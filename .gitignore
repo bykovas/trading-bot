@@ -1,0 +1,55 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+[TestResults]/
+artifacts/
+coverage/
+*.trx
+*.coverage
+*.coveragexml
+
+# Visual Studio / JetBrains / VS Code
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# .NET / NuGet
+packages/
+*.nupkg
+*.snupkg
+project.lock.json
+*.csproj.nuget.dgspec.json
+*.csproj.nuget.g.props
+*.csproj.nuget.g.targets
+*.log
+*.pidb
+
+# Local secrets and configuration
+appsettings.Development.json
+appsettings.Local.json
+secrets.json
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# Databases / Docker
+postgres-data/
+docker-data/
+*.db
+*.db-shm
+*.db-wal
+
+# OS files
+.DS_Store
+Thumbs.db

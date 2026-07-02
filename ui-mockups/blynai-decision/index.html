@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blynai Capital - Decision Explanation</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="terminal-shell">
+      <header class="topbar" aria-label="Trading bot status">
+        <a class="brand-lockup" href="#" aria-label="Blynai Capital">
+          <span class="brand-mark" aria-hidden="true"><span>BC</span></span>
+          <span class="brand-copy">
+            <strong>Blynai Capital</strong>
+            <small>Meme-finance lab</small>
+          </span>
+        </a>
+
+        <div class="status-rail" aria-label="System status">
+          <span class="status-pill status-ok"><span></span>Bot running</span>
+          <span class="status-pill status-ok"><span></span>Live trading enabled</span>
+          <span class="status-pill status-ok"><span></span>Kraken OK</span>
+          <span class="status-pill status-muted"><span></span>Trading212 off</span>
+        </div>
+
+        <div class="cycle-readout">
+          <small>Last cycle</small>
+          <strong>2026-07-02 14:38:11 UTC</strong>
+          <span>+2.4s</span>
+        </div>
+
+        <button class="kill-switch" type="button">
+          <span aria-hidden="true"></span>
+          Kill switch
+        </button>
+      </header>
+
+      <main class="decision-stage">
+        <section class="hero-band" aria-labelledby="page-title">
+          <div class="hero-copy">
+            <p class="eyebrow">Deterministic trade replay / Decision #4182</p>
+            <h1 id="page-title">Blynai Capital AI</h1>
+            <div class="hero-meta">
+              <span>Decision Explanation</span>
+              <span>SOL/EUR</span>
+              <span>Kraken Pro</span>
+              <span>EMA-Cross v1.2</span>
+            </div>
+          </div>
+
+          <div class="hero-verdict" aria-label="Decision verdict">
+            <span class="fund-seal" aria-hidden="true">
+              <span class="seal-core">micro</span>
+            </span>
+            <div>
+              <small>Desired position</small>
+              <strong>BUY / LONG micro</strong>
+              <p>Approved by risk. Execute one tiny position, then keep every number replayable.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="cockpit-grid" aria-label="Decision cockpit">
+          <article class="panel chart-panel">
+            <div class="panel-heading chart-heading">
+              <div>
+                <p class="panel-kicker">SOL/EUR - 5M</p>
+                <h2>EUR 68.28</h2>
+              </div>
+              <div class="chart-stats">
+                <span class="positive">+0.94%</span>
+                <span>EMA9</span>
+                <span>EMA21</span>
+                <span>Bullish regime</span>
+              </div>
+            </div>
+
+            <div class="chart-wrap" aria-label="SOL/EUR chart with EMA crossover and buy marker">
+              <svg class="decision-chart" viewBox="0 0 900 420" role="img" aria-label="Candlestick chart showing a bullish EMA crossover buy decision">
+                <defs>
+                  <linearGradient id="chartArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#37e99a" stop-opacity="0.25" />
+                    <stop offset="100%" stop-color="#37e99a" stop-opacity="0.02" />
+                  </linearGradient>
+                  <linearGradient id="regimeBand" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stop-color="#f4b64d" stop-opacity="0.07" />
+                    <stop offset="50%" stop-color="#42ef9a" stop-opacity="0.12" />
+                    <stop offset="100%" stop-color="#42ef9a" stop-opacity="0.03" />
+                  </linearGradient>
+                  <filter id="greenGlow" x="-40%" y="-40%" width="180%" height="180%">
+                    <feGaussianBlur stdDeviation="5" result="blur" />
+                    <feMerge>
+                      <feMergeNode in="blur" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
+                </defs>
+
+                <rect class="chart-bg" x="0" y="0" width="900" height="420" rx="8" />
+                <g class="grid">
+                  <path d="M48 64 H846" />
+                  <path d="M48 132 H846" />
+                  <path d="M48 200 H846" />
+                  <path d="M48 268 H846" />
+                  <path d="M48 336 H846" />
+                  <path d="M112 40 V370" />
+                  <path d="M232 40 V370" />
+                  <path d="M352 40 V370" />
+                  <path d="M472 40 V370" />
+                  <path d="M592 40 V370" />
+                  <path d="M712 40 V370" />
+                </g>
+
+                <rect class="regime" x="360" y="56" width="486" height="276" rx="8" fill="url(#regimeBand)" />
+                <text class="regime-label" x="378" y="82">BULLISH REGIME</text>
+                <path class="volume-haze" d="M48 330 C120 308 188 352 266 318 C332 288 382 302 430 244 C502 156 558 198 622 156 C692 112 746 142 846 94 L846 370 L48 370 Z" fill="url(#chartArea)" />
+
+                <g class="candles">
+                  <g class="candle down" transform="translate(68 252)"><line y1="-36" y2="42" /><rect x="-8" y="-10" width="16" height="36" /></g>
+                  <g class="candle down" transform="translate(96 262)"><line y1="-28" y2="46" /><rect x="-8" y="-2" width="16" height="30" /></g>
+                  <g class="candle down" transform="translate(124 282)"><line y1="-22" y2="38" /><rect x="-8" y="-4" width="16" height="30" /></g>
+                  <g class="candle down" transform="translate(152 294)"><line y1="-20" y2="34" /><rect x="-8" y="-2" width="16" height="26" /></g>
+                  <g class="candle down" transform="translate(180 310)"><line y1="-24" y2="32" /><rect x="-8" y="-8" width="16" height="28" /></g>
+                  <g class="candle up" transform="translate(208 300)"><line y1="-26" y2="36" /><rect x="-8" y="-18" width="16" height="30" /></g>
+                  <g class="candle up" transform="translate(236 286)"><line y1="-28" y2="36" /><rect x="-8" y="-22" width="16" height="26" /></g>
+                  <g class="candle down" transform="translate(264 286)"><line y1="-20" y2="32" /><rect x="-8" y="-6" width="16" height="20" /></g>
+                  <g class="candle up" transform="translate(292 274)"><line y1="-26" y2="34" /><rect x="-8" y="-20" width="16" height="26" /></g>
+                  <g class="candle up" transform="translate(320 250)"><line y1="-34" y2="42" /><rect x="-8" y="-26" width="16" height="38" /></g>
+                  <g class="candle up buy-candle" transform="translate(360 224)"><line y1="-46" y2="52" /><rect x="-9" y="-30" width="18" height="48" /></g>
+                  <g class="candle up" transform="translate(392 214)"><line y1="-42" y2="42" /><rect x="-8" y="-26" width="16" height="34" /></g>
+                  <g class="candle down" transform="translate(424 214)"><line y1="-30" y2="34" /><rect x="-8" y="-6" width="16" height="24" /></g>
+                  <g class="candle up" transform="translate(456 196)"><line y1="-42" y2="36" /><rect x="-8" y="-28" width="16" height="38" /></g>
+                  <g class="candle up" transform="translate(488 174)"><line y1="-42" y2="34" /><rect x="-8" y="-30" width="16" height="34" /></g>
+                  <g class="candle down" transform="translate(520 170)"><line y1="-30" y2="34" /><rect x="-8" y="-8" width="16" height="24" /></g>
+                  <g class="candle up" transform="translate(552 152)"><line y1="-34" y2="34" /><rect x="-8" y="-28" width="16" height="34" /></g>
+                  <g class="candle down" transform="translate(584 156)"><line y1="-28" y2="42" /><rect x="-8" y="-2" width="16" height="32" /></g>
+                  <g class="candle up" transform="translate(616 146)"><line y1="-30" y2="38" /><rect x="-8" y="-22" width="16" height="28" /></g>
+                  <g class="candle up" transform="translate(648 124)"><line y1="-38" y2="34" /><rect x="-8" y="-28" width="16" height="34" /></g>
+                  <g class="candle down" transform="translate(680 126)"><line y1="-32" y2="38" /><rect x="-8" y="-4" width="16" height="26" /></g>
+                  <g class="candle up" transform="translate(712 112)"><line y1="-34" y2="34" /><rect x="-8" y="-24" width="16" height="30" /></g>
+                  <g class="candle up" transform="translate(744 92)"><line y1="-40" y2="32" /><rect x="-8" y="-28" width="16" height="32" /></g>
+                  <g class="candle down" transform="translate(776 100)"><line y1="-30" y2="38" /><rect x="-8" y="-6" width="16" height="28" /></g>
+                </g>
+
+                <path class="ema ema-fast" d="M48 266 C124 270 178 286 240 284 C306 278 340 246 382 224 C454 186 504 178 572 158 C650 132 734 112 846 92" />
+                <path class="ema ema-slow" d="M48 260 C130 266 190 278 260 276 C330 270 388 244 456 218 C530 192 608 174 684 148 C748 126 798 120 846 112" />
+
+                <g class="buy-marker" filter="url(#greenGlow)">
+                  <line x1="360" y1="56" x2="360" y2="370" />
+                  <circle cx="360" cy="224" r="15" />
+                  <circle cx="360" cy="224" r="6" />
+                  <rect x="330" y="180" width="60" height="26" rx="8" />
+                  <text x="360" y="198">BUY</text>
+                </g>
+
+                <g class="price-tag">
+                  <line x1="790" y1="106" x2="850" y2="106" />
+                  <rect x="812" y="88" width="74" height="34" rx="8" />
+                  <text x="849" y="110">68.28</text>
+                </g>
+
+                <g class="axis">
+                  <text x="850" y="66">68.37</text>
+                  <text x="850" y="134">68.13</text>
+                  <text x="850" y="202">67.89</text>
+                  <text x="850" y="270">67.65</text>
+                  <text x="850" y="338">67.41</text>
+                </g>
+              </svg>
+            </div>
+
+            <div class="chart-foot">
+              <span>EMA9 crossed above EMA21</span>
+              <span>RSI filter: 54.8</span>
+              <span>Notional: EUR 4.10</span>
+              <span>Replay hash: 9f42-a13</span>
+            </div>
+          </article>
+
+          <aside class="panel score-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">Weighted signal</p>
+                <h2>Score waterfall</h2>
+              </div>
+              <span class="mini-chip">threshold +0.50</span>
+            </div>
+
+            <div class="score-list">
+              <div class="score-row positive" style="--score-width: 74%">
+                <span>Trend</span>
+                <i><b></b></i>
+                <strong>+0.34</strong>
+              </div>
+              <div class="score-row positive" style="--score-width: 58%">
+                <span>Momentum</span>
+                <i><b></b></i>
+                <strong>+0.22</strong>
+              </div>
+              <div class="score-row positive" style="--score-width: 41%">
+                <span>Volume</span>
+                <i><b></b></i>
+                <strong>+0.12</strong>
+              </div>
+              <div class="score-row negative" style="--score-width: 26%">
+                <span>Volatility</span>
+                <i><b></b></i>
+                <strong>-0.08</strong>
+              </div>
+              <div class="score-row positive" style="--score-width: 35%">
+                <span>Regime adj.</span>
+                <i><b></b></i>
+                <strong>+0.10</strong>
+              </div>
+              <div class="score-row info" style="--score-width: 22%">
+                <span>AI sentiment</span>
+                <i><b></b></i>
+                <strong>+0.04</strong>
+              </div>
+            </div>
+
+            <div class="final-score">
+              <small>Final score</small>
+              <strong>+0.74</strong>
+              <span>BUY</span>
+            </div>
+
+            <div class="explain-compact">
+              <h3>Why the bot bought</h3>
+              <p>EMA9 turned above EMA21 inside a bullish regime band. RSI is constructive, volume confirms, and risk only allows a micro-sized entry.</p>
+            </div>
+          </aside>
+
+          <article class="panel risk-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">Risk manager</p>
+                <h2>5 / 5 checks passed</h2>
+              </div>
+              <span class="mini-chip success">approved</span>
+            </div>
+
+            <div class="risk-timeline">
+              <div class="risk-item">
+                <span class="risk-dot"></span>
+                <strong>MaxPositionSize</strong>
+                <p>EUR 4.10 of EUR 5.00 cap - 82%</p>
+                <em>pass</em>
+              </div>
+              <div class="risk-item">
+                <span class="risk-dot"></span>
+                <strong>OneOpenPositionPerInstrument</strong>
+                <p>No open SOL/EUR position</p>
+                <em>pass</em>
+              </div>
+              <div class="risk-item">
+                <span class="risk-dot"></span>
+                <strong>MaxDailyLoss</strong>
+                <p>EUR 1.20 of EUR 10.00 budget</p>
+                <em>pass</em>
+              </div>
+              <div class="risk-item">
+                <span class="risk-dot"></span>
+                <strong>CooldownAfterLosses(3)</strong>
+                <p>0 recent losses, not throttled</p>
+                <em>pass</em>
+              </div>
+              <div class="risk-item">
+                <span class="risk-dot"></span>
+                <strong>KillSwitch</strong>
+                <p>Disarmed, trading permitted</p>
+                <em>pass</em>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel execution-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">Execution trace</p>
+                <h2>Filled on Kraken Pro</h2>
+              </div>
+              <span class="mini-chip success">filled</span>
+            </div>
+
+            <div class="trace-grid">
+              <div>
+                <small>Requested qty</small>
+                <strong>0.0601</strong>
+                <span>SOL = EUR 4.10</span>
+              </div>
+              <div>
+                <small>Filled price</small>
+                <strong>68.22</strong>
+                <span>EUR market</span>
+              </div>
+              <div>
+                <small>Slippage</small>
+                <strong>-0.06</strong>
+                <span>bps within band</span>
+              </div>
+              <div>
+                <small>Fee</small>
+                <strong>0.011</strong>
+                <span>EUR - 0.26%</span>
+              </div>
+              <div>
+                <small>Order type</small>
+                <strong>Limit</strong>
+                <span>post-only</span>
+              </div>
+              <div>
+                <small>Status</small>
+                <strong>Filled</strong>
+                <span>order #KRK-70b2</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel audit-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">Audit snapshot</p>
+                <h2>Traceable inputs</h2>
+              </div>
+              <span class="mini-chip">replayable</span>
+            </div>
+
+            <div class="audit-stack">
+              <div>
+                <span>Market data</span>
+                <strong>Kraken OHLC / 5m / 720 window</strong>
+              </div>
+              <div>
+                <span>Strategy config</span>
+                <strong>EMA-Cross v1.2 + RSI filter</strong>
+              </div>
+              <div>
+                <span>AI advisory</span>
+                <strong>42 sources, net positive, weight 0.10x</strong>
+              </div>
+              <div>
+                <span>Portfolio state</span>
+                <strong>NONE -> LONG micro</strong>
+              </div>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
