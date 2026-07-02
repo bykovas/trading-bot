@@ -6,7 +6,37 @@
 
 ---
 
+## Current Status (2026-07-02)
+
+A first **console dry-run slice** exists in `src/TradingBot.Worker` (single .NET 8 project, no Docker/PostgreSQL yet). It runs one full decision cycle end to end against **sample data or Kraken public endpoints** and simulates fills in a virtual portfolio — **no real or `validate=true` orders are placed**. See [RUNBOOK.md](../../RUNBOOK.md).
+
+Legend: ✅ done · 🚧 partial · ⬜ not started
+
+| Area | Status | What exists today |
+|---|---|---|
+| Solution skeleton (§6) | 🚧 | Single `TradingBot.Worker` console project. No multi-project layout, no `docker compose`, no PostgreSQL/EF Core. |
+| Kraken market data (§4.1, §9.4) | 🚧 | Public `AssetPairs` (minimums/precision), `OHLC` polling, `Ticker` quotes; closed-candle filtering. No raw-payload store, no instrument registry, no CSV bootstrap. |
+| Kraken broker adapter (§9.4) | ⬜ | No private API — no `Balance`, no `AddOrder`/`validate=true`. Execution is virtual only. |
+| Indicators (§4.2) | 🚧 | EMA (fast/slow) + RSI computed from candles. No SMA/ATR/MACD, no test suite. |
+| Signals / strategy (§4.4) | 🚧 | One hardcoded EMA-crossover + RSI + volatility scorer. Not yet a versioned `ISignalModule` registry. |
+| Market Regime (§4.3) | ⬜ | No regime component (not even a `Normal` stub). |
+| Decision Engine (§2.2, §4.5) | 🚧 | Deterministic score → `NONE` / `LONG_MICRO` with per-signal contribution breakdown. Config-driven scoring/versioning not done. |
+| Risk Manager (§4.6, §11) | 🚧 | Kill switch, max-order-EUR cap, zero-notional guard; single-position + max-open-positions enforced in the dry-run apply step. Daily-loss / cooldown / exposure rules only echoed, not enforced. |
+| Execution Engine (§4.7) | 🚧 | Virtual Open/Close with notional→quantity conversion, taker-fee + slippage model, conservative mark-to-market. No Increase/Reduce, no real broker. |
+| Portfolio / P&L (§4.8) | 🚧 | Virtual portfolio persisted to `data/dry-run/portfolio-state.json`; mark-to-market + realized/unrealized P&L. Fresh **50 EUR** portfolio auto-created when the state file is missing, empty, or corrupt; an existing valid state is reused. No broker balance fetch / reconstruction. |
+| Audit / Replay (§4.9, §12) | 🚧 | Per-cycle JSONL journal (`data/dry-run/events.jsonl`) with decisions, indicators, risk reasons, portfolio before/after. No DB snapshots, no config versioning, no replay runner. |
+| AI (§4.10, §10) | 🚧 | Optional OpenAI-compatible **watchlist** advisor (selection only) with heuristic fallback. Not the decision-path AI advisory of Plan 10. |
+| Config (§4.11) | 🚧 | `appsettings.json` + `TRADINGBOT_*` env overrides. No versioning/stamping. |
+| API / Dashboard (§4.12) | ⬜ | Console output only. |
+| CI/CD (§13) | ⬜ | None. |
+
+**Net:** this is an early, self-contained *paper/dry-run* preview that touches parts of Plans **00, 03, 07, 08** and a slice of **10** (watchlist only), but deliberately skips the live-broker (`validate=true`), PostgreSQL, and multi-project pieces that Plan 00 formally requires. The items below stay authoritative; each still needs completing on the real stack.
+
+---
+
 ## 00 — Day-1 Walking Skeleton
+
+**Status: 🚧 partial** — decision cycle, EMA/RSI, minimal Decision Engine, core risk caps + kill switch, and audit-per-cycle exist in the console dry-run slice. **Still missing:** multi-project layout, `docker compose` + PostgreSQL/EF Core migrations, and the Kraken `validate=true` / `Balance` path (execution is currently virtual, not broker-validated).
 
 **Goal:** one full decision cycle against Kraken, end to end, in `validate=true` mode. No live orders yet.
 
@@ -42,6 +72,8 @@
 - `IMarketDataProvider` contract finalized; polling scheduler with per-endpoint budgets
 
 ## 03 — Indicators, Signals & Decision Scoring Framework
+
+**Status: 🚧 partial** — EMA + RSI and a single hardcoded EMA-crossover/RSI/volatility scorer exist. **Still missing:** the `IIndicator` library (SMA/ATR/MACD + reference tests), the versioned `ISignalModule` registry, config-driven Decision Engine weights, and determinism/no-look-ahead unit tests.
 
 **Goal:** replace the hardcoded strategy with the pluggable framework from §4.2–4.5.
 
@@ -82,6 +114,8 @@
 
 ## 07 — Portfolio & P&L Reconstruction
 
+**Status: 🚧 partial (virtual only)** — a persisted virtual portfolio with mark-to-market and realized/unrealized P&L + fee accounting exists in dry-run (auto-creates a fresh 50 EUR portfolio, reuses an existing one). **Still missing:** everything against a real venue — balance fetch, reconstruction from recorded fills, `TradesHistory`/`Ledgers` cross-check, DB snapshots.
+
 **Goal:** trustworthy portfolio state on a balance-only venue (§4.8, §9.4 #2).
 
 - Position reconstruction from recorded fills (average entry, realized/unrealized P&L)
@@ -90,6 +124,8 @@
 - Fee accounting per trade — micro-trading economics dashboard data (fees vs. P&L)
 
 ## 08 — Paper Broker & Backtesting v1
+
+**Status: 🚧 seedling** — the dry-run virtual fill model (fee + slippage, conservative mark-to-market) is a precursor to the Paper Broker, but it is bespoke worker code, not an `IPaperBroker : IBroker` implementation, and there is no backtest driver yet.
 
 **Goal:** the secondary `IBroker` and the first backtest over accumulated + bootstrapped history (§12).
 
@@ -110,6 +146,8 @@
 - Practice-env soak → first live equities micro-order
 
 ## 10 — AI Analysis Service v1
+
+**Status: 🚧 adjacent** — an OpenAI-compatible advisor exists but only picks the **watchlist** (which pairs to evaluate), with a heuristic fallback; it never touches the decision path. The Plan 10 decision-path advisory (`IAIAnalysisProvider`, schema validation, persisted snapshots, bounded decision features) is not started.
 
 **Goal:** first structured AI advisory input into the Decision Engine (§4.10, §10).
 

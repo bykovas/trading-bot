@@ -19,30 +19,59 @@ internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions in
 
         if (File.Exists(StatePath))
         {
-            var json = File.ReadAllText(StatePath);
-            var state = JsonSerializer.Deserialize<PortfolioState>(json, _jsonOptions);
-            if (state is not null)
+            try
             {
-                return state;
+                var json = File.ReadAllText(StatePath);
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    var state = JsonSerializer.Deserialize<PortfolioState>(json, _jsonOptions);
+                    if (IsUsable(state))
+                    {
+                        state!.Positions ??= new List<PortfolioPosition>();
+                        Console.WriteLine(
+                            $"portfolio-load: reusing existing state from {StatePath} (cash {state.CashEur:0.##} EUR, positions {state.Positions.Count})");
+                        return state;
+                    }
+                }
+
+                Console.WriteLine(
+                    $"portfolio-load: existing state at {StatePath} is empty or invalid; creating a fresh portfolio with {initialPortfolio.StartingCashEur:0.##} EUR");
+            }
+            catch (Exception ex) when (ex is JsonException or IOException)
+            {
+                Console.WriteLine(
+                    $"portfolio-load: failed to read {StatePath} ({ex.Message}); creating a fresh portfolio with {initialPortfolio.StartingCashEur:0.##} EUR");
             }
         }
-
-        return new PortfolioState
+        else
         {
-            UpdatedAt = DateTimeOffset.UtcNow,
-            CashEur = initialPortfolio.StartingCashEur,
-            Positions = initialPortfolio.Positions
-                .Select(position => new PortfolioPosition
-                {
-                    Pair = position.Pair,
-                    Side = position.Side,
-                    Quantity = position.Quantity,
-                    EntryPrice = position.EntryPrice,
-                    EntryNotionalEur = position.EntryNotionalEur
-                })
-                .ToList()
-        };
+            Console.WriteLine(
+                $"portfolio-load: no state file at {StatePath}; creating a fresh portfolio with {initialPortfolio.StartingCashEur:0.##} EUR");
+        }
+
+        var fresh = CreateInitialState();
+        Save(fresh);
+        return fresh;
     }
+
+    private PortfolioState CreateInitialState() => new()
+    {
+        UpdatedAt = DateTimeOffset.UtcNow,
+        CashEur = initialPortfolio.StartingCashEur,
+        Positions = initialPortfolio.Positions
+            .Select(position => new PortfolioPosition
+            {
+                Pair = position.Pair,
+                Side = position.Side,
+                Quantity = position.Quantity,
+                EntryPrice = position.EntryPrice,
+                EntryNotionalEur = position.EntryNotionalEur
+            })
+            .ToList()
+    };
+
+    private static bool IsUsable(PortfolioState? state) =>
+        state is not null && (state.CashEur > 0m || state.Positions is { Count: > 0 });
 
     public PortfolioState CloneAndMark(PortfolioState state, IReadOnlyList<InstrumentMarketState> marketStates)
     {

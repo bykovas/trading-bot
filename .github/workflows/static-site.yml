@@ -1,4 +1,4 @@
-name: Static Site CI/CD
+name: CI/CD
 
 on:
   push:
@@ -12,6 +12,7 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/bykovas/trading-bot
+  WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-worker
 
 jobs:
   build:
@@ -28,17 +29,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Docker image
+      - name: Build UI image
         run: |
           docker build \
             --tag "${IMAGE_NAME}:latest" \
             --tag "${IMAGE_NAME}:${{ github.sha }}" \
             .
 
-      - name: Push Docker image
+      - name: Build worker image
+        run: |
+          docker build \
+            --file src/TradingBot.Worker/Dockerfile \
+            --tag "${WORKER_IMAGE_NAME}:latest" \
+            --tag "${WORKER_IMAGE_NAME}:${{ github.sha }}" \
+            .
+
+      - name: Push images
         run: |
           docker push "${IMAGE_NAME}:latest"
           docker push "${IMAGE_NAME}:${{ github.sha }}"
+          docker push "${WORKER_IMAGE_NAME}:latest"
+          docker push "${WORKER_IMAGE_NAME}:${{ github.sha }}"
 
   deploy:
     needs: build
@@ -48,6 +59,8 @@ jobs:
     env:
       IMAGE_NAME: ghcr.io/bykovas/trading-bot
       IMAGE_TAG: ${{ github.sha }}
+      WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-worker
+      WORKER_IMAGE_TAG: ${{ github.sha }}
       GHCR_USERNAME: ${{ github.actor }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

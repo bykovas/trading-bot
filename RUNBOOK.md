@@ -99,7 +99,15 @@ src/TradingBot.Worker/appsettings.json
 - `EntryPrice` - цена входа.
 - `EntryNotionalEur` - сколько EUR было вложено при входе.
 
-Важно: если файл `data/dry-run/portfolio-state.json` уже существует, worker продолжит состояние оттуда, а не из `appsettings.json`. Это нужно для ночного dry-run, чтобы виртуальные покупки/продажи не сбрасывались каждый цикл.
+Важно: если файл `data/dry-run/portfolio-state.json` уже существует и валиден, worker продолжит состояние оттуда, а не из `appsettings.json`. Это нужно для ночного dry-run, чтобы виртуальные покупки/продажи не сбрасывались каждый цикл.
+
+Если файла нет, он пустой или битый (невалидный JSON), worker не падает: он создает новый портфель из `appsettings.json` (по умолчанию `StartingCashEur = 50`, без позиций) и сразу сохраняет его. В консоли это видно по строке `portfolio-load:`:
+
+```text
+portfolio-load: no state file at data/dry-run/portfolio-state.json; creating a fresh portfolio with 50 EUR
+portfolio-load: reusing existing state from data/dry-run/portfolio-state.json (cash 47 EUR, positions 1)
+portfolio-load: existing state ... is empty or invalid; creating a fresh portfolio with 50 EUR
+```
 
 Чтобы начать dry-run заново:
 
