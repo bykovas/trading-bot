@@ -1,0 +1,29 @@
+http:
+  routers:
+    trading-bot-http:
+      rule: "Host(`fin.bykovas.lt`)"
+      entryPoints:
+        - web
+      middlewares:
+        - trading-bot-https-redirect
+      service: trading-bot
+
+    trading-bot-https:
+      rule: "Host(`fin.bykovas.lt`)"
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      service: trading-bot
+
+  middlewares:
+    trading-bot-https-redirect:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+  services:
+    trading-bot:
+      loadBalancer:
+        servers:
+          - url: "http://trading-bot:80"
