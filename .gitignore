@@ -22,6 +22,7 @@ coverage/
 *.sln.docstates
 
 # .NET / NuGet
+.dotnet/
 packages/
 *.nupkg
 *.snupkg
@@ -44,6 +45,7 @@ secrets.json
 !.env.example
 
 # Databases / Docker
+data/
 postgres-data/
 docker-data/
 *.db
