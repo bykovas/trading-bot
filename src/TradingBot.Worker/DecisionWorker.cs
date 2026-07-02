@@ -7,11 +7,13 @@ internal sealed class DecisionWorker(
     IndicatorEngine indicatorEngine,
     TechnicalDecisionEngine decisionEngine,
     RiskManager riskManager,
-    DryRunPortfolio dryRunPortfolio)
+    DryRunPortfolio dryRunPortfolio,
+    KrakenBroker? broker)
 {
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         PrintStartup();
+        await PrintBrokerStartupAsync(cancellationToken);
 
         do
         {
@@ -60,7 +62,7 @@ internal sealed class DecisionWorker(
         var decisionRecords = new List<DryRunDecisionRecord>();
         foreach (var marketState in selected)
         {
-            var record = PrintDecision(marketState, workingPortfolio);
+            var record = await PrintDecisionAsync(marketState, workingPortfolio, cancellationToken);
             if (record is not null)
             {
                 decisionRecords.Add(record);
@@ -104,6 +106,36 @@ internal sealed class DecisionWorker(
         Console.WriteLine($"dryRunEnabled={config.DryRun.Enabled} applyVirtualFills={config.DryRun.ApplyVirtualFills}");
         Console.WriteLine($"dryRunState={dryRunPortfolio.GetStatePath()}");
         Console.WriteLine($"dryRunEvents={dryRunPortfolio.GetEventsPath()}");
+    }
+
+    private bool LiveOrdersActive => config.Trading.LiveTradingEnabled && !config.Risk.KillSwitch;
+
+    private async Task PrintBrokerStartupAsync(CancellationToken cancellationToken)
+    {
+        if (broker is null)
+        {
+            Console.WriteLine("broker=disabled (no Kraken API keys or market data mode != kraken; virtual dry-run only)");
+            return;
+        }
+
+        Console.WriteLine($"broker=kraken-private mode={(LiveOrdersActive ? "LIVE (validate=false, REAL ORDERS)" : "validate-only (validate=true, no execution)")}");
+        if (LiveOrdersActive)
+        {
+            Console.WriteLine("!!! LIVE TRADING ENABLED: approved decisions will place REAL market orders on Kraken with real money !!!");
+        }
+
+        try
+        {
+            var balances = await broker.GetBalanceAsync(cancellationToken);
+            var eur = balances.TryGetValue("ZEUR", out var zeur)
+                ? zeur
+                : balances.TryGetValue("EUR", out var eurBalance) ? eurBalance : 0m;
+            Console.WriteLine($"broker-balance: EUR {eur:0.####} (auth OK, {balances.Count} assets)");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"broker-balance: FAILED to fetch ({ex.Message}) — check API key/secret/permissions");
+        }
     }
 
     private static void PrintCandidates(IReadOnlyList<InstrumentMarketState> candidates)
@@ -156,7 +188,10 @@ internal sealed class DecisionWorker(
         }
     }
 
-    private DryRunDecisionRecord? PrintDecision(InstrumentMarketState marketState, PortfolioState portfolio)
+    private async Task<DryRunDecisionRecord?> PrintDecisionAsync(
+        InstrumentMarketState marketState,
+        PortfolioState portfolio,
+        CancellationToken cancellationToken)
     {
         if (!marketState.IsUsable)
         {
@@ -202,6 +237,12 @@ internal sealed class DecisionWorker(
         Console.WriteLine($"  portfolio-cash: {dryRunAction.CashBeforeEur:0.##} -> {dryRunAction.CashAfterEur:0.##} EUR");
         Console.WriteLine($"  portfolio-value: {dryRunAction.PortfolioValueBeforeEur:0.##} -> {dryRunAction.PortfolioValueAfterEur:0.##} EUR");
 
+        var brokerVerdict = await RunBrokerAsync(marketState, dryRunAction, cancellationToken);
+        if (brokerVerdict is not null)
+        {
+            Console.WriteLine($"  broker={brokerVerdict}");
+        }
+
         return new DryRunDecisionRecord
         {
             Pair = proposal.Pair,
@@ -214,8 +255,85 @@ internal sealed class DecisionWorker(
             RiskApproved = risk.Approved,
             RiskReasons = risk.Reasons,
             Contributions = proposal.Contributions,
-            DryRunAction = dryRunAction
+            DryRunAction = dryRunAction,
+            Broker = brokerVerdict
         };
+    }
+
+    // Sends the order to Kraken for the two actionable outcomes only. The validate
+    // flag is derived from the live gate: validate=true (exchange checks the order
+    // without executing) unless live trading is explicitly enabled and the kill
+    // switch is off, in which case validate=false places a real market order.
+    private async Task<string?> RunBrokerAsync(
+        InstrumentMarketState marketState,
+        DryRunAction action,
+        CancellationToken cancellationToken)
+    {
+        if (broker is null)
+        {
+            return null;
+        }
+
+        if (action.Action != "WOULD_BUY" && action.Action != "WOULD_SELL")
+        {
+            return null;
+        }
+
+        var lotDecimals = marketState.PairRules?.LotDecimals ?? 8;
+        var orderMin = marketState.PairRules?.OrderMinimum ?? 0m;
+        var volume = TruncateTo(action.Quantity, lotDecimals);
+
+        if (volume <= 0m)
+        {
+            return "SKIPPED: computed volume is zero";
+        }
+
+        if (orderMin > 0m && volume < orderMin)
+        {
+            return $"SKIPPED: volume {volume} below pair ordermin {orderMin}";
+        }
+
+        var side = action.Action == "WOULD_BUY" ? "buy" : "sell";
+        var validate = !LiveOrdersActive;
+
+        // Belt-and-suspenders: never let a live BUY exceed the hard per-order cap,
+        // even though the risk gate already approved it upstream.
+        if (!validate && side == "buy" && action.TargetNotionalEur > config.Risk.MaxOrderEur)
+        {
+            return $"SKIPPED: live buy notional {action.TargetNotionalEur:0.##} exceeds MaxOrderEur {config.Risk.MaxOrderEur:0.##}";
+        }
+
+        var result = await broker.AddOrderAsync(marketState.Instrument.KrakenPair, side, volume, validate, cancellationToken);
+
+        if (!result.Success)
+        {
+            return validate ? $"VALIDATE_REJECTED: {result.Error}" : $"LIVE_ERROR: {result.Error}";
+        }
+
+        if (validate)
+        {
+            var descr = string.IsNullOrWhiteSpace(result.Description) ? string.Empty : $" descr=\"{result.Description}\"";
+            return $"VALIDATED_OK side={side} vol={volume}{descr}";
+        }
+
+        var txids = result.TxIds.Count > 0 ? string.Join(",", result.TxIds) : "(none)";
+        return $"LIVE_SUBMITTED side={side} vol={volume} txid={txids}";
+    }
+
+    private static decimal TruncateTo(decimal value, int decimals)
+    {
+        if (decimals < 0)
+        {
+            decimals = 0;
+        }
+
+        var factor = 1m;
+        for (var i = 0; i < decimals; i++)
+        {
+            factor *= 10m;
+        }
+
+        return Math.Truncate(value * factor) / factor;
     }
 
     private static void PrintPortfolio(string label, PortfolioState portfolio)

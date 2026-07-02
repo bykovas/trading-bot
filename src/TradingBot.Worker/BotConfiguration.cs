@@ -52,6 +52,8 @@ internal sealed class BotConfiguration
     {
         SetIfPresent("TRADINGBOT_MARKET_DATA_MODE", value => config.Kraken.MarketDataMode = value);
         SetIfPresent("TRADINGBOT_KRAKEN_BASE_URL", value => config.Kraken.BaseUrl = value);
+        SetIfPresent("TRADINGBOT_KRAKEN_API_KEY", value => config.Kraken.ApiKey = value);
+        SetIfPresent("TRADINGBOT_KRAKEN_API_SECRET", value => config.Kraken.ApiSecret = value);
         SetIfPresent("TRADINGBOT_RUN_ONCE", value => config.Worker.RunOnce = ParseBool(value, config.Worker.RunOnce));
         SetIfPresent("TRADINGBOT_LOOP_INTERVAL_SECONDS", value => config.Worker.LoopIntervalSeconds = ParseInt(value, config.Worker.LoopIntervalSeconds));
         SetIfPresent("TRADINGBOT_TIMEFRAME_MINUTES", value => config.Trading.TimeframeMinutes = ParseInt(value, config.Trading.TimeframeMinutes));
@@ -196,6 +198,8 @@ internal sealed class KrakenOptions
 {
     public string MarketDataMode { get; set; } = "sample";
     public string BaseUrl { get; set; } = "https://api.kraken.com";
+    public string ApiKey { get; set; } = string.Empty;
+    public string ApiSecret { get; set; } = string.Empty;
 }
 
 internal sealed class AiOptions

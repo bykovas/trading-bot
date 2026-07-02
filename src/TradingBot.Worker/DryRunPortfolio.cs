@@ -566,4 +566,8 @@ internal sealed class DryRunDecisionRecord
     public required IReadOnlyList<string> RiskReasons { get; init; }
     public required IReadOnlyList<SignalContribution> Contributions { get; init; }
     public required DryRunAction DryRunAction { get; init; }
+
+    // Exchange verdict for actionable decisions: VALIDATED_OK / VALIDATE_REJECTED /
+    // LIVE_SUBMITTED / LIVE_ERROR / SKIPPED. Null when no broker call was made.
+    public string? Broker { get; init; }
 }

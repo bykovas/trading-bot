@@ -16,7 +16,7 @@ Legend: ✅ done · 🚧 partial · ⬜ not started
 |---|---|---|
 | Solution skeleton (§6) | 🚧 | Single `TradingBot.Worker` console project. No multi-project layout, no `docker compose`, no PostgreSQL/EF Core. |
 | Kraken market data (§4.1, §9.4) | 🚧 | Public `AssetPairs` (minimums/precision), `OHLC` polling, `Ticker` quotes; closed-candle filtering. No raw-payload store, no instrument registry, no CSV bootstrap. |
-| Kraken broker adapter (§9.4) | ⬜ | No private API — no `Balance`, no `AddOrder`/`validate=true`. Execution is virtual only. |
+| Kraken broker adapter (§9.4) | 🚧 | Private API added: HMAC/nonce auth, `Balance`, `AddOrder` with `validate` flag ([00-live-kraken-ordering.md](00-live-kraken-ordering.md)). Sends actionable decisions to Kraken as validate-only by default; real orders behind `LiveTradingEnabled=true`. Nonce not yet persisted; live-mode portfolio reconstruction still pending. |
 | Indicators (§4.2) | 🚧 | EMA (fast/slow) + RSI computed from candles. No SMA/ATR/MACD, no test suite. |
 | Signals / strategy (§4.4) | 🚧 | One hardcoded EMA-crossover + RSI + volatility scorer. Not yet a versioned `ISignalModule` registry. |
 | Market Regime (§4.3) | ⬜ | No regime component (not even a `Normal` stub). |
@@ -36,7 +36,7 @@ Legend: ✅ done · 🚧 partial · ⬜ not started
 
 ## 00 — Day-1 Walking Skeleton
 
-**Status: 🚧 partial** — decision cycle, EMA/RSI, minimal Decision Engine, core risk caps + kill switch, and audit-per-cycle exist in the console dry-run slice. **Still missing:** multi-project layout, `docker compose` + PostgreSQL/EF Core migrations, and the Kraken `validate=true` / `Balance` path (execution is currently virtual, not broker-validated).
+**Status: 🚧 partial** — decision cycle, EMA/RSI, minimal Decision Engine, core risk caps + kill switch, audit-per-cycle, and now the Kraken private adapter with `Balance` + `AddOrder(validate=true)` all exist ([detailed plan](00-live-kraken-ordering.md)). **Still missing:** multi-project layout and `docker compose` + PostgreSQL/EF Core migrations (state/audit are still file-based).
 
 **Goal:** one full decision cycle against Kraken, end to end, in `validate=true` mode. No live orders yet.
 

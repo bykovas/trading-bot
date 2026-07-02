@@ -2,9 +2,19 @@
 
 Этот файл объясняет, как локально запускать текущий минимальный worker и как читать его консольный вывод.
 
-Текущее состояние: это decision loop без реальных ордеров. Worker может брать sample-данные или публичные данные Kraken, выбирать активный watchlist, считать EMA/RSI, выдавать `NONE` или `LONG_MICRO`, прогонять risk gate и писать результат в консоль.
+Текущее состояние: decision loop с виртуальным (dry-run) портфелем. Worker берёт sample-данные или публичные данные Kraken, выбирает активный watchlist, считает EMA/RSI, выдаёт `NONE` или `LONG_MICRO`, прогоняет risk gate, симулирует сделки в виртуальном портфеле и пишет результат в консоль/файлы.
+
+Дополнительно: если заданы приватные ключи Kraken, worker умеет отправлять ордер на биржу в режиме проверки `validate=true` (без исполнения) и, при явно включённом `LiveTradingEnabled=true`, реальные микро-ордера. См. раздел «Реальные ордера на Kraken (validate → live)» ниже и [docs/implementation/00-live-kraken-ordering.md](docs/implementation/00-live-kraken-ordering.md).
 
 ИИ сейчас используется только для выбора, за чем следить. В торговом решении он не участвует.
+
+## Где лежит конфиг (единый источник)
+
+Весь конфиг worker'а — в одном файле `src/TradingBot.Worker/appsettings.json`: режим данных, интервал, риск, стратегия, `Trading.LiveTradingEnabled` и оба API-ключа (`Kraken.ApiKey`/`Kraken.ApiSecret` и `Ai.ApiKey`).
+
+- Локально можно временно перебить любое значение через переменную окружения `TRADINGBOT_*` (см. `.env.example`), но это опционально.
+- На сервере правится один файл `/opt/trading-bot/appsettings.json` (смонтирован с хоста, в git не попадает — туда можно вписывать реальные ключи), затем `docker restart trading-bot-worker`.
+- В репозитории ключи в `appsettings.json` всегда пустые. Реальные значения не коммитить.
 
 ## Быстрый запуск
 
@@ -36,7 +46,7 @@ TRADINGBOT_AI_API_KEY=your-key \
 dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
 ```
 
-Ключи не записывать в `appsettings.json` и не коммитить. Передавай их через environment variables.
+Ключи можно задать в `appsettings.json` (`Ai.ApiKey`) — на сервере это файл `/opt/trading-bot/appsettings.json`, он не в git. В репозитории поле держим пустым и реальные значения не коммитим. Локально можно перебить через env, как выше.
 
 Если AI недоступен, не задан ключ, не задана модель или AI вернул неподходящие пары, worker использует fallback `heuristic` и продолжает работу.
 
@@ -792,14 +802,79 @@ src/TradingBot.Worker/appsettings.json
 - `KillSwitch=true` - принудительно блокирует новые risk-increasing действия.
 - `MinimumLongScore` - чем выше, тем реже будет `LONG_MICRO`.
 
+## Реальные ордера на Kraken (validate → live)
+
+Лесенка из трёх безопасных стадий. Флаг `validate` вычисляется из конфига автоматически — вручную его не трогаешь.
+
+```text
+validate = НЕ (LiveTradingEnabled И kill-switch выключен И заданы ключи Kraken И режим kraken)
+```
+
+По умолчанию всегда безопасный путь. Ордер уходит на биржу только для решений `WOULD_BUY` / `WOULD_SELL` (то есть уже прошедших risk gate).
+
+### Стадия 1 — dry-run (ключи не нужны)
+
+```bash
+TRADINGBOT_MARKET_DATA_MODE=kraken \
+dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+```
+
+В консоли: `broker=disabled ...`. Только виртуальный портфель.
+
+### Стадия 2 — validate=true (биржа проверяет ордер, но НЕ исполняет)
+
+Создай API-ключ Kraken с правами **Query Funds + Create/Modify Orders** и **БЕЗ вывода средств**. Пропиши его в `appsettings.json` (`Kraken.ApiKey`/`ApiSecret`) или локально через env:
+
+```bash
+TRADINGBOT_MARKET_DATA_MODE=kraken \
+TRADINGBOT_KRAKEN_API_KEY=... \
+TRADINGBOT_KRAKEN_API_SECRET=... \
+dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+```
+
+Что увидишь:
+
+```text
+broker=kraken-private mode=validate-only (validate=true, no execution)
+broker-balance: EUR 50.0000 (auth OK, N assets)
+...
+  execution=WOULD_BUY
+  broker=VALIDATED_OK side=buy vol=17.05 descr="buy 17.05 XLMEUR @ market"
+```
+
+- `broker-balance: EUR ...` подтверждает, что авторизация (ключ/подпись/nonce) работает и показывает реальный баланс.
+- `broker=VALIDATED_OK` — сам Kraken подтвердил, что ордер валиден. Денег не тратится.
+- `broker=VALIDATE_REJECTED: ...` — биржа отклонила (например, объём ниже `ordermin` или неверная точность).
+- `broker=SKIPPED: ...` — не отправляли (например, объём ниже минимума пары).
+
+### Стадия 3 — live (реальные микро-ордера)
+
+Только когда стадия 2 отработала чисто. Один флаг в `appsettings.json`: `"Trading": { "LiveTradingEnabled": true }` (или env `TRADINGBOT_LIVE_TRADING_ENABLED=true`).
+
+```bash
+TRADINGBOT_MARKET_DATA_MODE=kraken \
+TRADINGBOT_KRAKEN_API_KEY=... TRADINGBOT_KRAKEN_API_SECRET=... \
+TRADINGBOT_LIVE_TRADING_ENABLED=true \
+dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+```
+
+На старте будет громкое предупреждение, а по сделкам:
+
+```text
+broker=LIVE_SUBMITTED side=buy vol=17.05 txid=OABCDE-...
+```
+
+Защиты перед реальным ордером: `LiveTradingEnabled=true`, kill-switch выключен, решение прошло risk gate, notional ≤ `MaxOrderEur`, объём ≥ `ordermin` и округлён по `lot_decimals` пары.
+
+Важно на первом live-запуске: виртуальный dry-run портфель всё ещё считается параллельно с реальным ордером, поэтому ориентируйся на реальный `broker-balance`, а не на виртуальный. Полная реконструкция позиции из `Balance`/`TradesHistory` — следующий шаг (Plan 01). Рекомендуется `rm -rf data/dry-run` при переходе на live, чтобы виртуальное состояние не путало картину.
+
 ## Чего сейчас еще нет
 
-- Нет private Kraken API.
-- Нет `Balance`.
-- Нет `AddOrder(validate=true)`.
-- Нет реальных ордеров.
+- Есть private Kraken API (auth, `Balance`, `AddOrder` с `validate`), но **нет** персистентности nonce между рестартами (для одного worker'а ок).
+- Нет реконструкции реальной позиции из `Balance`/`TradesHistory` (в live виртуальный портфель считается параллельно).
+- Нет обработки 429/backoff и авто-kill-switch на серии ошибок брокера.
 - Нет PostgreSQL.
-- Нет audit journal в базе.
+- Нет audit journal в базе (пока файловый `events.jsonl`).
 - Нет replay.
 
-Следующий практический шаг: добавить Kraken private adapter только в `validate=true` режиме, чтобы worker мог показать не только `execution=SKIPPED`, но и результат broker preflight без реальной сделки.
+Следующий практический шаг: Plan 01 — soak в `validate=true` ≥24ч, затем первый реальный €2-ордер, персистентность nonce, реконструкция позиции из реального баланса и error-taxonomy брокера.

@@ -10,17 +10,10 @@ services:
     container_name: trading-bot-worker
     image: ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG:-latest}
     restart: unless-stopped
-    environment:
-      TRADINGBOT_MARKET_DATA_MODE: ${TRADINGBOT_MARKET_DATA_MODE:-kraken}
-      TRADINGBOT_RUN_ONCE: "false"
-      TRADINGBOT_LOOP_INTERVAL_SECONDS: ${TRADINGBOT_LOOP_INTERVAL_SECONDS:-300}
-      # Optional AI watchlist advisor (leave unset to stay on the heuristic).
-      # TRADINGBOT_AI_PROVIDER, TRADINGBOT_AI_BASE_URL, TRADINGBOT_AI_MODEL, TRADINGBOT_AI_API_KEY
-      # are picked up from the host environment / /opt/trading-bot/.env if defined.
-      TRADINGBOT_AI_PROVIDER: ${TRADINGBOT_AI_PROVIDER:-none}
-      TRADINGBOT_AI_BASE_URL: ${TRADINGBOT_AI_BASE_URL:-}
-      TRADINGBOT_AI_MODEL: ${TRADINGBOT_AI_MODEL:-}
-      TRADINGBOT_AI_API_KEY: ${TRADINGBOT_AI_API_KEY:-}
+    # Single source of truth for ALL worker config — Kraken/AI API keys, LiveTradingEnabled,
+    # market data mode, loop interval, risk and strategy — is the mounted appsettings.json.
+    # Edit /opt/trading-bot/appsettings.json on the host and restart the container.
+    # No config is injected via environment variables here.
     volumes:
       - /opt/trading-bot/appsettings.json:/app/appsettings.json:ro
       - /opt/trading-bot/data:/app/data

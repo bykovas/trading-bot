@@ -34,6 +34,11 @@ try
         ? new OpenAiCompatibleWatchlistAdvisor(httpClient, config.Ai, fallbackAdvisor)
         : fallbackAdvisor;
 
+    var krakenBroker = new KrakenBroker(httpClient, config.Kraken);
+    var broker = config.Kraken.MarketDataMode.Equals("kraken", StringComparison.OrdinalIgnoreCase) && krakenBroker.IsConfigured
+        ? krakenBroker
+        : null;
+
     var worker = new DecisionWorker(
         config,
         marketDataSource,
@@ -41,7 +46,8 @@ try
         new IndicatorEngine(),
         new TechnicalDecisionEngine(),
         new RiskManager(),
-        new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit));
+        new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit),
+        broker);
 
     await worker.RunAsync(cancellation.Token);
     return 0;
