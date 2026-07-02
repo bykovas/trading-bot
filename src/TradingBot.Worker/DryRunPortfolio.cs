@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace TradingBot.Worker;
 
-internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions initialPortfolio)
+internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions initialPortfolio, ExecutionPolicyOptions executionPolicy, PositionExitOptions positionExit)
 {
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -28,6 +28,7 @@ internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions in
                     if (IsUsable(state))
                     {
                         state!.Positions ??= new List<PortfolioPosition>();
+                        state.ActionHistory ??= new List<PairActionHistory>();
                         Console.WriteLine(
                             $"portfolio-load: reusing existing state from {StatePath} (cash {state.CashEur:0.##} EUR, positions {state.Positions.Count})");
                         return state;
@@ -54,21 +55,28 @@ internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions in
         return fresh;
     }
 
-    private PortfolioState CreateInitialState() => new()
+    private PortfolioState CreateInitialState()
     {
-        UpdatedAt = DateTimeOffset.UtcNow,
-        CashEur = initialPortfolio.StartingCashEur,
-        Positions = initialPortfolio.Positions
-            .Select(position => new PortfolioPosition
-            {
-                Pair = position.Pair,
-                Side = position.Side,
-                Quantity = position.Quantity,
-                EntryPrice = position.EntryPrice,
-                EntryNotionalEur = position.EntryNotionalEur
-            })
-            .ToList()
-    };
+        var now = DateTimeOffset.UtcNow;
+        return new PortfolioState
+        {
+            UpdatedAt = now,
+            CashEur = initialPortfolio.StartingCashEur,
+            Positions = initialPortfolio.Positions
+                .Select(position => new PortfolioPosition
+                {
+                    Pair = position.Pair,
+                    Side = position.Side,
+                    Quantity = position.Quantity,
+                    EntryPrice = position.EntryPrice,
+                    EntryNotionalEur = position.EntryNotionalEur,
+                    // Config-seeded positions are created now, so their hold clock starts now.
+                    OpenedAtUtc = now,
+                    LastActionAtUtc = now
+                })
+                .ToList()
+        };
+    }
 
     private static bool IsUsable(PortfolioState? state) =>
         state is not null && (state.CashEur > 0m || state.Positions is { Count: > 0 });
@@ -87,20 +95,50 @@ internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions in
         RiskEvaluation risk,
         RiskOptions riskOptions)
     {
+        var now = DateTimeOffset.UtcNow;
         var position = state.Positions.FirstOrDefault(item => item.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase));
         var beforeCash = state.CashEur;
         var beforeValue = CalculateTotalValue(state);
+        var desiredLong = proposal.DesiredPosition == "LONG_MICRO";
+
+        // A held position is evaluated first. Exit rules (kill switch, stop-loss,
+        // take-profit, max-hold, and the soft signal-flip guards) reduce or manage
+        // existing risk, so they run before the opening risk gate below and are never
+        // blocked by it.
+        if (position is not null)
+        {
+            return ApplyHeldPosition(state, marketState, proposal, riskOptions, position, beforeCash, beforeValue, now, desiredLong);
+        }
 
         if (!risk.Approved)
         {
             return BuildAction("REJECTED", "risk rejected proposal", proposal, position, beforeCash, beforeValue, state);
         }
 
-        if (proposal.DesiredPosition == "LONG_MICRO")
+        if (desiredLong)
         {
-            if (position is not null)
+            // Pair-level cooldowns: block opening a new position too soon after the
+            // previous sell (or buy) for the same pair to avoid rapid re-entry churn.
+            var history = state.ActionHistory.FirstOrDefault(item => item.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase));
+            if (history is not null)
             {
-                return BuildAction("WOULD_HOLD", "current position already matches desired long exposure", proposal, position, beforeCash, beforeValue, state);
+                if (history.LastSellAtUtc is { } lastSell)
+                {
+                    var sinceSell = (now - lastSell).TotalSeconds;
+                    if (sinceSell < executionPolicy.CooldownAfterSellSeconds)
+                    {
+                        return BuildAction("WOULD_BUY_BLOCKED", $"cooldown after sell active: wait {executionPolicy.CooldownAfterSellSeconds} seconds before re-buying {proposal.Pair} (elapsed {sinceSell:0} s)", proposal, position, beforeCash, beforeValue, state, holdReasonCode: "COOLDOWN_BLOCK");
+                    }
+                }
+
+                if (history.LastBuyAtUtc is { } lastBuy)
+                {
+                    var sinceBuy = (now - lastBuy).TotalSeconds;
+                    if (sinceBuy < executionPolicy.CooldownAfterBuySeconds)
+                    {
+                        return BuildAction("WOULD_BUY_BLOCKED", $"cooldown after buy active: wait {executionPolicy.CooldownAfterBuySeconds} seconds before buying {proposal.Pair} again (elapsed {sinceBuy:0} s)", proposal, position, beforeCash, beforeValue, state, holdReasonCode: "COOLDOWN_BLOCK");
+                    }
+                }
             }
 
             if (state.Positions.Count >= riskOptions.MaxOpenPositions)
@@ -136,14 +174,17 @@ internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions in
                 EntryPrice = buyPrice,
                 EntryNotionalEur = proposal.TargetNotionalEur,
                 LastPrice = marketState.LastPrice,
-                MarketValueEur = CalculateLiquidationValue(quantity, marketState)
+                MarketValueEur = CalculateLiquidationValue(quantity, marketState),
+                OpenedAtUtc = now,
+                LastActionAtUtc = now
             };
 
             if (options.ApplyVirtualFills)
             {
                 state.CashEur -= proposal.TargetNotionalEur;
                 state.Positions.Add(newPosition);
-                state.UpdatedAt = DateTimeOffset.UtcNow;
+                RecordAction(state, proposal.Pair, buy: true, now);
+                state.UpdatedAt = now;
                 MarkToMarket(state, new[] { marketState });
             }
 
@@ -161,9 +202,44 @@ internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions in
                 proposal.TargetNotionalEur);
         }
 
-        if (position is null)
+        return BuildAction("NO_ORDER", "no current position and desired is none", proposal, position, beforeCash, beforeValue, state);
+    }
+
+    private DryRunAction ApplyHeldPosition(
+        PortfolioState state,
+        InstrumentMarketState marketState,
+        DecisionProposal proposal,
+        RiskOptions riskOptions,
+        PortfolioPosition position,
+        decimal beforeCash,
+        decimal beforeValue,
+        DateTimeOffset now,
+        bool desiredLong)
+    {
+        var canValue = marketState.LastPrice > 0m;
+        var pnlPercent = ConservativeUnrealizedPnlPercent(position, marketState, canValue);
+        var ageSeconds = PositionAgeSeconds(position, now);
+
+        var evaluation = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong,
+            ageSeconds,
+            pnlPercent,
+            canValue,
+            riskOptions.KillSwitch,
+            executionPolicy,
+            positionExit);
+
+        if (!evaluation.ShouldSell)
         {
-            return BuildAction("NO_ORDER", "no current position and desired is none", proposal, position, beforeCash, beforeValue, state);
+            return BuildAction(
+                "WOULD_HOLD",
+                evaluation.Reason,
+                proposal,
+                position,
+                beforeCash,
+                beforeValue,
+                state,
+                holdReasonCode: evaluation.HoldReasonCode);
         }
 
         var sellPrice = CalculateSellPrice(marketState);
@@ -177,13 +253,17 @@ internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions in
         {
             state.CashEur += exitValue;
             state.Positions.Remove(position);
-            state.UpdatedAt = DateTimeOffset.UtcNow;
+            RecordAction(state, proposal.Pair, buy: false, now);
+            state.UpdatedAt = now;
             MarkToMarket(state, new[] { marketState });
         }
 
+        var closeDetail = $"close virtual long: gross EUR {grossExitValue:0.####}, fee EUR {sellFee:0.####}, fill bid-slippage {sellPrice:0.####}, realized PnL EUR {realizedPnl:0.####} ({realizedPnlPercent:0.##}%)";
+        var exitReasonCode = evaluation.ExitReason is { } reason ? PositionExitPolicy.ExitReasonCode(reason) : "SELL_SIGNAL_FLIP";
+
         return BuildAction(
             "WOULD_SELL",
-            $"close virtual long: gross EUR {grossExitValue:0.####}, fee EUR {sellFee:0.####}, fill bid-slippage {sellPrice:0.####}, realized PnL EUR {realizedPnl:0.####} ({realizedPnlPercent:0.##}%)",
+            $"{evaluation.Reason} | {closeDetail}",
             proposal,
             position,
             beforeCash,
@@ -192,7 +272,8 @@ internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions in
             sellPrice,
             sellFee,
             grossExitValue,
-            exitValue);
+            exitValue,
+            exitReasonCode: exitReasonCode);
     }
 
     public void Save(PortfolioState state)
@@ -233,6 +314,54 @@ internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions in
         }
     }
 
+    // Conservative unrealized PnL percent: values the position as if it had to be
+    // liquidated right now at bid - slippage - fee. This is the same figure used for
+    // mark-to-market, so stop-loss / take-profit never rely on an optimistic price.
+    private decimal ConservativeUnrealizedPnlPercent(PortfolioPosition position, InstrumentMarketState marketState, bool canValue)
+    {
+        if (!canValue || position.EntryNotionalEur <= 0m)
+        {
+            return 0m;
+        }
+
+        var liquidationValue = CalculateLiquidationValue(position.Quantity, marketState);
+        return (liquidationValue - position.EntryNotionalEur) / position.EntryNotionalEur * 100m;
+    }
+
+    private static double PositionAgeSeconds(PortfolioPosition position, DateTimeOffset now)
+    {
+        // Legacy positions loaded from old state files may not carry OpenedAtUtc.
+        // We treat those as "old enough" (infinite age) so the minimum-hold guard
+        // never suddenly locks a pre-existing position in. This is the least
+        // surprising fallback: existing positions keep closing as before, and only
+        // positions opened after this feature shipped are held for the minimum.
+        if (position.OpenedAtUtc is not { } openedAt)
+        {
+            return double.MaxValue;
+        }
+
+        return (now - openedAt).TotalSeconds;
+    }
+
+    private static void RecordAction(PortfolioState state, string pair, bool buy, DateTimeOffset now)
+    {
+        var history = state.ActionHistory.FirstOrDefault(item => item.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
+        if (history is null)
+        {
+            history = new PairActionHistory { Pair = pair };
+            state.ActionHistory.Add(history);
+        }
+
+        if (buy)
+        {
+            history.LastBuyAtUtc = now;
+        }
+        else
+        {
+            history.LastSellAtUtc = now;
+        }
+    }
+
     private static decimal CalculateTotalValue(PortfolioState state) =>
         state.CashEur + state.Positions.Sum(position => position.MarketValueEur);
 
@@ -263,7 +392,9 @@ internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions in
         decimal fillPrice = 0m,
         decimal feeEur = 0m,
         decimal grossNotionalEur = 0m,
-        decimal netNotionalEur = 0m)
+        decimal netNotionalEur = 0m,
+        string? holdReasonCode = null,
+        string? exitReasonCode = null)
     {
         var afterValue = CalculateTotalValue(afterState);
         return new DryRunAction
@@ -271,6 +402,8 @@ internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions in
             Pair = proposal.Pair,
             Action = action,
             Reason = reason,
+            HoldReasonCode = holdReasonCode,
+            ExitReasonCode = exitReasonCode,
             DesiredPosition = proposal.DesiredPosition,
             TargetNotionalEur = proposal.TargetNotionalEur,
             Quantity = action == "WOULD_BUY"
@@ -296,6 +429,11 @@ internal sealed class PortfolioState
     public decimal CashEur { get; set; }
     public List<PortfolioPosition> Positions { get; set; } = new();
 
+    // Per-pair record of the most recent buy/sell timestamps, used to enforce
+    // cooldowns. Old state files that predate this field deserialize to an empty
+    // list, so loading legacy state stays safe.
+    public List<PairActionHistory> ActionHistory { get; set; } = new();
+
     public decimal PositionsValueEur => Positions.Sum(position => position.MarketValueEur);
     public decimal TotalValueEur => CashEur + PositionsValueEur;
 
@@ -303,7 +441,8 @@ internal sealed class PortfolioState
     {
         UpdatedAt = UpdatedAt,
         CashEur = CashEur,
-        Positions = Positions.Select(position => position.Clone()).ToList()
+        Positions = Positions.Select(position => position.Clone()).ToList(),
+        ActionHistory = ActionHistory.Select(history => history.Clone()).ToList()
     };
 }
 
@@ -319,6 +458,12 @@ internal sealed class PortfolioPosition
     public decimal UnrealizedPnlEur { get; set; }
     public decimal UnrealizedPnlPercent { get; set; }
 
+    // Nullable so legacy state files (which lack these fields) still load. When
+    // OpenedAtUtc is null the position is treated as "old enough" for the
+    // minimum-hold guard (see DryRunPortfolio.PositionAgeSeconds).
+    public DateTimeOffset? OpenedAtUtc { get; set; }
+    public DateTimeOffset? LastActionAtUtc { get; set; }
+
     public PortfolioPosition Clone() => new()
     {
         Pair = Pair,
@@ -329,8 +474,39 @@ internal sealed class PortfolioPosition
         LastPrice = LastPrice,
         MarketValueEur = MarketValueEur,
         UnrealizedPnlEur = UnrealizedPnlEur,
-        UnrealizedPnlPercent = UnrealizedPnlPercent
+        UnrealizedPnlPercent = UnrealizedPnlPercent,
+        OpenedAtUtc = OpenedAtUtc,
+        LastActionAtUtc = LastActionAtUtc
     };
+}
+
+internal sealed class PairActionHistory
+{
+    public string Pair { get; set; } = string.Empty;
+    public DateTimeOffset? LastBuyAtUtc { get; set; }
+    public DateTimeOffset? LastSellAtUtc { get; set; }
+
+    public PairActionHistory Clone() => new()
+    {
+        Pair = Pair,
+        LastBuyAtUtc = LastBuyAtUtc,
+        LastSellAtUtc = LastSellAtUtc
+    };
+}
+
+// Classifies why a LONG position would be closed. Only SignalFlip is produced by
+// the current deterministic strategy. The hard-exit reasons below are declared so
+// future risk logic can set them; hard exits MUST bypass the minimum-hold guard.
+internal enum ExitReason
+{
+    SignalFlip,
+    StopLoss,
+    TakeProfit,
+    MaxHold,
+    TrailingStop,
+    KillSwitch,
+    EmergencyRisk,
+    BrokerSafety
 }
 
 internal sealed class DryRunAction
@@ -338,6 +514,18 @@ internal sealed class DryRunAction
     public string Pair { get; set; } = string.Empty;
     public string Action { get; set; } = string.Empty;
     public string Reason { get; set; } = string.Empty;
+
+    // Distinguishes the WOULD_HOLD / WOULD_BUY_BLOCKED variants:
+    // "DESIRED_LONG"    -> holding because the desired position still matches.
+    // "MIN_HOLD_BLOCK"  -> a signal-flip sell was suppressed by the minimum-hold guard.
+    // "MIN_PROFIT_BLOCK"-> a signal-flip sell was suppressed by the min-profit guard.
+    // "COOLDOWN_BLOCK"  -> a buy was suppressed by a buy/sell cooldown.
+    public string? HoldReasonCode { get; set; }
+
+    // Distinguishes the WOULD_SELL variants: SELL_STOP_LOSS, SELL_TAKE_PROFIT,
+    // SELL_MAX_HOLD, SELL_KILL_SWITCH, SELL_SIGNAL_FLIP, ...
+    public string? ExitReasonCode { get; set; }
+
     public string DesiredPosition { get; set; } = string.Empty;
     public decimal TargetNotionalEur { get; set; }
     public decimal Quantity { get; set; }

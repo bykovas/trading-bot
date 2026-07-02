@@ -13,4 +13,8 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="TradingBot.Worker.Tests" />
+  </ItemGroup>
+
 </Project>

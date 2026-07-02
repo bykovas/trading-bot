@@ -186,6 +186,14 @@ internal sealed class DecisionWorker(
         }
 
         Console.WriteLine($"  execution={dryRunAction.Action}");
+        if (!string.IsNullOrEmpty(dryRunAction.HoldReasonCode))
+        {
+            Console.WriteLine($"  execution-hold-reason-code: {dryRunAction.HoldReasonCode}");
+        }
+        if (!string.IsNullOrEmpty(dryRunAction.ExitReasonCode))
+        {
+            Console.WriteLine($"  execution-exit-reason-code: {dryRunAction.ExitReasonCode}");
+        }
         Console.WriteLine($"  execution-reason: {dryRunAction.Reason}");
         if (dryRunAction.FillPrice > 0m || dryRunAction.FeeEur > 0m)
         {

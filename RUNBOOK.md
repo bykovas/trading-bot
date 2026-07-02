@@ -346,11 +346,76 @@ Risk Manager смотрит на proposal после decision engine.
 - `NO_ORDER` - нет нужного действия.
 - `WOULD_BUY` - dry-run открыл бы виртуальную long-позицию.
 - `WOULD_SELL` - dry-run закрыл бы виртуальную long-позицию.
-- `WOULD_HOLD` - позиция уже есть и желаемое состояние тоже `LONG_MICRO`.
-- `WOULD_BUY_BLOCKED` - бот хотел бы купить, но dry-run/risk constraints не позволяют, например не хватает cash или достигнут `MaxOpenPositions`.
+- `WOULD_HOLD` - позиция удерживается. Разные случаи различаются по строке `execution-hold-reason-code`:
+  - `DESIRED_LONG` - позиция уже есть и желаемое состояние тоже `LONG_MICRO`.
+  - `MIN_HOLD_BLOCK` - стратегия дала signal flip (`desired=NONE`), но позиция моложе `ExecutionPolicy.MinHoldSeconds`, поэтому обычная продажа по флипу подавлена.
+  - `MIN_PROFIT_BLOCK` - signal flip, позиция уже старше `MinHoldSeconds`, но консервативный unrealized PnL ниже `PositionExit.MinProfitToExitOnSignalFlipPercent`.
+- `WOULD_SELL` - позиция закрывается. Причина различается по строке `execution-exit-reason-code`:
+  - `SELL_STOP_LOSS` - сработал stop-loss.
+  - `SELL_TAKE_PROFIT` - сработал take-profit.
+  - `SELL_MAX_HOLD` - достигнут max-hold по времени.
+  - `SELL_KILL_SWITCH` - активен kill switch, позиция принудительно закрывается.
+  - `SELL_SIGNAL_FLIP` - обычный signal flip прошел все soft-guard'ы.
+- `WOULD_BUY_BLOCKED` - бот хотел бы купить, но dry-run/risk constraints не позволяют, например не хватает cash, достигнут `MaxOpenPositions`, или активен pair cooldown (`execution-hold-reason-code=COOLDOWN_BLOCK`).
 - `REJECTED` - Risk Manager заблокировал proposal.
 
 Это сделано намеренно: текущий worker должен показывать решения в консоли, а не торговать.
+
+## Execution policy и position exit
+
+Dry-run использует эти правила, чтобы симулировать будущее live-поведение реалистичнее и не терять деньги на fee/spread/slippage из-за мгновенного churn. Реальные ордера при этом не отправляются.
+
+Два блока в `appsettings.json`:
+
+```json
+"ExecutionPolicy": {
+  "CooldownAfterBuySeconds": 900,
+  "CooldownAfterSellSeconds": 1800,
+  "MinHoldSeconds": 900,
+  "AllowImmediateExitOnSignalFlip": false
+},
+"PositionExit": {
+  "MinProfitToExitOnSignalFlipPercent": 1.2,
+  "StopLossPercent": 1.5,
+  "TakeProfitPercent": 2.0,
+  "MaxHoldMinutes": 240
+}
+```
+
+### ExecutionPolicy
+
+- `MinHoldSeconds` не дает боту купить и почти сразу продать ту же позицию из-за шумного EMA-флипа. Пример проблемы: в 16:28 купили SOL/EUR (`WOULD_BUY`), в 16:30 продали (`WOULD_SELL`), realized PnL ушел в минус в основном из-за fee/spread/slippage при крошечном изменении сигнала.
+- Если позиция открыта меньше `MinHoldSeconds` назад и `AllowImmediateExitOnSignalFlip=false`, обычный signal flip (`current=LONG`, `desired=NONE`) НЕ закрывает позицию. Вместо `WOULD_SELL` выводится `WOULD_HOLD` (`MIN_HOLD_BLOCK`) с reason `minimum hold active: signal flip ignored until position age reaches {MinHoldSeconds}s`. Состояние портфеля не меняется.
+- `CooldownAfterBuySeconds` / `CooldownAfterSellSeconds` не дают снова купить ту же пару слишком быстро после покупки/продажи. При активном cooldown покупка выводится как `WOULD_BUY_BLOCKED` (`COOLDOWN_BLOCK`).
+
+### PositionExit
+
+- `MinProfitToExitOnSignalFlipPercent` - обычный signal flip закрывает позицию только если консервативный unrealized PnL не ниже этого порога. Если PnL ниже, выводится `WOULD_HOLD` (`MIN_PROFIT_BLOCK`). Это правило применяется ТОЛЬКО к обычному signal flip и не блокирует hard exits.
+- `StopLossPercent` - если консервативный unrealized PnL <= `-StopLossPercent`, позиция закрывается (`SELL_STOP_LOSS`) даже если `MinHoldSeconds` еще не прошел.
+- `TakeProfitPercent` - если PnL >= `TakeProfitPercent`, позиция закрывается (`SELL_TAKE_PROFIT`) даже если стратегия все еще хочет `LONG_MICRO`.
+- `MaxHoldMinutes` - если возраст позиции >= `MaxHoldMinutes`, позиция закрывается (`SELL_MAX_HOLD`), даже если min-hold/min-profit иначе заблокировали бы продажу. `0` отключает это правило.
+
+### Приоритет выходов (детерминированный)
+
+Для открытой позиции правила проверяются строго в этом порядке:
+
+1. Kill switch / emergency exit (`SELL_KILL_SWITCH`) - использует существующий `Risk.KillSwitch`.
+2. Stop-loss (`SELL_STOP_LOSS`).
+3. Take-profit (`SELL_TAKE_PROFIT`).
+4. Max-hold (`SELL_MAX_HOLD`).
+5. Обычная сверка с desired-позицией:
+   - `current=NONE` + `desired=LONG_MICRO` -> BUY;
+   - `current=LONG` + `desired=LONG_MICRO` -> HOLD (`DESIRED_LONG`);
+   - `current=LONG` + `desired=NONE` -> возможно SELL, но только после `MinHoldSeconds` и `MinProfitToExitOnSignalFlipPercent`;
+   - `current=NONE` + `desired=NONE` -> NO_ORDER.
+
+Важно:
+
+- Пункты 1-4 - это hard exits. Они ОБХОДЯТ `MinHoldSeconds` и `MinProfitToExitOnSignalFlipPercent`.
+- `MinHoldSeconds` НЕ означает "держать вечно". Это только защита от мгновенного churn на шумных флипах; hard exits всегда могут закрыть позицию.
+- Логика выхода вынесена в чистую функцию `PositionExitPolicy.EvaluateHeldPosition` и покрыта unit-тестами (`tests/TradingBot.Worker.Tests`).
+
+Совместимость со старым state: старые `portfolio-state.json` без полей `openedAtUtc` / `lastActionAtUtc` загружаются без падения. Если у существующей позиции нет `openedAtUtc`, она считается "достаточно старой", и min-hold/max-hold ее не трогают неожиданно (наименее сюрпризное поведение: старые позиции закрываются как раньше, без форсированной продажи сразу после апгрейда формата). Новые позиции всегда получают `openedAtUtc` в момент открытия.
 
 ## Как dry-run считает цену сделки
 

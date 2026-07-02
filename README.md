@@ -50,6 +50,33 @@ data/dry-run/events.jsonl
 
 Стартовый виртуальный портфель задается в `src/TradingBot.Worker/appsettings.json` в блоке `Portfolio`.
 
+## Execution policy и position exit
+
+Блоки `ExecutionPolicy` и `PositionExit` в `appsettings.json` делают dry-run ближе к будущему live-поведению: они не дают боту churn'ить позицию на шуме и добавляют детерминированные правила выхода. Реальные ордера не отправляются.
+
+```json
+"ExecutionPolicy": {
+  "CooldownAfterBuySeconds": 900,
+  "CooldownAfterSellSeconds": 1800,
+  "MinHoldSeconds": 900,
+  "AllowImmediateExitOnSignalFlip": false
+},
+"PositionExit": {
+  "MinProfitToExitOnSignalFlipPercent": 1.2,
+  "StopLossPercent": 1.5,
+  "TakeProfitPercent": 2.0,
+  "MaxHoldMinutes": 240
+}
+```
+
+- `MinHoldSeconds` не дает купить и почти сразу продать ту же позицию из-за шумного EMA-флипа. Если позиция моложе `MinHoldSeconds`, обычный signal flip (`current=LONG`, `desired=NONE`) выводит `WOULD_HOLD`, а не `WOULD_SELL`.
+- `MinProfitToExitOnSignalFlipPercent` разрешает выход по обычному signal flip только если консервативный unrealized PnL не ниже порога.
+- `StopLossPercent`, `TakeProfitPercent`, `MaxHoldMinutes` - это hard exits. Они закрывают позицию даже если min-hold/min-profit иначе заблокировали бы продажу (а take-profit срабатывает даже когда стратегия все еще хочет `LONG_MICRO`).
+- Обычные signal flips НЕ должны мгновенно churn'ить позиции; hard exits (kill switch, stop-loss, take-profit, max-hold) ОБХОДЯТ min-hold и min-profit.
+- `MinHoldSeconds` НЕ значит "держать вечно" — это только защита от шума.
+
+Приоритет выходов, совместимость со старым state и коды причин (`SELL_STOP_LOSS`, `MIN_HOLD_BLOCK` и т.д.) описаны в [RUNBOOK.md](RUNBOOK.md).
+
 ## Включить AI watchlist advisor
 
 Worker поддерживает OpenAI-compatible chat completions endpoint. Ключи не хранятся в репозитории:

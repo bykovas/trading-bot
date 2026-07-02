@@ -13,6 +13,8 @@ internal sealed class BotConfiguration
     public StrategyOptions Strategy { get; set; } = new();
     public PortfolioOptions Portfolio { get; set; } = new();
     public DryRunOptions DryRun { get; set; } = new();
+    public ExecutionPolicyOptions ExecutionPolicy { get; set; } = new();
+    public PositionExitOptions PositionExit { get; set; } = new();
     public List<InstrumentOptions> CandidateUniverse { get; set; } = DefaultCandidateUniverse();
 
     public static BotConfiguration Load()
@@ -67,6 +69,14 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_AI_API_KEY", value => config.Ai.ApiKey = value);
         SetIfPresent("TRADINGBOT_AI_MODEL", value => config.Ai.Model = value);
         SetIfPresent("TRADINGBOT_AI_MAX_RECOMMENDATIONS", value => config.Ai.MaxRecommendations = ParseInt(value, config.Ai.MaxRecommendations));
+        SetIfPresent("TRADINGBOT_EXECUTION_COOLDOWN_AFTER_BUY_SECONDS", value => config.ExecutionPolicy.CooldownAfterBuySeconds = ParseInt(value, config.ExecutionPolicy.CooldownAfterBuySeconds));
+        SetIfPresent("TRADINGBOT_EXECUTION_COOLDOWN_AFTER_SELL_SECONDS", value => config.ExecutionPolicy.CooldownAfterSellSeconds = ParseInt(value, config.ExecutionPolicy.CooldownAfterSellSeconds));
+        SetIfPresent("TRADINGBOT_EXECUTION_MIN_HOLD_SECONDS", value => config.ExecutionPolicy.MinHoldSeconds = ParseInt(value, config.ExecutionPolicy.MinHoldSeconds));
+        SetIfPresent("TRADINGBOT_EXECUTION_ALLOW_IMMEDIATE_EXIT_ON_SIGNAL_FLIP", value => config.ExecutionPolicy.AllowImmediateExitOnSignalFlip = ParseBool(value, config.ExecutionPolicy.AllowImmediateExitOnSignalFlip));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_MIN_PROFIT_ON_SIGNAL_FLIP_PERCENT", value => config.PositionExit.MinProfitToExitOnSignalFlipPercent = ParseDecimal(value, config.PositionExit.MinProfitToExitOnSignalFlipPercent));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_STOP_LOSS_PERCENT", value => config.PositionExit.StopLossPercent = ParseDecimal(value, config.PositionExit.StopLossPercent));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_TAKE_PROFIT_PERCENT", value => config.PositionExit.TakeProfitPercent = ParseDecimal(value, config.PositionExit.TakeProfitPercent));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_MAX_HOLD_MINUTES", value => config.PositionExit.MaxHoldMinutes = ParseInt(value, config.PositionExit.MaxHoldMinutes));
     }
 
     private void Normalize()
@@ -86,6 +96,13 @@ internal sealed class BotConfiguration
         DryRun.EventsFile = string.IsNullOrWhiteSpace(DryRun.EventsFile) ? "events.jsonl" : DryRun.EventsFile.Trim();
         DryRun.TakerFeeBps = Math.Max(0m, DryRun.TakerFeeBps);
         DryRun.SlippageBps = Math.Max(0m, DryRun.SlippageBps);
+        ExecutionPolicy.CooldownAfterBuySeconds = Math.Max(0, ExecutionPolicy.CooldownAfterBuySeconds);
+        ExecutionPolicy.CooldownAfterSellSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterSellSeconds);
+        ExecutionPolicy.MinHoldSeconds = Math.Max(0, ExecutionPolicy.MinHoldSeconds);
+        PositionExit.MinProfitToExitOnSignalFlipPercent = Math.Max(0m, PositionExit.MinProfitToExitOnSignalFlipPercent);
+        PositionExit.StopLossPercent = Math.Max(0m, PositionExit.StopLossPercent);
+        PositionExit.TakeProfitPercent = Math.Max(0m, PositionExit.TakeProfitPercent);
+        PositionExit.MaxHoldMinutes = Math.Max(0, PositionExit.MaxHoldMinutes);
         Portfolio.Positions = Portfolio.Positions
             .Where(position => !string.IsNullOrWhiteSpace(position.Pair))
             .Select(position =>
@@ -239,6 +256,42 @@ internal sealed class DryRunOptions
     public string EventsFile { get; set; } = "events.jsonl";
     public decimal TakerFeeBps { get; set; } = 26m;
     public decimal SlippageBps { get; set; } = 5m;
+}
+
+internal sealed class ExecutionPolicyOptions
+{
+    // Minimum seconds to wait after a buy before another buy for the same pair is allowed.
+    public int CooldownAfterBuySeconds { get; set; } = 900;
+
+    // Minimum seconds to wait after a sell before buying the same pair again.
+    public int CooldownAfterSellSeconds { get; set; } = 1800;
+
+    // Minimum seconds a freshly opened position must be held before an ordinary
+    // strategy signal-flip exit is allowed. Hard exits (stop-loss, take-profit,
+    // trailing stop, kill switch, emergency risk, broker safety) always bypass this.
+    public int MinHoldSeconds { get; set; } = 900;
+
+    // When true, disables the minimum-hold guard so a signal flip can close a
+    // position immediately. Default false to avoid buy/sell churn on noisy flips.
+    public bool AllowImmediateExitOnSignalFlip { get; set; } = false;
+}
+
+internal sealed class PositionExitOptions
+{
+    // Normal signal-flip exits are only allowed when the conservative unrealized
+    // PnL percent is at least this value. Does not apply to hard exits.
+    public decimal MinProfitToExitOnSignalFlipPercent { get; set; } = 1.2m;
+
+    // Hard exit: sell when conservative unrealized PnL percent <= -StopLossPercent.
+    public decimal StopLossPercent { get; set; } = 1.5m;
+
+    // Hard exit: sell when conservative unrealized PnL percent >= TakeProfitPercent,
+    // even if the strategy still wants LONG_MICRO.
+    public decimal TakeProfitPercent { get; set; } = 2.0m;
+
+    // Hard exit: sell once the position age reaches this many minutes. Set to 0 to
+    // disable the max-hold guard.
+    public int MaxHoldMinutes { get; set; } = 240;
 }
 
 internal sealed class InstrumentOptions

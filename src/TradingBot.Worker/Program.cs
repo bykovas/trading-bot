@@ -41,7 +41,7 @@ try
         new IndicatorEngine(),
         new TechnicalDecisionEngine(),
         new RiskManager(),
-        new DryRunPortfolio(config.DryRun, config.Portfolio));
+        new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit));
 
     await worker.RunAsync(cancellation.Token);
     return 0;
