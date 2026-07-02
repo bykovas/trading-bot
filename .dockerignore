@@ -1,0 +1,12 @@
+.git
+.github
+.claude
+.vscode
+docs
+infra
+ui-mockups
+
+.DS_Store
+**/.DS_Store
+README.md
+LICENSE

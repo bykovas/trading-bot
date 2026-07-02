@@ -1,0 +1,6 @@
+services:
+  static-site:
+    image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
+    ports:
+      - "8090:80"
+    restart: unless-stopped
