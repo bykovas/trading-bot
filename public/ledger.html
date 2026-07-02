@@ -1,0 +1,1260 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BlynAI Capital — Cycle Ledger</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <style>
+    /* ===== Design tokens (Blynai Capital) ===== */
+    :root {
+      --bg-void: #050505;
+      --bg-1: #0B0C0A;
+      --surface-panel: rgba(17, 18, 15, 0.92);
+      --surface-inset: rgba(7, 10, 11, 0.5);
+      --hairline: rgba(246, 218, 160, 0.12);
+      --hairline-strong: rgba(246, 218, 160, 0.24);
+      --ink: #F6EFE1;
+      --ink-soft: #C8BBA6;
+      --muted: #82796D;
+      --gold: #F5B84F;
+      --gold-soft: #FFD987;
+      --gold-glow: rgba(245, 184, 79, 0.35);
+      --gold-wash: rgba(245, 184, 79, 0.09);
+      --green: #41EDA0;
+      --green-bright: #6BFFBE;
+      --green-glow: rgba(65, 237, 160, 0.35);
+      --green-wash: rgba(65, 237, 160, 0.09);
+      --red: #FF5367;
+      --red-bright: #FF7C8B;
+      --amber: #F0A63A;
+      --amber-glow: rgba(240, 166, 58, 0.35);
+      --amber-wash: rgba(240, 166, 58, 0.10);
+      --blue: #6FAEFF;
+      --blue-glow: rgba(111, 174, 255, 0.32);
+      --blue-wash: rgba(111, 174, 255, 0.10);
+      --cream: #F7E6C1;
+      --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+      --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      --r-sm: 6px;
+      --r-md: 8px;
+      --r-lg: 12px;
+      --r-pill: 999px;
+      --panel-radius: 8px;
+      --shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 22px 70px rgba(0, 0, 0, 0.30);
+      --shadow-hero: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 28px 80px rgba(0, 0, 0, 0.42);
+      --pancake-field:
+        repeating-radial-gradient(circle at 17% 12%, rgba(247, 213, 143, 0.12) 0 1px, transparent 1px 52px),
+        repeating-radial-gradient(circle at 82% 18%, rgba(65, 237, 160, 0.10) 0 1px, transparent 1px 64px);
+      --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      background: var(--bg-void);
+    }
+
+    body {
+      font-family: var(--font-body);
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+      background:
+        linear-gradient(120deg, rgba(5, 5, 5, 0.98), rgba(12, 13, 11, 0.96) 42%, rgba(4, 14, 12, 0.94) 100%),
+        var(--pancake-field), var(--bg-void);
+    }
+
+    ::selection {
+      background: rgba(245, 184, 79, 0.25);
+    }
+
+    /* ===== Topbar ===== */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 12px 28px;
+      min-height: 66px;
+      border-bottom: 1px solid var(--hairline);
+      background: rgba(5, 6, 6, 0.74);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .coin {
+      width: 40px;
+      height: 40px;
+      flex: none;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #1a1206;
+      font-family: var(--font-mono);
+      font-weight: 800;
+      font-size: 11px;
+      background: linear-gradient(145deg, rgba(255, 246, 215, 0.96), rgba(248, 184, 78, 0.94) 46%, rgba(129, 75, 28, 0.9));
+      border: 1px solid rgba(255, 226, 166, 0.5);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 0 22px rgba(245, 184, 79, 0.28);
+    }
+
+    .brand .n {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 16px;
+      color: var(--cream);
+      line-height: 1.05;
+    }
+
+    .brand .s {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--gold-soft);
+    }
+
+    .rail {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: 8px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+      padding: 6px 11px;
+      border-radius: var(--r-pill);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      border: 1px solid var(--hairline);
+      background: rgba(255, 255, 255, 0.035);
+      color: var(--ink-soft);
+    }
+
+    .pill .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 12px currentColor;
+    }
+
+    .pill.ok {
+      color: var(--green);
+      border-color: var(--green-glow);
+      background: var(--green-wash);
+    }
+
+    .pill.ok .dot {
+      animation: pulse 2.2s var(--ease-out) infinite;
+    }
+
+    .pill.warn {
+      color: var(--amber);
+      border-color: var(--amber-glow);
+      background: var(--amber-wash);
+    }
+
+    .pill.muted {
+      color: #7e8491;
+      border-color: rgba(126, 132, 145, 0.2);
+      background: rgba(126, 132, 145, 0.07);
+    }
+
+    .pill.muted .dot {
+      box-shadow: none;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: .32
+      }
+    }
+
+    .spacer {
+      flex: 1;
+    }
+
+    .cyc-info {
+      display: grid;
+      gap: 2px;
+      justify-items: end;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .cyc-info .lb {
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .cyc-info .t {
+      color: var(--ink-soft);
+      font-weight: 600;
+    }
+
+    .cyc-info .t b {
+      color: var(--green);
+      font-weight: 600;
+    }
+
+    main {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 22px 28px 44px;
+    }
+
+    /* ===== Portfolio band ===== */
+    .band {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(420px, 0.92fr);
+      gap: 22px;
+      margin-bottom: 18px;
+      padding: 26px 30px;
+      border: 1px solid rgba(246, 218, 160, 0.16);
+      border-radius: var(--panel-radius);
+      background: linear-gradient(90deg, rgba(23, 19, 13, 0.94), rgba(11, 18, 15, 0.86));
+      box-shadow: var(--shadow-hero);
+    }
+
+    .eyebrow {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--gold-soft);
+      margin-bottom: 12px;
+    }
+
+    .total-row {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .total {
+      font-family: var(--font-mono);
+      font-weight: 500;
+      font-size: 52px;
+      line-height: 0.9;
+      color: var(--cream);
+      letter-spacing: -0.01em;
+    }
+
+    .delta-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 12px;
+      border-radius: var(--r-pill);
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+
+    .delta-chip.neg {
+      color: var(--red);
+      border: 1px solid rgba(255, 83, 103, 0.4);
+      background: rgba(255, 83, 103, 0.10);
+    }
+
+    .delta-chip.pos {
+      color: var(--green);
+      border: 1px solid var(--green-glow);
+      background: var(--green-wash);
+    }
+
+    .seed {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .stat {
+      padding: 14px 16px;
+      border: 1px solid rgba(246, 218, 160, 0.1);
+      border-radius: var(--r-md);
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    .stat .k {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 7px;
+    }
+
+    .stat .v {
+      font-family: var(--font-mono);
+      font-size: 21px;
+      color: var(--ink);
+    }
+
+    .stat .v small {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .stat .v.gold {
+      color: var(--gold);
+    }
+
+    .pos-wrap {
+      border-left: 1px solid var(--hairline);
+      padding-left: 22px;
+    }
+
+    .pos-wrap .k {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .pos-list {
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+
+    .pos-row {
+      display: grid;
+      grid-template-columns: 96px 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 11px 14px;
+      border: 1px solid rgba(246, 218, 160, 0.1);
+      border-radius: var(--r-md);
+      background: rgba(0, 0, 0, 0.18);
+    }
+
+    .pos-row .pair {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--cream);
+    }
+
+    .pos-row .side {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--green);
+    }
+
+    .pos-row .px {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .pos-row .px span {
+      color: var(--ink-soft);
+    }
+
+    .pos-row .mkt {
+      text-align: right;
+      font-family: var(--font-mono);
+      font-size: 15px;
+      color: var(--ink);
+    }
+
+    .pos-row .pnl {
+      text-align: right;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    /* ===== Ledger panel ===== */
+    .panel {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--hairline);
+      border-radius: var(--panel-radius);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)), var(--surface-panel);
+      box-shadow: var(--shadow-card);
+    }
+
+    .p-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      min-height: 62px;
+      padding: 15px 20px;
+      border-bottom: 1px solid rgba(246, 218, 160, 0.09);
+    }
+
+    .kicker {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--gold-soft);
+      margin-bottom: 5px;
+    }
+
+    .p-head h2 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 19px;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+    }
+
+    .pg-wrap {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .range {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .pg-btns {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .pg {
+      min-width: 34px;
+      height: 34px;
+      padding: 0 10px;
+      border-radius: var(--r-md);
+      cursor: pointer;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink-soft);
+      border: 1px solid var(--hairline);
+      background: rgba(0, 0, 0, 0.2);
+      display: grid;
+      place-items: center;
+      transition: all .18s ease;
+    }
+
+    .pg:hover {
+      border-color: var(--hairline-strong);
+      color: var(--cream);
+    }
+
+    .pg.active {
+      color: #151006;
+      background: var(--gold);
+      border-color: var(--gold);
+    }
+
+    .pg.arrow {
+      font-size: 15px;
+    }
+
+    .pg[disabled] {
+      opacity: .35;
+      cursor: default;
+      pointer-events: none;
+    }
+
+    .cycles {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 18px 20px 22px;
+    }
+
+    .cycle {
+      border: 1px solid var(--hairline);
+      border-radius: var(--r-lg);
+      background: rgba(0, 0, 0, 0.16);
+      overflow: hidden;
+    }
+
+    .cy-head {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 18px;
+      padding: 15px 18px;
+      cursor: pointer;
+      transition: background .2s var(--ease-out);
+    }
+
+    .cy-head:hover {
+      background: rgba(246, 218, 160, 0.045);
+    }
+
+    .seq {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      border-radius: var(--r-md);
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--gold);
+      border: 1px solid var(--gold-glow);
+      background: var(--gold-wash);
+    }
+
+    .cy-time {
+      font-family: var(--font-mono);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--cream);
+      letter-spacing: 0.01em;
+    }
+
+    .cy-time small {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .cy-sub {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 2px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: center;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 9px;
+      border-radius: var(--r-pill);
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+    }
+
+    .chip .g {
+      font-size: 9px;
+    }
+
+    .cy-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .cy-total {
+      text-align: right;
+    }
+
+    .cy-total .v {
+      font-family: var(--font-mono);
+      font-size: 16px;
+      color: var(--ink);
+    }
+
+    .cy-total .d {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .chev {
+      font-family: var(--font-mono);
+      font-size: 16px;
+      color: var(--gold-soft);
+      width: 16px;
+      text-align: center;
+    }
+
+    .detail {
+      padding: 4px 16px 18px;
+      border-top: 1px solid rgba(246, 218, 160, 0.08);
+    }
+
+    .decisions {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 12px;
+      padding-top: 14px;
+    }
+
+    .dcard {
+      border: 1px solid var(--hairline);
+      border-radius: var(--r-md);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent), var(--surface-inset);
+      padding: 14px 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .dc-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .dc-pair {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 16px;
+      color: var(--cream);
+    }
+
+    .dc-price {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink-soft);
+      margin-top: 2px;
+    }
+
+    .dc-price small {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: var(--r-pill);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    .dc-actsub {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 5px;
+      text-align: right;
+    }
+
+    .dc-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .spill {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 1px;
+      padding: 6px 10px;
+      border-radius: var(--r-sm);
+      border: 1px solid var(--hairline);
+      background: rgba(0, 0, 0, 0.24);
+    }
+
+    .spill .k {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+
+    .spill .v {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .contribs {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      padding-top: 2px;
+    }
+
+    .contribs .hd {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .crow {
+      display: grid;
+      grid-template-columns: 80px 1fr 46px;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .crow .nm {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ink-soft);
+    }
+
+    .track {
+      position: relative;
+      height: 16px;
+      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.4);
+      box-shadow: inset 0 0 0 1px rgba(246, 218, 160, 0.06);
+      overflow: hidden;
+    }
+
+    .track .mid {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: rgba(246, 218, 160, 0.16);
+    }
+
+    .track .fill {
+      position: absolute;
+      top: 2px;
+      bottom: 2px;
+      border-radius: 3px;
+    }
+
+    .track .fill.pos {
+      background: linear-gradient(90deg, #0B6B4E, var(--green));
+      box-shadow: 0 0 10px var(--green-glow);
+    }
+
+    .track .fill.neg {
+      background: linear-gradient(90deg, var(--red), #B32C3A);
+      box-shadow: 0 0 10px rgba(255, 83, 103, 0.3);
+    }
+
+    .track .fill.zero {
+      background: var(--muted);
+    }
+
+    .crow .v {
+      text-align: right;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .buy-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1px;
+      border-radius: var(--r-sm);
+      overflow: hidden;
+      border: 1px solid var(--green-glow);
+      background: var(--green-glow);
+    }
+
+    .buy-grid .cell {
+      padding: 8px 10px;
+      background: rgba(5, 14, 11, 0.86);
+    }
+
+    .buy-grid .k {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+    }
+
+    .buy-grid .v {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink);
+    }
+
+    .buy-grid .v.g {
+      color: var(--green-bright);
+    }
+
+    .buy-grid .v.a {
+      color: var(--gold);
+    }
+
+    .reason {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      padding-top: 8px;
+      border-top: 1px solid rgba(246, 218, 160, 0.07);
+    }
+
+    .reason .mk {
+      flex: none;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      margin-top: 2px;
+    }
+
+    .reason p {
+      font-size: 11.5px;
+      color: var(--ink-soft);
+      line-height: 1.5;
+    }
+
+    /* tone helpers */
+    .t-green {
+      color: var(--green);
+    }
+
+    .t-blue {
+      color: var(--blue);
+    }
+
+    .t-amber {
+      color: var(--amber);
+    }
+
+    .t-muted {
+      color: var(--muted);
+    }
+
+    .t-red {
+      color: var(--red);
+    }
+
+    .t-ink {
+      color: var(--ink-soft);
+    }
+
+    .t-greenb {
+      color: var(--green-bright);
+    }
+
+    .t-redb {
+      color: var(--red-bright);
+    }
+
+    .badge.green,
+    .chip.green {
+      color: var(--green);
+      border: 1px solid var(--green-glow);
+      background: var(--green-wash);
+    }
+
+    .badge.blue,
+    .chip.blue {
+      color: var(--blue);
+      border: 1px solid var(--blue-glow);
+      background: var(--blue-wash);
+    }
+
+    .badge.amber,
+    .chip.amber {
+      color: var(--amber);
+      border: 1px solid var(--amber-glow);
+      background: var(--amber-wash);
+    }
+
+    .badge.muted,
+    .chip.muted {
+      color: var(--muted);
+      border: 1px solid rgba(130, 121, 109, 0.28);
+      background: rgba(130, 121, 109, 0.08);
+    }
+
+    @media (max-width:960px) {
+      .band {
+        grid-template-columns: 1fr;
+      }
+
+      .pos-wrap {
+        border-left: 0;
+        padding-left: 0;
+        border-top: 1px solid var(--hairline);
+        padding-top: 18px;
+      }
+
+      .rail {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <header class="topbar">
+    <a class="brand" href="#">
+      <span class="coin">BC</span>
+      <span>
+        <div class="n">BlynAI Capital</div>
+        <div class="s">Decision Ledger</div>
+      </span>
+    </a>
+    <div class="rail">
+      <span class="pill ok"><span class="dot"></span>Bot Running</span>
+      <span class="pill ok"><span class="dot"></span>Kraken OK</span>
+      <span class="pill warn"><span class="dot"></span>Dry Run</span>
+      <span class="pill muted"><span class="dot"></span>AI Off</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="cyc-info">
+      <span class="lb">Cycles logged</span>
+      <span class="t" id="cycMeta"></span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Portfolio band -->
+    <section class="band">
+      <div>
+        <span class="eyebrow">Paper portfolio · live state</span>
+        <div class="total-row">
+          <div class="total" id="pfTotal"></div>
+          <div class="delta-chip" id="pfDelta"></div>
+        </div>
+        <div class="seed">vs €75.00 seed capital</div>
+        <div class="stats">
+          <div class="stat"><span class="k">Free cash</span>
+            <div class="v" id="pfCash"></div>
+          </div>
+          <div class="stat"><span class="k">In positions</span>
+            <div class="v gold" id="pfPos"></div>
+          </div>
+          <div class="stat"><span class="k">Open / max</span>
+            <div class="v" id="pfOpen"></div>
+          </div>
+        </div>
+      </div>
+      <div class="pos-wrap">
+        <span class="k">Open positions · unrealized P&amp;L</span>
+        <div class="pos-list" id="pfPositions"></div>
+      </div>
+    </section>
+
+    <!-- Ledger -->
+    <section class="panel">
+      <div class="p-head">
+        <div>
+          <div class="kicker">Decision engine</div>
+          <h2>Cycle Ledger</h2>
+        </div>
+        <div class="pg-wrap">
+          <span class="range" id="range"></span>
+          <div class="pg-btns" id="paging"></div>
+        </div>
+      </div>
+      <div class="cycles" id="cycles"></div>
+    </section>
+  </main>
+
+  <script>
+    /* ================= DATA (server NDJSON format, parsed) ================= */
+    const DATA = [
+      {
+        id: '20260702185616', seq: 1, time: '18:56:16', date: '02 Jul 2026', mode: 'KRAKEN',
+        total: 74.6903, cash: 45, posVal: 29.6903,
+        positions: [
+          { pair: 'SOL/EUR', entry: 70.91084, last: 70.79, mkt: 9.8991, pnlPct: -1.009 },
+          { pair: 'UNI/EUR', entry: 2.8381353, last: 2.8527, mkt: 9.8907, pnlPct: -1.0928 },
+          { pair: 'BTC/EUR', entry: 54004.0501, last: 54014.0, mkt: 9.9005, pnlPct: -0.9952 }],
+        decisions: [
+          { pair: 'SOL/EUR', price: 70.79, fast: 70.814527, slow: 70.740224, rsi: 52.60, desired: 'LONG_MICRO', score: 0.85, action: 'WOULD_BUY', holdCode: null, reason: 'No open SOL/EUR and the signal cleared threshold — opened a virtual micro long (gross €9.96, fee €0.04).', qty: 0.1404603212, fill: 70.91084, fee: 0.0398, contribs: [{ name: 'EMA', value: 0.30 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'DOT/EUR', price: 0.7394, fast: 0.739777, slow: 0.740231, rsi: 42.06, desired: 'NONE', score: 0.30, action: 'NO_ORDER', holdCode: null, reason: 'Fast EMA sits below slow — no long wanted and nothing open, so no order.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'UNI/EUR', price: 2.8527, fast: 2.852751, slow: 2.844608, rsi: 56.80, desired: 'LONG_MICRO', score: 0.85, action: 'WOULD_BUY', holdCode: null, reason: 'EMA cross bullish with RSI constructive — opened a virtual micro long (gross €9.96, fee €0.04).', qty: 3.5094025865, fill: 2.8381353, fee: 0.0398, contribs: [{ name: 'EMA', value: 0.30 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'BTC/EUR', price: 54014.0, fast: 54014.627437, slow: 53983.223365, rsi: 53.73, desired: 'LONG_MICRO', score: 0.85, action: 'WOULD_BUY', holdCode: null, reason: 'Trend and momentum aligned — opened a virtual micro long (gross €9.96, fee €0.04).', qty: 0.0001844336, fill: 54004.0501, fee: 0.0398, contribs: [{ name: 'EMA', value: 0.30 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'XLM/EUR', price: 0.174314, fast: 0.174530, slow: 0.174631, rsi: 44.99, desired: 'NONE', score: 0.30, action: 'NO_ORDER', holdCode: null, reason: 'Fast EMA below slow — stay flat, no order.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] }
+        ]
+      },
+      {
+        id: '20260702190118', seq: 2, time: '19:01:18', date: '02 Jul 2026', mode: 'KRAKEN',
+        total: 74.6959, cash: 45, posVal: 29.6959,
+        positions: [
+          { pair: 'SOL/EUR', entry: 70.91084, last: 70.82, mkt: 9.8837, pnlPct: -1.1627 },
+          { pair: 'UNI/EUR', entry: 2.8381353, last: 2.8427, mkt: 9.9131, pnlPct: -0.8693 },
+          { pair: 'BTC/EUR', entry: 54004.0501, last: 53971.1, mkt: 9.8991, pnlPct: -1.0091 }],
+        decisions: [
+          { pair: 'XLM/EUR', price: 0.173816, fast: 0.174387, slow: 0.174557, rsi: 39.18, desired: 'NONE', score: 0.30, action: 'NO_ORDER', holdCode: null, reason: 'Fast EMA below slow — no long wanted, no order.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'UNI/EUR', price: 2.8427, fast: 2.850741, slow: 2.844434, rsi: 51.53, desired: 'LONG_MICRO', score: 0.85, action: 'WOULD_HOLD', holdCode: 'DESIRED_LONG', reason: 'Open position already matches the desired long exposure — hold, no re-entry.', contribs: [{ name: 'EMA', value: 0.30 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'SOL/EUR', price: 70.82, fast: 70.815622, slow: 70.747476, rsi: 53.57, desired: 'LONG_MICRO', score: 0.85, action: 'WOULD_HOLD', holdCode: 'DESIRED_LONG', reason: 'Position already matches desired long exposure — hold.', contribs: [{ name: 'EMA', value: 0.30 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'DOT/EUR', price: 0.7394, fast: 0.739701, slow: 0.740155, rsi: 42.06, desired: 'NONE', score: 0.30, action: 'NO_ORDER', holdCode: null, reason: 'Fast EMA below slow — stay flat.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'BTC/EUR', price: 53971.1, fast: 54005.921949, slow: 53982.121241, rsi: 50.34, desired: 'LONG_MICRO', score: 0.85, action: 'WOULD_HOLD', holdCode: 'DESIRED_LONG', reason: 'Position matches desired long exposure — hold.', contribs: [{ name: 'EMA', value: 0.30 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] }
+        ]
+      },
+      {
+        id: '20260702190619', seq: 3, time: '19:06:19', date: '02 Jul 2026', mode: 'KRAKEN',
+        total: 74.6594, cash: 45, posVal: 29.6594,
+        positions: [
+          { pair: 'SOL/EUR', entry: 70.91084, last: 70.85, mkt: 9.8907, pnlPct: -1.0929 },
+          { pair: 'UNI/EUR', entry: 2.8381353, last: 2.8346, mkt: 9.8775, pnlPct: -1.2255 },
+          { pair: 'BTC/EUR', entry: 54004.0501, last: 53929.9, mkt: 9.8913, pnlPct: -1.0875 }],
+        decisions: [
+          { pair: 'UNI/EUR', price: 2.8346, fast: 2.847513, slow: 2.843540, rsi: 47.67, desired: 'LONG_MICRO', score: 0.85, action: 'WOULD_HOLD', holdCode: 'DESIRED_LONG', reason: 'Position matches desired long exposure — hold.', contribs: [{ name: 'EMA', value: 0.30 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'SOL/EUR', price: 70.85, fast: 70.822497, slow: 70.756797, rsi: 54.58, desired: 'LONG_MICRO', score: 0.85, action: 'WOULD_HOLD', holdCode: 'DESIRED_LONG', reason: 'Position matches desired long exposure — hold.', contribs: [{ name: 'EMA', value: 0.30 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'XLM/EUR', price: 0.174012, fast: 0.174312, slow: 0.174507, rsi: 42.34, desired: 'NONE', score: 0.30, action: 'NO_ORDER', holdCode: null, reason: 'Fast EMA below slow — stay flat.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'BTC/EUR', price: 53929.9, fast: 53990.717560, slow: 53977.373855, rsi: 47.25, desired: 'LONG_MICRO', score: 0.85, action: 'WOULD_HOLD', holdCode: 'DESIRED_LONG', reason: 'Position matches desired long exposure — hold.', contribs: [{ name: 'EMA', value: 0.30 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'DOT/EUR', price: 0.7394, fast: 0.739641, slow: 0.740086, rsi: 42.06, desired: 'NONE', score: 0.30, action: 'NO_ORDER', holdCode: null, reason: 'Fast EMA below slow — stay flat.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] }
+        ]
+      },
+      {
+        id: '20260702191121', seq: 4, time: '19:11:21', date: '02 Jul 2026', mode: 'KRAKEN',
+        total: 74.6155, cash: 45, posVal: 29.6155,
+        positions: [
+          { pair: 'SOL/EUR', entry: 70.91084, last: 70.78, mkt: 9.8921, pnlPct: -1.0789 },
+          { pair: 'UNI/EUR', entry: 2.8381353, last: 2.8229, mkt: 9.8390, pnlPct: -1.6096 },
+          { pair: 'BTC/EUR', entry: 54004.0501, last: 53876.2, mkt: 9.8844, pnlPct: -1.1561 }],
+        decisions: [
+          { pair: 'UNI/EUR', price: 2.8229, fast: 2.842590, slow: 2.841664, rsi: 42.70, desired: 'LONG_MICRO', score: 0.85, action: 'WOULD_HOLD', holdCode: 'DESIRED_LONG', reason: 'Position matches desired long exposure — hold.', contribs: [{ name: 'EMA', value: 0.30 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'XLM/EUR', price: 0.173321, fast: 0.174114, slow: 0.174400, rsi: 35.37, desired: 'NONE', score: 0.30, action: 'NO_ORDER', holdCode: null, reason: 'Fast EMA below slow — stay flat.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'SOL/EUR', price: 70.78, fast: 70.813998, slow: 70.758906, rsi: 51.76, desired: 'LONG_MICRO', score: 0.85, action: 'WOULD_HOLD', holdCode: 'DESIRED_LONG', reason: 'Position matches desired long exposure — hold.', contribs: [{ name: 'EMA', value: 0.30 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'DOT/EUR', price: 0.7380, fast: 0.739313, slow: 0.739897, rsi: 34.49, desired: 'NONE', score: 0.15, action: 'NO_ORDER', holdCode: null, reason: 'EMA bearish and RSI neutral (34.5) — score too low, no order.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'BTC/EUR', price: 53876.2, fast: 53967.814048, slow: 53968.176232, rsi: 43.50, desired: 'NONE', score: 0.30, action: 'WOULD_HOLD', holdCode: 'MIN_HOLD_BLOCK', reason: 'Signal flipped to flat, but minimum-hold is active — exit is ignored until the position ages past 1800s.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] }
+        ]
+      },
+      {
+        id: '20260702191622', seq: 5, time: '19:16:22', date: '02 Jul 2026', mode: 'KRAKEN',
+        total: 74.5891, cash: 45, posVal: 29.5891,
+        positions: [
+          { pair: 'SOL/EUR', entry: 70.91084, last: 70.89, mkt: 9.8865, pnlPct: -1.1348 },
+          { pair: 'UNI/EUR', entry: 2.8381353, last: 2.8220, mkt: 9.8254, pnlPct: -1.7458 },
+          { pair: 'BTC/EUR', entry: 54004.0501, last: 53891.1, mkt: 9.8772, pnlPct: -1.2284 }],
+        decisions: [
+          { pair: 'XLM/EUR', price: 0.173000, fast: 0.173891, slow: 0.174272, rsi: 32.68, desired: 'NONE', score: 0.15, action: 'NO_ORDER', holdCode: null, reason: 'EMA bearish and RSI neutral (32.7) — score too low, no order.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'DOT/EUR', price: 0.7384, fast: 0.739130, slow: 0.739761, rsi: 37.93, desired: 'NONE', score: 0.30, action: 'NO_ORDER', holdCode: null, reason: 'Fast EMA below slow — stay flat.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'SOL/EUR', price: 70.89, fast: 70.829198, slow: 70.770824, rsi: 55.63, desired: 'LONG_MICRO', score: 0.85, action: 'WOULD_HOLD', holdCode: 'DESIRED_LONG', reason: 'Position matches desired long exposure — hold.', contribs: [{ name: 'EMA', value: 0.30 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'UNI/EUR', price: 2.8220, fast: 2.838472, slow: 2.839876, rsi: 42.33, desired: 'NONE', score: 0.30, action: 'WOULD_HOLD', holdCode: 'MIN_HOLD_BLOCK', reason: 'Signal flipped to flat, but minimum-hold is active — exit ignored until age reaches 1800s.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] },
+          { pair: 'BTC/EUR', price: 53891.1, fast: 53952.471238, slow: 53961.169302, rsi: 44.81, desired: 'NONE', score: 0.30, action: 'WOULD_HOLD', holdCode: 'MIN_HOLD_BLOCK', reason: 'Signal flipped to flat, but minimum-hold is active — exit ignored until age reaches 1800s.', contribs: [{ name: 'EMA', value: -0.25 }, { name: 'RSI', value: 0.15 }, { name: 'Volatility', value: 0.05 }] }
+        ]
+      }
+    ];
+
+    /* ================= CONFIG / STATE ================= */
+    const PAGE_SIZE = 3;
+    const MINUS = '\u2212';
+    let state = { page: 0, open: {} };
+
+    /* ================= FORMATTERS ================= */
+    const eur = (v, dp = 2) => '\u20AC' + v.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+    const price = v => { const dp = v >= 1000 ? 2 : v >= 1 ? 4 : 6; return v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: dp }); };
+    const qtyFmt = v => v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: v < 0.01 ? 8 : v < 1 ? 6 : 4 });
+    const signPct = v => (v >= 0 ? '+' : MINUS) + Math.abs(v).toFixed(2) + '%';
+    const signEur = v => (v >= 0 ? '+' : MINUS) + '\u20AC' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    /* ================= META ================= */
+    function actionMeta(d) {
+      if (d.action === 'WOULD_BUY') return { label: 'WOULD BUY', tone: 'green', sub: 'open micro long', glyph: '\u25B2' };
+      if (d.action === 'NO_ORDER') return { label: 'NO ORDER', tone: 'muted', sub: 'stay flat', glyph: '\u2013' };
+      if (d.holdCode === 'MIN_HOLD_BLOCK') return { label: 'HOLD \u00B7 LOCKED', tone: 'amber', sub: 'exit blocked', glyph: '\u23F1' };
+      return { label: 'HOLD', tone: 'blue', sub: 'matches target', glyph: '=' };
+    }
+
+    /* ================= RENDER: portfolio ================= */
+    function renderPortfolio() {
+      const pf = DATA[DATA.length - 1];
+      const seedDelta = pf.total - 75;
+      document.getElementById('cycMeta').innerHTML =
+        DATA.length + ' \u00B7 last <b>' + pf.time + ' UTC</b>';
+      document.getElementById('pfTotal').textContent = eur(pf.total);
+      const dc = document.getElementById('pfDelta');
+      dc.className = 'delta-chip ' + (seedDelta < 0 ? 'neg' : 'pos');
+      dc.textContent = signEur(seedDelta) + ' \u00B7 ' + signPct(seedDelta / 75 * 100);
+      document.getElementById('pfCash').textContent = eur(pf.cash);
+      document.getElementById('pfPos').textContent = eur(pf.posVal);
+      document.getElementById('pfOpen').innerHTML = pf.positions.length + ' <small>/ 5</small>';
+      document.getElementById('pfPositions').innerHTML = pf.positions.map(p => `
+    <div class="pos-row">
+      <div><div class="pair">${p.pair}</div><div class="side">LONG</div></div>
+      <div class="px"><div>entry ${price(p.entry)}</div><div>last <span>${price(p.last)}</span></div></div>
+      <div><div class="mkt">${eur(p.mkt)}</div><div class="pnl ${p.pnlPct >= 0 ? 't-green' : 't-red'}">${signPct(p.pnlPct)}</div></div>
+    </div>`).join('');
+    }
+
+    /* ================= RENDER: one decision card ================= */
+    function decisionCard(d) {
+      const a = actionMeta(d);
+      const bull = d.fast > d.slow;
+      const scoreTone = d.score >= 0.5 ? 't-green' : d.score >= 0.3 ? 't-blue' : 't-muted';
+      const rsiTone = (d.rsi < 35 || d.rsi > 65) ? 't-amber' : 't-ink';
+      const desiredLong = d.desired === 'LONG_MICRO';
+
+      const contribs = d.contribs.map(c => {
+        const pct = Math.min(Math.abs(c.value) / 0.40, 1) * 50;
+        let fillCls, fillStyle, valTone;
+        if (c.value === 0) { fillCls = 'zero'; fillStyle = 'left:calc(50% - 1px);width:2px;'; valTone = 't-muted'; }
+        else if (c.value > 0) { fillCls = 'pos'; fillStyle = 'left:50%;width:' + pct + '%;'; valTone = 't-greenb'; }
+        else { fillCls = 'neg'; fillStyle = 'right:50%;width:' + pct + '%;'; valTone = 't-redb'; }
+        const sign = c.value > 0 ? '+' : c.value < 0 ? MINUS : '\u00B1';
+        return `<div class="crow">
+      <span class="nm">${c.name}</span>
+      <span class="track"><span class="mid"></span><span class="fill ${fillCls}" style="${fillStyle}"></span></span>
+      <span class="v ${valTone}">${sign}${Math.abs(c.value).toFixed(2)}</span>
+    </div>`;
+      }).join('');
+
+      const buyBlock = d.action === 'WOULD_BUY' ? `
+    <div class="buy-grid">
+      <div class="cell"><span class="k">Notional</span><span class="v g">${eur(10)}</span></div>
+      <div class="cell"><span class="k">Quantity</span><span class="v">${qtyFmt(d.qty)}</span></div>
+      <div class="cell"><span class="k">Fill</span><span class="v">${price(d.fill)}</span></div>
+      <div class="cell"><span class="k">Fee</span><span class="v a">${eur(d.fee, 4)}</span></div>
+    </div>` : '';
+
+      return `<div class="dcard" style="border-left:3px solid var(--${a.tone === 'muted' ? 'muted' : a.tone});">
+    <div class="dc-top">
+      <div><div class="dc-pair">${d.pair}</div><div class="dc-price">${price(d.price)} <small>EUR</small></div></div>
+      <div><span class="badge ${a.tone}"><span>${a.glyph}</span>${a.label}</span><div class="dc-actsub">${a.sub}</div></div>
+    </div>
+    <div class="dc-stats">
+      <span class="spill"><span class="k">Trend</span><span class="v ${bull ? 't-green' : 't-red'}">${bull ? '\u25B2 bull' : '\u25BC bear'}</span></span>
+      <span class="spill"><span class="k">RSI</span><span class="v ${rsiTone}">${d.rsi.toFixed(2)}</span></span>
+      <span class="spill"><span class="k">Score</span><span class="v ${scoreTone}">+${d.score.toFixed(2)}</span></span>
+      <span class="spill"><span class="k">Target</span><span class="v ${desiredLong ? 't-green' : 't-muted'}">${desiredLong ? 'LONG micro' : 'flat'}</span></span>
+    </div>
+    <div class="contribs"><span class="hd">Signal contributions</span>${contribs}</div>
+    ${buyBlock}
+    <div class="reason"><span class="mk t-${a.tone}">\u203A</span><p>${d.reason}</p></div>
+  </div>`;
+    }
+
+    /* ================= RENDER: one cycle ================= */
+    function cycleCard(c, prevTotal) {
+      const delta = c.total - prevTotal;
+      const dTone = delta > 0.0001 ? 't-green' : delta < -0.0001 ? 't-red' : 't-muted';
+      const buys = c.decisions.filter(d => d.action === 'WOULD_BUY').length;
+      const holds = c.decisions.filter(d => d.action === 'WOULD_HOLD').length;
+      const flat = c.decisions.filter(d => d.action === 'NO_ORDER').length;
+      const parts = []; if (buys) parts.push(buys + ' buy'); if (holds) parts.push(holds + ' hold'); if (flat) parts.push(flat + ' flat');
+      const open = !!state.open[c.id];
+
+      const chips = c.decisions.map(d => {
+        const a = actionMeta(d);
+        return `<span class="chip ${a.tone}"><span class="g">${a.glyph}</span>${d.pair.split('/')[0]}</span>`;
+      }).join('');
+
+      const detail = open ? `<div class="detail"><div class="decisions">${c.decisions.map(decisionCard).join('')}</div></div>` : '';
+
+      return `<article class="cycle">
+    <div class="cy-head" data-id="${c.id}">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <span class="seq">${String(c.seq).padStart(2, '0')}</span>
+        <div>
+          <div class="cy-time">${c.time}<small> UTC</small></div>
+          <div class="cy-sub">${c.date} \u00B7 ${c.mode} \u00B7 ${parts.join(' \u00B7 ')}</div>
+        </div>
+      </div>
+      <div class="chips">${chips}</div>
+      <div class="cy-right">
+        <div class="cy-total"><div class="v">${eur(c.total)}</div><div class="d ${dTone}">${signEur(delta)} \u00B7 ${signPct(delta / prevTotal * 100)}</div></div>
+        <span class="chev">${open ? '\u25BE' : '\u25B8'}</span>
+      </div>
+    </div>
+    ${detail}
+  </article>`;
+    }
+
+    /* ================= RENDER: ledger + paging ================= */
+    function renderLedger() {
+      const withPrev = DATA.map((c, i) => ({ c, prev: i > 0 ? DATA[i - 1].total : 75 }));
+      const newestFirst = withPrev.slice().reverse();
+      const pageCount = Math.ceil(newestFirst.length / PAGE_SIZE);
+      if (state.page > pageCount - 1) state.page = pageCount - 1;
+      const start = state.page * PAGE_SIZE;
+      const slice = newestFirst.slice(start, start + PAGE_SIZE);
+
+      document.getElementById('cycles').innerHTML = slice.map(x => cycleCard(x.c, x.prev)).join('');
+      document.getElementById('range').textContent =
+        'Showing ' + (start + 1) + '\u2013' + (start + slice.length) + ' of ' + newestFirst.length;
+
+      let pg = `<button class="pg arrow" data-nav="prev" ${state.page === 0 ? 'disabled' : ''}>\u2039</button>`;
+      for (let i = 0; i < pageCount; i++)
+        pg += `<button class="pg ${i === state.page ? 'active' : ''}" data-page="${i}">${i + 1}</button>`;
+      pg += `<button class="pg arrow" data-nav="next" ${state.page >= pageCount - 1 ? 'disabled' : ''}>\u203A</button>`;
+      document.getElementById('paging').innerHTML = pg;
+    }
+
+    /* ================= EVENTS (delegated) ================= */
+    document.addEventListener('click', e => {
+      const head = e.target.closest('.cy-head');
+      if (head) { const id = head.dataset.id; state.open[id] = !state.open[id]; renderLedger(); return; }
+      const pageBtn = e.target.closest('[data-page]');
+      if (pageBtn) { state.page = +pageBtn.dataset.page; renderLedger(); return; }
+      const nav = e.target.closest('[data-nav]');
+      if (nav) {
+        const pageCount = Math.ceil(DATA.length / PAGE_SIZE);
+        state.page = nav.dataset.nav === 'prev' ? Math.max(0, state.page - 1) : Math.min(pageCount - 1, state.page + 1);
+        renderLedger();
+      }
+    });
+
+    /* ================= INIT ================= */
+    state.open[DATA[DATA.length - 1].id] = true; // newest cycle expanded by default
+    renderPortfolio();
+    renderLedger();
+  </script>
+</body>
+
+</html>
