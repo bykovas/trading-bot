@@ -12,7 +12,7 @@ TRAEFIK_DYNAMIC_FILE="${TRAEFIK_DYNAMIC_DIR}/trading-bot.yml"
 : "${GHCR_TOKEN:?GHCR_TOKEN is required}"
 
 IMAGE_TAG="${IMAGE_TAG:-latest}"
-TRAEFIK_NETWORK="${TRAEFIK_NETWORK:-traefik_default}"
+TRAEFIK_NETWORK="${TRAEFIK_NETWORK:-traefik}"
 
 echo "Deploying ${IMAGE_NAME}:${IMAGE_TAG} to ${DEPLOY_DIR}"
 
