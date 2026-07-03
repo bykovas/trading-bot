@@ -158,6 +158,90 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
             );
 
             create index if not exists ix_dry_run_cycles_utc on dry_run_cycles (utc desc);
+
+            create or replace view portfolio_summary as
+            select
+                id,
+                updated_at,
+                (state_json ->> 'cashEur')::numeric as cash_eur,
+                (state_json ->> 'positionsValueEur')::numeric as positions_value_eur,
+                (state_json ->> 'totalValueEur')::numeric as total_value_eur,
+                jsonb_array_length(coalesce(state_json -> 'positions', '[]'::jsonb)) as open_positions,
+                state_json -> 'dailyRisk' ->> 'dateUtc' as daily_risk_date_utc,
+                (state_json -> 'dailyRisk' ->> 'realizedPnlEur')::numeric as daily_realized_pnl_eur
+            from portfolio_state;
+
+            create or replace view portfolio_positions as
+            select
+                state.id as portfolio_state_id,
+                state.updated_at as portfolio_updated_at,
+                position ->> 'pair' as pair,
+                position ->> 'side' as side,
+                (position ->> 'quantity')::numeric as quantity,
+                (position ->> 'entryPrice')::numeric as entry_price,
+                (position ->> 'entryNotionalEur')::numeric as entry_notional_eur,
+                (position ->> 'lastPrice')::numeric as last_price,
+                (position ->> 'marketValueEur')::numeric as market_value_eur,
+                (position ->> 'unrealizedPnlEur')::numeric as unrealized_pnl_eur,
+                (position ->> 'unrealizedPnlPercent')::numeric as unrealized_pnl_percent,
+                (position ->> 'openedAtUtc')::timestamptz as opened_at_utc,
+                (position ->> 'lastActionAtUtc')::timestamptz as last_action_at_utc
+            from portfolio_state state
+            cross join lateral jsonb_array_elements(coalesce(state.state_json -> 'positions', '[]'::jsonb)) as position;
+
+            create or replace view dry_run_cycle_summary as
+            select
+                cycle.cycle_id,
+                cycle.utc,
+                cycle.record_json ->> 'marketDataMode' as market_data_mode,
+                cycle.record_json ->> 'aiProvider' as ai_provider,
+                jsonb_array_length(coalesce(cycle.record_json -> 'activePairs', '[]'::jsonb)) as active_pairs_count,
+                jsonb_array_length(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decisions_count,
+                (cycle.record_json -> 'portfolioBefore' ->> 'cashEur')::numeric as cash_before_eur,
+                (cycle.record_json -> 'portfolioAfter' ->> 'cashEur')::numeric as cash_after_eur,
+                (cycle.record_json -> 'portfolioBefore' ->> 'totalValueEur')::numeric as portfolio_value_before_eur,
+                (cycle.record_json -> 'portfolioAfter' ->> 'totalValueEur')::numeric as portfolio_value_after_eur,
+                (
+                    select count(*)
+                    from jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision
+                    where decision -> 'dryRunAction' ->> 'action' = 'WOULD_BUY'
+                ) as would_buy_count,
+                (
+                    select count(*)
+                    from jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision
+                    where decision -> 'dryRunAction' ->> 'action' = 'WOULD_SELL'
+                ) as would_sell_count,
+                (
+                    select count(*)
+                    from jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision
+                    where coalesce(decision ->> 'broker', '') like 'VALIDATED_OK%'
+                ) as validated_order_count
+            from dry_run_cycles cycle;
+
+            create or replace view dry_run_decisions as
+            select
+                cycle.cycle_id,
+                cycle.utc,
+                decision ->> 'pair' as pair,
+                decision -> 'dryRunAction' ->> 'action' as action,
+                decision ->> 'desiredPosition' as desired_position,
+                (decision ->> 'price')::numeric as price,
+                (decision ->> 'score')::numeric as score,
+                (decision ->> 'riskApproved')::boolean as risk_approved,
+                decision ->> 'broker' as broker,
+                (decision -> 'dryRunAction' ->> 'targetNotionalEur')::numeric as target_notional_eur,
+                (decision -> 'dryRunAction' ->> 'quantity')::numeric as quantity,
+                (decision -> 'dryRunAction' ->> 'fillPrice')::numeric as fill_price,
+                (decision -> 'dryRunAction' ->> 'feeEur')::numeric as fee_eur,
+                (decision -> 'dryRunAction' ->> 'cashBeforeEur')::numeric as cash_before_eur,
+                (decision -> 'dryRunAction' ->> 'cashAfterEur')::numeric as cash_after_eur,
+                (decision -> 'dryRunAction' ->> 'portfolioValueBeforeEur')::numeric as portfolio_value_before_eur,
+                (decision -> 'dryRunAction' ->> 'portfolioValueAfterEur')::numeric as portfolio_value_after_eur,
+                decision -> 'dryRunAction' ->> 'reason' as reason,
+                decision -> 'dryRunAction' ->> 'holdReasonCode' as hold_reason_code,
+                decision -> 'dryRunAction' ->> 'exitReasonCode' as exit_reason_code
+            from dry_run_cycles cycle
+            cross join lateral jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision;
             """,
             connection);
         command.ExecuteNonQuery();
