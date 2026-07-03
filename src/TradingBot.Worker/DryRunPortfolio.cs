@@ -90,6 +90,9 @@ internal sealed class DryRunPortfolio(
     {
         var clone = state.Clone();
         MarkToMarket(clone, marketStates);
+        // Mark-to-market refreshed position values, so the state timestamp must move
+        // too — otherwise saved snapshots carry the time of the last fill forever.
+        clone.UpdatedAt = DateTimeOffset.UtcNow;
         return clone;
     }
 
@@ -123,6 +126,16 @@ internal sealed class DryRunPortfolio(
 
         if (desiredLong)
         {
+            // Daily loss cap: once today's realized PnL breaches the configured cap,
+            // no new risk-increasing entries are allowed until the next UTC day.
+            // Exits (stop-loss / take-profit / signal flips) stay unaffected — the cap
+            // halts new risk, it never blocks reducing risk.
+            var realizedToday = RealizedPnlToday(state, now);
+            if (riskOptions.MaxDailyLossEur > 0m && realizedToday <= -riskOptions.MaxDailyLossEur)
+            {
+                return BuildAction("WOULD_BUY_BLOCKED", $"daily loss cap reached: realized PnL today EUR {realizedToday:0.##} <= -EUR {riskOptions.MaxDailyLossEur:0.##}; new entries blocked until next UTC day", proposal, position, beforeCash, beforeValue, state, holdReasonCode: "DAILY_LOSS_BLOCK");
+            }
+
             // Pair-level cooldowns: block opening a new position too soon after the
             // previous sell (or buy) for the same pair to avoid rapid re-entry churn.
             var history = state.ActionHistory.FirstOrDefault(item => item.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase));
@@ -276,6 +289,7 @@ internal sealed class DryRunPortfolio(
             state.CashEur += exitValue;
             state.Positions.Remove(position);
             RecordAction(state, proposal.Pair, buy: false, now);
+            RecordRealizedPnl(state, realizedPnl, now);
             state.UpdatedAt = now;
             MarkToMarket(state, new[] { marketState });
         }
@@ -363,6 +377,26 @@ internal sealed class DryRunPortfolio(
         }
 
         return (now - openedAt).TotalSeconds;
+    }
+
+    // Realized PnL accumulated so far today (UTC). A DailyRisk entry from a previous
+    // day counts as zero — the cap resets at UTC midnight. Legacy state files without
+    // the field deserialize to null and also count as zero.
+    private static decimal RealizedPnlToday(PortfolioState state, DateTimeOffset now)
+    {
+        var today = now.UtcDateTime.ToString("yyyy-MM-dd");
+        return state.DailyRisk?.DateUtc == today ? state.DailyRisk.RealizedPnlEur : 0m;
+    }
+
+    private static void RecordRealizedPnl(PortfolioState state, decimal realizedPnl, DateTimeOffset now)
+    {
+        var today = now.UtcDateTime.ToString("yyyy-MM-dd");
+        if (state.DailyRisk is null || state.DailyRisk.DateUtc != today)
+        {
+            state.DailyRisk = new DailyRiskState { DateUtc = today };
+        }
+
+        state.DailyRisk.RealizedPnlEur += realizedPnl;
     }
 
     private static void RecordAction(PortfolioState state, string pair, bool buy, DateTimeOffset now)
@@ -456,6 +490,10 @@ internal sealed class PortfolioState
     // list, so loading legacy state stays safe.
     public List<PairActionHistory> ActionHistory { get; set; } = new();
 
+    // Realized PnL accumulated in the current UTC day, used to enforce the daily
+    // loss cap. Null in legacy state files (counts as zero for today).
+    public DailyRiskState? DailyRisk { get; set; }
+
     public decimal PositionsValueEur => Positions.Sum(position => position.MarketValueEur);
     public decimal TotalValueEur => CashEur + PositionsValueEur;
 
@@ -464,7 +502,21 @@ internal sealed class PortfolioState
         UpdatedAt = UpdatedAt,
         CashEur = CashEur,
         Positions = Positions.Select(position => position.Clone()).ToList(),
-        ActionHistory = ActionHistory.Select(history => history.Clone()).ToList()
+        ActionHistory = ActionHistory.Select(history => history.Clone()).ToList(),
+        DailyRisk = DailyRisk?.Clone()
+    };
+}
+
+internal sealed class DailyRiskState
+{
+    // UTC calendar day the counter belongs to, formatted yyyy-MM-dd.
+    public string DateUtc { get; set; } = string.Empty;
+    public decimal RealizedPnlEur { get; set; }
+
+    public DailyRiskState Clone() => new()
+    {
+        DateUtc = DateUtc,
+        RealizedPnlEur = RealizedPnlEur
     };
 }
 

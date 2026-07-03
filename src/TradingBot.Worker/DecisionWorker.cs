@@ -61,16 +61,93 @@ internal sealed class DecisionWorker(
 
         var decisionRecords = new List<DryRunDecisionRecord>();
         var newPositionsThisCycle = 0;
+
+        // PHASE 1 — held positions. Exit/hold logic always runs first and is never
+        // delayed or displaced by new-entry ranking; a sell here also frees cash
+        // that phase 2 sizing can legitimately use.
+        var heldStates = new List<InstrumentMarketState>();
+        var entryStates = new List<InstrumentMarketState>();
         foreach (var marketState in selected)
         {
-            var record = await PrintDecisionAsync(marketState, workingPortfolio, newPositionsThisCycle, cancellationToken);
-            if (record is not null)
+            var hasPosition = workingPortfolio.Positions.Any(position =>
+                position.Pair.Equals(marketState.Instrument.Pair, StringComparison.OrdinalIgnoreCase));
+            (hasPosition ? heldStates : entryStates).Add(marketState);
+        }
+
+        foreach (var marketState in heldStates)
+        {
+            var prepared = PrepareDecision(marketState, workingPortfolio);
+            if (prepared is null)
             {
+                continue;
+            }
+
+            var record = await ExecuteDecisionAsync(prepared, workingPortfolio, newPositionsThisCycle, cancellationToken);
+            decisionRecords.Add(record);
+        }
+
+        // PHASE 2 — new entries. Evaluate all no-position instruments WITHOUT
+        // applying fills, rank the BUY candidates (score → EMA gap → RSI quality →
+        // target notional → stable input order), then execute in ranked order so the
+        // per-cycle and max-open limits go to the best candidates, not to whichever
+        // pairs happen to come first in CandidateUniverse.
+        var buyCandidates = new List<(PreparedDecision Prepared, EntryCandidate Rank)>();
+        var entryIndex = 0;
+        foreach (var marketState in entryStates)
+        {
+            var prepared = PrepareDecision(marketState, workingPortfolio);
+            if (prepared is null)
+            {
+                entryIndex++;
+                continue;
+            }
+
+            if (prepared.Proposal.DesiredPosition == "LONG_MICRO" && prepared.Risk.Approved)
+            {
+                buyCandidates.Add((prepared, new EntryCandidate(
+                    prepared.Proposal.Pair,
+                    prepared.Proposal.Score,
+                    BullishEmaGapPercent(prepared.Indicators),
+                    prepared.Indicators.Rsi,
+                    prepared.Proposal.TargetNotionalEur,
+                    entryIndex)));
+            }
+            else
+            {
+                // NO_ORDER / risk-rejected paths do not compete for entry slots;
+                // record them immediately.
+                var record = await ExecuteDecisionAsync(prepared, workingPortfolio, newPositionsThisCycle, cancellationToken);
                 decisionRecords.Add(record);
-                if (record.DryRunAction.Action == "WOULD_BUY")
-                {
-                    newPositionsThisCycle++;
-                }
+            }
+
+            entryIndex++;
+        }
+
+        foreach (var ranked in EntryRanking.Rank(buyCandidates.Select(candidate => candidate.Rank)))
+        {
+            var prepared = buyCandidates.First(candidate => ReferenceEquals(candidate.Rank, ranked)).Prepared;
+
+            if (config.ExecutionPolicy.MaxNewPositionsPerCycle > 0
+                && newPositionsThisCycle >= config.ExecutionPolicy.MaxNewPositionsPerCycle)
+            {
+                decisionRecords.Add(BuildSkippedBuyRecord(prepared, workingPortfolio));
+                continue;
+            }
+
+            // Re-evaluate with the portfolio as it is NOW (after phase-1 exits and
+            // higher-ranked buys) so position sizing / cash reserve / exposure see
+            // reality — same semantics the old sequential flow had.
+            var refreshed = PrepareDecision(prepared.MarketState, workingPortfolio);
+            if (refreshed is null)
+            {
+                continue;
+            }
+
+            var record = await ExecuteDecisionAsync(refreshed, workingPortfolio, newPositionsThisCycle, cancellationToken);
+            decisionRecords.Add(record);
+            if (record.DryRunAction.Action == "WOULD_BUY")
+            {
+                newPositionsThisCycle++;
             }
         }
 
@@ -193,11 +270,15 @@ internal sealed class DecisionWorker(
         }
     }
 
-    private async Task<DryRunDecisionRecord?> PrintDecisionAsync(
-        InstrumentMarketState marketState,
-        PortfolioState portfolio,
-        int newPositionsThisCycle,
-        CancellationToken cancellationToken)
+    // Immutable snapshot of a decision BEFORE it is applied to the portfolio. Lets
+    // phase 2 evaluate and rank all entry candidates without mutating state.
+    private sealed record PreparedDecision(
+        InstrumentMarketState MarketState,
+        IndicatorSnapshot Indicators,
+        DecisionProposal Proposal,
+        RiskEvaluation Risk);
+
+    private PreparedDecision? PrepareDecision(InstrumentMarketState marketState, PortfolioState portfolio)
     {
         if (!marketState.IsUsable)
         {
@@ -209,6 +290,69 @@ internal sealed class DecisionWorker(
         var currentExposureEur = portfolio.Positions.Sum(position => position.EntryNotionalEur);
         var proposal = decisionEngine.Decide(marketState, indicators, config.Trading, config.Strategy, config.PositionSizing, config.Risk, portfolio.CashEur, currentExposureEur);
         var risk = riskManager.Evaluate(proposal, config.Risk);
+        return new PreparedDecision(marketState, indicators, proposal, risk);
+    }
+
+    private static decimal BullishEmaGapPercent(IndicatorSnapshot indicators)
+    {
+        if (indicators.FastEma is not { } fast || indicators.SlowEma is not { } slow || slow == 0m || fast <= slow)
+        {
+            return 0m;
+        }
+
+        return (fast - slow) / slow * 100m;
+    }
+
+    // Record for a ranked BUY candidate that lost the per-cycle entry race to
+    // higher-ranked candidates. No portfolio mutation, no broker call.
+    private DryRunDecisionRecord BuildSkippedBuyRecord(PreparedDecision prepared, PortfolioState portfolio)
+    {
+        const string reason = "buy candidate skipped because higher-ranked candidates consumed max new positions per cycle";
+        Console.WriteLine($"decision {prepared.Proposal.Pair}:");
+        Console.WriteLine($"  desired={prepared.Proposal.DesiredPosition} score={prepared.Proposal.Score:0.##} targetEur={prepared.Proposal.TargetNotionalEur:0.##}");
+        Console.WriteLine("  execution=WOULD_BUY_BLOCKED");
+        Console.WriteLine("  execution-hold-reason-code: CYCLE_POSITION_LIMIT");
+        Console.WriteLine($"  execution-reason: {reason}");
+
+        return new DryRunDecisionRecord
+        {
+            Pair = prepared.Proposal.Pair,
+            Price = prepared.MarketState.LastPrice,
+            FastEma = prepared.Indicators.FastEma,
+            SlowEma = prepared.Indicators.SlowEma,
+            Rsi = prepared.Indicators.Rsi,
+            DesiredPosition = prepared.Proposal.DesiredPosition,
+            Score = prepared.Proposal.Score,
+            RiskApproved = prepared.Risk.Approved,
+            RiskReasons = prepared.Risk.Reasons,
+            Contributions = prepared.Proposal.Contributions,
+            DryRunAction = new DryRunAction
+            {
+                Pair = prepared.Proposal.Pair,
+                Action = "WOULD_BUY_BLOCKED",
+                Reason = reason,
+                HoldReasonCode = "CYCLE_POSITION_LIMIT",
+                DesiredPosition = prepared.Proposal.DesiredPosition,
+                TargetNotionalEur = prepared.Proposal.TargetNotionalEur,
+                CashBeforeEur = portfolio.CashEur,
+                CashAfterEur = portfolio.CashEur,
+                PortfolioValueBeforeEur = portfolio.TotalValueEur,
+                PortfolioValueAfterEur = portfolio.TotalValueEur
+            },
+            Broker = null
+        };
+    }
+
+    private async Task<DryRunDecisionRecord> ExecuteDecisionAsync(
+        PreparedDecision prepared,
+        PortfolioState portfolio,
+        int newPositionsThisCycle,
+        CancellationToken cancellationToken)
+    {
+        var marketState = prepared.MarketState;
+        var indicators = prepared.Indicators;
+        var proposal = prepared.Proposal;
+        var risk = prepared.Risk;
         var currentPositionBeforeAction = portfolio.Positions.FirstOrDefault(position => position.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase))?.Clone();
         var dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk, newPositionsThisCycle);
 

@@ -21,9 +21,9 @@ Legend: ✅ done · 🚧 partial · ⬜ not started
 | Signals / strategy (§4.4) | 🚧 | One hardcoded EMA-crossover + RSI + volatility scorer. Not yet a versioned `ISignalModule` registry. |
 | Market Regime (§4.3) | ⬜ | No regime component (not even a `Normal` stub). |
 | Decision Engine (§2.2, §4.5) | 🚧 | Deterministic score → `NONE` / `LONG_MICRO` with per-signal contribution breakdown. Config-driven scoring/versioning not done. |
-| Risk Manager (§4.6, §11) | 🚧 | Kill switch, max-order-EUR cap, zero-notional guard; single-position + max-open-positions enforced in the dry-run apply step. Daily-loss / cooldown / exposure rules only echoed, not enforced. |
-| Execution Engine (§4.7) | 🚧 | Virtual Open/Close with notional→quantity conversion, taker-fee + slippage model, conservative mark-to-market. No Increase/Reduce, no real broker. |
-| Portfolio / P&L (§4.8) | 🚧 | Virtual portfolio persisted to `data/dry-run/portfolio-state.json`; mark-to-market + realized/unrealized P&L. Fresh **50 EUR** portfolio auto-created when the state file is missing, empty, or corrupt; an existing valid state is reused. No broker balance fetch / reconstruction. |
+| Risk Manager (§4.6, §11) | 🚧 | Kill switch, max-order-EUR cap, zero-notional guard; max-open-positions, per-cycle position limit, max-total-exposure, cash-reserve and buy/sell cooldowns enforced in the apply step. **Daily loss cap now enforced** (UTC-day realized-PnL tracking in portfolio state; new entries blocked with `DAILY_LOSS_BLOCK`, exits never blocked). Tiered exit policy: stop-loss/TP/max-hold bypass soft guards. |
+| Execution Engine (§4.7) | 🚧 | Virtual Open/Close with notional→quantity conversion, taker-fee + slippage model, conservative mark-to-market. **Two-phase cycle:** held positions (exit/hold) always run first; new-entry BUY candidates are collected, **ranked (score → EMA gap → RSI quality → target → stable input order)** and executed best-first, so per-cycle/max-open limits go to the best candidates instead of CandidateUniverse order; candidates that lose the race are logged with `CYCLE_POSITION_LIMIT`. No Increase/Reduce, no real broker. |
+| Portfolio / P&L (§4.8) | 🚧 | Virtual portfolio persisted to `data/dry-run/portfolio-state.json`; mark-to-market + realized/unrealized P&L; daily realized-PnL counter for the loss cap. Fresh portfolio auto-created with `Portfolio.StartingCashEur` (**75 EUR** by config decision 2026-07-03; code default 50) when the state file is missing, empty, or corrupt; an existing valid state is reused (verified 2026-07-03). `updatedAt` now refreshes on every mark-to-market, not only on fills. No broker balance fetch / reconstruction yet. |
 | Audit / Replay (§4.9, §12) | 🚧 | Per-cycle JSONL journal (`data/dry-run/events.jsonl`) with decisions, indicators, risk reasons, portfolio before/after. No DB snapshots, no config versioning, no replay runner. |
 | AI (§4.10, §10) | 🚧 | Optional OpenAI-compatible **watchlist** advisor (selection only) with heuristic fallback. Not the decision-path AI advisory of Plan 10. |
 | Config (§4.11) | 🚧 | `appsettings.json` + `TRADINGBOT_*` env overrides. No versioning/stamping. |
@@ -54,6 +54,7 @@ Legend: ✅ done · 🚧 partial · ⬜ not started
 **Goal:** first real €2 order on Kraken, safely; validate-soak → live procedure.
 
 - Kraken API key hygiene: no-withdrawal permission, IP whitelist, nonce persistence across restarts
+- **Live-mode state integrity (go-live blocker):** virtual fills are currently applied *before* the broker call — a live order error would leave a phantom virtual position, and live SELL volumes come from virtual quantities instead of real balances. Reorder to broker-result-first (or reconcile after) before `LiveTradingEnabled=true`.
 - ToS read & confirmed (Kraken; T212 later in 09)
 - ≥24h validate-mode soak with log review; go-live checklist
 - Flip `LiveTradingEnabled=true`; first live micro-order; fee/slippage measurement vs. expectation, logged

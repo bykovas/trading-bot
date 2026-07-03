@@ -96,4 +96,124 @@ public class DryRunPortfolioRiskGuardTests
         Assert.Contains("would exceed max EUR 40", action.Reason);
         Assert.Equal(4, state.Positions.Count);
     }
+
+    [Fact]
+    public void Blocks_new_buy_when_max_open_positions_reached_regardless_of_ranking()
+    {
+        var portfolio = Portfolio();
+        var state = State(cashEur: 45m, 10m, 10m, 10m, 10m);
+
+        var action = portfolio.Apply(
+            state,
+            MarketState(),
+            LongProposal(),
+            ApprovedRisk(),
+            new RiskOptions { MaxOrderEur = 15m, MaxOpenPositions = 4 },
+            newPositionsThisCycle: 0);
+
+        Assert.Equal("WOULD_BUY_BLOCKED", action.Action);
+        Assert.Contains("max open positions 4 already reached", action.Reason);
+        Assert.Equal(4, state.Positions.Count);
+    }
+
+    [Fact]
+    public void Exit_of_held_position_is_never_blocked_by_the_per_cycle_entry_limit()
+    {
+        // AllowImmediateExitOnSignalFlip + zero min-profit so a plain signal-flip
+        // sell is allowed; the per-cycle NEW-position counter is already exhausted,
+        // which must not matter for exits.
+        var portfolio = new DryRunPortfolio(
+            new DryRunOptions
+            {
+                ApplyVirtualFills = true,
+                OutputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"))
+            },
+            new PortfolioOptions { StartingCashEur = 75m },
+            new ExecutionPolicyOptions { MaxNewPositionsPerCycle = 1, AllowImmediateExitOnSignalFlip = true },
+            new PositionExitOptions { MinProfitToExitOnSignalFlipPercent = 0m, TakeProfitPercent = 0m, MaxHoldMinutes = 0 },
+            new PositionSizingOptions());
+
+        var state = new PortfolioState
+        {
+            UpdatedAt = DateTimeOffset.UtcNow,
+            CashEur = 10m,
+            Positions = new List<PortfolioPosition>
+            {
+                new()
+                {
+                    // Entry below current price so the conservative (fee/slippage
+                    // adjusted) PnL is clearly positive and no soft guard interferes.
+                    Pair = "NEW/EUR",
+                    Side = "LONG",
+                    Quantity = 5m,
+                    EntryPrice = 0.9m,
+                    EntryNotionalEur = 4.5m,
+                    LastPrice = 1m,
+                    MarketValueEur = 5m,
+                    OpenedAtUtc = DateTimeOffset.UtcNow.AddHours(-1)
+                }
+            }
+        };
+
+        var flatProposal = new DecisionProposal("NEW/EUR", "NONE", 0.30m, 0m, Array.Empty<SignalContribution>());
+        var action = portfolio.Apply(
+            state,
+            MarketState(),
+            flatProposal,
+            ApprovedRisk(),
+            new RiskOptions { MaxOrderEur = 15m, MaxOpenPositions = 4 },
+            newPositionsThisCycle: 99);
+
+        Assert.Equal("WOULD_SELL", action.Action);
+        Assert.Equal("SELL_SIGNAL_FLIP", action.ExitReasonCode);
+        Assert.Empty(state.Positions);
+    }
+
+    [Fact]
+    public void Blocks_new_buy_when_daily_loss_cap_is_breached()
+    {
+        var portfolio = Portfolio();
+        var state = State();
+        state.DailyRisk = new DailyRiskState
+        {
+            DateUtc = DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd"),
+            RealizedPnlEur = -5.10m
+        };
+
+        var action = portfolio.Apply(
+            state,
+            MarketState(),
+            LongProposal(),
+            ApprovedRisk(),
+            new RiskOptions { MaxOrderEur = 15m, MaxOpenPositions = 6, MaxDailyLossEur = 5m },
+            newPositionsThisCycle: 0);
+
+        Assert.Equal("WOULD_BUY_BLOCKED", action.Action);
+        Assert.Equal("DAILY_LOSS_BLOCK", action.HoldReasonCode);
+        Assert.Contains("daily loss cap reached", action.Reason);
+        Assert.Empty(state.Positions);
+    }
+
+    [Fact]
+    public void Allows_new_buy_when_yesterdays_loss_no_longer_counts()
+    {
+        var portfolio = Portfolio();
+        var state = State();
+        state.DailyRisk = new DailyRiskState
+        {
+            DateUtc = DateTimeOffset.UtcNow.UtcDateTime.AddDays(-1).ToString("yyyy-MM-dd"),
+            RealizedPnlEur = -20m
+        };
+
+        var action = portfolio.Apply(
+            state,
+            MarketState(),
+            LongProposal(),
+            ApprovedRisk(),
+            new RiskOptions { MaxOrderEur = 15m, MaxOpenPositions = 6, MaxDailyLossEur = 5m },
+            newPositionsThisCycle: 0);
+
+        Assert.Equal("WOULD_BUY", action.Action);
+        Assert.Single(state.Positions);
+    }
 }
