@@ -102,8 +102,11 @@ internal sealed class BotConfiguration
         Risk.MaxTotalExposureEur = Math.Max(0m, Risk.MaxTotalExposureEur);
         Strategy.MinimumEmaGapPercent = Math.Max(0m, Strategy.MinimumEmaGapPercent);
         Strategy.MinimumLongScore = Math.Clamp(Strategy.MinimumLongScore, 0m, 1m);
-        Strategy.RsiIdealMin = Math.Clamp(Strategy.RsiIdealMin, 0m, 100m);
-        Strategy.RsiIdealMax = Math.Clamp(Strategy.RsiIdealMax, Strategy.RsiIdealMin, 100m);
+        // Keep the ideal band inside the hardcoded acceptable band (35..68) so a
+        // misconfigured ideal range can never carve out a silent RSI dead zone that
+        // scores neither ideal nor acceptable.
+        Strategy.RsiIdealMin = Math.Clamp(Strategy.RsiIdealMin, 35m, 68m);
+        Strategy.RsiIdealMax = Math.Clamp(Strategy.RsiIdealMax, Strategy.RsiIdealMin, 68m);
         Strategy.MomentumLookbackBars = Math.Max(1, Strategy.MomentumLookbackBars);
         Strategy.MomentumMinPercent = Math.Max(0m, Strategy.MomentumMinPercent);
         Strategy.TrendFilterMaPeriod = Math.Max(2, Strategy.TrendFilterMaPeriod);

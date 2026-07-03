@@ -75,6 +75,40 @@ public class WatchlistCacheTests
         Assert.Equal(2, primary.CallCount);
     }
 
+    [Fact]
+    public async Task Duplicate_recommendations_are_deduped_by_pair_keeping_best_priority()
+    {
+        var clock = new FakeClock(DateTimeOffset.Parse("2026-07-03T12:00:00Z"));
+        var advisor = new CachedWatchlistAdvisor(new DuplicatingAdvisor(), new CountingAdvisor("heuristic", "CCC/EUR"), 3600, clock);
+        var candidates = Candidates("AAA/EUR", "BBB/EUR");
+
+        var advice = await advisor.SelectAsync(candidates, 20, CancellationToken.None);
+
+        Assert.Equal(2, advice.Recommendations.Count);
+        Assert.Single(advice.Recommendations, recommendation => recommendation.Pair == "AAA/EUR");
+        // The best (lowest) source priority wins and gets re-indexed to #1.
+        Assert.Equal("AAA/EUR", advice.Recommendations[0].Pair);
+        Assert.Equal(1, advice.Recommendations[0].Priority);
+        Assert.Contains("best", advice.Recommendations[0].Reason);
+    }
+
+    private sealed class DuplicatingAdvisor : IWatchlistAdvisor
+    {
+        public Task<WatchlistAdvice> SelectAsync(
+            IReadOnlyList<InstrumentMarketState> candidates,
+            int maxRecommendations,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new WatchlistAdvice(
+                "openai-compatible",
+                new[]
+                {
+                    new WatchlistRecommendation("AAA/EUR", 2, "duplicate lower priority"),
+                    new WatchlistRecommendation("AAA/EUR", 1, "best priority"),
+                    new WatchlistRecommendation("BBB/EUR", 3, "other pair")
+                },
+                Array.Empty<string>()));
+    }
+
     private static IReadOnlyList<InstrumentMarketState> Candidates(params string[] pairs) =>
         pairs.Select(pair => new InstrumentMarketState
         {

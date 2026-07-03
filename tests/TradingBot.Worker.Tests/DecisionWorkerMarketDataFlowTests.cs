@@ -124,6 +124,7 @@ public class DecisionWorkerMarketDataFlowTests
         public Task<IReadOnlyList<InstrumentMarketState>> GetFullMarketStatesAsync(
             IReadOnlyList<InstrumentOptions> instruments,
             int timeframeMinutes,
+            IReadOnlyList<InstrumentMarketState> lightStates,
             CancellationToken cancellationToken)
         {
             FullRequestedPairs.AddRange(instruments.Select(instrument => instrument.Pair));

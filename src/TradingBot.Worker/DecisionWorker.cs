@@ -10,6 +10,12 @@ internal sealed class DecisionWorker(
     DryRunPortfolio dryRunPortfolio,
     KrakenBroker? broker)
 {
+    // Number of consecutive failed cycles that auto-trips the kill switch. A crash
+    // loop with unmonitored stop-losses is far more dangerous than pausing, so after
+    // this many back-to-back failures we halt new orders and let the operator look.
+    private const int MaxConsecutiveCycleFailures = 5;
+    private int _consecutiveCycleFailures;
+
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         PrintStartup();
@@ -17,7 +23,29 @@ internal sealed class DecisionWorker(
 
         do
         {
-            await RunCycleAsync(cancellationToken);
+            // A single transient market-data / AI error must never kill the process:
+            // with docker restart:unless-stopped that becomes a crash loop that stops
+            // managing open positions. Log the error, skip the cycle, keep looping.
+            try
+            {
+                await RunCycleAsync(cancellationToken);
+                _consecutiveCycleFailures = 0;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _consecutiveCycleFailures++;
+                Console.WriteLine($"cycle-error: {ex.Message} (consecutive failures {_consecutiveCycleFailures}/{MaxConsecutiveCycleFailures})");
+                if (_consecutiveCycleFailures >= MaxConsecutiveCycleFailures && !config.Risk.KillSwitch)
+                {
+                    config.Risk.KillSwitch = true;
+                    Console.WriteLine($"!!! KILL SWITCH AUTO-TRIPPED after {MaxConsecutiveCycleFailures} consecutive failed cycles: new orders halted; open positions will be flattened as data allows !!!");
+                }
+            }
+
             if (config.Worker.RunOnce)
             {
                 return;
@@ -50,6 +78,7 @@ internal sealed class DecisionWorker(
         var selected = (await marketDataSource.GetFullMarketStatesAsync(
                 activeInstruments,
                 config.Trading.TimeframeMinutes,
+                lightCandidates,
                 cancellationToken))
             .ToList();
 

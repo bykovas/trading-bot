@@ -19,15 +19,18 @@ internal sealed class HeuristicWatchlistAdvisor : IWatchlistAdvisor
         int maxRecommendations,
         CancellationToken cancellationToken)
     {
+        // Rank by EUR notional (24h base volume * price), NOT raw base-unit volume:
+        // ranking by base units alone floats meme coins (huge unit counts, tiny price)
+        // to the top of the fallback watchlist. Volatility is dropped as a tiebreaker
+        // because the light snapshot has no candles, so it is always 0 here.
         var recommendations = candidates
             .Where(candidate => candidate.LastPrice > 0m && string.IsNullOrWhiteSpace(candidate.DataWarning))
-            .OrderByDescending(candidate => candidate.LastVolume)
-            .ThenBy(candidate => candidate.VolatilityPercent)
+            .OrderByDescending(candidate => candidate.LastVolume * candidate.LastPrice)
             .Take(maxRecommendations)
             .Select((candidate, index) => new WatchlistRecommendation(
                 candidate.Instrument.Pair,
                 index + 1,
-                $"heuristic pick: volume {candidate.LastVolume:0.####}, volatility {candidate.VolatilityPercent:0.##}%"))
+                $"heuristic pick: est. 24h EUR volume {candidate.LastVolume * candidate.LastPrice:0}"))
             .ToList();
 
         var warnings = candidates
@@ -64,20 +67,10 @@ internal sealed class OpenAiCompatibleWatchlistAdvisor(
             throw new InvalidOperationException("AI provider configured but API key or model is missing");
         }
 
-        var aiAdvice = await AskModelAsync(candidates, maxRecommendations, cancellationToken);
-        var validPairs = candidates.Select(candidate => candidate.Instrument.Pair).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var recommendations = aiAdvice.Recommendations
-            .Where(item => validPairs.Contains(item.Pair))
-            .OrderBy(item => item.Priority)
-            .Take(maxRecommendations)
-            .ToList();
-
-        if (recommendations.Count == 0)
-        {
-            throw new InvalidOperationException("AI returned no valid configured pairs");
-        }
-
-        return aiAdvice with { Recommendations = recommendations };
+        // Return the raw model recommendations. Validation against the candidate set,
+        // deduplication and the max-count cap are the single responsibility of
+        // CachedWatchlistAdvisor.Normalize, so we do not duplicate that logic here.
+        return await AskModelAsync(candidates, maxRecommendations, cancellationToken);
     }
 
     private async Task<WatchlistAdvice> AskModelAsync(
@@ -301,8 +294,14 @@ internal sealed class CachedWatchlistAdvisor(
         int maxRecommendations)
     {
         var validPairs = candidates.Select(candidate => candidate.Instrument.Pair).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Dedupe by pair (case-insensitive, keeping the best/lowest priority) BEFORE
+        // capping: a duplicated pair from the model would otherwise become a duplicate
+        // active instrument evaluated twice in a cycle and cached for the whole TTL.
         var recommendations = advice.Recommendations
             .Where(item => validPairs.Contains(item.Pair))
+            .OrderBy(item => item.Priority)
+            .GroupBy(item => item.Pair, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
             .OrderBy(item => item.Priority)
             .Take(maxRecommendations)
             .Select((item, index) => item with { Priority = index + 1 })
