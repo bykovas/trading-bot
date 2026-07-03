@@ -8,6 +8,7 @@ internal sealed class BotConfiguration
     public HttpOptions Http { get; set; } = new();
     public KrakenOptions Kraken { get; set; } = new();
     public AiOptions Ai { get; set; } = new();
+    public LoggingOptions Logging { get; set; } = new();
     public TradingOptions Trading { get; set; } = new();
     public RiskOptions Risk { get; set; } = new();
     public StrategyOptions Strategy { get; set; } = new();
@@ -76,6 +77,7 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_OPENAI_API_KEY", value => config.Ai.ApiKey = value);
         SetIfPresent("TRADINGBOT_AI_MODEL", value => config.Ai.Model = value);
         SetIfPresent("TRADINGBOT_AI_MAX_RECOMMENDATIONS", value => config.Ai.MaxRecommendations = ParseInt(value, config.Ai.MaxRecommendations));
+        SetIfPresent("TRADINGBOT_LOG_DIRECTORY", value => config.Logging.Directory = value);
         SetIfPresent("TRADINGBOT_EXECUTION_COOLDOWN_AFTER_BUY_SECONDS", value => config.ExecutionPolicy.CooldownAfterBuySeconds = ParseInt(value, config.ExecutionPolicy.CooldownAfterBuySeconds));
         SetIfPresent("TRADINGBOT_EXECUTION_COOLDOWN_AFTER_SELL_SECONDS", value => config.ExecutionPolicy.CooldownAfterSellSeconds = ParseInt(value, config.ExecutionPolicy.CooldownAfterSellSeconds));
         SetIfPresent("TRADINGBOT_EXECUTION_MIN_HOLD_SECONDS", value => config.ExecutionPolicy.MinHoldSeconds = ParseInt(value, config.ExecutionPolicy.MinHoldSeconds));
@@ -101,6 +103,7 @@ internal sealed class BotConfiguration
         Strategy.MinimumLongScore = Math.Clamp(Strategy.MinimumLongScore, 0m, 1m);
         NormalizePositionSizing();
         Portfolio.StartingCashEur = Portfolio.StartingCashEur < 0 ? 0m : Portfolio.StartingCashEur;
+        Logging.Directory = string.IsNullOrWhiteSpace(Logging.Directory) ? "logs" : Logging.Directory.Trim();
         DryRun.OutputDirectory = string.IsNullOrWhiteSpace(DryRun.OutputDirectory) ? "data/dry-run" : DryRun.OutputDirectory.Trim();
         DryRun.StateFile = string.IsNullOrWhiteSpace(DryRun.StateFile) ? "portfolio-state.json" : DryRun.StateFile.Trim();
         DryRun.EventsFile = string.IsNullOrWhiteSpace(DryRun.EventsFile) ? "events.jsonl" : DryRun.EventsFile.Trim();
@@ -235,6 +238,11 @@ internal sealed class AiOptions
     public string Model { get; set; } = string.Empty;
     public int MaxRecommendations { get; set; } = 2;
     public bool UseJsonResponseFormat { get; set; } = true;
+}
+
+internal sealed class LoggingOptions
+{
+    public string Directory { get; set; } = "logs";
 }
 
 internal sealed class TradingOptions

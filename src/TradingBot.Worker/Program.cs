@@ -6,6 +6,8 @@ Console.OutputEncoding = Encoding.UTF8;
 try
 {
     var config = BotConfiguration.Load();
+    using var fileLogging = FileLogging.Configure(config.Logging.Directory);
+    Console.WriteLine($"fileLogging=enabled directory={config.Logging.Directory}");
     using var cancellation = new CancellationTokenSource();
 
     Console.CancelKeyPress += (_, eventArgs) =>

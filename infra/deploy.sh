@@ -10,6 +10,7 @@ WORKER_APPSETTINGS="${DEPLOY_DIR}/appsettings.json"
 WORKER_APPSETTINGS_SOURCE="src/TradingBot.Worker/appsettings.json"
 WORKER_ENV_FILE="${DEPLOY_DIR}/.env"
 WORKER_DATA_DIR="${DEPLOY_DIR}/data"
+WORKER_LOG_DIR="${DEPLOY_DIR}/logs"
 DATABASE_DIR="${DEPLOY_DIR}/database"
 
 : "${IMAGE_NAME:?IMAGE_NAME is required}"
@@ -29,7 +30,7 @@ echo "Deploying stack '${PROJECT_NAME}' to ${DEPLOY_DIR}"
 echo "  ui     = ${IMAGE_NAME}:${IMAGE_TAG}"
 echo "  worker = ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG}"
 
-mkdir -p "${DEPLOY_DIR}" "${TRAEFIK_DYNAMIC_DIR}" "${WORKER_DATA_DIR}" "${DATABASE_DIR}"
+mkdir -p "${DEPLOY_DIR}" "${TRAEFIK_DYNAMIC_DIR}" "${WORKER_DATA_DIR}" "${WORKER_LOG_DIR}" "${DATABASE_DIR}"
 cp infra/docker-compose.prod.yml "${COMPOSE_FILE}"
 cp infra/traefik/trading-bot.yml "${TRAEFIK_DYNAMIC_FILE}"
 
@@ -44,6 +45,9 @@ umask 077
   printf 'POSTGRES_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  printf 'TRADINGBOT_MARKET_DATA_MODE=kraken\n'
+  printf 'TRADINGBOT_LIVE_TRADING_ENABLED=false\n'
+  printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
   printf 'TRADINGBOT_KRAKEN_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_API_KEY:-}"
   printf 'TRADINGBOT_KRAKEN_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_API_SECRET:-}"
   printf 'TRADINGBOT_OPENAI_API_KEY=%s\n' "${TRADINGBOT_OPENAI_API_KEY:-}"

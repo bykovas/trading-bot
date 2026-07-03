@@ -21,6 +21,7 @@ services:
     volumes:
       - /opt/trading-bot/appsettings.json:/app/appsettings.json:ro
       - /opt/trading-bot/data:/app/data
+      - /opt/trading-bot/logs:/app/logs
 
   database:
     container_name: trading-bot-db
