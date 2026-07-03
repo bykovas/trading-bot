@@ -102,6 +102,13 @@ internal sealed class BotConfiguration
         Risk.MaxTotalExposureEur = Math.Max(0m, Risk.MaxTotalExposureEur);
         Strategy.MinimumEmaGapPercent = Math.Max(0m, Strategy.MinimumEmaGapPercent);
         Strategy.MinimumLongScore = Math.Clamp(Strategy.MinimumLongScore, 0m, 1m);
+        Strategy.RsiIdealMin = Math.Clamp(Strategy.RsiIdealMin, 0m, 100m);
+        Strategy.RsiIdealMax = Math.Clamp(Strategy.RsiIdealMax, Strategy.RsiIdealMin, 100m);
+        Strategy.MomentumLookbackBars = Math.Max(1, Strategy.MomentumLookbackBars);
+        Strategy.MomentumMinPercent = Math.Max(0m, Strategy.MomentumMinPercent);
+        Strategy.TrendFilterMaPeriod = Math.Max(2, Strategy.TrendFilterMaPeriod);
+        Strategy.VolumeConfirmationMultiple = Math.Max(1m, Strategy.VolumeConfirmationMultiple);
+        Strategy.MaxEntrySpreadPercent = Math.Max(0m, Strategy.MaxEntrySpreadPercent);
         NormalizePositionSizing();
         Portfolio.StartingCashEur = Portfolio.StartingCashEur < 0 ? 0m : Portfolio.StartingCashEur;
         Logging.Directory = string.IsNullOrWhiteSpace(Logging.Directory) ? "logs" : Logging.Directory.Trim();
@@ -272,6 +279,13 @@ internal sealed class StrategyOptions
     public int RsiPeriod { get; set; } = 14;
     public decimal MinimumEmaGapPercent { get; set; } = 0.05m;
     public decimal MinimumLongScore { get; set; } = 0.55m;
+    public decimal RsiIdealMin { get; set; } = 45m;
+    public decimal RsiIdealMax { get; set; } = 62m;
+    public int MomentumLookbackBars { get; set; } = 4;
+    public decimal MomentumMinPercent { get; set; } = 0.2m;
+    public int TrendFilterMaPeriod { get; set; } = 50;
+    public decimal VolumeConfirmationMultiple { get; set; } = 1.2m;
+    public decimal MaxEntrySpreadPercent { get; set; } = 0.5m;
 }
 
 internal sealed class PositionSizingOptions

@@ -134,7 +134,7 @@ public class TechnicalDecisionEngineTests
         Assert.Equal(0m, ema.Value);
         Assert.Contains("EMA crossover ignored because gap 0.049% < configured minimum 0.050%", ema.Reason);
         Assert.Equal("NONE", proposal.DesiredPosition);
-        Assert.Equal(0.55m, proposal.Score);
+        Assert.Equal(0.50m, proposal.Score);
     }
 
     [Fact]
@@ -145,7 +145,7 @@ public class TechnicalDecisionEngineTests
         var ema = Assert.Single(proposal.Contributions, contribution => contribution.Name == "EMA");
         Assert.Equal(0.30m, ema.Value);
         Assert.Equal("LONG_MICRO", proposal.DesiredPosition);
-        Assert.Equal(0.85m, proposal.Score);
+        Assert.Equal(0.80m, proposal.Score);
     }
 
     [Fact]
@@ -156,7 +156,7 @@ public class TechnicalDecisionEngineTests
         var ema = Assert.Single(proposal.Contributions, contribution => contribution.Name == "EMA");
         Assert.Equal(0.30m, ema.Value);
         Assert.Equal("LONG_MICRO", proposal.DesiredPosition);
-        Assert.Equal(0.85m, proposal.Score);
+        Assert.Equal(0.80m, proposal.Score);
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public class TechnicalDecisionEngineTests
         var ema = Assert.Single(proposal.Contributions, contribution => contribution.Name == "EMA");
         Assert.Equal(0.30m, ema.Value);
         Assert.Equal("LONG_MICRO", proposal.DesiredPosition);
-        Assert.Equal(0.85m, proposal.Score);
+        Assert.Equal(0.80m, proposal.Score);
     }
 
     [Fact]
@@ -179,13 +179,13 @@ public class TechnicalDecisionEngineTests
         Assert.Equal(0m, ema.Value);
         Assert.Contains("EMA crossover ignored because gap 0.049% < configured minimum 0.050%", ema.Reason);
         Assert.Equal("NONE", proposal.DesiredPosition);
-        Assert.Equal(0.55m, proposal.Score);
+        Assert.Equal(0.50m, proposal.Score);
     }
 
     [Theory]
-    [InlineData(70, 5, 0.70)]
-    [InlineData(25, 10, 0.78)]
-    [InlineData(50, 10, 0.85)]
+    [InlineData(70, 5, 0.65)]
+    [InlineData(25, 10, 0.73)]
+    [InlineData(50, 10, 0.80)]
     public void Enabled_position_sizing_selects_order_tier_from_score(decimal rsi, decimal expectedTargetEur, decimal expectedScore)
     {
         var proposal = Decide(
@@ -215,7 +215,7 @@ public class TechnicalDecisionEngineTests
             risk: Risk,
             cashEur: 75m);
 
-        Assert.Equal(0.85m, proposal.Score);
+        Assert.Equal(0.80m, proposal.Score);
         Assert.Equal(15m, proposal.TargetNotionalEur);
         Assert.Contains(
             proposal.Contributions,
@@ -237,7 +237,7 @@ public class TechnicalDecisionEngineTests
             risk: Risk,
             cashEur);
 
-        Assert.Equal(0.85m, proposal.Score);
+        Assert.Equal(0.80m, proposal.Score);
         Assert.Equal(expectedTargetEur, proposal.TargetNotionalEur);
     }
 
@@ -253,7 +253,7 @@ public class TechnicalDecisionEngineTests
             risk: Risk,
             cashEur: 20m);
 
-        Assert.Equal(0.78m, proposal.Score);
+        Assert.Equal(0.73m, proposal.Score);
         Assert.Equal(5m, proposal.TargetNotionalEur);
         Assert.Contains(
             proposal.Contributions,
@@ -272,7 +272,7 @@ public class TechnicalDecisionEngineTests
             risk: Risk,
             cashEur: 20.01m);
 
-        Assert.Equal(0.70m, proposal.Score);
+        Assert.Equal(0.65m, proposal.Score);
         Assert.Equal("LONG_MICRO", proposal.DesiredPosition);
         Assert.Equal(5m, proposal.TargetNotionalEur);
     }
@@ -308,7 +308,7 @@ public class TechnicalDecisionEngineTests
             risk: new RiskOptions { MaxOrderEur = 12m },
             cashEur: 75m);
 
-        Assert.Equal(0.85m, proposal.Score);
+        Assert.Equal(0.80m, proposal.Score);
         Assert.Equal(10m, proposal.TargetNotionalEur);
         Assert.Contains(
             proposal.Contributions,
@@ -328,7 +328,7 @@ public class TechnicalDecisionEngineTests
             cashEur: 75m,
             currentExposureEur: 30m);
 
-        Assert.Equal(0.85m, proposal.Score);
+        Assert.Equal(0.80m, proposal.Score);
         Assert.Equal(5m, proposal.TargetNotionalEur);
         Assert.Contains(
             proposal.Contributions,
@@ -355,6 +355,132 @@ public class TechnicalDecisionEngineTests
             contribution => contribution.Name == "PositionSizing" && contribution.Reason.Contains("exposure EUR 32"));
     }
 
+    private static InstrumentMarketState MarketStateFromCloses(
+        IReadOnlyList<decimal> closes,
+        decimal? lastVolumeOverride = null,
+        decimal? bid = null,
+        decimal? ask = null)
+    {
+        var count = closes.Count;
+        var candles = Enumerable.Range(0, count)
+            .Select(index => new Candle(
+                DateTimeOffset.UtcNow.AddMinutes(-(count - index)),
+                Open: closes[index],
+                High: closes[index],
+                Low: closes[index],
+                Close: closes[index],
+                Volume: index == count - 1 && lastVolumeOverride is not null ? lastVolumeOverride.Value : 100m,
+                TradeCount: 10))
+            .ToArray();
+
+        return new InstrumentMarketState
+        {
+            Instrument = new InstrumentOptions { Pair = "UNI/EUR", KrakenPair = "UNIEUR", Venue = "Kraken", Enabled = true },
+            Candles = candles,
+            Quote = bid is not null && ask is not null
+                ? new Quote(bid.Value, ask.Value, closes[^1], 1000m)
+                : null
+        };
+    }
+
+    // A textbook-strong setup (rising price + volume spike + above the trend filter)
+    // stacks every confirmation on top of the ordinary signal and approaches the
+    // 1.00 ceiling, giving the scoring real dispersion above 0.85.
+    [Fact]
+    public void Confirmations_lift_score_toward_the_ceiling()
+    {
+        var engine = new TechnicalDecisionEngine();
+        var closes = Enumerable.Range(0, 60).Select(index => 100m + index * 0.1m).ToArray();
+        var market = MarketStateFromCloses(closes, lastVolumeOverride: 200m);
+        var strategy = new StrategyOptions { MinimumEmaGapPercent = 0.05m, MinimumLongScore = 0.85m };
+
+        var proposal = engine.Decide(
+            market,
+            new IndicatorSnapshot(100.3m, 100m, 55m),
+            Trading,
+            strategy,
+            FixedSizing,
+            Risk,
+            cashEur: 75m,
+            currentExposureEur: 0m);
+
+        Assert.Equal("LONG_MICRO", proposal.DesiredPosition);
+        Assert.True(proposal.Score >= 0.95m, $"expected a strong score, got {proposal.Score}");
+        Assert.Contains(proposal.Contributions, contribution => contribution.Name == "Momentum" && contribution.Value == 0.10m);
+        Assert.Contains(proposal.Contributions, contribution => contribution.Name == "Volume" && contribution.Value == 0.05m);
+        Assert.Contains(proposal.Contributions, contribution => contribution.Name == "Trend" && contribution.Value == 0.05m);
+    }
+
+    // An "ordinary" ideal signal (EMA up + RSI in band + calm) with no confirmations
+    // lands at 0.80 and must NOT clear the 0.85 entry bar on its own — this is the
+    // core change that stops 0.85 from being a mass state.
+    [Fact]
+    public void Ordinary_signal_without_confirmations_does_not_reach_entry_bar()
+    {
+        var engine = new TechnicalDecisionEngine();
+        var strategy = new StrategyOptions { MinimumEmaGapPercent = 0.05m, MinimumLongScore = 0.85m };
+
+        var proposal = engine.Decide(
+            MarketState(),
+            new IndicatorSnapshot(100.3m, 100m, 55m),
+            Trading,
+            strategy,
+            FixedSizing,
+            Risk,
+            cashEur: 75m,
+            currentExposureEur: 0m);
+
+        Assert.Equal(0.80m, proposal.Score);
+        Assert.Equal("NONE", proposal.DesiredPosition);
+    }
+
+    // Friction guard: a strong score is still skipped for a NEW entry when the bid/ask
+    // spread alone is wider than the configured maximum.
+    [Fact]
+    public void Wide_spread_blocks_a_new_entry_even_with_a_strong_score()
+    {
+        var engine = new TechnicalDecisionEngine();
+        var closes = Enumerable.Range(0, 60).Select(index => 100m + index * 0.1m).ToArray();
+        var market = MarketStateFromCloses(closes, lastVolumeOverride: 200m, bid: 100m, ask: 101m);
+        var strategy = new StrategyOptions { MinimumEmaGapPercent = 0.05m, MinimumLongScore = 0.85m, MaxEntrySpreadPercent = 0.5m };
+
+        var proposal = engine.Decide(
+            market,
+            new IndicatorSnapshot(100.3m, 100m, 55m),
+            Trading,
+            strategy,
+            FixedSizing,
+            Risk,
+            cashEur: 75m,
+            currentExposureEur: 0m);
+
+        Assert.Equal("NONE", proposal.DesiredPosition);
+        Assert.Contains(proposal.Contributions, contribution => contribution.Name == "Friction");
+    }
+
+    // RSI just above the ideal band now only earns the reduced "acceptable" bonus
+    // instead of the full ideal-band credit.
+    [Fact]
+    public void Rsi_above_ideal_band_earns_only_the_acceptable_bonus()
+    {
+        var engine = new TechnicalDecisionEngine();
+        var strategy = new StrategyOptions { MinimumEmaGapPercent = 0.05m, MinimumLongScore = 0.55m };
+
+        var proposal = engine.Decide(
+            MarketState(),
+            new IndicatorSnapshot(100.3m, 100m, 65m),
+            Trading,
+            strategy,
+            FixedSizing,
+            Risk,
+            cashEur: 75m,
+            currentExposureEur: 0m);
+
+        Assert.Equal(0.70m, proposal.Score);
+        var rsi = Assert.Single(proposal.Contributions, contribution => contribution.Name == "RSI");
+        Assert.Equal(0.05m, rsi.Value);
+    }
+
     private static PositionSizingOptions EnabledSizing() => new()
     {
         Enabled = true,
@@ -364,10 +490,10 @@ public class TechnicalDecisionEngineTests
         StrongOrderEur = 15m,
         VeryStrongOrderEur = 15m,
         MaxOrderEur = 15m,
-        BaseScoreThreshold = 0.75m,
-        StrongScoreThreshold = 0.88m,
-        VeryStrongScoreThreshold = 0.94m,
-        StrongEmaGapScoreThreshold = 0.85m,
+        BaseScoreThreshold = 0.70m,
+        StrongScoreThreshold = 0.83m,
+        VeryStrongScoreThreshold = 0.89m,
+        StrongEmaGapScoreThreshold = 0.80m,
         StrongEmaGapPercent = 0.50m
     };
 }

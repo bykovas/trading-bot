@@ -30,12 +30,25 @@ internal sealed class TechnicalDecisionEngine
             }
             else
             {
-                var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur);
-                targetNotional = size.TargetNotionalEur;
-                contributions.Add(new SignalContribution("PositionSizing", 0m, size.Reason));
-                if (targetNotional <= 0m)
+                // Friction guard for NEW entries only: if the current bid/ask spread alone
+                // is wide, the round-trip cost (fees + slippage + spread) likely exceeds any
+                // realistic edge, so we skip the entry. Held positions bypass this so exits
+                // are never blocked by a temporarily wide book.
+                var spreadPercent = EntrySpreadPercent(marketState);
+                if (strategy.MaxEntrySpreadPercent > 0m && spreadPercent > strategy.MaxEntrySpreadPercent)
                 {
                     desiredPosition = "NONE";
+                    contributions.Add(new SignalContribution("Friction", 0m, $"entry skipped: spread {spreadPercent:0.###}% exceeds max {strategy.MaxEntrySpreadPercent:0.###}%"));
+                }
+                else
+                {
+                    var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur);
+                    targetNotional = size.TargetNotionalEur;
+                    contributions.Add(new SignalContribution("PositionSizing", 0m, size.Reason));
+                    if (targetNotional <= 0m)
+                    {
+                        desiredPosition = "NONE";
+                    }
                 }
             }
         }
@@ -54,7 +67,7 @@ internal sealed class TechnicalDecisionEngine
         StrategyOptions strategy)
     {
         var contributions = new List<SignalContribution>();
-        decimal score = 0.35m;
+        decimal score = 0.30m;
         var allowsLong = false;
         decimal? bullishEmaGapPercent = null;
 
@@ -101,26 +114,31 @@ internal sealed class TechnicalDecisionEngine
             contributions.Add(new SignalContribution("EMA", 0m, "not enough candles for EMA"));
         }
 
-        if (indicators.Rsi is not null)
+        if (indicators.Rsi is { } rsi)
         {
-            if (indicators.Rsi is >= 35m and <= 68m)
+            if (rsi >= strategy.RsiIdealMin && rsi <= strategy.RsiIdealMax)
             {
                 score += 0.15m;
-                contributions.Add(new SignalContribution("RSI", 0.15m, $"RSI {indicators.Rsi:0.##} is in the acceptable range"));
+                contributions.Add(new SignalContribution("RSI", 0.15m, $"RSI {rsi:0.##} is in the ideal long band {strategy.RsiIdealMin:0.#}-{strategy.RsiIdealMax:0.#}"));
             }
-            else if (indicators.Rsi < 30m)
+            else if ((rsi >= 35m && rsi < strategy.RsiIdealMin) || (rsi > strategy.RsiIdealMax && rsi <= 68m))
+            {
+                score += 0.05m;
+                contributions.Add(new SignalContribution("RSI", 0.05m, $"RSI {rsi:0.##} is acceptable but outside the ideal band"));
+            }
+            else if (rsi < 30m)
             {
                 score += 0.08m;
-                contributions.Add(new SignalContribution("RSI", 0.08m, $"RSI {indicators.Rsi:0.##} is oversold"));
+                contributions.Add(new SignalContribution("RSI", 0.08m, $"RSI {rsi:0.##} is oversold"));
             }
-            else if (indicators.Rsi > 75m)
+            else if (rsi > 72m)
             {
                 score -= 0.25m;
-                contributions.Add(new SignalContribution("RSI", -0.25m, $"RSI {indicators.Rsi:0.##} is overheated"));
+                contributions.Add(new SignalContribution("RSI", -0.25m, $"RSI {rsi:0.##} is overheated"));
             }
             else
             {
-                contributions.Add(new SignalContribution("RSI", 0m, $"RSI {indicators.Rsi:0.##} is neutral"));
+                contributions.Add(new SignalContribution("RSI", 0m, $"RSI {rsi:0.##} is neutral"));
             }
         }
         else
@@ -139,6 +157,44 @@ internal sealed class TechnicalDecisionEngine
             contributions.Add(new SignalContribution("Volatility", -0.10m, $"short-term volatility {marketState.VolatilityPercent:0.##}% is elevated"));
         }
 
+        // Confirmation bonuses only apply on top of an allowed bullish trend. They exist
+        // to create real score dispersion: an ordinary "EMA up + RSI ok + calm" signal
+        // lands at 0.80 and must earn at least one confirmation to reach the 0.85 entry
+        // bar, while a genuinely strong setup (momentum + volume + trend) can reach ~1.00.
+        if (allowsLong)
+        {
+            if (TryMomentumPercent(marketState.Candles, strategy.MomentumLookbackBars, out var momentumPercent)
+                && momentumPercent >= strategy.MomentumMinPercent)
+            {
+                score += 0.10m;
+                contributions.Add(new SignalContribution("Momentum", 0.10m, $"price up {momentumPercent:0.##}% over last {strategy.MomentumLookbackBars} candles"));
+            }
+            else
+            {
+                contributions.Add(new SignalContribution("Momentum", 0m, $"no confirmed momentum over last {strategy.MomentumLookbackBars} candles"));
+            }
+
+            if (VolumeConfirmed(marketState.Candles, strategy.VolumeConfirmationMultiple))
+            {
+                score += 0.05m;
+                contributions.Add(new SignalContribution("Volume", 0.05m, $"last candle volume above {strategy.VolumeConfirmationMultiple:0.##}x recent average"));
+            }
+            else
+            {
+                contributions.Add(new SignalContribution("Volume", 0m, "no volume confirmation"));
+            }
+
+            if (TrendAligned(marketState.Candles, strategy.TrendFilterMaPeriod))
+            {
+                score += 0.05m;
+                contributions.Add(new SignalContribution("Trend", 0.05m, $"price above {strategy.TrendFilterMaPeriod}-period trend filter"));
+            }
+            else
+            {
+                contributions.Add(new SignalContribution("Trend", 0m, $"price not above {strategy.TrendFilterMaPeriod}-period trend filter"));
+            }
+        }
+
         score = Math.Clamp(score, 0m, 1m);
         var direction = score >= 0.55m ? "LONG_BIAS" : "NEUTRAL";
         return new TechnicalSignal(decimal.Round(score, 2), direction, allowsLong, bullishEmaGapPercent, contributions);
@@ -149,6 +205,64 @@ internal sealed class TechnicalDecisionEngine
 
     private static bool EmaGapPassesFilter(decimal emaGapPercent, decimal minimumEmaGapPercent) =>
         minimumEmaGapPercent <= 0m || emaGapPercent >= minimumEmaGapPercent;
+
+    private static decimal EntrySpreadPercent(InstrumentMarketState marketState)
+    {
+        var bid = marketState.BestBid;
+        var ask = marketState.BestAsk;
+        if (bid <= 0m || ask <= 0m || ask < bid)
+        {
+            return 0m;
+        }
+
+        var mid = (bid + ask) / 2m;
+        return mid == 0m ? 0m : (ask - bid) / mid * 100m;
+    }
+
+    private static bool TryMomentumPercent(IReadOnlyList<Candle> candles, int lookbackBars, out decimal changePercent)
+    {
+        changePercent = 0m;
+        if (lookbackBars < 1 || candles.Count <= lookbackBars)
+        {
+            return false;
+        }
+
+        var last = candles[^1].Close;
+        var prior = candles[^(lookbackBars + 1)].Close;
+        if (prior <= 0m)
+        {
+            return false;
+        }
+
+        changePercent = (last - prior) / prior * 100m;
+        return true;
+    }
+
+    private static bool VolumeConfirmed(IReadOnlyList<Candle> candles, decimal multiple)
+    {
+        if (multiple <= 0m || candles.Count < 6)
+        {
+            return false;
+        }
+
+        var window = Math.Min(20, candles.Count - 1);
+        var priorAverage = candles
+            .Skip(candles.Count - 1 - window)
+            .Take(window)
+            .Average(candle => candle.Volume);
+        return priorAverage > 0m && candles[^1].Volume >= multiple * priorAverage;
+    }
+
+    private static bool TrendAligned(IReadOnlyList<Candle> candles, int period)
+    {
+        if (period < 2 || candles.Count < period)
+        {
+            return false;
+        }
+
+        var sma = candles.Skip(candles.Count - period).Take(period).Average(candle => candle.Close);
+        return candles[^1].Close > sma;
+    }
 
     private static PositionSizeSelection SelectPositionSize(
         TechnicalSignal signal,
