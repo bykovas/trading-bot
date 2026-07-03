@@ -17,18 +17,33 @@ internal sealed record ExitEvaluation(
 // PnL, desired position and the configured policies. Keeping it free of side
 // effects makes the priority ordering easy to reason about and to test.
 //
-// Priority (highest first):
-//   1. Kill switch / emergency exit (hard exit)
-//   2. Stop-loss                    (hard exit)
-//   3. Take-profit                  (hard exit)
-//   4. Max-hold                     (hard exit)
-//   5. Normal desired-position reconciliation:
-//        desired LONG_MICRO -> HOLD (already matches)
-//        desired NONE       -> signal-flip exit, but only after the soft guards:
-//            - MinHoldSeconds
-//            - MinProfitToExitOnSignalFlipPercent
+// The evaluation is organised into strict priority TIERS. A higher tier is always
+// resolved before any lower tier is even consulted, so a lower-tier soft filter
+// (such as MinProfitToExitOnSignalFlipPercent) can never suppress a higher-tier
+// exit. This ordering is the whole point of the policy and must not be broken:
 //
-// Hard exits (1-4) bypass MinHoldSeconds and MinProfitToExitOnSignalFlipPercent.
+//   TIER 1 - HARD RISK RULES (highest priority, nothing may block them)
+//     - Kill switch / emergency risk / broker safety
+//     - Stop-loss
+//     These flatten the position immediately and bypass EVERY hold/profit guard.
+//
+//   TIER 2 - FORCED EXITS (bypass the profit filter, rank below hard risk)
+//     - Take-profit
+//     - Max-hold
+//     (Future position-invalid / data-integrity forced exits plug in here.)
+//
+//   TIER 3 - STRATEGY EXITS (may be filtered)
+//     - desired LONG_MICRO -> HOLD (already matches)
+//     - desired NONE       -> signal-flip exit, but only after the soft guards:
+//         - MinHoldSeconds            (MIN_HOLD_BLOCK)
+//         - MinProfitToExitOnSignalFlipPercent (MIN_PROFIT_BLOCK)
+//
+//   TIER 4 - STRATEGY ENTRIES (BUY / position increase) are handled upstream in
+//     DryRunPortfolio and are never reached for a position that is already held.
+//
+// Only TIER 3 signal-flip exits are subject to MinProfitToExitOnSignalFlipPercent.
+// The min-profit / min-hold filters are structurally unreachable for TIER 1 and
+// TIER 2 exits because those tiers return before the strategy tier is evaluated.
 internal static class PositionExitPolicy
 {
     public static ExitEvaluation EvaluateHeldPosition(
@@ -42,31 +57,69 @@ internal static class PositionExitPolicy
     {
         var pnl = conservativeUnrealizedPnlPercent;
 
-        // 1. Kill switch / emergency exit. This uses the existing RiskOptions.KillSwitch
-        //    and flattens an open position regardless of hold/profit guards.
-        //    TODO: broker/account safety exits and other emergency signals plug in here.
+        // TIER 1 - HARD RISK RULES. Highest priority. Nothing below may block these.
+        var hardRiskExit = EvaluateHardRiskRules(pnl, canValuePosition, killSwitchActive, positionExit);
+        if (hardRiskExit is not null)
+        {
+            return hardRiskExit;
+        }
+
+        // TIER 2 - FORCED EXITS. Rank below hard risk but still bypass the profit filter.
+        var forcedExit = EvaluateForcedExits(pnl, positionAgeSeconds, canValuePosition, positionExit);
+        if (forcedExit is not null)
+        {
+            return forcedExit;
+        }
+
+        // TIER 3 - STRATEGY EXITS (the only tier subject to the soft profit/hold guards).
+        return EvaluateStrategyExit(desiredLong, positionAgeSeconds, pnl, canValuePosition, executionPolicy, positionExit);
+    }
+
+    // TIER 1: hard risk rules. These MUST always execute immediately and can never
+    // be blocked by hold-time or profit filters. Returns null when none fire.
+    private static ExitEvaluation? EvaluateHardRiskRules(
+        decimal pnl,
+        bool canValuePosition,
+        bool killSwitchActive,
+        PositionExitOptions positionExit)
+    {
+        // Kill switch / emergency exit. Uses the existing RiskOptions.KillSwitch and
+        // flattens an open position regardless of hold/profit guards.
+        // TODO: liquidation, broker/account safety, and other emergency signals plug in here.
         if (killSwitchActive)
         {
             return Sell(ExitReason.KillSwitch, "kill-switch exit: flattening position while kill switch is active");
         }
 
-        // 2. Stop-loss. Only evaluated when the position can be valued.
-        if (canValuePosition && pnl <= -positionExit.StopLossPercent)
+        // Stop-loss. Only evaluated when the position can be valued. A positive
+        // StopLossPercent arms the guard; 0 disables it (never fire on a flat/valued loss).
+        if (canValuePosition && positionExit.StopLossPercent > 0m && pnl <= -positionExit.StopLossPercent)
         {
             return Sell(
                 ExitReason.StopLoss,
                 $"stop-loss exit: unrealized PnL {Percent(pnl)}% <= -{Percent(positionExit.StopLossPercent)}%");
         }
 
-        // 3. Take-profit. Fires even if the strategy still wants LONG_MICRO.
-        if (canValuePosition && pnl >= positionExit.TakeProfitPercent)
+        return null;
+    }
+
+    // TIER 2: forced exits. These bypass the profit filter but rank below hard risk.
+    // Returns null when none fire.
+    private static ExitEvaluation? EvaluateForcedExits(
+        decimal pnl,
+        double positionAgeSeconds,
+        bool canValuePosition,
+        PositionExitOptions positionExit)
+    {
+        // Take-profit. Fires even if the strategy still wants LONG_MICRO.
+        if (canValuePosition && positionExit.TakeProfitPercent > 0m && pnl >= positionExit.TakeProfitPercent)
         {
             return Sell(
                 ExitReason.TakeProfit,
                 $"take-profit exit: unrealized PnL {Percent(pnl)}% >= {Percent(positionExit.TakeProfitPercent)}%");
         }
 
-        // 4. Max-hold. Age-based, independent of valuation. Zero disables the guard.
+        // Max-hold. Age-based, independent of valuation. Zero disables the guard.
         if (positionExit.MaxHoldMinutes > 0 && positionAgeSeconds >= positionExit.MaxHoldMinutes * 60.0)
         {
             var ageMinutes = positionAgeSeconds / 60.0;
@@ -75,7 +128,19 @@ internal static class PositionExitPolicy
                 $"max-hold exit: position age {ageMinutes.ToString("0", CultureInfo.InvariantCulture)}m >= {positionExit.MaxHoldMinutes}m");
         }
 
-        // 5. Normal desired-position reconciliation.
+        return null;
+    }
+
+    // TIER 3: strategy exits. This is the ONLY tier where MinHoldSeconds and
+    // MinProfitToExitOnSignalFlipPercent may suppress an exit.
+    private static ExitEvaluation EvaluateStrategyExit(
+        bool desiredLong,
+        double positionAgeSeconds,
+        decimal pnl,
+        bool canValuePosition,
+        ExecutionPolicyOptions executionPolicy,
+        PositionExitOptions positionExit)
+    {
         if (desiredLong)
         {
             return Hold("DESIRED_LONG", "current position already matches desired long exposure");
