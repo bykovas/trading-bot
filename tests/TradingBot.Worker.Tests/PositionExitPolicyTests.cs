@@ -21,12 +21,16 @@ public class PositionExitPolicyTests
         decimal minProfit = 1.2m,
         decimal stopLoss = 1.5m,
         decimal takeProfit = 2.0m,
-        int maxHoldMinutes = 240) => new()
+        int maxHoldMinutes = 240,
+        decimal trailingActivation = 0m,
+        decimal trailingDistance = 0m) => new()
     {
         MinProfitToExitOnSignalFlipPercent = minProfit,
         StopLossPercent = stopLoss,
         TakeProfitPercent = takeProfit,
-        MaxHoldMinutes = maxHoldMinutes
+        MaxHoldMinutes = maxHoldMinutes,
+        TrailingActivationPercent = trailingActivation,
+        TrailingDistancePercent = trailingDistance
     };
 
     // A. Opened 2 minutes ago, desired flips to NONE, MinHoldSeconds = 900 => HOLD.
@@ -279,6 +283,82 @@ public class PositionExitPolicyTests
         Assert.True(result.ShouldSell);
         Assert.Equal(ExitReason.StopLoss, result.ExitReason);
         Assert.Equal("SELL_STOP_LOSS", PositionExitPolicy.ExitReasonCode(result.ExitReason!.Value));
+    }
+
+    // Trailing stop fires once the peak reaches activation and PnL falls the full
+    // trailing distance below that peak (0.9 <= 2.0 - 1.0). Still LONG so it proves
+    // the trailing stop is a forced exit that bypasses the strategy tier.
+    [Fact]
+    public void TrailingStop_fires_after_peak_reaches_activation_and_pnl_retraces()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: true,
+            positionAgeSeconds: 60,
+            conservativeUnrealizedPnlPercent: 0.9m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(),
+            Exit(takeProfit: 3.0m, trailingActivation: 1.5m, trailingDistance: 1.0m),
+            peakPnlPercent: 2.0m);
+
+        Assert.True(result.ShouldSell);
+        Assert.Equal(ExitReason.TrailingStop, result.ExitReason);
+        Assert.Equal("SELL_TRAILING_STOP", PositionExitPolicy.ExitReasonCode(result.ExitReason!.Value));
+    }
+
+    // Peak never reached activation (1.2% < 1.5%), so a retrace does NOT trail-fire.
+    [Fact]
+    public void TrailingStop_does_not_fire_when_peak_below_activation()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: true,
+            positionAgeSeconds: 60,
+            conservativeUnrealizedPnlPercent: 0.1m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(),
+            Exit(takeProfit: 3.0m, trailingActivation: 1.5m, trailingDistance: 1.0m),
+            peakPnlPercent: 1.2m);
+
+        Assert.False(result.ShouldSell);
+        Assert.Equal("DESIRED_LONG", result.HoldReasonCode);
+    }
+
+    // Stop-loss (TIER 1) outranks the trailing stop (TIER 2): even with an armed peak
+    // and a retrace, a stop-loss loss reports StopLoss, not TrailingStop.
+    [Fact]
+    public void StopLoss_outranks_trailing_stop()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: true,
+            positionAgeSeconds: 60,
+            conservativeUnrealizedPnlPercent: -2m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(),
+            Exit(stopLoss: 1.5m, takeProfit: 3.0m, trailingActivation: 1.5m, trailingDistance: 1.0m),
+            peakPnlPercent: 2.0m);
+
+        Assert.True(result.ShouldSell);
+        Assert.Equal(ExitReason.StopLoss, result.ExitReason);
+    }
+
+    // A legacy position with no recorded peak (null) can never trail-fire.
+    [Fact]
+    public void TrailingStop_never_fires_without_a_recorded_peak()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: true,
+            positionAgeSeconds: 60,
+            conservativeUnrealizedPnlPercent: 0.1m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(),
+            Exit(takeProfit: 3.0m, trailingActivation: 1.5m, trailingDistance: 1.0m),
+            peakPnlPercent: null);
+
+        Assert.False(result.ShouldSell);
+        Assert.Equal("DESIRED_LONG", result.HoldReasonCode);
     }
 
     // A zero StopLossPercent disables the stop-loss guard (consistent with

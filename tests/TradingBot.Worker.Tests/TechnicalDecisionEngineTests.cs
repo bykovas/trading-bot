@@ -481,6 +481,103 @@ public class TechnicalDecisionEngineTests
         Assert.Equal(0.05m, rsi.Value);
     }
 
+    // 2.1 Exit hysteresis: a held position with a weak-but-still-bullish signal
+    // (score below the entry bar, fast EMA still above slow) HOLDS instead of flipping.
+    [Fact]
+    public void Held_weak_bullish_signal_holds_long_instead_of_flipping()
+    {
+        var engine = new TechnicalDecisionEngine();
+        var strategy = new StrategyOptions { MinimumEmaGapPercent = 0.05m, MinimumLongScore = 0.85m, ExitEmaGapPercent = 0.15m };
+
+        var proposal = engine.Decide(
+            MarketState(),
+            new IndicatorSnapshot(100.3m, 100m, 65m),
+            Trading,
+            strategy,
+            FixedSizing,
+            Risk,
+            cashEur: 75m,
+            currentExposureEur: 0m,
+            hasOpenPosition: true);
+
+        Assert.Equal(0.70m, proposal.Score);
+        Assert.Equal("LONG_MICRO", proposal.DesiredPosition);
+        var note = Assert.Single(proposal.Contributions, contribution => contribution.Name == "ExitSignal");
+        Assert.Contains("no confirmed bearish cross", note.Reason);
+    }
+
+    // 2.1 A CONFIRMED bearish cross (fast below slow by >= ExitEmaGapPercent) flips a
+    // held position's desired to NONE, handing it to the exit path.
+    [Fact]
+    public void Held_confirmed_bearish_cross_flips_desired_to_none()
+    {
+        var engine = new TechnicalDecisionEngine();
+        var strategy = new StrategyOptions { MinimumEmaGapPercent = 0.05m, MinimumLongScore = 0.85m, ExitEmaGapPercent = 0.15m };
+
+        var proposal = engine.Decide(
+            MarketState(),
+            new IndicatorSnapshot(99.8m, 100m, 55m),
+            Trading,
+            strategy,
+            FixedSizing,
+            Risk,
+            cashEur: 75m,
+            currentExposureEur: 0m,
+            hasOpenPosition: true);
+
+        Assert.Equal("NONE", proposal.DesiredPosition);
+        var note = Assert.Single(proposal.Contributions, contribution => contribution.Name == "ExitSignal");
+        Assert.Contains("confirmed bearish cross", note.Reason);
+    }
+
+    // 2.1 New entries are unaffected by hysteresis: no ExitSignal line, and a weak
+    // bearish signal still yields NONE.
+    [Fact]
+    public void New_entry_is_unaffected_by_exit_hysteresis()
+    {
+        var engine = new TechnicalDecisionEngine();
+        var strategy = new StrategyOptions { MinimumEmaGapPercent = 0.05m, MinimumLongScore = 0.85m, ExitEmaGapPercent = 0.15m };
+
+        var proposal = engine.Decide(
+            MarketState(),
+            new IndicatorSnapshot(99.8m, 100m, 55m),
+            Trading,
+            strategy,
+            FixedSizing,
+            Risk,
+            cashEur: 75m,
+            currentExposureEur: 0m,
+            hasOpenPosition: false);
+
+        Assert.Equal("NONE", proposal.DesiredPosition);
+        Assert.DoesNotContain(proposal.Contributions, contribution => contribution.Name == "ExitSignal");
+    }
+
+    // 2.1 ExitEmaGapPercent = 0 restores the old behavior: a held position whose
+    // bullish score drops below the entry bar flips straight to NONE.
+    [Fact]
+    public void Held_with_zero_exit_gap_restores_flip_on_weak_signal()
+    {
+        var engine = new TechnicalDecisionEngine();
+        var strategy = new StrategyOptions { MinimumEmaGapPercent = 0.05m, MinimumLongScore = 0.85m, ExitEmaGapPercent = 0m };
+
+        var proposal = engine.Decide(
+            MarketState(),
+            new IndicatorSnapshot(100.3m, 100m, 65m),
+            Trading,
+            strategy,
+            FixedSizing,
+            Risk,
+            cashEur: 75m,
+            currentExposureEur: 0m,
+            hasOpenPosition: true);
+
+        Assert.Equal(0.70m, proposal.Score);
+        Assert.Equal("NONE", proposal.DesiredPosition);
+        var note = Assert.Single(proposal.Contributions, contribution => contribution.Name == "ExitSignal");
+        Assert.Contains("exit hysteresis disabled", note.Reason);
+    }
+
     private static PositionSizingOptions EnabledSizing() => new()
     {
         Enabled = true,

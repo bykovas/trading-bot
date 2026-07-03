@@ -14,41 +14,48 @@ internal sealed class TechnicalDecisionEngine
         bool hasOpenPosition = false)
     {
         var signal = EvaluateSignal(marketState, indicators, strategy);
-        var desiredPosition = signal.AllowsLong && signal.Score >= strategy.MinimumLongScore ? "LONG_MICRO" : "NONE";
+        var entryDesired = signal.AllowsLong && signal.Score >= strategy.MinimumLongScore ? "LONG_MICRO" : "NONE";
+        var desiredPosition = entryDesired;
         var targetNotional = 0m;
         var contributions = signal.Contributions.ToList();
-        if (desiredPosition == "LONG_MICRO")
+
+        if (hasOpenPosition)
         {
-            if (hasOpenPosition)
+            // Exit hysteresis: a held position keeps its LONG desire unless a CONFIRMED
+            // bearish cross appears. A merely weak (non-bearish) signal is a HOLD, not a
+            // flip. This governs only the desired-position handoff to the exit policy;
+            // hard exits (stop-loss / take-profit / trailing / max-hold / kill switch)
+            // are evaluated independently downstream.
+            var held = EvaluateHeldDesire(indicators, strategy, entryDesired);
+            desiredPosition = held.Desired;
+            contributions.Add(held.Note);
+            if (desiredPosition == "LONG_MICRO")
             {
-                // A held position needs no new-entry sizing. Critically, a capacity-driven
-                // zero target must NOT collapse the desired state to NONE: when cash
-                // reserve / max exposure leave no room for NEW entries, the signal for
-                // the held pair is still LONG, and flipping to NONE here would masquerade
-                // as a signal flip and push the position into the exit path.
+                // A held position needs no new-entry sizing; a capacity-driven zero target
+                // must never masquerade as a signal flip.
                 contributions.Add(new SignalContribution("PositionSizing", 0m, "holding existing position; new-entry sizing skipped"));
+            }
+        }
+        else if (entryDesired == "LONG_MICRO")
+        {
+            // Friction guard for NEW entries only: if the current bid/ask spread alone
+            // is wide, the round-trip cost (fees + slippage + spread) likely exceeds any
+            // realistic edge, so we skip the entry. Held positions bypass this so exits
+            // are never blocked by a temporarily wide book.
+            var spreadPercent = EntrySpreadPercent(marketState);
+            if (strategy.MaxEntrySpreadPercent > 0m && spreadPercent > strategy.MaxEntrySpreadPercent)
+            {
+                desiredPosition = "NONE";
+                contributions.Add(new SignalContribution("Friction", 0m, $"entry skipped: spread {spreadPercent:0.###}% exceeds max {strategy.MaxEntrySpreadPercent:0.###}%"));
             }
             else
             {
-                // Friction guard for NEW entries only: if the current bid/ask spread alone
-                // is wide, the round-trip cost (fees + slippage + spread) likely exceeds any
-                // realistic edge, so we skip the entry. Held positions bypass this so exits
-                // are never blocked by a temporarily wide book.
-                var spreadPercent = EntrySpreadPercent(marketState);
-                if (strategy.MaxEntrySpreadPercent > 0m && spreadPercent > strategy.MaxEntrySpreadPercent)
+                var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur);
+                targetNotional = size.TargetNotionalEur;
+                contributions.Add(new SignalContribution("PositionSizing", 0m, size.Reason));
+                if (targetNotional <= 0m)
                 {
                     desiredPosition = "NONE";
-                    contributions.Add(new SignalContribution("Friction", 0m, $"entry skipped: spread {spreadPercent:0.###}% exceeds max {strategy.MaxEntrySpreadPercent:0.###}%"));
-                }
-                else
-                {
-                    var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur);
-                    targetNotional = size.TargetNotionalEur;
-                    contributions.Add(new SignalContribution("PositionSizing", 0m, size.Reason));
-                    if (targetNotional <= 0m)
-                    {
-                        desiredPosition = "NONE";
-                    }
                 }
             }
         }
@@ -59,6 +66,45 @@ internal sealed class TechnicalDecisionEngine
             signal.Score,
             targetNotional,
             contributions);
+    }
+
+    // Exit hysteresis for a held position (2.1). Returns the desired position plus a
+    // contribution line explaining which case applied. With ExitEmaGapPercent = 0 the
+    // held desire simply follows the entry signal (old flip-when-weak behavior).
+    private static (string Desired, SignalContribution Note) EvaluateHeldDesire(
+        IndicatorSnapshot indicators,
+        StrategyOptions strategy,
+        string entryDesired)
+    {
+        if (strategy.ExitEmaGapPercent <= 0m)
+        {
+            return (entryDesired, new SignalContribution(
+                "ExitSignal",
+                0m,
+                $"exit hysteresis disabled; held desire follows entry signal ({entryDesired})"));
+        }
+
+        if (indicators.FastEma is { } fast && indicators.SlowEma is { } slow && slow != 0m)
+        {
+            var gapPercent = Math.Abs(fast - slow) / slow * 100m;
+            if (fast < slow && gapPercent >= strategy.ExitEmaGapPercent)
+            {
+                return ("NONE", new SignalContribution(
+                    "ExitSignal",
+                    0m,
+                    $"confirmed bearish cross: fast EMA below slow by {gapPercent:0.###}% >= exit gap {strategy.ExitEmaGapPercent:0.###}%; flipping desired to none"));
+            }
+
+            return ("LONG_MICRO", new SignalContribution(
+                "ExitSignal",
+                0m,
+                $"no confirmed bearish cross (fast/slow gap {gapPercent:0.###}% < exit gap {strategy.ExitEmaGapPercent:0.###}%); holding long"));
+        }
+
+        return ("LONG_MICRO", new SignalContribution(
+            "ExitSignal",
+            0m,
+            "EMA unavailable; holding long rather than flipping on missing data"));
     }
 
     private static TechnicalSignal EvaluateSignal(

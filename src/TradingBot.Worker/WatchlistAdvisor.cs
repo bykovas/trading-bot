@@ -214,7 +214,9 @@ internal sealed class CachedWatchlistAdvisor(
     IWatchlistAdvisor refreshAdvisor,
     IWatchlistAdvisor fallbackAdvisor,
     int refreshSeconds,
-    IClock? clock = null) : IWatchlistAdvisor
+    IClock? clock = null,
+    int blackoutFromHour = 0,
+    int blackoutMinutes = 0) : IWatchlistAdvisor
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -228,6 +230,15 @@ internal sealed class CachedWatchlistAdvisor(
     {
         var now = _clock.UtcNow;
         var refreshInterval = TimeSpan.FromSeconds(Math.Max(0, refreshSeconds));
+
+        // During the entry blackout we deliberately do NOT hit the AI: entries are
+        // blocked anyway, so serve the existing selection (even if past its TTL) and
+        // never fall back to the heuristic just because of the blackout. Only when
+        // there is no cache at all (e.g. a restart inside the window) do we refresh.
+        if (_cachedAdvice is not null && IsInEntryBlackout(now))
+        {
+            return BuildCachedAdvice(now, new[] { "entry blackout window: serving cached watchlist without an AI refresh" });
+        }
 
         if (refreshInterval > TimeSpan.Zero && _cachedAdvice is not null && now - _cachedAt <= refreshInterval)
         {
@@ -276,6 +287,19 @@ internal sealed class CachedWatchlistAdvisor(
         {
             _gate.Release();
         }
+    }
+
+    private bool IsInEntryBlackout(DateTimeOffset now)
+    {
+        if (blackoutMinutes <= 0)
+        {
+            return false;
+        }
+
+        var utc = now.UtcDateTime;
+        var windowStart = utc.Date.AddHours(blackoutFromHour);
+        var minutesSinceStart = (utc - windowStart).TotalMinutes;
+        return minutesSinceStart >= 0 && minutesSinceStart < blackoutMinutes;
     }
 
     private WatchlistAdvice BuildCachedAdvice(DateTimeOffset now, IReadOnlyList<string> extraWarnings)

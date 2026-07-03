@@ -53,7 +53,8 @@ internal static class PositionExitPolicy
         bool canValuePosition,
         bool killSwitchActive,
         ExecutionPolicyOptions executionPolicy,
-        PositionExitOptions positionExit)
+        PositionExitOptions positionExit,
+        decimal? peakPnlPercent = null)
     {
         var pnl = conservativeUnrealizedPnlPercent;
 
@@ -65,7 +66,7 @@ internal static class PositionExitPolicy
         }
 
         // TIER 2 - FORCED EXITS. Rank below hard risk but still bypass the profit filter.
-        var forcedExit = EvaluateForcedExits(pnl, positionAgeSeconds, canValuePosition, positionExit);
+        var forcedExit = EvaluateForcedExits(pnl, positionAgeSeconds, canValuePosition, peakPnlPercent, positionExit);
         if (forcedExit is not null)
         {
             return forcedExit;
@@ -109,14 +110,31 @@ internal static class PositionExitPolicy
         decimal pnl,
         double positionAgeSeconds,
         bool canValuePosition,
+        decimal? peakPnlPercent,
         PositionExitOptions positionExit)
     {
-        // Take-profit. Fires even if the strategy still wants LONG_MICRO.
+        // Take-profit. Fires even if the strategy still wants LONG_MICRO. Kept as the
+        // hard cap ABOVE the trailing stop.
         if (canValuePosition && positionExit.TakeProfitPercent > 0m && pnl >= positionExit.TakeProfitPercent)
         {
             return Sell(
                 ExitReason.TakeProfit,
                 $"take-profit exit: unrealized PnL {Percent(pnl)}% >= {Percent(positionExit.TakeProfitPercent)}%");
+        }
+
+        // Trailing stop. Once the conservative peak PnL reaches the activation level,
+        // sell if PnL falls at least TrailingDistancePercent below that peak. Both knobs
+        // must be positive to arm it. Ranks below take-profit, above max-hold.
+        if (canValuePosition
+            && positionExit.TrailingActivationPercent > 0m
+            && positionExit.TrailingDistancePercent > 0m
+            && peakPnlPercent is { } peak
+            && peak >= positionExit.TrailingActivationPercent
+            && pnl <= peak - positionExit.TrailingDistancePercent)
+        {
+            return Sell(
+                ExitReason.TrailingStop,
+                $"trailing-stop exit: unrealized PnL {Percent(pnl)}% <= peak {Percent(peak)}% - {Percent(positionExit.TrailingDistancePercent)}%");
         }
 
         // Max-hold. Age-based, independent of valuation. Zero disables the guard.

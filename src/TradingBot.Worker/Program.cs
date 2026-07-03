@@ -36,7 +36,9 @@ try
         ? new CachedWatchlistAdvisor(
             new OpenAiCompatibleWatchlistAdvisor(httpClient, config.Ai),
             fallbackAdvisor,
-            config.Ai.WatchlistRefreshSeconds)
+            config.Ai.WatchlistRefreshSeconds,
+            blackoutFromHour: config.ExecutionPolicy.EntryBlackoutUtcFromHour,
+            blackoutMinutes: config.ExecutionPolicy.EntryBlackoutMinutes)
         : fallbackAdvisor;
 
     var krakenBroker = new KrakenBroker(httpClient, config.Kraken);

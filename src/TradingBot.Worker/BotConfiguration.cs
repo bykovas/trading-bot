@@ -87,6 +87,11 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_POSITION_EXIT_STOP_LOSS_PERCENT", value => config.PositionExit.StopLossPercent = ParseDecimal(value, config.PositionExit.StopLossPercent));
         SetIfPresent("TRADINGBOT_POSITION_EXIT_TAKE_PROFIT_PERCENT", value => config.PositionExit.TakeProfitPercent = ParseDecimal(value, config.PositionExit.TakeProfitPercent));
         SetIfPresent("TRADINGBOT_POSITION_EXIT_MAX_HOLD_MINUTES", value => config.PositionExit.MaxHoldMinutes = ParseInt(value, config.PositionExit.MaxHoldMinutes));
+        SetIfPresent("TRADINGBOT_STRATEGY_EXIT_EMA_GAP_PERCENT", value => config.Strategy.ExitEmaGapPercent = ParseDecimal(value, config.Strategy.ExitEmaGapPercent));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_TRAILING_ACTIVATION_PERCENT", value => config.PositionExit.TrailingActivationPercent = ParseDecimal(value, config.PositionExit.TrailingActivationPercent));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_TRAILING_DISTANCE_PERCENT", value => config.PositionExit.TrailingDistancePercent = ParseDecimal(value, config.PositionExit.TrailingDistancePercent));
+        SetIfPresent("TRADINGBOT_EXECUTION_ENTRY_BLACKOUT_UTC_FROM_HOUR", value => config.ExecutionPolicy.EntryBlackoutUtcFromHour = ParseInt(value, config.ExecutionPolicy.EntryBlackoutUtcFromHour));
+        SetIfPresent("TRADINGBOT_EXECUTION_ENTRY_BLACKOUT_MINUTES", value => config.ExecutionPolicy.EntryBlackoutMinutes = ParseInt(value, config.ExecutionPolicy.EntryBlackoutMinutes));
     }
 
     private void Normalize()
@@ -112,6 +117,7 @@ internal sealed class BotConfiguration
         Strategy.TrendFilterMaPeriod = Math.Max(2, Strategy.TrendFilterMaPeriod);
         Strategy.VolumeConfirmationMultiple = Math.Max(1m, Strategy.VolumeConfirmationMultiple);
         Strategy.MaxEntrySpreadPercent = Math.Max(0m, Strategy.MaxEntrySpreadPercent);
+        Strategy.ExitEmaGapPercent = Math.Max(0m, Strategy.ExitEmaGapPercent);
         NormalizePositionSizing();
         Portfolio.StartingCashEur = Portfolio.StartingCashEur < 0 ? 0m : Portfolio.StartingCashEur;
         Logging.Directory = string.IsNullOrWhiteSpace(Logging.Directory) ? "logs" : Logging.Directory.Trim();
@@ -125,10 +131,14 @@ internal sealed class BotConfiguration
         ExecutionPolicy.CooldownAfterSellSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterSellSeconds);
         ExecutionPolicy.MinHoldSeconds = Math.Max(0, ExecutionPolicy.MinHoldSeconds);
         ExecutionPolicy.MaxNewPositionsPerCycle = Math.Max(0, ExecutionPolicy.MaxNewPositionsPerCycle);
+        ExecutionPolicy.EntryBlackoutUtcFromHour = Math.Clamp(ExecutionPolicy.EntryBlackoutUtcFromHour, 0, 23);
+        ExecutionPolicy.EntryBlackoutMinutes = Math.Max(0, ExecutionPolicy.EntryBlackoutMinutes);
         PositionExit.MinProfitToExitOnSignalFlipPercent = Math.Max(0m, PositionExit.MinProfitToExitOnSignalFlipPercent);
         PositionExit.StopLossPercent = Math.Max(0m, PositionExit.StopLossPercent);
         PositionExit.TakeProfitPercent = Math.Max(0m, PositionExit.TakeProfitPercent);
         PositionExit.MaxHoldMinutes = Math.Max(0, PositionExit.MaxHoldMinutes);
+        PositionExit.TrailingActivationPercent = Math.Max(0m, PositionExit.TrailingActivationPercent);
+        PositionExit.TrailingDistancePercent = Math.Max(0m, PositionExit.TrailingDistancePercent);
         Portfolio.Positions = Portfolio.Positions
             .Where(position => !string.IsNullOrWhiteSpace(position.Pair))
             .Select(position =>
@@ -289,6 +299,12 @@ internal sealed class StrategyOptions
     public int TrendFilterMaPeriod { get; set; } = 50;
     public decimal VolumeConfirmationMultiple { get; set; } = 1.2m;
     public decimal MaxEntrySpreadPercent { get; set; } = 0.5m;
+
+    // Exit hysteresis: a held position keeps its LONG desire unless a CONFIRMED
+    // bearish EMA cross appears (fast below slow by at least this gap). A merely
+    // weak-but-not-bearish signal becomes a HOLD, not a flip. 0 restores the old
+    // behavior (flip to NONE as soon as the bullish entry score is lost).
+    public decimal ExitEmaGapPercent { get; set; } = 0.15m;
 }
 
 internal sealed class PositionSizingOptions
@@ -329,6 +345,12 @@ internal sealed class DryRunOptions
     public string OutputDirectory { get; set; } = "data/dry-run";
     public string StateFile { get; set; } = "portfolio-state.json";
     public string EventsFile { get; set; } = "events.jsonl";
+
+    // Fee/slippage model for the dry-run simulation. These are meant to be an HONEST
+    // estimate of real execution cost (26 bps = Kraken Pro starter taker tier, ~10 bps
+    // slippage), not a padded worst case. Safety margin belongs in the risk limits
+    // (order size, exposure, daily loss), NOT here: an over-penalized simulation can
+    // reject a strategy that is actually profitable at real fees.
     public decimal TakerFeeBps { get; set; } = 26m;
     public decimal SlippageBps { get; set; } = 5m;
 }
@@ -359,6 +381,13 @@ internal sealed class ExecutionPolicyOptions
     // When true, disables the minimum-hold guard so a signal flip can close a
     // position immediately. Default false to avoid buy/sell churn on noisy flips.
     public bool AllowImmediateExitOnSignalFlip { get; set; } = false;
+
+    // UTC-midnight (or configured hour) entry blackout. Kraken Ticker's 'o' resets at
+    // 00:00 UTC, so early-UTC change data is meaningless and liquidity is thin. During
+    // [FromHour:00, FromHour:00 + Minutes) NEW entries are blocked; exits and held
+    // management are unaffected. EntryBlackoutMinutes = 0 disables the window.
+    public int EntryBlackoutUtcFromHour { get; set; } = 0;
+    public int EntryBlackoutMinutes { get; set; } = 60;
 }
 
 internal sealed class PositionExitOptions
@@ -377,6 +406,13 @@ internal sealed class PositionExitOptions
     // Hard exit: sell once the position age reaches this many minutes. Set to 0 to
     // disable the max-hold guard.
     public int MaxHoldMinutes { get; set; } = 240;
+
+    // Trailing stop (forced exit, TIER 2). Once the conservative peak PnL reaches
+    // TrailingActivationPercent, sell if PnL falls TrailingDistancePercent below that
+    // peak. Either value at 0 disables the trailing stop. TakeProfitPercent stays the
+    // hard cap above it.
+    public decimal TrailingActivationPercent { get; set; } = 1.5m;
+    public decimal TrailingDistancePercent { get; set; } = 1.0m;
 }
 
 internal sealed class InstrumentOptions

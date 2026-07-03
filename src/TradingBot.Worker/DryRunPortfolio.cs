@@ -8,9 +8,11 @@ internal sealed class DryRunPortfolio(
     ExecutionPolicyOptions executionPolicy,
     PositionExitOptions positionExit,
     PositionSizingOptions positionSizing,
-    IDryRunPortfolioStore? store = null)
+    IDryRunPortfolioStore? store = null,
+    IClock? clock = null)
 {
     private readonly IDryRunPortfolioStore _store = store ?? new FileDryRunPortfolioStore(options);
+    private readonly IClock _clock = clock ?? SystemClock.Instance;
 
     public PortfolioState Load()
     {
@@ -89,7 +91,7 @@ internal sealed class DryRunPortfolio(
         RiskOptions riskOptions,
         int newPositionsThisCycle)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _clock.UtcNow;
         var position = state.Positions.FirstOrDefault(item => item.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase));
         var beforeCash = state.CashEur;
         var beforeValue = CalculateTotalValue(state);
@@ -111,6 +113,22 @@ internal sealed class DryRunPortfolio(
 
         if (desiredLong)
         {
+            // UTC-midnight entry blackout: block NEW entries during the configured
+            // window (thin liquidity and meaningless early-UTC change data). Exits and
+            // held-position management are unaffected because they never reach here.
+            if (IsInEntryBlackout(now, executionPolicy))
+            {
+                return BuildAction(
+                    "WOULD_BUY_BLOCKED",
+                    $"entry blackout active: no new entries during the {executionPolicy.EntryBlackoutMinutes} min after {executionPolicy.EntryBlackoutUtcFromHour:00}:00 UTC (now {now.UtcDateTime:HH:mm} UTC)",
+                    proposal,
+                    position,
+                    beforeCash,
+                    beforeValue,
+                    state,
+                    holdReasonCode: "ENTRY_BLACKOUT");
+            }
+
             // Daily loss cap: once today's realized PnL breaches the configured cap,
             // no new risk-increasing entries are allowed until the next UTC day.
             // Exits (stop-loss / take-profit / signal flips) stay unaffected — the cap
@@ -247,7 +265,8 @@ internal sealed class DryRunPortfolio(
             canValue,
             riskOptions.KillSwitch,
             executionPolicy,
-            positionExit);
+            positionExit,
+            position.PeakPnlPercent);
 
         if (!evaluation.ShouldSell)
         {
@@ -313,6 +332,13 @@ internal sealed class DryRunPortfolio(
             position.UnrealizedPnlPercent = position.EntryNotionalEur == 0m
                 ? 0m
                 : position.UnrealizedPnlEur / position.EntryNotionalEur * 100m;
+
+            // Track the running peak of the conservative PnL for the trailing stop.
+            // A legacy position (null peak) simply adopts its current PnL as the first
+            // peak, so it cannot trail-fire until it rises and then falls again.
+            position.PeakPnlPercent = position.PeakPnlPercent is { } peak
+                ? Math.Max(peak, position.UnrealizedPnlPercent)
+                : position.UnrealizedPnlPercent;
         }
     }
 
@@ -382,6 +408,21 @@ internal sealed class DryRunPortfolio(
         {
             history.LastSellAtUtc = now;
         }
+    }
+
+    // True when nowUtc falls in [FromHour:00, FromHour:00 + Minutes). Minutes = 0
+    // disables the window. Pure/static so it can be unit tested at a fixed clock.
+    internal static bool IsInEntryBlackout(DateTimeOffset nowUtc, ExecutionPolicyOptions executionPolicy)
+    {
+        if (executionPolicy.EntryBlackoutMinutes <= 0)
+        {
+            return false;
+        }
+
+        var utc = nowUtc.UtcDateTime;
+        var windowStart = utc.Date.AddHours(executionPolicy.EntryBlackoutUtcFromHour);
+        var minutesSinceStart = (utc - windowStart).TotalMinutes;
+        return minutesSinceStart >= 0 && minutesSinceStart < executionPolicy.EntryBlackoutMinutes;
     }
 
     private static decimal CalculateTotalValue(PortfolioState state) =>
@@ -504,6 +545,12 @@ internal sealed class PortfolioPosition
     public DateTimeOffset? OpenedAtUtc { get; set; }
     public DateTimeOffset? LastActionAtUtc { get; set; }
 
+    // Highest conservative unrealized PnL percent seen while the position was held,
+    // used by the trailing stop. Nullable so legacy state files load; a legacy
+    // position only starts tracking once it is next marked to market, so it can never
+    // fire the trailing stop until it establishes a fresh peak.
+    public decimal? PeakPnlPercent { get; set; }
+
     public PortfolioPosition Clone() => new()
     {
         Pair = Pair,
@@ -516,7 +563,8 @@ internal sealed class PortfolioPosition
         UnrealizedPnlEur = UnrealizedPnlEur,
         UnrealizedPnlPercent = UnrealizedPnlPercent,
         OpenedAtUtc = OpenedAtUtc,
-        LastActionAtUtc = LastActionAtUtc
+        LastActionAtUtc = LastActionAtUtc,
+        PeakPnlPercent = PeakPnlPercent
     };
 }
 
