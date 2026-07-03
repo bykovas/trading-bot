@@ -10,10 +10,13 @@
 
 ## Где лежит конфиг (единый источник)
 
-Весь конфиг worker'а — в одном файле `src/TradingBot.Worker/appsettings.json`: режим данных, интервал, риск, стратегия, `Trading.LiveTradingEnabled` и оба API-ключа (`Kraken.ApiKey`/`Kraken.ApiSecret` и `Ai.ApiKey`).
+Весь конфиг worker'а — в одном файле `src/TradingBot.Worker/appsettings.json`: режим данных, интервал, риск, стратегия, `Trading.LiveTradingEnabled`, universe и пустые поля для API-ключей.
 
 - Локально можно временно перебить любое значение через переменную окружения `TRADINGBOT_*` (см. `.env.example`), но это опционально.
-- На сервере правится один файл `/opt/trading-bot/appsettings.json` (смонтирован с хоста, в git не попадает — туда можно вписывать реальные ключи), затем `docker restart trading-bot-worker`.
+- На сервере worker читает смонтированный файл `/opt/trading-bot/appsettings.json`.
+- CI/CD при каждом deploy перезаписывает `/opt/trading-bot/appsettings.json` свежим repo-конфигом.
+- Risk/strategy/universe меняются в репозитории и попадают на сервер через deploy.
+- Реальные секреты должны подставляться отдельным CI/CD шагом или env-файлом. Пока этот шаг не добавлен, в repo-конфиге ключи остаются пустыми.
 - В репозитории ключи в `appsettings.json` всегда пустые. Реальные значения не коммитить.
 
 ## Быстрый запуск

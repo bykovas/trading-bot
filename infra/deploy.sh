@@ -7,6 +7,7 @@ PROJECT_NAME="trading-bot"
 COMPOSE_FILE="${DEPLOY_DIR}/docker-compose.prod.yml"
 TRAEFIK_DYNAMIC_FILE="${TRAEFIK_DYNAMIC_DIR}/trading-bot.yml"
 WORKER_APPSETTINGS="${DEPLOY_DIR}/appsettings.json"
+WORKER_APPSETTINGS_SOURCE="src/TradingBot.Worker/appsettings.json"
 WORKER_DATA_DIR="${DEPLOY_DIR}/data"
 
 : "${IMAGE_NAME:?IMAGE_NAME is required}"
@@ -26,13 +27,10 @@ mkdir -p "${DEPLOY_DIR}" "${TRAEFIK_DYNAMIC_DIR}" "${WORKER_DATA_DIR}"
 cp infra/docker-compose.prod.yml "${COMPOSE_FILE}"
 cp infra/traefik/trading-bot.yml "${TRAEFIK_DYNAMIC_FILE}"
 
-# Seed the worker config once; keep host edits (risk/strategy/universe) on redeploys.
-if [ ! -f "${WORKER_APPSETTINGS}" ]; then
-  echo "Seeding ${WORKER_APPSETTINGS} from repository defaults"
-  cp src/TradingBot.Worker/appsettings.json "${WORKER_APPSETTINGS}"
-else
-  echo "Keeping existing ${WORKER_APPSETTINGS}"
-fi
+# Keep the mounted worker config in sync with repository settings on every deploy.
+# Secret injection will be handled by CI/CD separately.
+echo "Updating ${WORKER_APPSETTINGS} from repository config"
+cp "${WORKER_APPSETTINGS_SOURCE}" "${WORKER_APPSETTINGS}"
 
 echo "${GHCR_TOKEN}" | docker login ghcr.io \
   --username "${GHCR_USERNAME}" \
