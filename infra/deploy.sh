@@ -10,11 +10,16 @@ WORKER_APPSETTINGS="${DEPLOY_DIR}/appsettings.json"
 WORKER_APPSETTINGS_SOURCE="src/TradingBot.Worker/appsettings.json"
 WORKER_ENV_FILE="${DEPLOY_DIR}/.env"
 WORKER_DATA_DIR="${DEPLOY_DIR}/data"
+DATABASE_DIR="${DEPLOY_DIR}/database"
 
 : "${IMAGE_NAME:?IMAGE_NAME is required}"
 : "${WORKER_IMAGE_NAME:?WORKER_IMAGE_NAME is required}"
 : "${GHCR_USERNAME:?GHCR_USERNAME is required}"
 : "${GHCR_TOKEN:?GHCR_TOKEN is required}"
+: "${TRADINGBOT_DB_PASSWORD:?TRADINGBOT_DB_PASSWORD is required}"
+: "${TRADINGBOT_KRAKEN_API_KEY:?TRADINGBOT_KRAKEN_API_KEY is required}"
+: "${TRADINGBOT_KRAKEN_API_SECRET:?TRADINGBOT_KRAKEN_API_SECRET is required}"
+: "${TRADINGBOT_OPENAI_API_KEY:?TRADINGBOT_OPENAI_API_KEY is required}"
 
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 WORKER_IMAGE_TAG="${WORKER_IMAGE_TAG:-${IMAGE_TAG}}"
@@ -24,7 +29,7 @@ echo "Deploying stack '${PROJECT_NAME}' to ${DEPLOY_DIR}"
 echo "  ui     = ${IMAGE_NAME}:${IMAGE_TAG}"
 echo "  worker = ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG}"
 
-mkdir -p "${DEPLOY_DIR}" "${TRAEFIK_DYNAMIC_DIR}" "${WORKER_DATA_DIR}"
+mkdir -p "${DEPLOY_DIR}" "${TRAEFIK_DYNAMIC_DIR}" "${WORKER_DATA_DIR}" "${DATABASE_DIR}"
 cp infra/docker-compose.prod.yml "${COMPOSE_FILE}"
 cp infra/traefik/trading-bot.yml "${TRAEFIK_DYNAMIC_FILE}"
 
@@ -36,6 +41,9 @@ echo "Writing worker environment overrides to ${WORKER_ENV_FILE}"
 umask 077
 {
   printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  printf 'POSTGRES_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
+  printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
   printf 'TRADINGBOT_KRAKEN_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_API_KEY:-}"
   printf 'TRADINGBOT_KRAKEN_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_API_SECRET:-}"
   printf 'TRADINGBOT_OPENAI_API_KEY=%s\n' "${TRADINGBOT_OPENAI_API_KEY:-}"
@@ -65,6 +73,13 @@ docker compose \
   -p "${PROJECT_NAME}" \
   -f "${COMPOSE_FILE}" \
   ps
+
+# Database health: Postgres must be ready before the worker can persist dry-run state.
+docker compose \
+  -p "${PROJECT_NAME}" \
+  -f "${COMPOSE_FILE}" \
+  exec -T database pg_isready -U tradingbot -d tradingbot
+echo "Health check passed for trading-bot-db container."
 
 # UI health: nginx must answer over HTTP.
 docker compose \

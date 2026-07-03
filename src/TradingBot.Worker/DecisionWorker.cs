@@ -291,7 +291,7 @@ internal sealed class DecisionWorker(
         var hasOpenPosition = portfolio.Positions.Any(position =>
             position.Pair.Equals(marketState.Instrument.Pair, StringComparison.OrdinalIgnoreCase));
         var proposal = decisionEngine.Decide(marketState, indicators, config.Trading, config.Strategy, config.PositionSizing, config.Risk, portfolio.CashEur, currentExposureEur, hasOpenPosition);
-        var risk = riskManager.Evaluate(proposal, config.Risk);
+        var risk = riskManager.Evaluate(proposal, config.Risk, hasOpenPosition);
         return new PreparedDecision(marketState, indicators, proposal, risk);
     }
 

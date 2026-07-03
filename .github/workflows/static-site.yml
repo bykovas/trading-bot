@@ -55,6 +55,7 @@ jobs:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: self-hosted
+    environment: PROD
 
     env:
       IMAGE_NAME: ghcr.io/bykovas/trading-bot

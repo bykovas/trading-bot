@@ -229,7 +229,7 @@ internal sealed class TechnicalDecisionEngine
 
 internal sealed class RiskManager
 {
-    public RiskEvaluation Evaluate(DecisionProposal proposal, RiskOptions risk)
+    public RiskEvaluation Evaluate(DecisionProposal proposal, RiskOptions risk, bool hasOpenPosition = false)
     {
         var reasons = new List<string>();
 
@@ -242,6 +242,16 @@ internal sealed class RiskManager
         if (proposal.DesiredPosition == "NONE")
         {
             reasons.Add("no position requested");
+            return new RiskEvaluation(true, reasons);
+        }
+
+        // A held pair whose signal is still LONG carries a zero target on purpose
+        // (new-entry sizing is skipped for held positions). That is a HOLD, not an
+        // order request — rejecting it here would pollute the journal with
+        // riskApproved=false on perfectly healthy positions.
+        if (hasOpenPosition)
+        {
+            reasons.Add("holding existing position; exit rules govern this pair");
             return new RiskEvaluation(true, reasons);
         }
 

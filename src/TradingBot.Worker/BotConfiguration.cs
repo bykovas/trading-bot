@@ -14,6 +14,7 @@ internal sealed class BotConfiguration
     public PositionSizingOptions PositionSizing { get; set; } = new();
     public PortfolioOptions Portfolio { get; set; } = new();
     public DryRunOptions DryRun { get; set; } = new();
+    public DatabaseOptions Database { get; set; } = new();
     public ExecutionPolicyOptions ExecutionPolicy { get; set; } = new();
     public PositionExitOptions PositionExit { get; set; } = new();
     public List<InstrumentOptions> CandidateUniverse { get; set; } = DefaultCandidateUniverse();
@@ -68,6 +69,8 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_DRY_RUN_OUTPUT_DIRECTORY", value => config.DryRun.OutputDirectory = value);
         SetIfPresent("TRADINGBOT_DRY_RUN_TAKER_FEE_BPS", value => config.DryRun.TakerFeeBps = ParseDecimal(value, config.DryRun.TakerFeeBps));
         SetIfPresent("TRADINGBOT_DRY_RUN_SLIPPAGE_BPS", value => config.DryRun.SlippageBps = ParseDecimal(value, config.DryRun.SlippageBps));
+        SetIfPresent("TRADINGBOT_DATABASE_ENABLED", value => config.Database.Enabled = ParseBool(value, config.Database.Enabled));
+        SetIfPresent("TRADINGBOT_DATABASE_CONNECTION_STRING", value => config.Database.ConnectionString = value);
         SetIfPresent("TRADINGBOT_AI_PROVIDER", value => config.Ai.Provider = value);
         SetIfPresent("TRADINGBOT_AI_BASE_URL", value => config.Ai.BaseUrl = value);
         SetIfPresent("TRADINGBOT_OPENAI_API_KEY", value => config.Ai.ApiKey = value);
@@ -103,6 +106,7 @@ internal sealed class BotConfiguration
         DryRun.EventsFile = string.IsNullOrWhiteSpace(DryRun.EventsFile) ? "events.jsonl" : DryRun.EventsFile.Trim();
         DryRun.TakerFeeBps = Math.Max(0m, DryRun.TakerFeeBps);
         DryRun.SlippageBps = Math.Max(0m, DryRun.SlippageBps);
+        Database.ConnectionString = Database.ConnectionString.Trim();
         ExecutionPolicy.CooldownAfterBuySeconds = Math.Max(0, ExecutionPolicy.CooldownAfterBuySeconds);
         ExecutionPolicy.CooldownAfterSellSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterSellSeconds);
         ExecutionPolicy.MinHoldSeconds = Math.Max(0, ExecutionPolicy.MinHoldSeconds);
@@ -299,6 +303,12 @@ internal sealed class DryRunOptions
     public string EventsFile { get; set; } = "events.jsonl";
     public decimal TakerFeeBps { get; set; } = 26m;
     public decimal SlippageBps { get; set; } = 5m;
+}
+
+internal sealed class DatabaseOptions
+{
+    public bool Enabled { get; set; } = false;
+    public string ConnectionString { get; set; } = string.Empty;
 }
 
 internal sealed class ExecutionPolicyOptions

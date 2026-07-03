@@ -7,53 +7,25 @@ internal sealed class DryRunPortfolio(
     PortfolioOptions initialPortfolio,
     ExecutionPolicyOptions executionPolicy,
     PositionExitOptions positionExit,
-    PositionSizingOptions positionSizing)
+    PositionSizingOptions positionSizing,
+    IDryRunPortfolioStore? store = null)
 {
-    private readonly JsonSerializerOptions _jsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true
-    };
-
-    private string StatePath => Path.Combine(options.OutputDirectory, options.StateFile);
-    private string EventsPath => Path.Combine(options.OutputDirectory, options.EventsFile);
+    private readonly IDryRunPortfolioStore _store = store ?? new FileDryRunPortfolioStore(options);
 
     public PortfolioState Load()
     {
-        Directory.CreateDirectory(options.OutputDirectory);
-
-        if (File.Exists(StatePath))
+        var state = _store.Load();
+        if (IsUsable(state))
         {
-            try
-            {
-                var json = File.ReadAllText(StatePath);
-                if (!string.IsNullOrWhiteSpace(json))
-                {
-                    var state = JsonSerializer.Deserialize<PortfolioState>(json, _jsonOptions);
-                    if (IsUsable(state))
-                    {
-                        state!.Positions ??= new List<PortfolioPosition>();
-                        state.ActionHistory ??= new List<PairActionHistory>();
-                        Console.WriteLine(
-                            $"portfolio-load: reusing existing state from {StatePath} (cash {state.CashEur:0.##} EUR, positions {state.Positions.Count})");
-                        return state;
-                    }
-                }
-
-                Console.WriteLine(
-                    $"portfolio-load: existing state at {StatePath} is empty or invalid; creating a fresh portfolio with {initialPortfolio.StartingCashEur:0.##} EUR");
-            }
-            catch (Exception ex) when (ex is JsonException or IOException)
-            {
-                Console.WriteLine(
-                    $"portfolio-load: failed to read {StatePath} ({ex.Message}); creating a fresh portfolio with {initialPortfolio.StartingCashEur:0.##} EUR");
-            }
-        }
-        else
-        {
+            state!.Positions ??= new List<PortfolioPosition>();
+            state.ActionHistory ??= new List<PairActionHistory>();
             Console.WriteLine(
-                $"portfolio-load: no state file at {StatePath}; creating a fresh portfolio with {initialPortfolio.StartingCashEur:0.##} EUR");
+                $"portfolio-load: reusing existing state from {_store.StateDescription} (cash {state.CashEur:0.##} EUR, positions {state.Positions.Count})");
+            return state;
         }
+
+        Console.WriteLine(
+            $"portfolio-load: no usable state at {_store.StateDescription}; creating a fresh portfolio with {initialPortfolio.StartingCashEur:0.##} EUR");
 
         var fresh = CreateInitialState();
         Save(fresh);
@@ -85,6 +57,19 @@ internal sealed class DryRunPortfolio(
 
     private static bool IsUsable(PortfolioState? state) =>
         state is not null && (state.CashEur > 0m || state.Positions is { Count: > 0 });
+
+    public void Save(PortfolioState state)
+    {
+        _store.Save(state);
+    }
+
+    public void AppendCycle(DryRunCycleRecord record)
+    {
+        _store.AppendCycle(record);
+    }
+
+    public string GetStatePath() => _store.StateDescription;
+    public string GetEventsPath() => _store.EventsDescription;
 
     public PortfolioState CloneAndMark(PortfolioState state, IReadOnlyList<InstrumentMarketState> marketStates)
     {
@@ -311,25 +296,6 @@ internal sealed class DryRunPortfolio(
             exitValue,
             exitReasonCode: exitReasonCode);
     }
-
-    public void Save(PortfolioState state)
-    {
-        Directory.CreateDirectory(options.OutputDirectory);
-        File.WriteAllText(StatePath, JsonSerializer.Serialize(state, _jsonOptions));
-    }
-
-    public void AppendCycle(DryRunCycleRecord record)
-    {
-        Directory.CreateDirectory(options.OutputDirectory);
-        var line = JsonSerializer.Serialize(record, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
-        File.AppendAllText(EventsPath, line + Environment.NewLine);
-    }
-
-    public string GetStatePath() => StatePath;
-    public string GetEventsPath() => EventsPath;
 
     private void MarkToMarket(PortfolioState state, IReadOnlyList<InstrumentMarketState> marketStates)
     {

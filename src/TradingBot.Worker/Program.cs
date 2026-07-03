@@ -39,6 +39,7 @@ try
         ? krakenBroker
         : null;
 
+    var portfolioStore = CreatePortfolioStore(config);
     var worker = new DecisionWorker(
         config,
         marketDataSource,
@@ -46,7 +47,7 @@ try
         new IndicatorEngine(),
         new TechnicalDecisionEngine(),
         new RiskManager(),
-        new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit, config.PositionSizing),
+        new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit, config.PositionSizing, portfolioStore),
         broker);
 
     await worker.RunAsync(cancellation.Token);
@@ -62,4 +63,19 @@ catch (Exception ex)
     Console.Error.WriteLine("Fatal error:");
     Console.Error.WriteLine(ex);
     return 1;
+}
+
+static IDryRunPortfolioStore CreatePortfolioStore(BotConfiguration config)
+{
+    if (config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString))
+    {
+        return new PostgresDryRunPortfolioStore(config.Database.ConnectionString);
+    }
+
+    if (config.Database.Enabled)
+    {
+        Console.WriteLine("database=disabled (enabled but connection string is missing; using file dry-run storage)");
+    }
+
+    return new FileDryRunPortfolioStore(config.DryRun);
 }
