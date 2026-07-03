@@ -77,6 +77,7 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_OPENAI_API_KEY", value => config.Ai.ApiKey = value);
         SetIfPresent("TRADINGBOT_AI_MODEL", value => config.Ai.Model = value);
         SetIfPresent("TRADINGBOT_AI_MAX_RECOMMENDATIONS", value => config.Ai.MaxRecommendations = ParseInt(value, config.Ai.MaxRecommendations));
+        SetIfPresent("TRADINGBOT_AI_WATCHLIST_REFRESH_SECONDS", value => config.Ai.WatchlistRefreshSeconds = ParseInt(value, config.Ai.WatchlistRefreshSeconds));
         SetIfPresent("TRADINGBOT_LOG_DIRECTORY", value => config.Logging.Directory = value);
         SetIfPresent("TRADINGBOT_EXECUTION_COOLDOWN_AFTER_BUY_SECONDS", value => config.ExecutionPolicy.CooldownAfterBuySeconds = ParseInt(value, config.ExecutionPolicy.CooldownAfterBuySeconds));
         SetIfPresent("TRADINGBOT_EXECUTION_COOLDOWN_AFTER_SELL_SECONDS", value => config.ExecutionPolicy.CooldownAfterSellSeconds = ParseInt(value, config.ExecutionPolicy.CooldownAfterSellSeconds));
@@ -134,6 +135,7 @@ internal sealed class BotConfiguration
             .Where(position => position.Quantity > 0m)
             .ToList();
         Ai.MaxRecommendations = Math.Max(1, Ai.MaxRecommendations);
+        Ai.WatchlistRefreshSeconds = Math.Max(0, Ai.WatchlistRefreshSeconds);
         CandidateUniverse = CandidateUniverse
             .Where(item => item.Enabled)
             .Where(item => !string.IsNullOrWhiteSpace(item.Pair))
@@ -237,6 +239,7 @@ internal sealed class AiOptions
     public string ApiKey { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
     public int MaxRecommendations { get; set; } = 2;
+    public int WatchlistRefreshSeconds { get; set; } = 3600;
     public bool UseJsonResponseFormat { get; set; } = true;
 }
 

@@ -26,15 +26,20 @@ internal sealed class InstrumentMarketState
     public string? DataWarning { get; init; }
 
     public bool IsUsable => Candles.Count >= 30 && string.IsNullOrWhiteSpace(DataWarning);
-    public decimal LastPrice => Candles.Count == 0 ? 0m : Candles[^1].Close;
+    public decimal LastPrice => Candles.Count == 0 ? Quote?.Last ?? 0m : Candles[^1].Close;
     public decimal BestBid => Quote?.Bid ?? LastPrice;
     public decimal BestAsk => Quote?.Ask ?? LastPrice;
-    public decimal LastVolume => Candles.Count == 0 ? 0m : Candles[^1].Volume;
+    public decimal LastVolume => Candles.Count == 0 ? Quote?.VolumeToday ?? 0m : Candles[^1].Volume;
 
     public decimal ChangePercent
     {
         get
         {
+            if (Candles.Count == 0 && Quote?.ChangePercent is { } tickerChange)
+            {
+                return tickerChange;
+            }
+
             if (Candles.Count < 2)
             {
                 return 0m;
@@ -65,7 +70,8 @@ internal sealed record Quote(
     decimal Bid,
     decimal Ask,
     decimal Last,
-    decimal VolumeToday);
+    decimal VolumeToday,
+    decimal? ChangePercent = null);
 
 internal sealed record IndicatorSnapshot(
     decimal? FastEma,

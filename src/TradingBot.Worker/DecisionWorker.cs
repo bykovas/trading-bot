@@ -35,29 +35,29 @@ internal sealed class DecisionWorker(
         Console.WriteLine();
         Console.WriteLine($"cycle={cycleId} utc={utc:O}");
 
-        var candidates = await marketDataSource.GetMarketStatesAsync(
+        var lightCandidates = await marketDataSource.GetLightMarketStatesAsync(
             config.CandidateUniverse,
-            config.Trading.TimeframeMinutes,
             cancellationToken);
 
-        PrintCandidates(candidates);
-
         var loadedPortfolio = dryRunPortfolio.Load();
-        var workingPortfolio = dryRunPortfolio.CloneAndMark(loadedPortfolio, candidates);
-        var portfolioBefore = workingPortfolio.Clone();
-        PrintPortfolio("portfolio-before", portfolioBefore);
+        PrintCandidates("candidate-universe light snapshot:", lightCandidates);
 
         var maxRecommendations = Math.Min(config.Trading.MaxActiveInstruments, config.Ai.MaxRecommendations);
-        var advice = await watchlistAdvisor.SelectAsync(candidates, maxRecommendations, cancellationToken);
+        var advice = await watchlistAdvisor.SelectAsync(lightCandidates, maxRecommendations, cancellationToken);
         PrintWatchlistAdvice(advice);
 
-        var selected = advice.Recommendations
-            .Select(recommendation => candidates.FirstOrDefault(candidate => candidate.Instrument.Pair.Equals(recommendation.Pair, StringComparison.OrdinalIgnoreCase)))
-            .Where(candidate => candidate is not null)
-            .Cast<InstrumentMarketState>()
+        var activeInstruments = BuildActiveInstruments(advice, lightCandidates, loadedPortfolio);
+        var selected = (await marketDataSource.GetFullMarketStatesAsync(
+                activeInstruments,
+                config.Trading.TimeframeMinutes,
+                cancellationToken))
             .ToList();
 
-        ForceOpenPositionsIntoEvaluation(selected, candidates, portfolioBefore);
+        PrintCandidates("active full-data set:", selected);
+
+        var workingPortfolio = dryRunPortfolio.CloneAndMark(loadedPortfolio, selected);
+        var portfolioBefore = workingPortfolio.Clone();
+        PrintPortfolio("portfolio-before", portfolioBefore);
 
         var decisionRecords = new List<DryRunDecisionRecord>();
         var newPositionsThisCycle = 0;
@@ -220,9 +220,9 @@ internal sealed class DecisionWorker(
         }
     }
 
-    private static void PrintCandidates(IReadOnlyList<InstrumentMarketState> candidates)
+    private static void PrintCandidates(string heading, IReadOnlyList<InstrumentMarketState> candidates)
     {
-        Console.WriteLine("candidate-universe:");
+        Console.WriteLine(heading);
         foreach (var candidate in candidates)
         {
             var warning = string.IsNullOrWhiteSpace(candidate.DataWarning) ? "ok" : candidate.DataWarning;
@@ -245,14 +245,21 @@ internal sealed class DecisionWorker(
         }
     }
 
-    private static void ForceOpenPositionsIntoEvaluation(
-        List<InstrumentMarketState> selected,
+    private static IReadOnlyList<InstrumentOptions> BuildActiveInstruments(
+        WatchlistAdvice advice,
         IReadOnlyList<InstrumentMarketState> candidates,
         PortfolioState portfolio)
     {
+        var selected = advice.Recommendations
+            .Select(recommendation => candidates.FirstOrDefault(candidate => candidate.Instrument.Pair.Equals(recommendation.Pair, StringComparison.OrdinalIgnoreCase)))
+            .Where(candidate => candidate is not null)
+            .Cast<InstrumentMarketState>()
+            .Select(candidate => candidate.Instrument)
+            .ToList();
+
         foreach (var position in portfolio.Positions)
         {
-            if (selected.Any(candidate => candidate.Instrument.Pair.Equals(position.Pair, StringComparison.OrdinalIgnoreCase)))
+            if (selected.Any(instrument => instrument.Pair.Equals(position.Pair, StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }
@@ -260,7 +267,7 @@ internal sealed class DecisionWorker(
             var candidate = candidates.FirstOrDefault(item => item.Instrument.Pair.Equals(position.Pair, StringComparison.OrdinalIgnoreCase));
             if (candidate is not null)
             {
-                selected.Add(candidate);
+                selected.Add(candidate.Instrument);
                 Console.WriteLine($"watchlist-forced {position.Pair}: open position must be evaluated even if advisor did not select it");
             }
             else
@@ -268,6 +275,8 @@ internal sealed class DecisionWorker(
                 Console.WriteLine($"warning: open position {position.Pair} is not present in CandidateUniverse; cannot evaluate exit");
             }
         }
+
+        return selected;
     }
 
     // Immutable snapshot of a decision BEFORE it is applied to the portfolio. Lets

@@ -6,34 +6,74 @@ namespace TradingBot.Worker;
 
 internal interface IMarketDataSource
 {
-    Task<IReadOnlyList<InstrumentMarketState>> GetMarketStatesAsync(
+    Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
+        IReadOnlyList<InstrumentOptions> instruments,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<InstrumentMarketState>> GetFullMarketStatesAsync(
         IReadOnlyList<InstrumentOptions> instruments,
         int timeframeMinutes,
         CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<InstrumentMarketState>> GetMarketStatesAsync(
+        IReadOnlyList<InstrumentOptions> instruments,
+        int timeframeMinutes,
+        CancellationToken cancellationToken) =>
+        GetFullMarketStatesAsync(instruments, timeframeMinutes, cancellationToken);
 }
 
 internal sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOptions options) : IMarketDataSource
 {
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private static readonly TimeSpan OhlcDelay = TimeSpan.FromMilliseconds(150);
+    private static readonly TimeSpan RateLimitBackoff = TimeSpan.FromSeconds(2);
 
-    public async Task<IReadOnlyList<InstrumentMarketState>> GetMarketStatesAsync(
+    public async Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
+        IReadOnlyList<InstrumentOptions> instruments,
+        CancellationToken cancellationToken)
+    {
+        var quotes = await GetQuotesAsync(instruments, metadata: null, cancellationToken);
+
+        return instruments.Select(instrument =>
+        {
+            quotes.TryGetValue(instrument.KrakenPair, out var quote);
+            return new InstrumentMarketState
+            {
+                Instrument = instrument,
+                Candles = Array.Empty<Candle>(),
+                Quote = quote,
+                DataWarning = quote is null ? "Ticker data unavailable." : null
+            };
+        }).ToList();
+    }
+
+    public async Task<IReadOnlyList<InstrumentMarketState>> GetFullMarketStatesAsync(
         IReadOnlyList<InstrumentOptions> instruments,
         int timeframeMinutes,
         CancellationToken cancellationToken)
     {
         var states = new List<InstrumentMarketState>();
-        foreach (var instrument in instruments)
+        var metadata = await GetPairMetadataAsync(instruments, cancellationToken);
+        var quotes = await GetQuotesAsync(instruments, metadata, cancellationToken);
+
+        for (var index = 0; index < instruments.Count; index++)
         {
+            var instrument = instruments[index];
             try
             {
-                var rules = await GetPairRulesAsync(instrument, cancellationToken);
-                var candles = await GetClosedCandlesAsync(instrument, timeframeMinutes, cancellationToken);
-                var quote = await GetQuoteAsync(instrument, cancellationToken);
+                if (index > 0)
+                {
+                    await Task.Delay(OhlcDelay, cancellationToken);
+                }
+
+                metadata.TryGetValue(instrument.KrakenPair, out var pairMetadata);
+                quotes.TryGetValue(instrument.KrakenPair, out var quote);
+                var candles = await GetClosedCandlesWithRetryAsync(instrument, timeframeMinutes, cancellationToken);
                 states.Add(new InstrumentMarketState
                 {
                     Instrument = instrument,
                     Candles = candles,
-                    PairRules = rules,
+                    PairRules = pairMetadata?.Rules,
                     Quote = quote,
                     DataWarning = candles.Count < 30 ? $"Only {candles.Count} closed candles returned." : null
                 });
@@ -52,9 +92,17 @@ internal sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOption
         return states;
     }
 
-    private async Task<PairRules?> GetPairRulesAsync(InstrumentOptions instrument, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, PairMetadata>> GetPairMetadataAsync(
+        IReadOnlyList<InstrumentOptions> instruments,
+        CancellationToken cancellationToken)
     {
-        var uri = $"{options.BaseUrl.TrimEnd('/')}/0/public/AssetPairs?assetVersion=1&pair={Uri.EscapeDataString(instrument.KrakenPair)}";
+        if (instruments.Count == 0)
+        {
+            return new Dictionary<string, PairMetadata>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var pairs = string.Join(",", instruments.Select(instrument => instrument.KrakenPair));
+        var uri = $"{options.BaseUrl.TrimEnd('/')}/0/public/AssetPairs?assetVersion=1&pair={Uri.EscapeDataString(pairs)}";
         using var response = await httpClient.GetAsync(uri, cancellationToken);
         response.EnsureSuccessStatusCode();
 
@@ -62,26 +110,52 @@ internal sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOption
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
         ThrowIfKrakenError(doc.RootElement);
 
-        var result = doc.RootElement.GetProperty("result");
-        var pairProperty = result.EnumerateObject().FirstOrDefault();
-        if (pairProperty.Value.ValueKind != JsonValueKind.Object)
+        var metadata = new Dictionary<string, PairMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pairProperty in doc.RootElement.GetProperty("result").EnumerateObject())
         {
-            return null;
+            if (pairProperty.Value.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var value = pairProperty.Value;
+            var altName = GetString(value, "altname") ?? pairProperty.Name;
+            var wsName = GetString(value, "wsname") ?? pairProperty.Name;
+            var instrument = instruments.FirstOrDefault(item =>
+                item.KrakenPair.Equals(altName, StringComparison.OrdinalIgnoreCase)
+                || item.Pair.Equals(wsName, StringComparison.OrdinalIgnoreCase));
+            if (instrument is null)
+            {
+                continue;
+            }
+
+            metadata[instrument.KrakenPair] = new PairMetadata(
+                altName,
+                wsName,
+                new PairRules(
+                    instrument.Pair,
+                    GetString(value, "status") ?? "unknown",
+                    GetDecimal(value, "ordermin"),
+                    GetDecimal(value, "costmin"),
+                    GetInt(value, "lot_decimals"),
+                    GetInt(value, "pair_decimals")));
         }
 
-        var value = pairProperty.Value;
-        return new PairRules(
-            instrument.Pair,
-            GetString(value, "status") ?? "unknown",
-            GetDecimal(value, "ordermin"),
-            GetDecimal(value, "costmin"),
-            GetInt(value, "lot_decimals"),
-            GetInt(value, "pair_decimals"));
+        return metadata;
     }
 
-    private async Task<Quote?> GetQuoteAsync(InstrumentOptions instrument, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, Quote>> GetQuotesAsync(
+        IReadOnlyList<InstrumentOptions> instruments,
+        IReadOnlyDictionary<string, PairMetadata>? metadata,
+        CancellationToken cancellationToken)
     {
-        var uri = $"{options.BaseUrl.TrimEnd('/')}/0/public/Ticker?pair={Uri.EscapeDataString(instrument.KrakenPair)}";
+        if (instruments.Count == 0)
+        {
+            return new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var pairs = string.Join(",", instruments.Select(instrument => instrument.KrakenPair));
+        var uri = $"{options.BaseUrl.TrimEnd('/')}/0/public/Ticker?assetVersion=1&pair={Uri.EscapeDataString(pairs)}";
         using var response = await httpClient.GetAsync(uri, cancellationToken);
         response.EnsureSuccessStatusCode();
 
@@ -89,19 +163,54 @@ internal sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOption
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
         ThrowIfKrakenError(doc.RootElement);
 
-        var result = doc.RootElement.GetProperty("result");
-        var pairProperty = result.EnumerateObject().FirstOrDefault();
-        if (pairProperty.Value.ValueKind != JsonValueKind.Object)
+        var quotes = new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pairProperty in doc.RootElement.GetProperty("result").EnumerateObject())
         {
-            return null;
+            var instrument = instruments.FirstOrDefault(item =>
+            {
+                if (ExpectedWsName(item).Equals(pairProperty.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                return metadata is not null
+                    && metadata.TryGetValue(item.KrakenPair, out var pairMetadata)
+                    && pairMetadata.WsName.Equals(pairProperty.Name, StringComparison.OrdinalIgnoreCase);
+            });
+            if (instrument is null || pairProperty.Value.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var value = pairProperty.Value;
+            var last = ParseKrakenDecimal(value.GetProperty("c")[0]);
+            var open = ParseKrakenDecimal(value.GetProperty("o"));
+            var changePercent = open == 0m ? 0m : decimal.Round((last - open) / open * 100m, 2);
+            quotes[instrument.KrakenPair] = new Quote(
+                ParseKrakenDecimal(value.GetProperty("b")[0]),
+                ParseKrakenDecimal(value.GetProperty("a")[0]),
+                last,
+                ParseKrakenDecimal(value.GetProperty("v")[1]),
+                changePercent);
         }
 
-        var value = pairProperty.Value;
-        return new Quote(
-            ParseKrakenDecimal(value.GetProperty("b")[0]),
-            ParseKrakenDecimal(value.GetProperty("a")[0]),
-            ParseKrakenDecimal(value.GetProperty("c")[0]),
-            ParseKrakenDecimal(value.GetProperty("v")[1]));
+        return quotes;
+    }
+
+    private async Task<IReadOnlyList<Candle>> GetClosedCandlesWithRetryAsync(
+        InstrumentOptions instrument,
+        int timeframeMinutes,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await GetClosedCandlesAsync(instrument, timeframeMinutes, cancellationToken);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+        {
+            await Task.Delay(RateLimitBackoff, cancellationToken);
+            return await GetClosedCandlesAsync(instrument, timeframeMinutes, cancellationToken);
+        }
     }
 
     private async Task<IReadOnlyList<Candle>> GetClosedCandlesAsync(
@@ -178,11 +287,55 @@ internal sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOption
 
     private static int GetInt(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var property) && property.TryGetInt32(out var value) ? value : 0;
+
+    private static string ExpectedWsName(InstrumentOptions instrument)
+    {
+        if (instrument.Pair.Equals("XBT/EUR", StringComparison.OrdinalIgnoreCase))
+        {
+            return "BTC/EUR";
+        }
+
+        if (instrument.Pair.Equals("XDG/EUR", StringComparison.OrdinalIgnoreCase))
+        {
+            return "DOGE/EUR";
+        }
+
+        return instrument.Pair;
+    }
+
+    private sealed record PairMetadata(string AltName, string WsName, PairRules Rules);
 }
 
 internal sealed class SampleMarketDataSource : IMarketDataSource
 {
-    public Task<IReadOnlyList<InstrumentMarketState>> GetMarketStatesAsync(
+    public Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
+        IReadOnlyList<InstrumentOptions> instruments,
+        CancellationToken cancellationToken)
+    {
+        var states = instruments.Select((instrument, index) =>
+        {
+            var candles = BuildSampleCandles(instrument.Pair, 5, index);
+            var last = candles[^1].Close;
+            var first = candles[Math.Max(0, candles.Count - 24)].Close;
+            return new InstrumentMarketState
+            {
+                Instrument = instrument,
+                Candles = Array.Empty<Candle>(),
+                Quote = new Quote(
+                    decimal.Round(last * 0.9995m, 4),
+                    decimal.Round(last * 1.0005m, 4),
+                    last,
+                    candles[^1].Volume,
+                    first == 0m ? 0m : decimal.Round((last - first) / first * 100m, 2)),
+                PairRules = new PairRules(instrument.Pair, "sample", 0.001m, 0.5m, 8, 2),
+                DataWarning = null
+            };
+        }).ToList();
+
+        return Task.FromResult<IReadOnlyList<InstrumentMarketState>>(states);
+    }
+
+    public Task<IReadOnlyList<InstrumentMarketState>> GetFullMarketStatesAsync(
         IReadOnlyList<InstrumentOptions> instruments,
         int timeframeMinutes,
         CancellationToken cancellationToken)

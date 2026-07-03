@@ -20,7 +20,7 @@ internal sealed class HeuristicWatchlistAdvisor : IWatchlistAdvisor
         CancellationToken cancellationToken)
     {
         var recommendations = candidates
-            .Where(candidate => candidate.IsUsable)
+            .Where(candidate => candidate.LastPrice > 0m && string.IsNullOrWhiteSpace(candidate.DataWarning))
             .OrderByDescending(candidate => candidate.LastVolume)
             .ThenBy(candidate => candidate.VolatilityPercent)
             .Take(maxRecommendations)
@@ -46,8 +46,7 @@ internal sealed class HeuristicWatchlistAdvisor : IWatchlistAdvisor
 
 internal sealed class OpenAiCompatibleWatchlistAdvisor(
     HttpClient httpClient,
-    AiOptions options,
-    IWatchlistAdvisor fallbackAdvisor) : IWatchlistAdvisor
+    AiOptions options) : IWatchlistAdvisor
 {
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -62,45 +61,23 @@ internal sealed class OpenAiCompatibleWatchlistAdvisor(
     {
         if (string.IsNullOrWhiteSpace(options.ApiKey) || string.IsNullOrWhiteSpace(options.Model))
         {
-            var fallback = await fallbackAdvisor.SelectAsync(candidates, maxRecommendations, cancellationToken);
-            return fallback with
-            {
-                Provider = "ai-disabled",
-                Warnings = fallback.Warnings.Concat(new[] { "AI provider configured but API key or model is missing; used heuristic watchlist" }).ToList()
-            };
+            throw new InvalidOperationException("AI provider configured but API key or model is missing");
         }
 
-        try
+        var aiAdvice = await AskModelAsync(candidates, maxRecommendations, cancellationToken);
+        var validPairs = candidates.Select(candidate => candidate.Instrument.Pair).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var recommendations = aiAdvice.Recommendations
+            .Where(item => validPairs.Contains(item.Pair))
+            .OrderBy(item => item.Priority)
+            .Take(maxRecommendations)
+            .ToList();
+
+        if (recommendations.Count == 0)
         {
-            var aiAdvice = await AskModelAsync(candidates, maxRecommendations, cancellationToken);
-            var validPairs = candidates.Select(candidate => candidate.Instrument.Pair).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var recommendations = aiAdvice.Recommendations
-                .Where(item => validPairs.Contains(item.Pair))
-                .OrderBy(item => item.Priority)
-                .Take(maxRecommendations)
-                .ToList();
-
-            if (recommendations.Count == 0)
-            {
-                var fallback = await fallbackAdvisor.SelectAsync(candidates, maxRecommendations, cancellationToken);
-                return fallback with
-                {
-                    Provider = "ai-fallback",
-                    Warnings = fallback.Warnings.Concat(new[] { "AI returned no valid configured pairs; used heuristic watchlist" }).ToList()
-                };
-            }
-
-            return aiAdvice with { Recommendations = recommendations };
+            throw new InvalidOperationException("AI returned no valid configured pairs");
         }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
-        {
-            var fallback = await fallbackAdvisor.SelectAsync(candidates, maxRecommendations, cancellationToken);
-            return fallback with
-            {
-                Provider = "ai-fallback",
-                Warnings = fallback.Warnings.Concat(new[] { $"AI watchlist failed: {ex.Message}; used heuristic watchlist" }).ToList()
-            };
-        }
+
+        return aiAdvice with { Recommendations = recommendations };
     }
 
     private async Task<WatchlistAdvice> AskModelAsync(
@@ -165,7 +142,7 @@ internal sealed class OpenAiCompatibleWatchlistAdvisor(
         {
             pair = candidate.Instrument.Pair,
             venue = candidate.Instrument.Venue,
-            usable = candidate.IsUsable,
+            usable = candidate.LastPrice > 0m && string.IsNullOrWhiteSpace(candidate.DataWarning),
             warning = candidate.DataWarning,
             lastPrice = candidate.LastPrice,
             changePercent = candidate.ChangePercent,
@@ -238,4 +215,125 @@ internal sealed class OpenAiCompatibleWatchlistAdvisor(
         public int Priority { get; set; }
         public string Reason { get; set; } = string.Empty;
     }
+}
+
+internal sealed class CachedWatchlistAdvisor(
+    IWatchlistAdvisor refreshAdvisor,
+    IWatchlistAdvisor fallbackAdvisor,
+    int refreshSeconds,
+    IClock? clock = null) : IWatchlistAdvisor
+{
+    private readonly IClock _clock = clock ?? SystemClock.Instance;
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private WatchlistAdvice? _cachedAdvice;
+    private DateTimeOffset _cachedAt;
+
+    public async Task<WatchlistAdvice> SelectAsync(
+        IReadOnlyList<InstrumentMarketState> candidates,
+        int maxRecommendations,
+        CancellationToken cancellationToken)
+    {
+        var now = _clock.UtcNow;
+        var refreshInterval = TimeSpan.FromSeconds(Math.Max(0, refreshSeconds));
+
+        if (refreshInterval > TimeSpan.Zero && _cachedAdvice is not null && now - _cachedAt <= refreshInterval)
+        {
+            return BuildCachedAdvice(now, Array.Empty<string>());
+        }
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            now = _clock.UtcNow;
+            if (refreshInterval > TimeSpan.Zero && _cachedAdvice is not null && now - _cachedAt <= refreshInterval)
+            {
+                return BuildCachedAdvice(now, Array.Empty<string>());
+            }
+
+            try
+            {
+                var refreshed = await refreshAdvisor.SelectAsync(candidates, maxRecommendations, cancellationToken);
+                var normalized = Normalize(refreshed, candidates, maxRecommendations);
+                if (normalized.Recommendations.Count == 0)
+                {
+                    throw new InvalidOperationException("watchlist refresh returned no valid configured pairs");
+                }
+
+                _cachedAdvice = normalized;
+                _cachedAt = now;
+                return normalized;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
+            {
+                if (_cachedAdvice is not null && refreshInterval > TimeSpan.Zero && now - _cachedAt <= refreshInterval * 2)
+                {
+                    return BuildCachedAdvice(now, new[] { $"watchlist refresh failed: {ex.Message}; serving stale cached selection" });
+                }
+
+                var fallback = await fallbackAdvisor.SelectAsync(candidates, maxRecommendations, cancellationToken);
+                return fallback with
+                {
+                    Provider = "heuristic",
+                    Recommendations = Normalize(fallback, candidates, maxRecommendations).Recommendations,
+                    Warnings = fallback.Warnings.Concat(new[] { $"watchlist refresh failed: {ex.Message}; used heuristic watchlist" }).ToList()
+                };
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private WatchlistAdvice BuildCachedAdvice(DateTimeOffset now, IReadOnlyList<string> extraWarnings)
+    {
+        var age = now - _cachedAt;
+        return _cachedAdvice! with
+        {
+            Provider = $"{_cachedAdvice.Provider} (cached {FormatAge(age)} ago)",
+            Warnings = _cachedAdvice.Warnings.Concat(extraWarnings).ToList()
+        };
+    }
+
+    private static WatchlistAdvice Normalize(
+        WatchlistAdvice advice,
+        IReadOnlyList<InstrumentMarketState> candidates,
+        int maxRecommendations)
+    {
+        var validPairs = candidates.Select(candidate => candidate.Instrument.Pair).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var recommendations = advice.Recommendations
+            .Where(item => validPairs.Contains(item.Pair))
+            .OrderBy(item => item.Priority)
+            .Take(maxRecommendations)
+            .Select((item, index) => item with { Priority = index + 1 })
+            .ToList();
+
+        return advice with { Recommendations = recommendations };
+    }
+
+    private static string FormatAge(TimeSpan age)
+    {
+        if (age.TotalMinutes < 1)
+        {
+            return $"{Math.Max(0, (int)age.TotalSeconds)}s";
+        }
+
+        if (age.TotalHours < 1)
+        {
+            return $"{(int)age.TotalMinutes}m";
+        }
+
+        return $"{(int)age.TotalHours}h";
+    }
+}
+
+internal interface IClock
+{
+    DateTimeOffset UtcNow { get; }
+}
+
+internal sealed class SystemClock : IClock
+{
+    public static readonly SystemClock Instance = new();
+    public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
 }

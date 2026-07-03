@@ -33,7 +33,10 @@ try
 
     var fallbackAdvisor = new HeuristicWatchlistAdvisor();
     IWatchlistAdvisor watchlistAdvisor = config.Ai.Provider.Equals("openai-compatible", StringComparison.OrdinalIgnoreCase)
-        ? new OpenAiCompatibleWatchlistAdvisor(httpClient, config.Ai, fallbackAdvisor)
+        ? new CachedWatchlistAdvisor(
+            new OpenAiCompatibleWatchlistAdvisor(httpClient, config.Ai),
+            fallbackAdvisor,
+            config.Ai.WatchlistRefreshSeconds)
         : fallbackAdvisor;
 
     var krakenBroker = new KrakenBroker(httpClient, config.Kraken);
