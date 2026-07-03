@@ -186,4 +186,116 @@ public class PositionExitPolicyTests
         Assert.True(result.ShouldSell);
         Assert.Equal(ExitReason.SignalFlip, result.ExitReason);
     }
+
+    // Regression coverage for the reported execution-priority bug: a stop-loss (or
+    // any hard/forced exit) must never be suppressed by the min-profit filter. The
+    // four scenarios below mirror the acceptance criteria in the bug report.
+
+    // Scenario 1: PnL = -2%, StopLoss = 1.5%, Signal = HOLD (strategy still long) => SELL (STOP_LOSS).
+    [Fact]
+    public void Scenario1_StopLoss_sells_even_when_strategy_wants_hold()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: true,
+            positionAgeSeconds: 60,
+            conservativeUnrealizedPnlPercent: -2m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(),
+            Exit(stopLoss: 1.5m));
+
+        Assert.True(result.ShouldSell);
+        Assert.Equal(ExitReason.StopLoss, result.ExitReason);
+    }
+
+    // Scenario 2: PnL = -2%, Signal = EXIT (desired NONE) => SELL (STOP_LOSS).
+    // The position is young and below the min-profit threshold, proving stop-loss
+    // outranks both MIN_HOLD_BLOCK and MIN_PROFIT_BLOCK.
+    [Fact]
+    public void Scenario2_StopLoss_sells_on_signal_flip_below_min_profit()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: false,
+            positionAgeSeconds: 30,
+            conservativeUnrealizedPnlPercent: -2m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(stopLoss: 1.5m, minProfit: 1m));
+
+        Assert.True(result.ShouldSell);
+        Assert.Equal(ExitReason.StopLoss, result.ExitReason);
+        Assert.Null(result.HoldReasonCode);
+    }
+
+    // Scenario 3: PnL = +0.4%, Signal = EXIT, MinProfit = 1% => HOLD (MIN_PROFIT_BLOCK).
+    [Fact]
+    public void Scenario3_MinProfit_blocks_signal_flip_when_profit_too_small()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: false,
+            positionAgeSeconds: 1000,
+            conservativeUnrealizedPnlPercent: 0.4m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(minProfit: 1m));
+
+        Assert.False(result.ShouldSell);
+        Assert.Equal("MIN_PROFIT_BLOCK", result.HoldReasonCode);
+    }
+
+    // Scenario 4: PnL = +1.5%, Signal = EXIT, MinProfit = 1% => SELL (signal flip).
+    [Fact]
+    public void Scenario4_SignalFlip_sells_when_profit_above_min_profit()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: false,
+            positionAgeSeconds: 1000,
+            conservativeUnrealizedPnlPercent: 1.5m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(minProfit: 1m, takeProfit: 2m));
+
+        Assert.True(result.ShouldSell);
+        Assert.Equal(ExitReason.SignalFlip, result.ExitReason);
+    }
+
+    // The originally reported example verbatim: PnL = -2.2%, StopLoss = 1.5%,
+    // Signal = EXIT => SELL (STOP_LOSS), never HOLD / MIN_PROFIT_BLOCK.
+    [Fact]
+    public void ReportedExample_losing_position_on_signal_flip_hits_stop_loss()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: false,
+            positionAgeSeconds: 45,
+            conservativeUnrealizedPnlPercent: -2.2m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(stopLoss: 1.5m, minProfit: 1.2m));
+
+        Assert.True(result.ShouldSell);
+        Assert.Equal(ExitReason.StopLoss, result.ExitReason);
+        Assert.Equal("SELL_STOP_LOSS", PositionExitPolicy.ExitReasonCode(result.ExitReason!.Value));
+    }
+
+    // A zero StopLossPercent disables the stop-loss guard (consistent with
+    // MaxHoldMinutes = 0) rather than firing on every valued loss.
+    [Fact]
+    public void StopLoss_disabled_when_percent_is_zero()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: true,
+            positionAgeSeconds: 60,
+            conservativeUnrealizedPnlPercent: -5m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(),
+            Exit(stopLoss: 0m));
+
+        Assert.False(result.ShouldSell);
+        Assert.Equal("DESIRED_LONG", result.HoldReasonCode);
+    }
 }
