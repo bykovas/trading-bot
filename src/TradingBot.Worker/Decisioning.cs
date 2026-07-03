@@ -8,8 +8,8 @@ internal sealed class TechnicalDecisionEngine
         TradingOptions trading,
         StrategyOptions strategy)
     {
-        var signal = EvaluateSignal(marketState, indicators);
-        var desiredPosition = signal.Score >= strategy.MinimumLongScore ? "LONG_MICRO" : "NONE";
+        var signal = EvaluateSignal(marketState, indicators, strategy);
+        var desiredPosition = signal.AllowsLong && signal.Score >= strategy.MinimumLongScore ? "LONG_MICRO" : "NONE";
         var targetNotional = desiredPosition == "LONG_MICRO" ? trading.TargetOrderEur : 0m;
 
         return new DecisionProposal(
@@ -20,22 +20,50 @@ internal sealed class TechnicalDecisionEngine
             signal.Contributions);
     }
 
-    private static TechnicalSignal EvaluateSignal(InstrumentMarketState marketState, IndicatorSnapshot indicators)
+    private static TechnicalSignal EvaluateSignal(
+        InstrumentMarketState marketState,
+        IndicatorSnapshot indicators,
+        StrategyOptions strategy)
     {
         var contributions = new List<SignalContribution>();
         decimal score = 0.35m;
+        var allowsLong = false;
 
         if (indicators.FastEma is not null && indicators.SlowEma is not null)
         {
-            if (indicators.FastEma > indicators.SlowEma)
+            var emaGapPercent = CalculateEmaGapPercent(indicators.FastEma.Value, indicators.SlowEma.Value);
+            if (emaGapPercent is null)
             {
-                score += 0.30m;
-                contributions.Add(new SignalContribution("EMA", 0.30m, "fast EMA is above slow EMA"));
+                contributions.Add(new SignalContribution("EMA", 0m, "slow EMA is zero; cannot calculate EMA gap"));
+            }
+            else if (indicators.FastEma > indicators.SlowEma)
+            {
+                if (EmaGapPassesFilter(emaGapPercent.Value, strategy.MinimumEmaGapPercent))
+                {
+                    score += 0.30m;
+                    allowsLong = true;
+                    contributions.Add(new SignalContribution("EMA", 0.30m, $"fast EMA is above slow EMA by {emaGapPercent.Value:0.###}%"));
+                }
+                else
+                {
+                    contributions.Add(new SignalContribution("EMA", 0m, $"EMA crossover ignored because gap {emaGapPercent.Value:0.000}% < configured minimum {strategy.MinimumEmaGapPercent:0.000}%"));
+                }
+            }
+            else if (indicators.FastEma < indicators.SlowEma)
+            {
+                if (EmaGapPassesFilter(emaGapPercent.Value, strategy.MinimumEmaGapPercent))
+                {
+                    score -= 0.25m;
+                    contributions.Add(new SignalContribution("EMA", -0.25m, $"fast EMA is below slow EMA by {emaGapPercent.Value:0.###}%"));
+                }
+                else
+                {
+                    contributions.Add(new SignalContribution("EMA", 0m, $"EMA crossover ignored because gap {emaGapPercent.Value:0.000}% < configured minimum {strategy.MinimumEmaGapPercent:0.000}%"));
+                }
             }
             else
             {
-                score -= 0.25m;
-                contributions.Add(new SignalContribution("EMA", -0.25m, "fast EMA is below slow EMA"));
+                contributions.Add(new SignalContribution("EMA", 0m, "fast EMA equals slow EMA"));
             }
         }
         else
@@ -83,8 +111,14 @@ internal sealed class TechnicalDecisionEngine
 
         score = Math.Clamp(score, 0m, 1m);
         var direction = score >= 0.55m ? "LONG_BIAS" : "NEUTRAL";
-        return new TechnicalSignal(decimal.Round(score, 2), direction, contributions);
+        return new TechnicalSignal(decimal.Round(score, 2), direction, allowsLong, contributions);
     }
+
+    private static decimal? CalculateEmaGapPercent(decimal fastEma, decimal slowEma) =>
+        slowEma == 0m ? null : Math.Abs(fastEma - slowEma) / slowEma * 100m;
+
+    private static bool EmaGapPassesFilter(decimal emaGapPercent, decimal minimumEmaGapPercent) =>
+        minimumEmaGapPercent <= 0m || emaGapPercent >= minimumEmaGapPercent;
 }
 
 internal sealed class RiskManager

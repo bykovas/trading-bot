@@ -75,6 +75,7 @@ internal sealed record IndicatorSnapshot(
 internal sealed record TechnicalSignal(
     decimal Score,
     string Direction,
+    bool AllowsLong,
     IReadOnlyList<SignalContribution> Contributions);
 
 internal sealed record SignalContribution(
