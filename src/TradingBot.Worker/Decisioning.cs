@@ -9,7 +9,8 @@ internal sealed class TechnicalDecisionEngine
         StrategyOptions strategy,
         PositionSizingOptions positionSizing,
         RiskOptions risk,
-        decimal cashEur)
+        decimal cashEur,
+        decimal currentExposureEur)
     {
         var signal = EvaluateSignal(marketState, indicators, strategy);
         var desiredPosition = signal.AllowsLong && signal.Score >= strategy.MinimumLongScore ? "LONG_MICRO" : "NONE";
@@ -17,7 +18,7 @@ internal sealed class TechnicalDecisionEngine
         var contributions = signal.Contributions.ToList();
         if (desiredPosition == "LONG_MICRO")
         {
-            var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur);
+            var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur);
             targetNotional = size.TargetNotionalEur;
             contributions.Add(new SignalContribution("PositionSizing", 0m, size.Reason));
             if (targetNotional <= 0m)
@@ -141,7 +142,8 @@ internal sealed class TechnicalDecisionEngine
         TradingOptions trading,
         PositionSizingOptions positionSizing,
         RiskOptions risk,
-        decimal cashEur)
+        decimal cashEur,
+        decimal currentExposureEur)
     {
         if (!positionSizing.Enabled)
         {
@@ -168,11 +170,18 @@ internal sealed class TechnicalDecisionEngine
         target = Math.Min(target, effectiveMaxOrder);
         var selectedTarget = target;
 
-        if (positionSizing.CashReserveEur > 0m)
+        var availableCash = positionSizing.CashReserveEur > 0m
+            ? cashEur - positionSizing.CashReserveEur
+            : cashEur;
+        var availableExposure = risk.MaxTotalExposureEur > 0m
+            ? risk.MaxTotalExposureEur - currentExposureEur
+            : decimal.MaxValue;
+        var availableNotional = Math.Min(availableCash, availableExposure);
+
+        if (positionSizing.CashReserveEur > 0m || risk.MaxTotalExposureEur > 0m)
         {
-            var available = cashEur - positionSizing.CashReserveEur;
             target = PositionSizeTiers(positionSizing)
-                .Where(tier => tier <= selectedTarget && tier <= available)
+                .Where(tier => tier <= selectedTarget && tier <= availableNotional)
                 .DefaultIfEmpty(0m)
                 .Max();
         }
@@ -181,11 +190,11 @@ internal sealed class TechnicalDecisionEngine
         {
             return new PositionSizeSelection(
                 0m,
-                $"score {signal.Score:0.##} selected no entry because cash EUR {cashEur:0.##} must keep reserve EUR {positionSizing.CashReserveEur:0.##}");
+                $"score {signal.Score:0.##} selected no entry because cash EUR {cashEur:0.##} must keep reserve EUR {positionSizing.CashReserveEur:0.##} and exposure EUR {currentExposureEur:0.##} must stay within max EUR {risk.MaxTotalExposureEur:0.##}");
         }
 
         var reserveReason = target < selectedTarget
-            ? $"; reduced from EUR {selectedTarget:0.##} to keep cash reserve EUR {positionSizing.CashReserveEur:0.##}"
+            ? $"; reduced from EUR {selectedTarget:0.##} to keep cash reserve EUR {positionSizing.CashReserveEur:0.##} and max exposure EUR {risk.MaxTotalExposureEur:0.##}"
             : string.Empty;
         var strongEmaGapReason = strongByEmaGap
             ? $"; EMA gap {signal.BullishEmaGapPercent:0.###}% reached strong threshold {positionSizing.StrongEmaGapPercent:0.###}%"
@@ -238,6 +247,10 @@ internal sealed class RiskManager
         reasons.Add($"target EUR {proposal.TargetNotionalEur:0.##} is within max order EUR {risk.MaxOrderEur:0.##}");
         reasons.Add($"daily loss cap configured at EUR {risk.MaxDailyLossEur:0.##}");
         reasons.Add($"max open positions configured at {risk.MaxOpenPositions}");
+        if (risk.MaxTotalExposureEur > 0m)
+        {
+            reasons.Add($"max total exposure configured at EUR {risk.MaxTotalExposureEur:0.##}");
+        }
         return new RiskEvaluation(true, reasons);
     }
 }

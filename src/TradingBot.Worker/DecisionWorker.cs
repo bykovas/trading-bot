@@ -60,12 +60,17 @@ internal sealed class DecisionWorker(
         ForceOpenPositionsIntoEvaluation(selected, candidates, portfolioBefore);
 
         var decisionRecords = new List<DryRunDecisionRecord>();
+        var newPositionsThisCycle = 0;
         foreach (var marketState in selected)
         {
-            var record = await PrintDecisionAsync(marketState, workingPortfolio, cancellationToken);
+            var record = await PrintDecisionAsync(marketState, workingPortfolio, newPositionsThisCycle, cancellationToken);
             if (record is not null)
             {
                 decisionRecords.Add(record);
+                if (record.DryRunAction.Action == "WOULD_BUY")
+                {
+                    newPositionsThisCycle++;
+                }
             }
         }
 
@@ -191,6 +196,7 @@ internal sealed class DecisionWorker(
     private async Task<DryRunDecisionRecord?> PrintDecisionAsync(
         InstrumentMarketState marketState,
         PortfolioState portfolio,
+        int newPositionsThisCycle,
         CancellationToken cancellationToken)
     {
         if (!marketState.IsUsable)
@@ -200,10 +206,11 @@ internal sealed class DecisionWorker(
         }
 
         var indicators = indicatorEngine.Calculate(marketState.Candles, config.Strategy);
-        var proposal = decisionEngine.Decide(marketState, indicators, config.Trading, config.Strategy, config.PositionSizing, config.Risk, portfolio.CashEur);
+        var currentExposureEur = portfolio.Positions.Sum(position => position.EntryNotionalEur);
+        var proposal = decisionEngine.Decide(marketState, indicators, config.Trading, config.Strategy, config.PositionSizing, config.Risk, portfolio.CashEur, currentExposureEur);
         var risk = riskManager.Evaluate(proposal, config.Risk);
         var currentPositionBeforeAction = portfolio.Positions.FirstOrDefault(position => position.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase))?.Clone();
-        var dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk);
+        var dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk, newPositionsThisCycle);
 
         Console.WriteLine($"decision {proposal.Pair}:");
         Console.WriteLine($"  price={marketState.LastPrice:0.####} ema{config.Strategy.FastEmaPeriod}={Format(indicators.FastEma)} ema{config.Strategy.SlowEmaPeriod}={Format(indicators.SlowEma)} rsi{config.Strategy.RsiPeriod}={Format(indicators.Rsi)}");

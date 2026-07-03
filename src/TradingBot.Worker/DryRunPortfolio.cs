@@ -98,7 +98,8 @@ internal sealed class DryRunPortfolio(
         InstrumentMarketState marketState,
         DecisionProposal proposal,
         RiskEvaluation risk,
-        RiskOptions riskOptions)
+        RiskOptions riskOptions,
+        int newPositionsThisCycle)
     {
         var now = DateTimeOffset.UtcNow;
         var position = state.Positions.FirstOrDefault(item => item.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase));
@@ -149,6 +150,17 @@ internal sealed class DryRunPortfolio(
             if (state.Positions.Count >= riskOptions.MaxOpenPositions)
             {
                 return BuildAction("WOULD_BUY_BLOCKED", $"max open positions {riskOptions.MaxOpenPositions} already reached", proposal, position, beforeCash, beforeValue, state);
+            }
+
+            if (executionPolicy.MaxNewPositionsPerCycle > 0 && newPositionsThisCycle >= executionPolicy.MaxNewPositionsPerCycle)
+            {
+                return BuildAction("WOULD_BUY_BLOCKED", $"max new positions per cycle {executionPolicy.MaxNewPositionsPerCycle} already reached", proposal, position, beforeCash, beforeValue, state, holdReasonCode: "CYCLE_POSITION_LIMIT");
+            }
+
+            var currentExposureEur = state.Positions.Sum(item => item.EntryNotionalEur);
+            if (riskOptions.MaxTotalExposureEur > 0m && currentExposureEur + proposal.TargetNotionalEur > riskOptions.MaxTotalExposureEur)
+            {
+                return BuildAction("WOULD_BUY_BLOCKED", $"total exposure EUR {currentExposureEur + proposal.TargetNotionalEur:0.##} would exceed max EUR {riskOptions.MaxTotalExposureEur:0.##}", proposal, position, beforeCash, beforeValue, state);
             }
 
             if (proposal.TargetNotionalEur > state.CashEur)

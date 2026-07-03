@@ -93,6 +93,7 @@ internal sealed class BotConfiguration
         Risk.MaxOrderEur = Risk.MaxOrderEur <= 0 ? 3m : Risk.MaxOrderEur;
         Risk.MaxDailyLossEur = Risk.MaxDailyLossEur <= 0 ? 10m : Risk.MaxDailyLossEur;
         Risk.MaxOpenPositions = Math.Max(1, Risk.MaxOpenPositions);
+        Risk.MaxTotalExposureEur = Math.Max(0m, Risk.MaxTotalExposureEur);
         Strategy.MinimumEmaGapPercent = Math.Max(0m, Strategy.MinimumEmaGapPercent);
         Strategy.MinimumLongScore = Math.Clamp(Strategy.MinimumLongScore, 0m, 1m);
         NormalizePositionSizing();
@@ -105,6 +106,7 @@ internal sealed class BotConfiguration
         ExecutionPolicy.CooldownAfterBuySeconds = Math.Max(0, ExecutionPolicy.CooldownAfterBuySeconds);
         ExecutionPolicy.CooldownAfterSellSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterSellSeconds);
         ExecutionPolicy.MinHoldSeconds = Math.Max(0, ExecutionPolicy.MinHoldSeconds);
+        ExecutionPolicy.MaxNewPositionsPerCycle = Math.Max(0, ExecutionPolicy.MaxNewPositionsPerCycle);
         PositionExit.MinProfitToExitOnSignalFlipPercent = Math.Max(0m, PositionExit.MinProfitToExitOnSignalFlipPercent);
         PositionExit.StopLossPercent = Math.Max(0m, PositionExit.StopLossPercent);
         PositionExit.TakeProfitPercent = Math.Max(0m, PositionExit.TakeProfitPercent);
@@ -244,6 +246,7 @@ internal sealed class RiskOptions
     public decimal MaxOrderEur { get; set; } = 3m;
     public decimal MaxDailyLossEur { get; set; } = 10m;
     public int MaxOpenPositions { get; set; } = 1;
+    public decimal MaxTotalExposureEur { get; set; } = 0m;
     public bool KillSwitch { get; set; } = false;
 }
 
@@ -310,6 +313,10 @@ internal sealed class ExecutionPolicyOptions
     // strategy signal-flip exit is allowed. Hard exits (stop-loss, take-profit,
     // trailing stop, kill switch, emergency risk, broker safety) always bypass this.
     public int MinHoldSeconds { get; set; } = 900;
+
+    // Maximum new positions that may be opened in one decision cycle. Set to 0 to
+    // disable the per-cycle throttle.
+    public int MaxNewPositionsPerCycle { get; set; } = 0;
 
     // When true, disables the minimum-hold guard so a signal flip can close a
     // position immediately. Default false to avoid buy/sell churn on noisy flips.

@@ -53,7 +53,8 @@ public class TechnicalDecisionEngineTests
         decimal minimumEmaGapPercent,
         PositionSizingOptions positionSizing,
         RiskOptions risk,
-        decimal cashEur)
+        decimal cashEur,
+        decimal currentExposureEur = 0m)
     {
         var engine = new TechnicalDecisionEngine();
         return engine.Decide(
@@ -63,7 +64,8 @@ public class TechnicalDecisionEngineTests
             Strategy(minimumEmaGapPercent),
             positionSizing,
             risk,
-            cashEur);
+            cashEur,
+            currentExposureEur);
     }
 
     [Fact]
@@ -254,6 +256,46 @@ public class TechnicalDecisionEngineTests
         Assert.Contains(
             proposal.Contributions,
             contribution => contribution.Name == "PositionSizing" && contribution.Reason.Contains("max EUR 12"));
+    }
+
+    [Fact]
+    public void Position_sizing_uses_total_exposure_cap_as_available_notional()
+    {
+        var proposal = Decide(
+            fastEma: 100.6m,
+            slowEma: 100m,
+            rsi: 50m,
+            minimumEmaGapPercent: 0.05m,
+            positionSizing: EnabledSizing(),
+            risk: new RiskOptions { MaxOrderEur = 15m, MaxTotalExposureEur = 35m },
+            cashEur: 75m,
+            currentExposureEur: 30m);
+
+        Assert.Equal(0.85m, proposal.Score);
+        Assert.Equal(5m, proposal.TargetNotionalEur);
+        Assert.Contains(
+            proposal.Contributions,
+            contribution => contribution.Name == "PositionSizing" && contribution.Reason.Contains("max exposure EUR 35"));
+    }
+
+    [Fact]
+    public void Position_sizing_blocks_entry_when_total_exposure_cap_has_no_room()
+    {
+        var proposal = Decide(
+            fastEma: 100.6m,
+            slowEma: 100m,
+            rsi: 50m,
+            minimumEmaGapPercent: 0.05m,
+            positionSizing: EnabledSizing(),
+            risk: new RiskOptions { MaxOrderEur = 15m, MaxTotalExposureEur = 35m },
+            cashEur: 75m,
+            currentExposureEur: 32m);
+
+        Assert.Equal("NONE", proposal.DesiredPosition);
+        Assert.Equal(0m, proposal.TargetNotionalEur);
+        Assert.Contains(
+            proposal.Contributions,
+            contribution => contribution.Name == "PositionSizing" && contribution.Reason.Contains("exposure EUR 32"));
     }
 
     private static PositionSizingOptions EnabledSizing() => new()
