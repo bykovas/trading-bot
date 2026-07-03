@@ -76,6 +76,7 @@ internal sealed record TechnicalSignal(
     decimal Score,
     string Direction,
     bool AllowsLong,
+    decimal? BullishEmaGapPercent,
     IReadOnlyList<SignalContribution> Contributions);
 
 internal sealed record SignalContribution(
@@ -89,6 +90,10 @@ internal sealed record DecisionProposal(
     decimal Score,
     decimal TargetNotionalEur,
     IReadOnlyList<SignalContribution> Contributions);
+
+internal sealed record PositionSizeSelection(
+    decimal TargetNotionalEur,
+    string Reason);
 
 internal sealed record RiskEvaluation(
     bool Approved,

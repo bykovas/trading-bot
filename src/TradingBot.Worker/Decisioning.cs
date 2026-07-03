@@ -6,18 +6,32 @@ internal sealed class TechnicalDecisionEngine
         InstrumentMarketState marketState,
         IndicatorSnapshot indicators,
         TradingOptions trading,
-        StrategyOptions strategy)
+        StrategyOptions strategy,
+        PositionSizingOptions positionSizing,
+        RiskOptions risk,
+        decimal cashEur)
     {
         var signal = EvaluateSignal(marketState, indicators, strategy);
         var desiredPosition = signal.AllowsLong && signal.Score >= strategy.MinimumLongScore ? "LONG_MICRO" : "NONE";
-        var targetNotional = desiredPosition == "LONG_MICRO" ? trading.TargetOrderEur : 0m;
+        var targetNotional = 0m;
+        var contributions = signal.Contributions.ToList();
+        if (desiredPosition == "LONG_MICRO")
+        {
+            var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur);
+            targetNotional = size.TargetNotionalEur;
+            contributions.Add(new SignalContribution("PositionSizing", 0m, size.Reason));
+            if (targetNotional <= 0m)
+            {
+                desiredPosition = "NONE";
+            }
+        }
 
         return new DecisionProposal(
             marketState.Instrument.Pair,
             desiredPosition,
             signal.Score,
             targetNotional,
-            signal.Contributions);
+            contributions);
     }
 
     private static TechnicalSignal EvaluateSignal(
@@ -28,6 +42,7 @@ internal sealed class TechnicalDecisionEngine
         var contributions = new List<SignalContribution>();
         decimal score = 0.35m;
         var allowsLong = false;
+        decimal? bullishEmaGapPercent = null;
 
         if (indicators.FastEma is not null && indicators.SlowEma is not null)
         {
@@ -42,6 +57,7 @@ internal sealed class TechnicalDecisionEngine
                 {
                     score += 0.30m;
                     allowsLong = true;
+                    bullishEmaGapPercent = emaGapPercent.Value;
                     contributions.Add(new SignalContribution("EMA", 0.30m, $"fast EMA is above slow EMA by {emaGapPercent.Value:0.###}%"));
                 }
                 else
@@ -111,7 +127,7 @@ internal sealed class TechnicalDecisionEngine
 
         score = Math.Clamp(score, 0m, 1m);
         var direction = score >= 0.55m ? "LONG_BIAS" : "NEUTRAL";
-        return new TechnicalSignal(decimal.Round(score, 2), direction, allowsLong, contributions);
+        return new TechnicalSignal(decimal.Round(score, 2), direction, allowsLong, bullishEmaGapPercent, contributions);
     }
 
     private static decimal? CalculateEmaGapPercent(decimal fastEma, decimal slowEma) =>
@@ -119,6 +135,74 @@ internal sealed class TechnicalDecisionEngine
 
     private static bool EmaGapPassesFilter(decimal emaGapPercent, decimal minimumEmaGapPercent) =>
         minimumEmaGapPercent <= 0m || emaGapPercent >= minimumEmaGapPercent;
+
+    private static PositionSizeSelection SelectPositionSize(
+        TechnicalSignal signal,
+        TradingOptions trading,
+        PositionSizingOptions positionSizing,
+        RiskOptions risk,
+        decimal cashEur)
+    {
+        if (!positionSizing.Enabled)
+        {
+            return new PositionSizeSelection(
+                trading.TargetOrderEur,
+                $"fixed target EUR {trading.TargetOrderEur:0.##}");
+        }
+
+        var veryStrongByScore = signal.Score >= positionSizing.VeryStrongScoreThreshold;
+        var strongByScore = signal.Score >= positionSizing.StrongScoreThreshold;
+        var strongByEmaGap =
+            signal.Score >= positionSizing.StrongEmaGapScoreThreshold
+            && signal.BullishEmaGapPercent >= positionSizing.StrongEmaGapPercent;
+
+        var target = veryStrongByScore
+            ? positionSizing.VeryStrongOrderEur
+            : strongByScore || strongByEmaGap
+                ? positionSizing.StrongOrderEur
+                : signal.Score >= positionSizing.BaseScoreThreshold
+                    ? positionSizing.BaseOrderEur
+                    : positionSizing.SmallOrderEur;
+
+        var effectiveMaxOrder = Math.Min(positionSizing.MaxOrderEur, risk.MaxOrderEur);
+        target = Math.Min(target, effectiveMaxOrder);
+        var selectedTarget = target;
+
+        if (positionSizing.CashReserveEur > 0m)
+        {
+            var available = cashEur - positionSizing.CashReserveEur;
+            target = PositionSizeTiers(positionSizing)
+                .Where(tier => tier <= selectedTarget && tier <= available)
+                .DefaultIfEmpty(0m)
+                .Max();
+        }
+
+        if (target <= 0m)
+        {
+            return new PositionSizeSelection(
+                0m,
+                $"score {signal.Score:0.##} selected no entry because cash EUR {cashEur:0.##} must keep reserve EUR {positionSizing.CashReserveEur:0.##}");
+        }
+
+        var reserveReason = target < selectedTarget
+            ? $"; reduced from EUR {selectedTarget:0.##} to keep cash reserve EUR {positionSizing.CashReserveEur:0.##}"
+            : string.Empty;
+        var strongEmaGapReason = strongByEmaGap
+            ? $"; EMA gap {signal.BullishEmaGapPercent:0.###}% reached strong threshold {positionSizing.StrongEmaGapPercent:0.###}%"
+            : string.Empty;
+
+        return new PositionSizeSelection(
+            target,
+            $"score {signal.Score:0.##} selected target EUR {target:0.##} (tiers {positionSizing.SmallOrderEur:0.##}/{positionSizing.BaseOrderEur:0.##}/{positionSizing.StrongOrderEur:0.##}/{positionSizing.VeryStrongOrderEur:0.##}, max EUR {effectiveMaxOrder:0.##}){strongEmaGapReason}{reserveReason}");
+    }
+
+    private static IEnumerable<decimal> PositionSizeTiers(PositionSizingOptions sizing)
+    {
+        yield return sizing.SmallOrderEur;
+        yield return sizing.BaseOrderEur;
+        yield return sizing.StrongOrderEur;
+        yield return sizing.VeryStrongOrderEur;
+    }
 }
 
 internal sealed class RiskManager

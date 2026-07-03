@@ -2,7 +2,12 @@ using System.Text.Json;
 
 namespace TradingBot.Worker;
 
-internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions initialPortfolio, ExecutionPolicyOptions executionPolicy, PositionExitOptions positionExit)
+internal sealed class DryRunPortfolio(
+    DryRunOptions options,
+    PortfolioOptions initialPortfolio,
+    ExecutionPolicyOptions executionPolicy,
+    PositionExitOptions positionExit,
+    PositionSizingOptions positionSizing)
 {
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -149,6 +154,11 @@ internal sealed class DryRunPortfolio(DryRunOptions options, PortfolioOptions in
             if (proposal.TargetNotionalEur > state.CashEur)
             {
                 return BuildAction("WOULD_BUY_BLOCKED", $"cash EUR {state.CashEur:0.##} is below target EUR {proposal.TargetNotionalEur:0.##}", proposal, position, beforeCash, beforeValue, state);
+            }
+
+            if (positionSizing.Enabled && state.CashEur - proposal.TargetNotionalEur < positionSizing.CashReserveEur)
+            {
+                return BuildAction("WOULD_BUY_BLOCKED", $"cash reserve EUR {positionSizing.CashReserveEur:0.##} would be breached by target EUR {proposal.TargetNotionalEur:0.##}", proposal, position, beforeCash, beforeValue, state);
             }
 
             if (marketState.LastPrice <= 0m)

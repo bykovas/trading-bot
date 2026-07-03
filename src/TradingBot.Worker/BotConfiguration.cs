@@ -11,6 +11,7 @@ internal sealed class BotConfiguration
     public TradingOptions Trading { get; set; } = new();
     public RiskOptions Risk { get; set; } = new();
     public StrategyOptions Strategy { get; set; } = new();
+    public PositionSizingOptions PositionSizing { get; set; } = new();
     public PortfolioOptions Portfolio { get; set; } = new();
     public DryRunOptions DryRun { get; set; } = new();
     public ExecutionPolicyOptions ExecutionPolicy { get; set; } = new();
@@ -94,6 +95,7 @@ internal sealed class BotConfiguration
         Risk.MaxOpenPositions = Math.Max(1, Risk.MaxOpenPositions);
         Strategy.MinimumEmaGapPercent = Math.Max(0m, Strategy.MinimumEmaGapPercent);
         Strategy.MinimumLongScore = Math.Clamp(Strategy.MinimumLongScore, 0m, 1m);
+        NormalizePositionSizing();
         Portfolio.StartingCashEur = Portfolio.StartingCashEur < 0 ? 0m : Portfolio.StartingCashEur;
         DryRun.OutputDirectory = string.IsNullOrWhiteSpace(DryRun.OutputDirectory) ? "data/dry-run" : DryRun.OutputDirectory.Trim();
         DryRun.StateFile = string.IsNullOrWhiteSpace(DryRun.StateFile) ? "portfolio-state.json" : DryRun.StateFile.Trim();
@@ -141,6 +143,21 @@ internal sealed class BotConfiguration
         {
             CandidateUniverse = DefaultCandidateUniverse();
         }
+    }
+
+    private void NormalizePositionSizing()
+    {
+        PositionSizing.CashReserveEur = Math.Max(0m, PositionSizing.CashReserveEur);
+        PositionSizing.SmallOrderEur = PositionSizing.SmallOrderEur <= 0m ? Trading.TargetOrderEur : PositionSizing.SmallOrderEur;
+        PositionSizing.BaseOrderEur = PositionSizing.BaseOrderEur <= 0m ? Trading.TargetOrderEur : PositionSizing.BaseOrderEur;
+        PositionSizing.StrongOrderEur = PositionSizing.StrongOrderEur <= 0m ? PositionSizing.BaseOrderEur : PositionSizing.StrongOrderEur;
+        PositionSizing.VeryStrongOrderEur = PositionSizing.VeryStrongOrderEur <= 0m ? PositionSizing.StrongOrderEur : PositionSizing.VeryStrongOrderEur;
+        PositionSizing.MaxOrderEur = PositionSizing.MaxOrderEur <= 0m ? PositionSizing.VeryStrongOrderEur : PositionSizing.MaxOrderEur;
+        PositionSizing.BaseScoreThreshold = Math.Clamp(PositionSizing.BaseScoreThreshold, 0m, 1m);
+        PositionSizing.StrongScoreThreshold = Math.Clamp(PositionSizing.StrongScoreThreshold, 0m, 1m);
+        PositionSizing.VeryStrongScoreThreshold = Math.Clamp(PositionSizing.VeryStrongScoreThreshold, 0m, 1m);
+        PositionSizing.StrongEmaGapScoreThreshold = Math.Clamp(PositionSizing.StrongEmaGapScoreThreshold, 0m, 1m);
+        PositionSizing.StrongEmaGapPercent = Math.Max(0m, PositionSizing.StrongEmaGapPercent);
     }
 
     private static string NormalizePair(string pair)
@@ -237,6 +254,22 @@ internal sealed class StrategyOptions
     public int RsiPeriod { get; set; } = 14;
     public decimal MinimumEmaGapPercent { get; set; } = 0.05m;
     public decimal MinimumLongScore { get; set; } = 0.55m;
+}
+
+internal sealed class PositionSizingOptions
+{
+    public bool Enabled { get; set; } = false;
+    public decimal CashReserveEur { get; set; } = 0m;
+    public decimal SmallOrderEur { get; set; } = 5m;
+    public decimal BaseOrderEur { get; set; } = 10m;
+    public decimal StrongOrderEur { get; set; } = 15m;
+    public decimal VeryStrongOrderEur { get; set; } = 20m;
+    public decimal MaxOrderEur { get; set; } = 20m;
+    public decimal BaseScoreThreshold { get; set; } = 0.75m;
+    public decimal StrongScoreThreshold { get; set; } = 0.88m;
+    public decimal VeryStrongScoreThreshold { get; set; } = 0.94m;
+    public decimal StrongEmaGapScoreThreshold { get; set; } = 0.85m;
+    public decimal StrongEmaGapPercent { get; set; } = 0.50m;
 }
 
 internal sealed class PortfolioOptions

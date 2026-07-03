@@ -10,6 +10,16 @@ public class TechnicalDecisionEngineTests
         TargetOrderEur = 10m
     };
 
+    private static readonly PositionSizingOptions FixedSizing = new()
+    {
+        Enabled = false
+    };
+
+    private static readonly RiskOptions Risk = new()
+    {
+        MaxOrderEur = 15m
+    };
+
     private static StrategyOptions Strategy(decimal minimumEmaGapPercent) => new()
     {
         MinimumEmaGapPercent = minimumEmaGapPercent,
@@ -33,12 +43,27 @@ public class TechnicalDecisionEngineTests
 
     private static DecisionProposal Decide(decimal fastEma, decimal slowEma, decimal minimumEmaGapPercent)
     {
+        return Decide(fastEma, slowEma, rsi: 50m, minimumEmaGapPercent, FixedSizing, risk: Risk, cashEur: 75m);
+    }
+
+    private static DecisionProposal Decide(
+        decimal fastEma,
+        decimal slowEma,
+        decimal? rsi,
+        decimal minimumEmaGapPercent,
+        PositionSizingOptions positionSizing,
+        RiskOptions risk,
+        decimal cashEur)
+    {
         var engine = new TechnicalDecisionEngine();
         return engine.Decide(
             MarketState(),
-            new IndicatorSnapshot(fastEma, slowEma, Rsi: 50m),
+            new IndicatorSnapshot(fastEma, slowEma, rsi),
             Trading,
-            Strategy(minimumEmaGapPercent));
+            Strategy(minimumEmaGapPercent),
+            positionSizing,
+            risk,
+            cashEur);
     }
 
     [Fact]
@@ -97,4 +122,153 @@ public class TechnicalDecisionEngineTests
         Assert.Equal("NONE", proposal.DesiredPosition);
         Assert.Equal(0.55m, proposal.Score);
     }
+
+    [Theory]
+    [InlineData(70, 5, 0.70)]
+    [InlineData(25, 10, 0.78)]
+    [InlineData(50, 10, 0.85)]
+    public void Enabled_position_sizing_selects_order_tier_from_score(decimal rsi, decimal expectedTargetEur, decimal expectedScore)
+    {
+        var proposal = Decide(
+            fastEma: 100.2m,
+            slowEma: 100m,
+            rsi,
+            minimumEmaGapPercent: 0.05m,
+            positionSizing: EnabledSizing(),
+            risk: Risk,
+            cashEur: 75m);
+
+        Assert.Equal("LONG_MICRO", proposal.DesiredPosition);
+        Assert.Equal(expectedScore, proposal.Score);
+        Assert.Equal(expectedTargetEur, proposal.TargetNotionalEur);
+        Assert.Contains(proposal.Contributions, contribution => contribution.Name == "PositionSizing");
+    }
+
+    [Fact]
+    public void Position_sizing_uses_strong_tier_for_wide_ema_gap()
+    {
+        var proposal = Decide(
+            fastEma: 100.6m,
+            slowEma: 100m,
+            rsi: 50m,
+            minimumEmaGapPercent: 0.05m,
+            positionSizing: EnabledSizing(),
+            risk: Risk,
+            cashEur: 75m);
+
+        Assert.Equal(0.85m, proposal.Score);
+        Assert.Equal(15m, proposal.TargetNotionalEur);
+        Assert.Contains(
+            proposal.Contributions,
+            contribution => contribution.Name == "PositionSizing" && contribution.Reason.Contains("EMA gap 0.6% reached strong threshold 0.5%"));
+    }
+
+    [Theory]
+    [InlineData(35, 15)]
+    [InlineData(30, 15)]
+    [InlineData(25, 10)]
+    public void Position_sizing_reduces_strong_target_to_keep_cash_reserve(decimal cashEur, decimal expectedTargetEur)
+    {
+        var proposal = Decide(
+            fastEma: 100.6m,
+            slowEma: 100m,
+            rsi: 50m,
+            minimumEmaGapPercent: 0.05m,
+            positionSizing: EnabledSizing(),
+            risk: Risk,
+            cashEur);
+
+        Assert.Equal(0.85m, proposal.Score);
+        Assert.Equal(expectedTargetEur, proposal.TargetNotionalEur);
+    }
+
+    [Fact]
+    public void Position_sizing_reduces_base_target_to_small_target_to_keep_cash_reserve()
+    {
+        var proposal = Decide(
+            fastEma: 100.2m,
+            slowEma: 100m,
+            rsi: 25m,
+            minimumEmaGapPercent: 0.05m,
+            positionSizing: EnabledSizing(),
+            risk: Risk,
+            cashEur: 20m);
+
+        Assert.Equal(0.78m, proposal.Score);
+        Assert.Equal(5m, proposal.TargetNotionalEur);
+        Assert.Contains(
+            proposal.Contributions,
+            contribution => contribution.Name == "PositionSizing" && contribution.Reason.Contains("reduced from EUR 10"));
+    }
+
+    [Fact]
+    public void Position_sizing_allows_small_target_when_cash_after_stays_above_reserve()
+    {
+        var proposal = Decide(
+            fastEma: 100.2m,
+            slowEma: 100m,
+            rsi: 70m,
+            minimumEmaGapPercent: 0.05m,
+            positionSizing: EnabledSizing(),
+            risk: Risk,
+            cashEur: 20.01m);
+
+        Assert.Equal(0.70m, proposal.Score);
+        Assert.Equal("LONG_MICRO", proposal.DesiredPosition);
+        Assert.Equal(5m, proposal.TargetNotionalEur);
+    }
+
+    [Fact]
+    public void Position_sizing_blocks_entry_when_cash_reserve_leaves_no_tier()
+    {
+        var proposal = Decide(
+            fastEma: 100.2m,
+            slowEma: 100m,
+            rsi: 50m,
+            minimumEmaGapPercent: 0.05m,
+            positionSizing: EnabledSizing(),
+            risk: Risk,
+            cashEur: 19m);
+
+        Assert.Equal("NONE", proposal.DesiredPosition);
+        Assert.Equal(0m, proposal.TargetNotionalEur);
+        Assert.Contains(
+            proposal.Contributions,
+            contribution => contribution.Name == "PositionSizing" && contribution.Reason.Contains("selected no entry"));
+    }
+
+    [Fact]
+    public void Position_sizing_uses_lower_risk_cap_as_effective_max_order()
+    {
+        var proposal = Decide(
+            fastEma: 100.6m,
+            slowEma: 100m,
+            rsi: 50m,
+            minimumEmaGapPercent: 0.05m,
+            positionSizing: EnabledSizing(),
+            risk: new RiskOptions { MaxOrderEur = 12m },
+            cashEur: 75m);
+
+        Assert.Equal(0.85m, proposal.Score);
+        Assert.Equal(10m, proposal.TargetNotionalEur);
+        Assert.Contains(
+            proposal.Contributions,
+            contribution => contribution.Name == "PositionSizing" && contribution.Reason.Contains("max EUR 12"));
+    }
+
+    private static PositionSizingOptions EnabledSizing() => new()
+    {
+        Enabled = true,
+        CashReserveEur = 15m,
+        SmallOrderEur = 5m,
+        BaseOrderEur = 10m,
+        StrongOrderEur = 15m,
+        VeryStrongOrderEur = 15m,
+        MaxOrderEur = 15m,
+        BaseScoreThreshold = 0.75m,
+        StrongScoreThreshold = 0.88m,
+        VeryStrongScoreThreshold = 0.94m,
+        StrongEmaGapScoreThreshold = 0.85m,
+        StrongEmaGapPercent = 0.50m
+    };
 }

@@ -200,7 +200,7 @@ internal sealed class DecisionWorker(
         }
 
         var indicators = indicatorEngine.Calculate(marketState.Candles, config.Strategy);
-        var proposal = decisionEngine.Decide(marketState, indicators, config.Trading, config.Strategy);
+        var proposal = decisionEngine.Decide(marketState, indicators, config.Trading, config.Strategy, config.PositionSizing, config.Risk, portfolio.CashEur);
         var risk = riskManager.Evaluate(proposal, config.Risk);
         var currentPositionBeforeAction = portfolio.Positions.FirstOrDefault(position => position.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase))?.Clone();
         var dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk);
