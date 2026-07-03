@@ -31,6 +31,9 @@ services:
     environment:
       POSTGRES_DB: tradingbot
       POSTGRES_USER: tradingbot
+    # Expose Postgres only on the VPN interface, not on public interfaces.
+    ports:
+      - "10.8.0.1:5432:5432"
     volumes:
       - /opt/trading-bot/database:/var/lib/postgresql/data
     healthcheck:
