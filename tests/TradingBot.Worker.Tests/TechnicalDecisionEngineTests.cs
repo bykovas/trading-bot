@@ -54,7 +54,8 @@ public class TechnicalDecisionEngineTests
         PositionSizingOptions positionSizing,
         RiskOptions risk,
         decimal cashEur,
-        decimal currentExposureEur = 0m)
+        decimal currentExposureEur = 0m,
+        bool hasOpenPosition = false)
     {
         var engine = new TechnicalDecisionEngine();
         return engine.Decide(
@@ -65,7 +66,45 @@ public class TechnicalDecisionEngineTests
             positionSizing,
             risk,
             cashEur,
-            currentExposureEur);
+            currentExposureEur,
+            hasOpenPosition);
+    }
+
+    [Fact]
+    public void Zero_capacity_collapses_desired_to_none_for_a_NEW_entry()
+    {
+        // No open position + no room left for a new entry => desired NONE (unchanged behavior).
+        var sizing = new PositionSizingOptions { Enabled = true, CashReserveEur = 15m };
+        var proposal = Decide(
+            fastEma: 100.30m, slowEma: 100m, rsi: 55m, minimumEmaGapPercent: 0.20m,
+            positionSizing: sizing,
+            risk: new RiskOptions { MaxOrderEur = 10m, MaxTotalExposureEur = 50m },
+            cashEur: 25m,
+            currentExposureEur: 50m);
+
+        Assert.Equal("NONE", proposal.DesiredPosition);
+        Assert.Equal(0m, proposal.TargetNotionalEur);
+    }
+
+    [Fact]
+    public void Zero_capacity_does_NOT_collapse_desired_for_a_HELD_position()
+    {
+        // Same zero-capacity situation, but we already hold the pair: the signal is
+        // still LONG, so desired must stay LONG_MICRO — a capacity-driven NONE would
+        // masquerade as a signal flip and push the held position into the exit path.
+        var sizing = new PositionSizingOptions { Enabled = true, CashReserveEur = 15m };
+        var proposal = Decide(
+            fastEma: 100.30m, slowEma: 100m, rsi: 55m, minimumEmaGapPercent: 0.20m,
+            positionSizing: sizing,
+            risk: new RiskOptions { MaxOrderEur = 10m, MaxTotalExposureEur = 50m },
+            cashEur: 25m,
+            currentExposureEur: 50m,
+            hasOpenPosition: true);
+
+        Assert.Equal("LONG_MICRO", proposal.DesiredPosition);
+        Assert.Equal(0m, proposal.TargetNotionalEur);
+        var sizingNote = Assert.Single(proposal.Contributions, contribution => contribution.Name == "PositionSizing");
+        Assert.Contains("holding existing position", sizingNote.Reason);
     }
 
     [Fact]

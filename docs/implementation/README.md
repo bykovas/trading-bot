@@ -100,6 +100,7 @@ Legend: ✅ done · 🚧 partial · ⬜ not started
 - All `IRiskRule` implementations: exposure caps, cooldown after losses, transition-aware rules (risk-increasing vs. risk-reducing)
 - Platform-monitored stop-loss / take-profit: evaluation cycle emits Close/Reduce (§9.5)
 - Execution Engine: full delta actions (Increase / Reduce) in addition to Open/Close
+- **Rotation (opportunity-cost exit):** when slots/exposure are full and a top-quality fresh candidate (strong EMA gap, healthy RSI) is blocked only by capacity, allow closing the weakest held position (genuine signal-flip victim, age ≥ MinHold, PnL above a small floor) to fund it. Quality-gap threshold must clear the double round-trip friction (~2.2–2.5%); max 1 rotation/cycle, capped per day. **Phase 1: log-only `WOULD_ROTATE` records for ≥1 week, enable only if the measured benefit beats the measured cost.**
 - Risk-limit config versioning; kill-switch drill (test criterion §13 #13)
 - Slippage tolerance buffer on micro caps (§9.2 #3)
 

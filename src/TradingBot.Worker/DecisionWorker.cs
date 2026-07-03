@@ -288,7 +288,9 @@ internal sealed class DecisionWorker(
 
         var indicators = indicatorEngine.Calculate(marketState.Candles, config.Strategy);
         var currentExposureEur = portfolio.Positions.Sum(position => position.EntryNotionalEur);
-        var proposal = decisionEngine.Decide(marketState, indicators, config.Trading, config.Strategy, config.PositionSizing, config.Risk, portfolio.CashEur, currentExposureEur);
+        var hasOpenPosition = portfolio.Positions.Any(position =>
+            position.Pair.Equals(marketState.Instrument.Pair, StringComparison.OrdinalIgnoreCase));
+        var proposal = decisionEngine.Decide(marketState, indicators, config.Trading, config.Strategy, config.PositionSizing, config.Risk, portfolio.CashEur, currentExposureEur, hasOpenPosition);
         var risk = riskManager.Evaluate(proposal, config.Risk);
         return new PreparedDecision(marketState, indicators, proposal, risk);
     }

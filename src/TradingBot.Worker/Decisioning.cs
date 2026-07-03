@@ -10,7 +10,8 @@ internal sealed class TechnicalDecisionEngine
         PositionSizingOptions positionSizing,
         RiskOptions risk,
         decimal cashEur,
-        decimal currentExposureEur)
+        decimal currentExposureEur,
+        bool hasOpenPosition = false)
     {
         var signal = EvaluateSignal(marketState, indicators, strategy);
         var desiredPosition = signal.AllowsLong && signal.Score >= strategy.MinimumLongScore ? "LONG_MICRO" : "NONE";
@@ -18,12 +19,24 @@ internal sealed class TechnicalDecisionEngine
         var contributions = signal.Contributions.ToList();
         if (desiredPosition == "LONG_MICRO")
         {
-            var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur);
-            targetNotional = size.TargetNotionalEur;
-            contributions.Add(new SignalContribution("PositionSizing", 0m, size.Reason));
-            if (targetNotional <= 0m)
+            if (hasOpenPosition)
             {
-                desiredPosition = "NONE";
+                // A held position needs no new-entry sizing. Critically, a capacity-driven
+                // zero target must NOT collapse the desired state to NONE: when cash
+                // reserve / max exposure leave no room for NEW entries, the signal for
+                // the held pair is still LONG, and flipping to NONE here would masquerade
+                // as a signal flip and push the position into the exit path.
+                contributions.Add(new SignalContribution("PositionSizing", 0m, "holding existing position; new-entry sizing skipped"));
+            }
+            else
+            {
+                var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur);
+                targetNotional = size.TargetNotionalEur;
+                contributions.Add(new SignalContribution("PositionSizing", 0m, size.Reason));
+                if (targetNotional <= 0m)
+                {
+                    desiredPosition = "NONE";
+                }
             }
         }
 
