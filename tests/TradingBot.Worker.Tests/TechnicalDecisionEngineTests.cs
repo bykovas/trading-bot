@@ -87,6 +87,24 @@ public class TechnicalDecisionEngineTests
     }
 
     [Fact]
+    public void Risk_manager_approves_held_position_hold_instead_of_rejecting_zero_target()
+    {
+        // A held pair with a still-LONG signal carries target 0 by design. The risk
+        // gate must record that as an approved HOLD, not "target notional is zero" —
+        // otherwise the journal shows riskApproved=false on healthy positions.
+        var manager = new RiskManager();
+        var proposal = new DecisionProposal("NEW/EUR", "LONG_MICRO", 0.85m, 0m, Array.Empty<SignalContribution>());
+
+        var held = manager.Evaluate(proposal, new RiskOptions { MaxOrderEur = 10m }, hasOpenPosition: true);
+        Assert.True(held.Approved);
+        Assert.Contains(held.Reasons, reason => reason.Contains("holding existing position"));
+
+        var fresh = manager.Evaluate(proposal, new RiskOptions { MaxOrderEur = 10m }, hasOpenPosition: false);
+        Assert.False(fresh.Approved);
+        Assert.Contains(fresh.Reasons, reason => reason.Contains("target notional is zero"));
+    }
+
+    [Fact]
     public void Zero_capacity_does_NOT_collapse_desired_for_a_HELD_position()
     {
         // Same zero-capacity situation, but we already hold the pair: the signal is
