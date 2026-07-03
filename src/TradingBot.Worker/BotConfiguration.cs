@@ -70,7 +70,7 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_DRY_RUN_SLIPPAGE_BPS", value => config.DryRun.SlippageBps = ParseDecimal(value, config.DryRun.SlippageBps));
         SetIfPresent("TRADINGBOT_AI_PROVIDER", value => config.Ai.Provider = value);
         SetIfPresent("TRADINGBOT_AI_BASE_URL", value => config.Ai.BaseUrl = value);
-        SetIfPresent("TRADINGBOT_AI_API_KEY", value => config.Ai.ApiKey = value);
+        SetIfPresent("TRADINGBOT_OPENAI_API_KEY", value => config.Ai.ApiKey = value);
         SetIfPresent("TRADINGBOT_AI_MODEL", value => config.Ai.Model = value);
         SetIfPresent("TRADINGBOT_AI_MAX_RECOMMENDATIONS", value => config.Ai.MaxRecommendations = ParseInt(value, config.Ai.MaxRecommendations));
         SetIfPresent("TRADINGBOT_EXECUTION_COOLDOWN_AFTER_BUY_SECONDS", value => config.ExecutionPolicy.CooldownAfterBuySeconds = ParseInt(value, config.ExecutionPolicy.CooldownAfterBuySeconds));

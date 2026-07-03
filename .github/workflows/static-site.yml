@@ -63,6 +63,10 @@ jobs:
       WORKER_IMAGE_TAG: ${{ github.sha }}
       GHCR_USERNAME: ${{ github.actor }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TRADINGBOT_DB_PASSWORD: ${{ secrets.TRADINGBOT_DB_PASSWORD }}
+      TRADINGBOT_KRAKEN_API_KEY: ${{ secrets.TRADINGBOT_KRAKEN_API_KEY }}
+      TRADINGBOT_KRAKEN_API_SECRET: ${{ secrets.TRADINGBOT_KRAKEN_API_SECRET }}
+      TRADINGBOT_OPENAI_API_KEY: ${{ secrets.TRADINGBOT_OPENAI_API_KEY }}
 
     steps:
       - name: Checkout

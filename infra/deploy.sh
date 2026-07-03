@@ -8,6 +8,7 @@ COMPOSE_FILE="${DEPLOY_DIR}/docker-compose.prod.yml"
 TRAEFIK_DYNAMIC_FILE="${TRAEFIK_DYNAMIC_DIR}/trading-bot.yml"
 WORKER_APPSETTINGS="${DEPLOY_DIR}/appsettings.json"
 WORKER_APPSETTINGS_SOURCE="src/TradingBot.Worker/appsettings.json"
+WORKER_ENV_FILE="${DEPLOY_DIR}/.env"
 WORKER_DATA_DIR="${DEPLOY_DIR}/data"
 
 : "${IMAGE_NAME:?IMAGE_NAME is required}"
@@ -28,9 +29,17 @@ cp infra/docker-compose.prod.yml "${COMPOSE_FILE}"
 cp infra/traefik/trading-bot.yml "${TRAEFIK_DYNAMIC_FILE}"
 
 # Keep the mounted worker config in sync with repository settings on every deploy.
-# Secret injection will be handled by CI/CD separately.
 echo "Updating ${WORKER_APPSETTINGS} from repository config"
 cp "${WORKER_APPSETTINGS_SOURCE}" "${WORKER_APPSETTINGS}"
+
+echo "Writing worker environment overrides to ${WORKER_ENV_FILE}"
+umask 077
+{
+  printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  printf 'TRADINGBOT_KRAKEN_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_API_KEY:-}"
+  printf 'TRADINGBOT_KRAKEN_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_API_SECRET:-}"
+  printf 'TRADINGBOT_OPENAI_API_KEY=%s\n' "${TRADINGBOT_OPENAI_API_KEY:-}"
+} > "${WORKER_ENV_FILE}"
 
 echo "${GHCR_TOKEN}" | docker login ghcr.io \
   --username "${GHCR_USERNAME}" \
