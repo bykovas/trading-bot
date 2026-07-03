@@ -10,10 +10,9 @@ services:
     container_name: trading-bot-worker
     image: ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG:-latest}
     restart: unless-stopped
-    # Single source of truth for ALL worker config — Kraken/AI API keys, LiveTradingEnabled,
-    # market data mode, loop interval, risk and strategy — is the mounted appsettings.json.
-    # Edit /opt/trading-bot/appsettings.json on the host and restart the container.
-    # No config is injected via environment variables here.
+    # Runtime config is mounted from the host, but deploy overwrites this file
+    # from src/TradingBot.Worker/appsettings.json on every release.
+    # Secret injection can be added by CI/CD separately.
     volumes:
       - /opt/trading-bot/appsettings.json:/app/appsettings.json:ro
       - /opt/trading-bot/data:/app/data
