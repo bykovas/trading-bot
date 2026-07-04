@@ -70,6 +70,11 @@ internal sealed class DecisionWorker(
         var loadedPortfolio = dryRunPortfolio.Load();
         PrintCandidates("candidate-universe light snapshot:", lightCandidates);
 
+        // Persist the light snapshot of every universe pair right after it is fetched:
+        // bid/ask/spread cannot be rebuilt from candles later. This must never block or
+        // delay trading, so it is best-effort — a store failure is logged and ignored.
+        PersistMarketSnapshots(cycleId, utc, lightCandidates);
+
         var maxRecommendations = Math.Min(config.Trading.MaxActiveInstruments, config.Ai.MaxRecommendations);
         var advice = await watchlistAdvisor.SelectAsync(lightCandidates, maxRecommendations, cancellationToken);
         PrintWatchlistAdvice(advice);
@@ -203,6 +208,33 @@ internal sealed class DecisionWorker(
                 PortfolioAfter = portfolioAfter
             });
             Console.WriteLine($"dry-run-written state={dryRunPortfolio.GetStatePath()} events={dryRunPortfolio.GetEventsPath()}");
+        }
+    }
+
+    // Best-effort per-cycle persistence of the light market snapshot. Failures here
+    // must NEVER block or delay trading, so everything is wrapped and only logged.
+    private void PersistMarketSnapshots(string cycleId, DateTimeOffset utc, IReadOnlyList<InstrumentMarketState> lightStates)
+    {
+        try
+        {
+            var snapshots = lightStates
+                .Select(state => new MarketSnapshotRecord(
+                    cycleId,
+                    utc,
+                    state.Instrument.Pair,
+                    state.BestBid,
+                    state.BestAsk,
+                    state.LastPrice,
+                    state.LastVolume,
+                    state.ChangePercent))
+                .ToList();
+
+            dryRunPortfolio.AppendMarketSnapshots(snapshots);
+            Console.WriteLine($"market-snapshots: persisted {snapshots.Count} rows for cycle {cycleId}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"market-snapshots: FAILED to persist for cycle {cycleId} ({ex.Message}); continuing cycle");
         }
     }
 

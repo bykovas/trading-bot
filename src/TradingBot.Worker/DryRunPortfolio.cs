@@ -82,6 +82,11 @@ internal sealed class DryRunPortfolio(
         _store.AppendCycle(record);
     }
 
+    public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots)
+    {
+        _store.AppendMarketSnapshots(snapshots);
+    }
+
     public string GetStatePath() => _store.StateDescription;
     public string GetEventsPath() => _store.EventsDescription;
 

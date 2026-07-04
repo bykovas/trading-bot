@@ -11,6 +11,10 @@ internal interface IDryRunPortfolioStore
     PortfolioState? Load();
     void Save(PortfolioState state);
     void AppendCycle(DryRunCycleRecord record);
+
+    // Persist the per-cycle light market snapshot (one row per universe pair) in a
+    // single batch. Callers wrap this so a failure never blocks the trading cycle.
+    void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots);
 }
 
 internal sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunPortfolioStore
@@ -28,6 +32,7 @@ internal sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunP
 
     private string StatePath => Path.Combine(options.OutputDirectory, options.StateFile);
     private string EventsPath => Path.Combine(options.OutputDirectory, options.EventsFile);
+    private string MarketSnapshotsPath => Path.Combine(options.OutputDirectory, options.MarketSnapshotsFile);
 
     public string StateDescription => StatePath;
     public string EventsDescription => EventsPath;
@@ -66,6 +71,18 @@ internal sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunP
         Directory.CreateDirectory(options.OutputDirectory);
         var line = JsonSerializer.Serialize(record, _eventJsonOptions);
         File.AppendAllText(EventsPath, line + Environment.NewLine);
+    }
+
+    public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots)
+    {
+        if (snapshots.Count == 0)
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(options.OutputDirectory);
+        var lines = snapshots.Select(snapshot => JsonSerializer.Serialize(snapshot, _eventJsonOptions));
+        File.AppendAllLines(MarketSnapshotsPath, lines);
     }
 }
 
@@ -135,6 +152,35 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
         command.ExecuteNonQuery();
     }
 
+    public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots)
+    {
+        if (snapshots.Count == 0)
+        {
+            return;
+        }
+
+        EnsureSchema();
+
+        // One batch COPY per cycle. Lean by design: no retention, no extra indexes.
+        using var connection = OpenConnection();
+        using var writer = connection.BeginBinaryImport(
+            "copy market_snapshots (cycle_id, utc, pair, bid, ask, last, volume24h, change_percent) from stdin (format binary)");
+        foreach (var snapshot in snapshots)
+        {
+            writer.StartRow();
+            writer.Write(snapshot.CycleId, NpgsqlDbType.Text);
+            writer.Write(snapshot.Utc.UtcDateTime, NpgsqlDbType.TimestampTz);
+            writer.Write(snapshot.Pair, NpgsqlDbType.Text);
+            writer.Write(snapshot.Bid, NpgsqlDbType.Numeric);
+            writer.Write(snapshot.Ask, NpgsqlDbType.Numeric);
+            writer.Write(snapshot.Last, NpgsqlDbType.Numeric);
+            writer.Write(snapshot.Volume24h, NpgsqlDbType.Numeric);
+            writer.Write(snapshot.ChangePercent, NpgsqlDbType.Numeric);
+        }
+
+        writer.Complete();
+    }
+
     private void EnsureSchema()
     {
         if (_schemaReady)
@@ -158,6 +204,19 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
             );
 
             create index if not exists ix_dry_run_cycles_utc on dry_run_cycles (utc desc);
+
+            create table if not exists market_snapshots (
+                cycle_id text not null,
+                utc timestamptz not null,
+                pair text not null,
+                bid numeric not null,
+                ask numeric not null,
+                last numeric not null,
+                volume24h numeric not null,
+                change_percent numeric not null
+            );
+
+            create index if not exists ix_market_snapshots_cycle_id on market_snapshots (cycle_id);
 
             create or replace view portfolio_summary as
             select

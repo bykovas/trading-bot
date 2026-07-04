@@ -359,6 +359,11 @@ internal sealed class DryRunOptions
     public string StateFile { get; set; } = "portfolio-state.json";
     public string EventsFile { get; set; } = "events.jsonl";
 
+    // Per-cycle light market snapshot (bid/ask/last/volume/change for every universe
+    // pair). Written to this JSONL file when the database is disabled; the spread data
+    // it captures cannot be reconstructed from candles later.
+    public string MarketSnapshotsFile { get; set; } = "market-snapshots.jsonl";
+
     // Fee/slippage model for the dry-run simulation. These are meant to be an HONEST
     // estimate of real execution cost (26 bps = Kraken Pro starter taker tier, ~10 bps
     // slippage), not a padded worst case. Safety margin belongs in the risk limits

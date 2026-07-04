@@ -114,3 +114,15 @@ internal sealed record WatchlistRecommendation(
     string Pair,
     int Priority,
     string Reason);
+
+// One light market snapshot row per universe pair per cycle. Captures the bid/ask/
+// spread state that Kraken candles cannot reconstruct after the fact.
+internal sealed record MarketSnapshotRecord(
+    string CycleId,
+    DateTimeOffset Utc,
+    string Pair,
+    decimal Bid,
+    decimal Ask,
+    decimal Last,
+    decimal Volume24h,
+    decimal ChangePercent);
