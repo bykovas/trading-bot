@@ -8,8 +8,11 @@ internal sealed class DecisionWorker(
     TechnicalDecisionEngine decisionEngine,
     RiskManager riskManager,
     DryRunPortfolio dryRunPortfolio,
-    KrakenBroker? broker)
+    KrakenBroker? broker,
+    WorkerBuildInfo? buildInfo = null)
 {
+    private readonly WorkerBuildInfo _buildInfo = buildInfo ?? WorkerBuildInfo.FromEnvironment();
+
     // Number of consecutive failed cycles that auto-trips the kill switch. A crash
     // loop with unmonitored stop-losses is far more dangerous than pausing, so after
     // this many back-to-back failures we halt new orders and let the operator look.
@@ -62,6 +65,7 @@ internal sealed class DecisionWorker(
         var cycleId = utc.ToString("yyyyMMddHHmmss");
         Console.WriteLine();
         Console.WriteLine($"cycle={cycleId} utc={utc:O}");
+        Console.WriteLine($"worker-version={_buildInfo.Version} commit={_buildInfo.Commit} strategy={_buildInfo.StrategyVersion} changeSet={_buildInfo.ChangeSet}");
 
         var lightCandidates = await marketDataSource.GetLightMarketStatesAsync(
             config.CandidateUniverse,
@@ -202,6 +206,7 @@ internal sealed class DecisionWorker(
                 Utc = utc,
                 MarketDataMode = config.Kraken.MarketDataMode,
                 AiProvider = config.Ai.Provider,
+                Worker = _buildInfo,
                 ActivePairs = selected.Select(candidate => candidate.Instrument.Pair).ToList(),
                 Decisions = decisionRecords,
                 PortfolioBefore = portfolioBefore,

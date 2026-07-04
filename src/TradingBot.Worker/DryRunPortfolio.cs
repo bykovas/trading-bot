@@ -834,6 +834,7 @@ internal sealed class DryRunCycleRecord
     public required DateTimeOffset Utc { get; init; }
     public required string MarketDataMode { get; init; }
     public required string AiProvider { get; init; }
+    public required WorkerBuildInfo Worker { get; init; }
     public required IReadOnlyList<string> ActivePairs { get; init; }
     public required IReadOnlyList<DryRunDecisionRecord> Decisions { get; init; }
     public required PortfolioState PortfolioBefore { get; init; }

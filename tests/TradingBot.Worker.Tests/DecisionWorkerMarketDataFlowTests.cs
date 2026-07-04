@@ -33,6 +33,7 @@ public class DecisionWorkerMarketDataFlowTests
         Assert.Contains("HELD/EUR", marketData.FullRequestedPairs);
         var eventsJson = File.ReadAllText(Path.Combine(outputDirectory, "events.jsonl"));
         Assert.Contains("\"pair\":\"HELD/EUR\"", eventsJson);
+        Assert.Contains("\"worker\":{\"version\":\"test-version\"", eventsJson);
     }
 
     [Fact]
@@ -64,7 +65,14 @@ public class DecisionWorkerMarketDataFlowTests
         new TechnicalDecisionEngine(),
         new RiskManager(),
         new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit, config.PositionSizing),
-        broker: null);
+        broker: null,
+        buildInfo: new WorkerBuildInfo(
+            "test-version",
+            "test-commit",
+            "2026-07-04T00:00:00Z",
+            "test-image",
+            "test-strategy",
+            "test-change-set"));
 
     private static BotConfiguration Config(string outputDirectory, params string[] pairs) => new()
     {
