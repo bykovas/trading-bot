@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BlynAI Capital - Trades Journal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --font-display: "Space Grotesk", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+      --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+      --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+      --bg: #050505;
+      --panel: #11120f;
+      --line: rgba(246, 218, 160, 0.13);
+      --ink: #f6efe1;
+      --soft: #c8bba6;
+      --muted: #81786b;
+      --gold: #f5b84f;
+      --gold-soft: #ffd987;
+      --cream: #f7e6c1;
+      --green: #41eda0;
+      --red: #ff5367;
+      --blue: #6faeff;
+      --purple: #b9a6f5;
+      --amber: #f0a63a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font-body);
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      background:
+        linear-gradient(120deg, rgba(5, 5, 5, 0.98), rgba(14, 15, 12, 0.96) 52%, rgba(4, 15, 12, 0.94)),
+        radial-gradient(circle at 12% 8%, rgba(245, 184, 79, 0.11), transparent 32%),
+        radial-gradient(circle at 88% 12%, rgba(65, 237, 160, 0.08), transparent 35%),
+        var(--bg);
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 44px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 0 26px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand-lockup {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .bc-mark {
+      position: relative;
+      width: 40px;
+      height: 40px;
+      flex: none;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid rgba(246, 218, 160, 0.24);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 22px rgba(245, 184, 79, 0.18);
+    }
+
+    .brand-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .brand-copy .n {
+      margin: 0;
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 16px;
+      letter-spacing: 0;
+      line-height: 1.05;
+      color: var(--cream);
+      white-space: nowrap;
+    }
+
+    .brand-copy .n .ai { color: var(--gold); }
+
+    .brand-copy .s {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #9b87f5;
+      white-space: nowrap;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 38px;
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .82);
+      color: var(--soft);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 14px rgba(111, 174, 255, .5);
+    }
+
+    .dot.ok {
+      background: var(--green);
+      box-shadow: 0 0 14px rgba(65, 237, 160, .5);
+    }
+
+    .dot.bad {
+      background: var(--red);
+      box-shadow: 0 0 14px rgba(255, 83, 103, .5);
+    }
+
+    .api-links {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    .api-links a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .72);
+      color: var(--gold);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    .api-links a:hover {
+      border-color: rgba(245, 184, 79, .38);
+      background: rgba(245, 184, 79, .08);
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: 24px 0;
+    }
+
+    .metric, .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012)), rgba(17,18,15,.9);
+      box-shadow: 0 22px 60px rgba(0,0,0,.28);
+    }
+
+    .metric {
+      min-height: 106px;
+      padding: 18px;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+
+    .value {
+      margin-top: 13px;
+      font-family: var(--font-mono);
+      font-size: clamp(22px, 2.6vw, 32px);
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+
+    .subvalue {
+      margin-top: 9px;
+      color: var(--soft);
+      font-size: 13px;
+    }
+
+    .panel {
+      overflow: hidden;
+    }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(23, 24, 18, .75);
+    }
+
+    .panel-title {
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .updated {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+
+    .trade-list {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .trade {
+      display: grid;
+      grid-template-columns: minmax(190px, 0.85fr) minmax(280px, 1.35fr) minmax(250px, 1fr);
+      gap: 18px;
+      padding: 18px;
+      border-bottom: 1px solid rgba(246, 218, 160, .08);
+    }
+
+    .trade:last-child {
+      border-bottom: 0;
+    }
+
+    .trade-main {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .trade-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .pair {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--cream);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .badge.buy {
+      color: var(--green);
+      border-color: rgba(65, 237, 160, .34);
+      background: rgba(65, 237, 160, .08);
+    }
+
+    .badge.sell {
+      color: var(--red);
+      border-color: rgba(255, 83, 103, .34);
+      background: rgba(255, 83, 103, .08);
+    }
+
+    .badge.exploratory {
+      color: var(--amber);
+      border-color: rgba(240, 166, 58, .34);
+      background: rgba(240, 166, 58, .08);
+    }
+
+    .badge.firm {
+      color: var(--green);
+      border-color: rgba(65, 237, 160, .34);
+      background: rgba(65, 237, 160, .08);
+    }
+
+    .time {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .numbers {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 14px;
+      color: var(--soft);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .numbers span {
+      color: var(--muted);
+      display: block;
+      font-family: var(--font-body);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+
+    .why {
+      min-width: 0;
+    }
+
+    .why-title, .detail-title {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .07em;
+      margin-bottom: 7px;
+      text-transform: uppercase;
+    }
+
+    .why-text {
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .plain-reason {
+      margin-top: 7px;
+      color: var(--soft);
+      font-size: 13px;
+    }
+
+    .detail {
+      min-width: 0;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      min-height: 26px;
+      padding: 0 8px;
+      border: 1px solid rgba(246, 218, 160, .12);
+      border-radius: 8px;
+      background: rgba(0, 0, 0, .16);
+      color: var(--soft);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chip.good { color: var(--green); border-color: rgba(65, 237, 160, .25); }
+    .chip.bad { color: var(--red); border-color: rgba(255, 83, 103, .25); }
+    .chip.warn { color: var(--amber); border-color: rgba(240, 166, 58, .25); }
+    .chip.info { color: var(--blue); border-color: rgba(111, 174, 255, .25); }
+
+    .empty, .warning {
+      padding: 34px 18px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .warning {
+      display: none;
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      border: 1px solid rgba(245, 184, 79, .32);
+      border-radius: 8px;
+      background: rgba(245, 184, 79, .08);
+      color: var(--gold);
+      text-align: left;
+      font-size: 13px;
+    }
+
+    .positive { color: var(--green); }
+    .negative { color: var(--red); }
+    .gold { color: var(--gold); }
+
+    @media (max-width: 960px) {
+      header { align-items: flex-start; flex-direction: column; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .trade { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      main {
+        width: min(100% - 20px, 1180px);
+        padding-top: 18px;
+      }
+
+      .summary { grid-template-columns: 1fr; }
+      .panel-head { align-items: flex-start; flex-direction: column; }
+      .trade { padding: 14px; }
+      .numbers { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <a class="brand-lockup" href="/dash.html" aria-label="BlynAI Capital">
+        <span class="bc-mark">
+          <svg width="30" height="30" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="bcMark" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#FFD987"/>
+                <stop offset="1" stop-color="#F5B84F"/>
+              </linearGradient>
+            </defs>
+            <path d="M16.5 9 L8.5 20 L16.5 31" stroke="url(#bcMark)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <path d="M23.5 9 L31.5 20 L23.5 31" stroke="url(#bcMark)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <circle cx="17" cy="17.5" r="2.1" fill="#FFD987"/>
+            <circle cx="23" cy="17.5" r="2.1" fill="#C8963B"/>
+            <circle cx="17" cy="22.5" r="2.1" fill="#C8963B"/>
+            <circle cx="23" cy="22.5" r="2.1" fill="#FFD987"/>
+          </svg>
+        </span>
+        <span class="brand-copy">
+          <span class="n">Blyn<span class="ai">AI</span> Capital</span>
+          <span class="s">BYKOVAS-FINANCE LAB</span>
+        </span>
+      </a>
+      <div class="status">
+        <span id="status-dot" class="dot"></span>
+        <span id="status-text">Loading trades</span>
+      </div>
+    </header>
+
+    <nav class="api-links" aria-label="Navigation links">
+      <a href="/dash.html">Portfolio dashboard</a>
+      <a href="/cycles.html">Cycles table</a>
+      <a href="/market-snapshots.html">Market snapshots table</a>
+      <a href="/api/export/cycles-and-snapshots.csv">Export CSV</a>
+    </nav>
+
+    <section class="summary" aria-label="Trade journal summary">
+      <div class="metric">
+        <div class="label">Trades shown</div>
+        <div id="trade-count" class="value gold">--</div>
+        <div class="subvalue">Only buys and sells</div>
+      </div>
+      <div class="metric">
+        <div class="label">Buys</div>
+        <div id="buy-count" class="value">--</div>
+        <div class="subvalue">Opened virtual positions</div>
+      </div>
+      <div class="metric">
+        <div class="label">Sells</div>
+        <div id="sell-count" class="value">--</div>
+        <div class="subvalue">Closed virtual positions</div>
+      </div>
+      <div class="metric">
+        <div class="label">Realized PnL in list</div>
+        <div id="realized-pnl" class="value">--</div>
+        <div class="subvalue">From visible sell rows</div>
+      </div>
+    </section>
+
+    <div id="warning" class="warning"></div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-title">Trades journal</div>
+        <div id="updated" class="updated">not updated yet</div>
+      </div>
+      <div id="trade-list" class="trade-list">
+        <div class="empty">Loading trades</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const els = {
+      statusDot: document.getElementById("status-dot"),
+      statusText: document.getElementById("status-text"),
+      tradeCount: document.getElementById("trade-count"),
+      buyCount: document.getElementById("buy-count"),
+      sellCount: document.getElementById("sell-count"),
+      realizedPnl: document.getElementById("realized-pnl"),
+      warning: document.getElementById("warning"),
+      updated: document.getElementById("updated"),
+      tradeList: document.getElementById("trade-list")
+    };
+
+    const eur = new Intl.NumberFormat("en-IE", {
+      style: "currency",
+      currency: "EUR",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+
+    const numberFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function money(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? eur.format(n) : "--";
+    }
+
+    function signedMoney(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "--";
+      return `${n >= 0 ? "+" : ""}${eur.format(n)}`;
+    }
+
+    function percent(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "--";
+      return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+    }
+
+    function number(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? numberFmt.format(n) : "--";
+    }
+
+    function score(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n.toFixed(2) : "--";
+    }
+
+    function dateLabel(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "--";
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/Vilnius",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23"
+      }).formatToParts(date);
+      const byType = Object.fromEntries(parts.map(part => [part.type, part.value]));
+      return `${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute} LT`;
+    }
+
+    function ltDateTime(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "--";
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/Vilnius",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23"
+      }).formatToParts(date);
+      const byType = Object.fromEntries(parts.map(part => [part.type, part.value]));
+      return `${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute}:${byType.second}`;
+    }
+
+    function pnlClass(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n === 0) return "";
+      return n > 0 ? "positive" : "negative";
+    }
+
+    function setStatus(kind, text) {
+      els.statusDot.className = `dot ${kind === "ok" ? "ok" : kind === "bad" ? "bad" : ""}`;
+      els.statusText.textContent = text;
+    }
+
+    function setWarning(text) {
+      els.warning.style.display = text ? "block" : "none";
+      els.warning.textContent = text || "";
+    }
+
+    function getRecord(cycle) {
+      return cycle.record ?? cycle.Record ?? cycle.recordJson ?? cycle.record_json ?? {};
+    }
+
+    function contributionMap(decision) {
+      const map = new Map();
+      for (const item of decision.contributions || []) {
+        map.set(item.name, item);
+      }
+      return map;
+    }
+
+    function topContributions(decision) {
+      const ignored = new Set(["PositionSizing", "ExitSignal", "EmaGapVelocity"]);
+      return (decision.contributions || [])
+        .filter(item => !ignored.has(item.name))
+        .filter(item => Number(item.value) !== 0 || ["EMA", "RSI", "Volume", "PriceAction"].includes(item.name))
+        .sort((a, b) => Math.abs(Number(b.value || 0)) - Math.abs(Number(a.value || 0)))
+        .slice(0, 5);
+    }
+
+    function chipClass(item) {
+      const value = Number(item.value);
+      if (item.name === "VolumeCap" || value < 0) return "bad";
+      if (item.name === "Exploratory" || item.name === "Volume") return value > 0 ? "good" : "warn";
+      if (value > 0) return "good";
+      return "info";
+    }
+
+    function exitExplanation(code, reason) {
+      const map = {
+        SELL_TAKE_PROFIT: "Продал, потому что позиция достигла take-profit. Это фиксация прибыли, а не паника.",
+        SELL_STOP_LOSS: "Продал, потому что позиция дошла до hard stop-loss.",
+        SELL_SCORE_DECAY: "Продал, потому что первоначальный сильный сигнал развалился, пока позиция была убыточной.",
+        SELL_POST_ENTRY_ADVERSE: "Продал, потому что сразу после входа цена пошла против позиции, а сигнал перестал подтверждаться.",
+        SELL_MAX_HOLD: "Продал, потому что позиция держалась дольше максимального времени.",
+        SELL_SIGNAL_FLIP: "Продал, потому что стратегия больше не хотела держать long."
+      };
+      if (code && map[code]) return map[code];
+      if (String(reason || "").toLowerCase().includes("take-profit")) return map.SELL_TAKE_PROFIT;
+      if (String(reason || "").toLowerCase().includes("stop-loss")) return map.SELL_STOP_LOSS;
+      return "Продал по exit rule. Точный технический текст ниже.";
+    }
+
+    function buyExplanation(decision, action, contribs) {
+      const parts = [];
+      const ema = contribs.get("EMA");
+      const momentum = contribs.get("Momentum");
+      const volume = contribs.get("Volume");
+      const priceAction = contribs.get("PriceAction");
+      const rsi = contribs.get("RSI");
+
+      if (ema && Number(ema.value) > 0) parts.push("EMA была bullish");
+      if (momentum && Number(momentum.value) > 0) parts.push("momentum подтверждал движение");
+      if (volume && Number(volume.value) > 0) parts.push("volume подтвердил вход");
+      if (priceAction && Number(priceAction.value) >= 0 && decision.priceActionDirection === "RISING") parts.push("recent price action был rising");
+      if (rsi && Number(rsi.value) < 0) parts.push("RSI был перегрет, поэтому вход слабее");
+
+      const prefix = decision.exploratory || action.exploratory
+        ? "Купил как exploratory dry-run вход ниже основного порога 0.90."
+        : "Купил как обычный вход по полному сигналу.";
+      const detail = parts.length ? ` Основание: ${parts.join(", ")}.` : " Подробности сигнала смотри в contributions.";
+      return prefix + detail;
+    }
+
+    function parseRealizedPnl(reason) {
+      const match = String(reason || "").match(/realized PnL EUR ([+-]?\d+(?:\.\d+)?)/i);
+      return match ? Number(match[1]) : 0;
+    }
+
+    function buildTrade(cycle, decision) {
+      const action = decision.dryRunAction || {};
+      const isBuy = action.action === "WOULD_BUY";
+      const contribs = contributionMap(decision);
+      const reason = action.reason || "";
+      const realized = isBuy ? 0 : parseRealizedPnl(reason);
+
+      return {
+        utc: cycle.utc,
+        pair: decision.pair || action.pair,
+        action: isBuy ? "BUY" : "SELL",
+        actionClass: isBuy ? "buy" : "sell",
+        mode: isBuy
+          ? (decision.exploratory || action.exploratory ? "exploratory" : "firm")
+          : (action.exitReasonCode || "sell"),
+        modeClass: isBuy
+          ? (decision.exploratory || action.exploratory ? "exploratory" : "firm")
+          : "sell",
+        explanation: isBuy ? buyExplanation(decision, action, contribs) : exitExplanation(action.exitReasonCode, reason),
+        technicalReason: reason,
+        score: decision.score,
+        price: action.fillPrice || decision.price || action.lastPrice,
+        quantity: action.quantity,
+        fee: action.feeEur,
+        target: action.targetNotionalEur || action.grossNotionalEur || action.netNotionalEur,
+        realized,
+        realizedPercent: isBuy ? null : reason.match(/\((-?\d+(?:\.\d+)?)%\)/)?.[1],
+        exitReasonCode: action.exitReasonCode,
+        holdReasonCode: action.holdReasonCode,
+        spreadPercent: decision.spreadPercent,
+        priceActionDirection: decision.priceActionDirection,
+        priceActionTrendPercent: decision.priceActionTrendPercent,
+        emaGap: decision.bullishEmaGapPercent,
+        contributions: topContributions(decision)
+      };
+    }
+
+    function collectTrades(cycles) {
+      const trades = [];
+      for (const cycle of cycles) {
+        const record = getRecord(cycle);
+        const cycleUtc = cycle.utc || record.utc;
+        for (const decision of record.decisions || []) {
+          const action = decision.dryRunAction || {};
+          if (action.action === "WOULD_BUY" || action.action === "WOULD_SELL") {
+            trades.push(buildTrade({ utc: cycleUtc }, decision));
+          }
+        }
+      }
+      return trades.sort((a, b) => new Date(b.utc) - new Date(a.utc));
+    }
+
+    function renderTrade(trade) {
+      const realizedHtml = trade.action === "SELL"
+        ? `<div><span>Realized</span><strong class="${pnlClass(trade.realized)}">${signedMoney(trade.realized)} ${trade.realizedPercent != null ? percent(trade.realizedPercent) : ""}</strong></div>`
+        : `<div><span>Target</span><strong>${money(trade.target)}</strong></div>`;
+
+      const chipHtml = trade.contributions.map(item => `
+        <span class="chip ${chipClass(item)}" title="${escapeHtml(item.reason || "")}">
+          ${escapeHtml(item.name)} ${Number(item.value) > 0 ? "+" : ""}${score(item.value)}
+        </span>
+      `).join("");
+
+      const contextChips = [
+        trade.spreadPercent != null ? `<span class="chip info">spread ${percent(trade.spreadPercent)}</span>` : "",
+        trade.priceActionDirection ? `<span class="chip info">PA ${escapeHtml(trade.priceActionDirection)} ${trade.priceActionTrendPercent != null ? percent(trade.priceActionTrendPercent) : ""}</span>` : "",
+        trade.emaGap != null ? `<span class="chip info">EMA gap ${percent(trade.emaGap)}</span>` : "",
+        trade.exitReasonCode ? `<span class="chip warn">${escapeHtml(trade.exitReasonCode)}</span>` : ""
+      ].filter(Boolean).join("");
+
+      return `
+        <article class="trade">
+          <div class="trade-main">
+            <div class="trade-title">
+              <span class="pair">${escapeHtml(trade.pair)}</span>
+              <span class="badge ${trade.actionClass}">${trade.action}</span>
+              <span class="badge ${trade.modeClass}">${escapeHtml(trade.mode)}</span>
+            </div>
+            <div class="time">${dateLabel(trade.utc)}</div>
+            <div class="numbers">
+              <div><span>Fill price</span><strong>${money(trade.price)}</strong></div>
+              <div><span>Quantity</span><strong>${number(trade.quantity)}</strong></div>
+              <div><span>Fee</span><strong>${money(trade.fee)}</strong></div>
+              <div><span>Score</span><strong>${score(trade.score)}</strong></div>
+              ${realizedHtml}
+            </div>
+          </div>
+          <div class="why">
+            <div class="why-title">Why</div>
+            <div class="why-text">${escapeHtml(trade.explanation)}</div>
+            <div class="plain-reason">${escapeHtml(trade.technicalReason)}</div>
+          </div>
+          <div class="detail">
+            <div class="detail-title">Signals</div>
+            <div class="chips">${chipHtml || '<span class="chip">no signal details</span>'}</div>
+            <div class="detail-title" style="margin-top:12px">Context</div>
+            <div class="chips">${contextChips || '<span class="chip">no context</span>'}</div>
+          </div>
+        </article>
+      `;
+    }
+
+    function render(trades, fetchedAt) {
+      const buys = trades.filter(trade => trade.action === "BUY").length;
+      const sells = trades.filter(trade => trade.action === "SELL").length;
+      const realized = trades.reduce((sum, trade) => sum + (trade.action === "SELL" ? Number(trade.realized || 0) : 0), 0);
+
+      els.tradeCount.textContent = String(trades.length);
+      els.buyCount.textContent = String(buys);
+      els.sellCount.textContent = String(sells);
+      els.realizedPnl.textContent = signedMoney(realized);
+      els.realizedPnl.className = `value ${pnlClass(realized)}`;
+      els.updated.textContent = `loaded ${ltDateTime(fetchedAt)} LT`;
+
+      if (trades.length === 0) {
+        els.tradeList.innerHTML = '<div class="empty">No buy or sell rows found in loaded cycles</div>';
+      } else {
+        els.tradeList.innerHTML = trades.map(renderTrade).join("");
+      }
+    }
+
+    async function fetchCycles() {
+      const cycles = [];
+      let offset = 0;
+      const limit = 200;
+      const maxCycles = 1000;
+
+      while (offset != null && cycles.length < maxCycles) {
+        const response = await fetch(`/api/cycles?limit=${limit}&offset=${offset}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        cycles.push(...(payload.items || payload.Items || []));
+        offset = payload.nextOffset ?? payload.NextOffset ?? null;
+      }
+
+      return { cycles, truncated: offset != null };
+    }
+
+    async function refresh() {
+      try {
+        const { cycles, truncated } = await fetchCycles();
+        const trades = collectTrades(cycles);
+        render(trades, new Date());
+        setWarning(truncated ? "Showing the newest 1000 cycles only. Older trades may exist in previous pages." : "");
+        setStatus("ok", "Live data");
+      } catch (error) {
+        setStatus("bad", "API unavailable");
+        setWarning(error.message || "Failed to load trades");
+        els.tradeList.innerHTML = '<div class="empty">Could not load trades</div>';
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 10000);
+  </script>
+</body>
+</html>

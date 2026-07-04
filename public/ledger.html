@@ -1016,7 +1016,7 @@
     /* ================= DATA (server NDJSON format, parsed) ================= */
     const DATA = [
       {
-        id: '20260702185616', seq: 1, time: '18:56:16', date: '02 Jul 2026', mode: 'KRAKEN',
+        id: '20260702185616', seq: 1, time: '18:56:16', date: '2026-07-02', mode: 'KRAKEN',
         total: 74.6903, cash: 45, posVal: 29.6903,
         positions: [
           { pair: 'SOL/EUR', entry: 70.91084, last: 70.79, mkt: 9.8991, pnlPct: -1.009 },
@@ -1031,7 +1031,7 @@
         ]
       },
       {
-        id: '20260702190118', seq: 2, time: '19:01:18', date: '02 Jul 2026', mode: 'KRAKEN',
+        id: '20260702190118', seq: 2, time: '19:01:18', date: '2026-07-02', mode: 'KRAKEN',
         total: 74.6959, cash: 45, posVal: 29.6959,
         positions: [
           { pair: 'SOL/EUR', entry: 70.91084, last: 70.82, mkt: 9.8837, pnlPct: -1.1627 },
@@ -1046,7 +1046,7 @@
         ]
       },
       {
-        id: '20260702190619', seq: 3, time: '19:06:19', date: '02 Jul 2026', mode: 'KRAKEN',
+        id: '20260702190619', seq: 3, time: '19:06:19', date: '2026-07-02', mode: 'KRAKEN',
         total: 74.6594, cash: 45, posVal: 29.6594,
         positions: [
           { pair: 'SOL/EUR', entry: 70.91084, last: 70.85, mkt: 9.8907, pnlPct: -1.0929 },
@@ -1061,7 +1061,7 @@
         ]
       },
       {
-        id: '20260702191121', seq: 4, time: '19:11:21', date: '02 Jul 2026', mode: 'KRAKEN',
+        id: '20260702191121', seq: 4, time: '19:11:21', date: '2026-07-02', mode: 'KRAKEN',
         total: 74.6155, cash: 45, posVal: 29.6155,
         positions: [
           { pair: 'SOL/EUR', entry: 70.91084, last: 70.78, mkt: 9.8921, pnlPct: -1.0789 },
@@ -1076,7 +1076,7 @@
         ]
       },
       {
-        id: '20260702191622', seq: 5, time: '19:16:22', date: '02 Jul 2026', mode: 'KRAKEN',
+        id: '20260702191622', seq: 5, time: '19:16:22', date: '2026-07-02', mode: 'KRAKEN',
         total: 74.5891, cash: 45, posVal: 29.5891,
         positions: [
           { pair: 'SOL/EUR', entry: 70.91084, last: 70.89, mkt: 9.8865, pnlPct: -1.1348 },
@@ -1117,7 +1117,7 @@
       const pf = DATA[DATA.length - 1];
       const seedDelta = pf.total - 75;
       document.getElementById('cycMeta').innerHTML =
-        DATA.length + ' \u00B7 last <b>' + pf.time + ' UTC</b>';
+        DATA.length + ' \u00B7 last <b>' + pf.date + ' ' + pf.time + ' LT</b>';
       document.getElementById('pfTotal').textContent = eur(pf.total);
       const dc = document.getElementById('pfDelta');
       dc.className = 'delta-chip ' + (seedDelta < 0 ? 'neg' : 'pos');
@@ -1202,7 +1202,7 @@
       <div style="display:flex;align-items:center;gap:14px;">
         <span class="seq">${String(c.seq).padStart(2, '0')}</span>
         <div>
-          <div class="cy-time">${c.time}<small> UTC</small></div>
+          <div class="cy-time">${c.time}<small> LT</small></div>
           <div class="cy-sub">${c.date} \u00B7 ${c.mode} \u00B7 ${parts.join(' \u00B7 ')}</div>
         </div>
       </div>

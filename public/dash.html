@@ -389,6 +389,7 @@
     </header>
 
     <nav class="api-links" aria-label="Raw API links">
+      <a href="/trades.html">Trades journal</a>
       <a href="/cycles.html">Cycles table</a>
       <a href="/market-snapshots.html">Market snapshots table</a>
       <a href="/api/export/cycles-and-snapshots.csv">Export CSV</a>
@@ -500,6 +501,23 @@
       return `${hours}:${String(remainingMinutes).padStart(2, "0")}`;
     }
 
+    function ltDateTime(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "--";
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/Vilnius",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23"
+      }).formatToParts(date);
+      const byType = Object.fromEntries(parts.map(part => [part.type, part.value]));
+      return `${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute}:${byType.second}`;
+    }
+
     function pnlClass(value) {
       const n = Number(value);
       if (!Number.isFinite(n) || n === 0) return "";
@@ -551,7 +569,7 @@
         els.positionsValue.textContent = "--";
         els.openPositions.textContent = "0 open positions";
         els.dailyPnl.textContent = "--";
-        els.dailyDate.textContent = "UTC day";
+        els.dailyDate.textContent = "risk day";
         els.updated.textContent = "waiting for worker data";
         renderPositions([]);
         setStatus("ok", "API connected");
@@ -564,8 +582,8 @@
       els.openPositions.textContent = `${summary.openPositions} open position${summary.openPositions === 1 ? "" : "s"}`;
       els.dailyPnl.textContent = signedMoney(summary.dailyRealizedPnlEur ?? 0);
       els.dailyPnl.className = `value ${pnlClass(summary.dailyRealizedPnlEur ?? 0)}`;
-      els.dailyDate.textContent = summary.dailyRiskDateUtc ? `${summary.dailyRiskDateUtc} UTC` : "UTC day";
-      els.updated.textContent = `portfolio updated ${new Date(summary.updatedAt).toLocaleString()}`;
+      els.dailyDate.textContent = summary.dailyRiskDateUtc ? `${summary.dailyRiskDateUtc} risk day` : "risk day";
+      els.updated.textContent = `portfolio updated ${ltDateTime(summary.updatedAt)} LT`;
 
       renderPositions(data.positions || []);
       setStatus("ok", "Live data");

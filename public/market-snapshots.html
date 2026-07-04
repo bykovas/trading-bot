@@ -283,7 +283,7 @@
         <table>
           <thead>
             <tr>
-              <th>UTC</th>
+              <th>LT</th>
               <th>Cycle</th>
               <th>Pair</th>
               <th class="num">Bid</th>
@@ -326,6 +326,23 @@
       return n > 0 ? "good" : "bad";
     }
 
+    function ltDateTime(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "-";
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/Vilnius",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23"
+      }).formatToParts(date);
+      const byType = Object.fromEntries(parts.map(part => [part.type, part.value]));
+      return `${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute}:${byType.second}`;
+    }
+
     function query() {
       const params = new URLSearchParams({ limit, offset });
       if (pairInput.value.trim()) params.set("pair", pairInput.value.trim());
@@ -346,7 +363,7 @@
 
       rows.innerHTML = data.items.map(item => `
         <tr>
-          <td class="mono">${new Date(item.utc).toLocaleString()}</td>
+          <td class="mono">${ltDateTime(item.utc)}</td>
           <td class="mono">${item.cycleId}</td>
           <td>${item.pair}</td>
           <td class="num">${num(item.bid)}</td>
