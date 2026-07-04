@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.Json;
+using System.Text;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -140,6 +142,20 @@ app.MapGet("/api/market-snapshots", async (
         page.Limit,
         page.Offset,
         items.Count == page.Limit ? page.Offset + page.Limit : null));
+});
+
+app.MapGet("/api/export/cycles-and-snapshots.csv", (IConfiguration configuration, CancellationToken cancellationToken) =>
+{
+    var connectionString = GetConnectionString(configuration);
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return Results.Problem("TRADINGBOT_DATABASE_CONNECTION_STRING is not configured.");
+    }
+
+    return Results.Stream(
+        stream => WriteCyclesAndSnapshotsCsv(stream, connectionString, cancellationToken),
+        "text/csv; charset=utf-8",
+        $"trading-bot-cycles-snapshots-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.csv");
 });
 
 app.Run();
@@ -410,6 +426,83 @@ static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
 
 static string? NormalizePairFilter(string? pair) =>
     string.IsNullOrWhiteSpace(pair) ? null : pair.Trim().ToUpperInvariant();
+
+static async Task WriteCyclesAndSnapshotsCsv(
+    Stream stream,
+    string connectionString,
+    CancellationToken cancellationToken)
+{
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), leaveOpen: true);
+    await writer.WriteLineAsync("record_type,cycle_id,utc,pair,bid,ask,last,volume24h,change_percent,record_json");
+
+    await using (var command = new NpgsqlCommand(
+        """
+        select cycle_id, utc, record_json::text
+        from dry_run_cycles
+        order by utc asc, cycle_id asc
+        """,
+        connection))
+    await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+    {
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            await writer.WriteLineAsync(string.Join(',', new[]
+            {
+                CsvText("cycle"),
+                CsvText(reader.GetString(0)),
+                CsvText(FormatUtc(reader.GetDateTime(1))),
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                CsvText(reader.GetString(2))
+            }));
+        }
+    }
+
+    await using (var command = new NpgsqlCommand(
+        """
+        select cycle_id, utc, pair, bid, ask, last, volume24h, change_percent
+        from market_snapshots
+        order by utc asc, cycle_id asc, pair asc
+        """,
+        connection))
+    await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+    {
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            await writer.WriteLineAsync(string.Join(',', new[]
+            {
+                CsvText("market_snapshot"),
+                CsvText(reader.GetString(0)),
+                CsvText(FormatUtc(reader.GetDateTime(1))),
+                CsvText(reader.GetString(2)),
+                CsvDecimal(reader.GetDecimal(3)),
+                CsvDecimal(reader.GetDecimal(4)),
+                CsvDecimal(reader.GetDecimal(5)),
+                CsvDecimal(reader.GetDecimal(6)),
+                CsvDecimal(reader.GetDecimal(7)),
+                ""
+            }));
+        }
+    }
+}
+
+static string FormatUtc(DateTime value) =>
+    DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("O", CultureInfo.InvariantCulture);
+
+static string CsvDecimal(decimal value) => CsvText(value.ToString(CultureInfo.InvariantCulture));
+
+static string CsvText(string? value)
+{
+    value ??= string.Empty;
+    return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+}
 
 internal sealed record PortfolioResponse(
     DateTimeOffset Utc,
