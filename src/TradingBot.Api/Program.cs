@@ -116,6 +116,31 @@ app.MapGet("/api/decisions", async (string? cycleId, int? limit, int? offset, Ca
         items.Count == page.Limit ? page.Offset + page.Limit : null));
 });
 
+app.MapGet("/api/market-snapshots", async (
+    string? cycleId,
+    string? pair,
+    int? limit,
+    int? offset,
+    CancellationToken cancellationToken) =>
+{
+    var connectionString = GetConnectionString(builder.Configuration);
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return Results.Problem("TRADINGBOT_DATABASE_CONNECTION_STRING is not configured.");
+    }
+
+    var page = PageRequest.Create(limit, offset);
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    var items = await ReadMarketSnapshots(connection, cycleId, pair, page, cancellationToken);
+    return Results.Ok(new PageResponse<MarketSnapshotDto>(
+        items,
+        page.Limit,
+        page.Offset,
+        items.Count == page.Limit ? page.Offset + page.Limit : null));
+});
+
 app.Run();
 
 static string GetConnectionString(IConfiguration configuration) =>
@@ -334,6 +359,57 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
 static decimal? GetNullableDecimal(NpgsqlDataReader reader, int ordinal) =>
     reader.IsDBNull(ordinal) ? null : reader.GetDecimal(ordinal);
 
+static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
+    NpgsqlConnection connection,
+    string? cycleId,
+    string? pair,
+    PageRequest page,
+    CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand(
+        """
+        select
+            cycle_id,
+            utc,
+            pair,
+            bid,
+            ask,
+            last,
+            volume24h,
+            change_percent
+        from market_snapshots
+        where (@cycle_id is null or cycle_id = @cycle_id)
+          and (@pair is null or pair = @pair)
+        order by utc desc, cycle_id desc, pair
+        limit @limit offset @offset
+        """,
+        connection);
+    command.Parameters.AddWithValue("cycle_id", (object?)cycleId ?? DBNull.Value);
+    command.Parameters.AddWithValue("pair", (object?)NormalizePairFilter(pair) ?? DBNull.Value);
+    command.Parameters.AddWithValue("limit", page.Limit);
+    command.Parameters.AddWithValue("offset", page.Offset);
+
+    var snapshots = new List<MarketSnapshotDto>();
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    while (await reader.ReadAsync(cancellationToken))
+    {
+        snapshots.Add(new MarketSnapshotDto(
+            reader.GetString(0),
+            reader.GetDateTime(1),
+            reader.GetString(2),
+            reader.GetDecimal(3),
+            reader.GetDecimal(4),
+            reader.GetDecimal(5),
+            reader.GetDecimal(6),
+            reader.GetDecimal(7)));
+    }
+
+    return snapshots;
+}
+
+static string? NormalizePairFilter(string? pair) =>
+    string.IsNullOrWhiteSpace(pair) ? null : pair.Trim().ToUpperInvariant();
+
 internal sealed record PortfolioResponse(
     DateTimeOffset Utc,
     PortfolioSummaryDto? Summary,
@@ -410,3 +486,13 @@ internal sealed record DecisionSummaryDto(
     string Reason,
     string? HoldReasonCode,
     string? ExitReasonCode);
+
+internal sealed record MarketSnapshotDto(
+    string CycleId,
+    DateTime Utc,
+    string Pair,
+    decimal Bid,
+    decimal Ask,
+    decimal Last,
+    decimal Volume24h,
+    decimal ChangePercent);

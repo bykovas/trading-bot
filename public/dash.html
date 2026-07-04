@@ -94,6 +94,31 @@
       white-space: nowrap;
     }
 
+    .api-links {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    .api-links a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .72);
+      color: var(--gold);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    .api-links a:hover {
+      border-color: rgba(245, 184, 79, .38);
+      background: rgba(245, 184, 79, .08);
+    }
+
     .dot {
       width: 8px;
       height: 8px;
@@ -277,6 +302,11 @@
         <span id="status-text">Loading portfolio</span>
       </div>
     </header>
+
+    <nav class="api-links" aria-label="Raw API links">
+      <a href="/api/cycles?limit=5">Raw cycles API</a>
+      <a href="/api/market-snapshots?limit=50">Market snapshots API</a>
+    </nav>
 
     <section class="grid" aria-label="Portfolio summary">
       <div class="metric">
