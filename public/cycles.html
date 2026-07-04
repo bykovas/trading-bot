@@ -69,45 +69,17 @@
       text-decoration: none;
     }
 
-    .coin {
+    .bc-mark {
       position: relative;
       width: 40px;
       height: 40px;
       flex: none;
-      border-radius: 50%;
       display: grid;
       place-items: center;
-      color: #1a1206;
-      font-family: var(--font-mono);
-      font-weight: 800;
-      font-size: 11px;
-      background: linear-gradient(145deg, rgba(255, 246, 215, 0.96), rgba(248, 184, 78, 0.94) 46%, rgba(129, 75, 28, 0.9));
-      border: 1px solid rgba(255, 226, 166, 0.5);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 0 22px rgba(245, 184, 79, 0.28);
-    }
-
-    .coin::before {
-      content: "";
-      position: absolute;
-      inset: 6px;
-      border: 1px solid rgba(42, 23, 7, 0.32);
-      border-radius: 50%;
-    }
-
-    .coin::after {
-      content: "";
-      position: absolute;
-      left: 8px;
-      right: 8px;
-      bottom: 10px;
-      height: 6px;
-      border-top: 1px solid rgba(43, 25, 8, 0.4);
-      border-bottom: 1px solid rgba(43, 25, 8, 0.3);
-    }
-
-    .coin span {
-      position: relative;
-      z-index: 1;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid rgba(246, 218, 160, 0.24);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 22px rgba(245, 184, 79, 0.18);
     }
 
     .brand-copy {
@@ -128,7 +100,7 @@
     }
 
     .brand-copy .n .ai {
-      color: var(--gold);
+      color: #F5B84F;
     }
 
     .brand-copy .s {
@@ -136,7 +108,7 @@
       font-size: 10px;
       text-transform: uppercase;
       letter-spacing: 0.14em;
-      color: var(--purple-dim);
+      color: #9B87F5;
       white-space: nowrap;
     }
 
@@ -261,7 +233,22 @@
   <main>
     <header>
       <a class="brand-lockup" href="/dash.html" aria-label="BlynAI Capital">
-        <span class="coin"><span>BC</span></span>
+        <span class="bc-mark">
+          <svg width="30" height="30" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="bcMark" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#FFD987"/>
+                <stop offset="1" stop-color="#F5B84F"/>
+              </linearGradient>
+            </defs>
+            <path d="M16.5 9 L8.5 20 L16.5 31" stroke="url(#bcMark)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <path d="M23.5 9 L31.5 20 L23.5 31" stroke="url(#bcMark)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <circle cx="17" cy="17.5" r="2.1" fill="#FFD987"/>
+            <circle cx="23" cy="17.5" r="2.1" fill="#C8963B"/>
+            <circle cx="17" cy="22.5" r="2.1" fill="#C8963B"/>
+            <circle cx="23" cy="22.5" r="2.1" fill="#FFD987"/>
+          </svg>
+        </span>
         <span class="brand-copy">
           <span class="n">Blyn<span class="ai">AI</span> Capital</span>
           <span class="s">BYKOVAS-FINANCE LAB</span>
