@@ -9,10 +9,22 @@ internal sealed class DryRunPortfolio(
     PositionExitOptions positionExit,
     PositionSizingOptions positionSizing,
     IDryRunPortfolioStore? store = null,
-    IClock? clock = null)
+    IClock? clock = null,
+    StrategyOptions? strategy = null,
+    CorrelationRiskOptions? correlationRisk = null)
 {
     private readonly IDryRunPortfolioStore _store = store ?? new FileDryRunPortfolioStore(options);
     private readonly IClock _clock = clock ?? SystemClock.Instance;
+    private readonly StrategyOptions _strategy = strategy ?? new StrategyOptions();
+    private readonly CorrelationRiskOptions _correlationRisk = correlationRisk ?? new CorrelationRiskOptions();
+    private readonly IReadOnlyDictionary<string, string> _pairToGroup =
+        CorrelationRiskResolver.BuildPairToGroup(correlationRisk ?? new CorrelationRiskOptions());
+    private readonly ISet<string> _highBetaGroups =
+        CorrelationRiskResolver.BuildHighBetaGroups(correlationRisk ?? new CorrelationRiskOptions());
+
+    // True when exit hysteresis is enabled: a held position whose desired flips to NONE
+    // then represents a CONFIRMED bearish cross, which unlocks the controlled-loss exit.
+    private bool ExitHysteresisEnabled => _strategy.ExitEmaGapPercent > 0m;
 
     public PortfolioState Load()
     {
@@ -91,6 +103,26 @@ internal sealed class DryRunPortfolio(
         RiskOptions riskOptions,
         int newPositionsThisCycle)
     {
+        // The correlation snapshot is resolved for the pair regardless of the decision
+        // so its diagnostics land on every record (even holds and sells). It is used to
+        // reject BUYs only; exits and holds are never blocked by the correlation layer.
+        var correlation = BuildCorrelationSnapshot(state, proposal.Pair);
+        var action = ApplyCore(state, marketState, proposal, risk, riskOptions, newPositionsThisCycle, correlation);
+        action.CorrelationGroup = correlation.Group;
+        action.CorrelationGroupOpenPositions = correlation.GroupOpenPositions;
+        action.CorrelationGroupExposureEur = correlation.GroupExposureEur;
+        return action;
+    }
+
+    private DryRunAction ApplyCore(
+        PortfolioState state,
+        InstrumentMarketState marketState,
+        DecisionProposal proposal,
+        RiskEvaluation risk,
+        RiskOptions riskOptions,
+        int newPositionsThisCycle,
+        CorrelationSnapshot correlation)
+    {
         var now = _clock.UtcNow;
         var position = state.Positions.FirstOrDefault(item => item.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase));
         var beforeCash = state.CashEur;
@@ -139,6 +171,18 @@ internal sealed class DryRunPortfolio(
                 return BuildAction("WOULD_BUY_BLOCKED", $"daily loss cap reached: realized PnL today EUR {realizedToday:0.##} <= -EUR {riskOptions.MaxDailyLossEur:0.##}; new entries blocked until next UTC day", proposal, position, beforeCash, beforeValue, state, holdReasonCode: "DAILY_LOSS_BLOCK");
             }
 
+            // Hourly entry throttle: cap NEW entries per rolling 60 minutes, counted over
+            // the BUY timestamps recorded in ActionHistory. 0 disables it.
+            if (executionPolicy.MaxNewPositionsPerHour > 0)
+            {
+                var windowStart = now.AddHours(-1);
+                var recentBuys = state.ActionHistory.Count(item => item.LastBuyAtUtc is { } lastBuy && lastBuy > windowStart);
+                if (recentBuys >= executionPolicy.MaxNewPositionsPerHour)
+                {
+                    return BuildAction("WOULD_BUY_BLOCKED", $"hourly entry limit reached: {recentBuys} entries in the last 60 minutes >= max {executionPolicy.MaxNewPositionsPerHour}", proposal, position, beforeCash, beforeValue, state, holdReasonCode: "HOURLY_ENTRY_LIMIT");
+                }
+            }
+
             // Pair-level cooldowns: block opening a new position too soon after the
             // previous sell (or buy) for the same pair to avoid rapid re-entry churn.
             var history = state.ActionHistory.FirstOrDefault(item => item.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase));
@@ -161,6 +205,28 @@ internal sealed class DryRunPortfolio(
                         return BuildAction("WOULD_BUY_BLOCKED", $"cooldown after buy active: wait {executionPolicy.CooldownAfterBuySeconds} seconds before buying {proposal.Pair} again (elapsed {sinceBuy:0} s)", proposal, position, beforeCash, beforeValue, state, holdReasonCode: "COOLDOWN_BLOCK");
                     }
                 }
+
+                // Additive per-pair cooldown after a stop-loss. A stop-loss also stamps
+                // LastSellAtUtc, so this window (typically longer) extends the plain sell
+                // cooldown; plain sells never set LastStopLossAtUtc and keep the sell
+                // cooldown only.
+                if (executionPolicy.CooldownAfterStopLossSeconds > 0 && history.LastStopLossAtUtc is { } lastStopLoss)
+                {
+                    var sinceStopLoss = (now - lastStopLoss).TotalSeconds;
+                    if (sinceStopLoss < executionPolicy.CooldownAfterStopLossSeconds)
+                    {
+                        return BuildAction("WOULD_BUY_BLOCKED", $"stop-loss cooldown active: wait {executionPolicy.CooldownAfterStopLossSeconds} seconds before re-buying {proposal.Pair} after a stop-loss (elapsed {sinceStopLoss:0} s)", proposal, position, beforeCash, beforeValue, state, holdReasonCode: "STOPLOSS_COOLDOWN");
+                    }
+                }
+            }
+
+            // Correlation-risk layer: reject when the pair's group is already crowded, or
+            // when its group / high-beta exposure would be exceeded. Runs alongside the
+            // other opening gates; exits and holds never reach here.
+            var correlationBlock = EvaluateCorrelationRejection(proposal, correlation, position, beforeCash, beforeValue, state);
+            if (correlationBlock is not null)
+            {
+                return correlationBlock;
             }
 
             if (state.Positions.Count >= riskOptions.MaxOpenPositions)
@@ -266,7 +332,8 @@ internal sealed class DryRunPortfolio(
             riskOptions.KillSwitch,
             executionPolicy,
             positionExit,
-            position.PeakPnlPercent);
+            position.PeakPnlPercent,
+            ExitHysteresisEnabled);
 
         if (!evaluation.ShouldSell)
         {
@@ -293,6 +360,11 @@ internal sealed class DryRunPortfolio(
             state.CashEur += exitValue;
             state.Positions.Remove(position);
             RecordAction(state, proposal.Pair, buy: false, now);
+            // Stamp the stop-loss time so the post-stop-loss cooldown can gate re-buys.
+            if (evaluation.ExitReason == ExitReason.StopLoss)
+            {
+                RecordStopLoss(state, proposal.Pair, now);
+            }
             RecordRealizedPnl(state, realizedPnl, now);
             state.UpdatedAt = now;
             MarkToMarket(state, new[] { marketState });
@@ -409,6 +481,110 @@ internal sealed class DryRunPortfolio(
             history.LastSellAtUtc = now;
         }
     }
+
+    private static void RecordStopLoss(PortfolioState state, string pair, DateTimeOffset now)
+    {
+        var history = state.ActionHistory.FirstOrDefault(item => item.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
+        if (history is null)
+        {
+            history = new PairActionHistory { Pair = pair };
+            state.ActionHistory.Add(history);
+        }
+
+        history.LastStopLossAtUtc = now;
+    }
+
+    // Correlation snapshot for a candidate pair against the CURRENTLY open positions.
+    private CorrelationSnapshot BuildCorrelationSnapshot(PortfolioState state, string pair)
+    {
+        var group = CorrelationRiskResolver.ResolveGroup(_pairToGroup, pair);
+        var isHighBeta = CorrelationRiskResolver.IsHighBeta(_highBetaGroups, group);
+
+        var groupOpenPositions = 0;
+        var groupExposureEur = 0m;
+        var highBetaOpenPositions = 0;
+        var highBetaExposureEur = 0m;
+
+        foreach (var open in state.Positions)
+        {
+            var openGroup = CorrelationRiskResolver.ResolveGroup(_pairToGroup, open.Pair);
+            if (string.Equals(openGroup, group, StringComparison.OrdinalIgnoreCase))
+            {
+                groupOpenPositions++;
+                groupExposureEur += open.EntryNotionalEur;
+            }
+
+            if (CorrelationRiskResolver.IsHighBeta(_highBetaGroups, openGroup))
+            {
+                highBetaOpenPositions++;
+                highBetaExposureEur += open.EntryNotionalEur;
+            }
+        }
+
+        return new CorrelationSnapshot(group, isHighBeta, groupOpenPositions, groupExposureEur, highBetaOpenPositions, highBetaExposureEur);
+    }
+
+    // Correlation-risk rejection for a BUY candidate. Returns null when the candidate
+    // passes. Order: per-group count, per-group exposure, then (for high-beta groups)
+    // high-beta count and high-beta exposure. Every cap uses the 0 = disabled rule.
+    private DryRunAction? EvaluateCorrelationRejection(
+        DecisionProposal proposal,
+        CorrelationSnapshot correlation,
+        PortfolioPosition? position,
+        decimal beforeCash,
+        decimal beforeValue,
+        PortfolioState state)
+    {
+        var target = proposal.TargetNotionalEur;
+
+        if (_correlationRisk.MaxOpenPositionsPerGroup > 0 && correlation.GroupOpenPositions >= _correlationRisk.MaxOpenPositionsPerGroup)
+        {
+            return CorrelationBlock("CORRELATION_GROUP_LIMIT", $"correlation group {correlation.Group} already holds {correlation.GroupOpenPositions} position(s) >= max {_correlationRisk.MaxOpenPositionsPerGroup}", proposal, correlation, position, beforeCash, beforeValue, state);
+        }
+
+        if (_correlationRisk.MaxExposureEurPerGroup > 0m && correlation.GroupExposureEur + target > _correlationRisk.MaxExposureEurPerGroup)
+        {
+            return CorrelationBlock("CORRELATION_EXPOSURE_LIMIT", $"correlation group {correlation.Group} exposure EUR {correlation.GroupExposureEur + target:0.##} would exceed max EUR {_correlationRisk.MaxExposureEurPerGroup:0.##}", proposal, correlation, position, beforeCash, beforeValue, state);
+        }
+
+        if (correlation.IsHighBeta)
+        {
+            if (_correlationRisk.MaxHighBetaPositions > 0 && correlation.HighBetaOpenPositions >= _correlationRisk.MaxHighBetaPositions)
+            {
+                return CorrelationBlock("HIGH_BETA_LIMIT", $"high-beta open positions {correlation.HighBetaOpenPositions} >= max {_correlationRisk.MaxHighBetaPositions} (group {correlation.Group})", proposal, correlation, position, beforeCash, beforeValue, state);
+            }
+
+            if (_correlationRisk.MaxHighBetaExposureEur > 0m && correlation.HighBetaExposureEur + target > _correlationRisk.MaxHighBetaExposureEur)
+            {
+                return CorrelationBlock("HIGH_BETA_LIMIT", $"high-beta exposure EUR {correlation.HighBetaExposureEur + target:0.##} would exceed max EUR {_correlationRisk.MaxHighBetaExposureEur:0.##} (group {correlation.Group})", proposal, correlation, position, beforeCash, beforeValue, state);
+            }
+        }
+
+        return null;
+    }
+
+    private static DryRunAction CorrelationBlock(
+        string reasonCode,
+        string reason,
+        DecisionProposal proposal,
+        CorrelationSnapshot correlation,
+        PortfolioPosition? position,
+        decimal beforeCash,
+        decimal beforeValue,
+        PortfolioState state)
+    {
+        var action = BuildAction("WOULD_BUY_BLOCKED", $"correlation-risk block: {reason}", proposal, position, beforeCash, beforeValue, state, holdReasonCode: reasonCode);
+        action.CorrelationRejectedReason = reasonCode;
+        return action;
+    }
+
+    private sealed record CorrelationSnapshot(
+        string Group,
+        bool IsHighBeta,
+        int GroupOpenPositions,
+        decimal GroupExposureEur,
+        int HighBetaOpenPositions,
+        decimal HighBetaExposureEur);
 
     // True when nowUtc falls in [FromHour:00, FromHour:00 + Minutes). Minutes = 0
     // disables the window. Pure/static so it can be unit tested at a fixed clock.
@@ -574,11 +750,16 @@ internal sealed class PairActionHistory
     public DateTimeOffset? LastBuyAtUtc { get; set; }
     public DateTimeOffset? LastSellAtUtc { get; set; }
 
+    // Timestamp of the most recent SELL_STOP_LOSS fill for this pair, used by the
+    // per-pair post-stop-loss cooldown. Null in legacy state files (no cooldown).
+    public DateTimeOffset? LastStopLossAtUtc { get; set; }
+
     public PairActionHistory Clone() => new()
     {
         Pair = Pair,
         LastBuyAtUtc = LastBuyAtUtc,
-        LastSellAtUtc = LastSellAtUtc
+        LastSellAtUtc = LastSellAtUtc,
+        LastStopLossAtUtc = LastStopLossAtUtc
     };
 }
 
@@ -608,11 +789,24 @@ internal sealed class DryRunAction
     // "MIN_HOLD_BLOCK"  -> a signal-flip sell was suppressed by the minimum-hold guard.
     // "MIN_PROFIT_BLOCK"-> a signal-flip sell was suppressed by the min-profit guard.
     // "COOLDOWN_BLOCK"  -> a buy was suppressed by a buy/sell cooldown.
+    // "STOPLOSS_COOLDOWN"      -> a re-buy was suppressed by the post-stop-loss cooldown.
+    // "HOURLY_ENTRY_LIMIT"     -> a buy was suppressed by the rolling hourly entry cap.
+    // "CORRELATION_GROUP_LIMIT"/"CORRELATION_EXPOSURE_LIMIT"/"HIGH_BETA_LIMIT"
+    //                          -> a buy was rejected by the correlation-risk layer.
+    // "FLIP_LOSS_FLOOR_BLOCK"  -> a confirmed bearish flip was below the loss floor.
     public string? HoldReasonCode { get; set; }
 
     // Distinguishes the WOULD_SELL variants: SELL_STOP_LOSS, SELL_TAKE_PROFIT,
     // SELL_MAX_HOLD, SELL_KILL_SWITCH, SELL_SIGNAL_FLIP, ...
     public string? ExitReasonCode { get; set; }
+
+    // Correlation-risk diagnostics (nullable; populated for the resolved pair). These
+    // are informational on every record; CorrelationRejectedReason is set only when
+    // the correlation layer actually blocked a BUY.
+    public string? CorrelationGroup { get; set; }
+    public int? CorrelationGroupOpenPositions { get; set; }
+    public decimal? CorrelationGroupExposureEur { get; set; }
+    public string? CorrelationRejectedReason { get; set; }
 
     public string DesiredPosition { get; set; } = string.Empty;
     public decimal TargetNotionalEur { get; set; }

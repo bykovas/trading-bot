@@ -54,7 +54,8 @@ internal static class PositionExitPolicy
         bool killSwitchActive,
         ExecutionPolicyOptions executionPolicy,
         PositionExitOptions positionExit,
-        decimal? peakPnlPercent = null)
+        decimal? peakPnlPercent = null,
+        bool exitHysteresisEnabled = false)
     {
         var pnl = conservativeUnrealizedPnlPercent;
 
@@ -73,7 +74,7 @@ internal static class PositionExitPolicy
         }
 
         // TIER 3 - STRATEGY EXITS (the only tier subject to the soft profit/hold guards).
-        return EvaluateStrategyExit(desiredLong, positionAgeSeconds, pnl, canValuePosition, executionPolicy, positionExit);
+        return EvaluateStrategyExit(desiredLong, positionAgeSeconds, pnl, canValuePosition, exitHysteresisEnabled, executionPolicy, positionExit);
     }
 
     // TIER 1: hard risk rules. These MUST always execute immediately and can never
@@ -156,6 +157,7 @@ internal static class PositionExitPolicy
         double positionAgeSeconds,
         decimal pnl,
         bool canValuePosition,
+        bool exitHysteresisEnabled,
         ExecutionPolicyOptions executionPolicy,
         PositionExitOptions positionExit)
     {
@@ -165,11 +167,31 @@ internal static class PositionExitPolicy
         }
 
         // desired == NONE: this is an ordinary signal-flip exit subject to soft guards.
+        // The minimum-hold guard always applies (it is not replaced by the loss floor).
         if (!executionPolicy.AllowImmediateExitOnSignalFlip && positionAgeSeconds < executionPolicy.MinHoldSeconds)
         {
             return Hold(
                 "MIN_HOLD_BLOCK",
                 $"minimum hold active: signal flip ignored until position age reaches {executionPolicy.MinHoldSeconds}s");
+        }
+
+        // Controlled-loss exit for CONFIRMED bearish flips. When exit hysteresis is on
+        // (Strategy.ExitEmaGapPercent > 0), desired NONE on a held position means a
+        // confirmed bearish cross. For those flips ONLY, the loss floor replaces the
+        // min-profit guard: exit while the loss is still shallow (PnL >= floor), but
+        // leave deeper losses to stop-loss / max-hold / emergency rules. A floor of 0
+        // disables this mechanism and falls back to the legacy min-profit behavior.
+        if (exitHysteresisEnabled && positionExit.MaxSignalFlipLossExitPercent < 0m)
+        {
+            var floor = positionExit.MaxSignalFlipLossExitPercent;
+            if (canValuePosition && pnl < floor)
+            {
+                return Hold(
+                    "FLIP_LOSS_FLOOR_BLOCK",
+                    $"confirmed bearish flip held: PnL {Percent(pnl)}% is below the controlled-loss floor {Percent(floor)}%; deeper losses are owned by stop-loss / max-hold");
+            }
+
+            return Sell(ExitReason.SignalFlip, $"confirmed bearish flip: PnL {Percent(pnl)}% is at or above the controlled-loss floor {Percent(floor)}%; exiting");
         }
 
         if (canValuePosition && pnl < positionExit.MinProfitToExitOnSignalFlipPercent)

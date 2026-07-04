@@ -217,6 +217,26 @@ internal sealed class DecisionWorker(
         Console.WriteLine($"dryRunEnabled={config.DryRun.Enabled} applyVirtualFills={config.DryRun.ApplyVirtualFills}");
         Console.WriteLine($"dryRunState={dryRunPortfolio.GetStatePath()}");
         Console.WriteLine($"dryRunEvents={dryRunPortfolio.GetEventsPath()}");
+        PrintCorrelationDrift();
+    }
+
+    // Config-drift guard: any universe pair missing from every correlation group is
+    // treated as a high-beta singleton by the risk layer. Warn once at startup so a
+    // silently-ungrouped pair can never slip past the correlation caps unnoticed.
+    private void PrintCorrelationDrift()
+    {
+        if (config.CorrelationRisk.Groups.Count == 0)
+        {
+            return;
+        }
+
+        var ungrouped = CorrelationRiskResolver.UngroupedPairs(
+            config.CorrelationRisk,
+            config.CandidateUniverse.Select(instrument => instrument.Pair));
+        if (ungrouped.Count > 0)
+        {
+            Console.WriteLine($"warning: {ungrouped.Count} universe pair(s) are not in any correlation group and are treated as high-beta singletons: {string.Join(", ", ungrouped)}");
+        }
     }
 
     private bool LiveOrdersActive => config.Trading.LiveTradingEnabled && !config.Risk.KillSwitch;
@@ -421,6 +441,14 @@ internal sealed class DecisionWorker(
             Console.WriteLine($"  execution-exit-reason-code: {dryRunAction.ExitReasonCode}");
         }
         Console.WriteLine($"  execution-reason: {dryRunAction.Reason}");
+        if (!string.IsNullOrEmpty(dryRunAction.CorrelationGroup))
+        {
+            Console.WriteLine($"  correlation-group={dryRunAction.CorrelationGroup} open={dryRunAction.CorrelationGroupOpenPositions} exposure={dryRunAction.CorrelationGroupExposureEur:0.##} EUR");
+        }
+        if (!string.IsNullOrEmpty(dryRunAction.CorrelationRejectedReason))
+        {
+            Console.WriteLine($"  correlation-rejected: {dryRunAction.CorrelationRejectedReason}");
+        }
         if (dryRunAction.FillPrice > 0m || dryRunAction.FeeEur > 0m)
         {
             Console.WriteLine($"  fill-price={dryRunAction.FillPrice:0.####} fee={dryRunAction.FeeEur:0.####} gross={dryRunAction.GrossNotionalEur:0.####} net={dryRunAction.NetNotionalEur:0.####}");

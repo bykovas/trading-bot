@@ -54,7 +54,7 @@ try
         new IndicatorEngine(),
         new TechnicalDecisionEngine(),
         new RiskManager(),
-        new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit, config.PositionSizing, portfolioStore),
+        new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit, config.PositionSizing, portfolioStore, strategy: config.Strategy, correlationRisk: config.CorrelationRisk),
         broker);
 
     await worker.RunAsync(cancellation.Token);

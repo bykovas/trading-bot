@@ -23,14 +23,16 @@ public class PositionExitPolicyTests
         decimal takeProfit = 2.0m,
         int maxHoldMinutes = 240,
         decimal trailingActivation = 0m,
-        decimal trailingDistance = 0m) => new()
+        decimal trailingDistance = 0m,
+        decimal maxSignalFlipLossExit = -1.2m) => new()
     {
         MinProfitToExitOnSignalFlipPercent = minProfit,
         StopLossPercent = stopLoss,
         TakeProfitPercent = takeProfit,
         MaxHoldMinutes = maxHoldMinutes,
         TrailingActivationPercent = trailingActivation,
-        TrailingDistancePercent = trailingDistance
+        TrailingDistancePercent = trailingDistance,
+        MaxSignalFlipLossExitPercent = maxSignalFlipLossExit
     };
 
     // A. Opened 2 minutes ago, desired flips to NONE, MinHoldSeconds = 900 => HOLD.
@@ -359,6 +361,101 @@ public class PositionExitPolicyTests
 
         Assert.False(result.ShouldSell);
         Assert.Equal("DESIRED_LONG", result.HoldReasonCode);
+    }
+
+    // Mechanism 3: controlled-loss exit for CONFIRMED bearish flips. With exit
+    // hysteresis enabled, desired NONE means a confirmed bearish cross and the loss
+    // floor (-1.2) replaces the min-profit guard. A shallow loss (-0.8%) is above the
+    // floor, so the flip is allowed even though min-profit (1.2%) would have blocked it.
+    [Fact]
+    public void Confirmed_bearish_flip_exits_at_shallow_loss_within_floor()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: false,
+            positionAgeSeconds: 1000,
+            conservativeUnrealizedPnlPercent: -0.8m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(minProfit: 1.2m, stopLoss: 2.5m, maxSignalFlipLossExit: -1.2m),
+            peakPnlPercent: null,
+            exitHysteresisEnabled: true);
+
+        Assert.True(result.ShouldSell);
+        Assert.Equal(ExitReason.SignalFlip, result.ExitReason);
+    }
+
+    // Loss right at the edge but still above the floor (-1.1 >= -1.2) => exit allowed.
+    [Fact]
+    public void Confirmed_bearish_flip_exits_just_above_the_floor()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: false,
+            positionAgeSeconds: 1000,
+            conservativeUnrealizedPnlPercent: -1.1m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(minProfit: 1.2m, stopLoss: 2.5m, maxSignalFlipLossExit: -1.2m),
+            peakPnlPercent: null,
+            exitHysteresisEnabled: true);
+
+        Assert.True(result.ShouldSell);
+        Assert.Equal(ExitReason.SignalFlip, result.ExitReason);
+    }
+
+    // Loss below the floor (-1.8 < -1.2) => the flip does NOT sell; a deeper loss is
+    // owned by stop-loss / max-hold, not by the controlled-loss flip mechanism.
+    [Fact]
+    public void Confirmed_bearish_flip_does_not_exit_below_the_floor()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: false,
+            positionAgeSeconds: 1000,
+            conservativeUnrealizedPnlPercent: -1.8m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(minProfit: 1.2m, stopLoss: 2.5m, maxSignalFlipLossExit: -1.2m),
+            peakPnlPercent: null,
+            exitHysteresisEnabled: true);
+
+        Assert.False(result.ShouldSell);
+        Assert.Equal("FLIP_LOSS_FLOOR_BLOCK", result.HoldReasonCode);
+    }
+
+    // Legacy behavior intact: with exit hysteresis disabled the loss floor is ignored
+    // and the min-profit guard governs the flip (a -0.8% loss is blocked by min-profit).
+    [Fact]
+    public void Legacy_min_profit_behavior_intact_when_hysteresis_disabled()
+    {
+        var blocked = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: false,
+            positionAgeSeconds: 1000,
+            conservativeUnrealizedPnlPercent: -0.8m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(minProfit: 1.2m, stopLoss: 2.5m, maxSignalFlipLossExit: -1.2m),
+            peakPnlPercent: null,
+            exitHysteresisEnabled: false);
+
+        Assert.False(blocked.ShouldSell);
+        Assert.Equal("MIN_PROFIT_BLOCK", blocked.HoldReasonCode);
+
+        var sold = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: false,
+            positionAgeSeconds: 1000,
+            conservativeUnrealizedPnlPercent: 1.5m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(minProfit: 1.2m, stopLoss: 2.5m, takeProfit: 3m, maxSignalFlipLossExit: -1.2m),
+            peakPnlPercent: null,
+            exitHysteresisEnabled: false);
+
+        Assert.True(sold.ShouldSell);
+        Assert.Equal(ExitReason.SignalFlip, sold.ExitReason);
     }
 
     // A zero StopLossPercent disables the stop-loss guard (consistent with

@@ -18,6 +18,7 @@ internal sealed class BotConfiguration
     public DatabaseOptions Database { get; set; } = new();
     public ExecutionPolicyOptions ExecutionPolicy { get; set; } = new();
     public PositionExitOptions PositionExit { get; set; } = new();
+    public CorrelationRiskOptions CorrelationRisk { get; set; } = new();
     public List<InstrumentOptions> CandidateUniverse { get; set; } = DefaultCandidateUniverse();
 
     public static BotConfiguration Load()
@@ -92,6 +93,9 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_POSITION_EXIT_TRAILING_DISTANCE_PERCENT", value => config.PositionExit.TrailingDistancePercent = ParseDecimal(value, config.PositionExit.TrailingDistancePercent));
         SetIfPresent("TRADINGBOT_EXECUTION_ENTRY_BLACKOUT_UTC_FROM_HOUR", value => config.ExecutionPolicy.EntryBlackoutUtcFromHour = ParseInt(value, config.ExecutionPolicy.EntryBlackoutUtcFromHour));
         SetIfPresent("TRADINGBOT_EXECUTION_ENTRY_BLACKOUT_MINUTES", value => config.ExecutionPolicy.EntryBlackoutMinutes = ParseInt(value, config.ExecutionPolicy.EntryBlackoutMinutes));
+        SetIfPresent("TRADINGBOT_EXECUTION_MAX_NEW_POSITIONS_PER_HOUR", value => config.ExecutionPolicy.MaxNewPositionsPerHour = ParseInt(value, config.ExecutionPolicy.MaxNewPositionsPerHour));
+        SetIfPresent("TRADINGBOT_EXECUTION_COOLDOWN_AFTER_STOP_LOSS_SECONDS", value => config.ExecutionPolicy.CooldownAfterStopLossSeconds = ParseInt(value, config.ExecutionPolicy.CooldownAfterStopLossSeconds));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_MAX_SIGNAL_FLIP_LOSS_EXIT_PERCENT", value => config.PositionExit.MaxSignalFlipLossExitPercent = ParseDecimal(value, config.PositionExit.MaxSignalFlipLossExitPercent));
     }
 
     private void Normalize()
@@ -133,12 +137,21 @@ internal sealed class BotConfiguration
         ExecutionPolicy.MaxNewPositionsPerCycle = Math.Max(0, ExecutionPolicy.MaxNewPositionsPerCycle);
         ExecutionPolicy.EntryBlackoutUtcFromHour = Math.Clamp(ExecutionPolicy.EntryBlackoutUtcFromHour, 0, 23);
         ExecutionPolicy.EntryBlackoutMinutes = Math.Max(0, ExecutionPolicy.EntryBlackoutMinutes);
+        ExecutionPolicy.MaxNewPositionsPerHour = Math.Max(0, ExecutionPolicy.MaxNewPositionsPerHour);
+        ExecutionPolicy.CooldownAfterStopLossSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterStopLossSeconds);
         PositionExit.MinProfitToExitOnSignalFlipPercent = Math.Max(0m, PositionExit.MinProfitToExitOnSignalFlipPercent);
         PositionExit.StopLossPercent = Math.Max(0m, PositionExit.StopLossPercent);
         PositionExit.TakeProfitPercent = Math.Max(0m, PositionExit.TakeProfitPercent);
         PositionExit.MaxHoldMinutes = Math.Max(0, PositionExit.MaxHoldMinutes);
         PositionExit.TrailingActivationPercent = Math.Max(0m, PositionExit.TrailingActivationPercent);
         PositionExit.TrailingDistancePercent = Math.Max(0m, PositionExit.TrailingDistancePercent);
+        // Loss floor for confirmed bearish flips is a loss (<= 0); a positive value is
+        // nonsensical, so clamp it up to 0 (which also disables the mechanism).
+        PositionExit.MaxSignalFlipLossExitPercent = Math.Min(0m, PositionExit.MaxSignalFlipLossExitPercent);
+        CorrelationRisk.MaxOpenPositionsPerGroup = Math.Max(0, CorrelationRisk.MaxOpenPositionsPerGroup);
+        CorrelationRisk.MaxExposureEurPerGroup = Math.Max(0m, CorrelationRisk.MaxExposureEurPerGroup);
+        CorrelationRisk.MaxHighBetaPositions = Math.Max(0, CorrelationRisk.MaxHighBetaPositions);
+        CorrelationRisk.MaxHighBetaExposureEur = Math.Max(0m, CorrelationRisk.MaxHighBetaExposureEur);
         Portfolio.Positions = Portfolio.Positions
             .Where(position => !string.IsNullOrWhiteSpace(position.Pair))
             .Select(position =>
@@ -388,6 +401,15 @@ internal sealed class ExecutionPolicyOptions
     // management are unaffected. EntryBlackoutMinutes = 0 disables the window.
     public int EntryBlackoutUtcFromHour { get; set; } = 0;
     public int EntryBlackoutMinutes { get; set; } = 60;
+
+    // Rolling 60-minute cap on NEW entries, counted over the BUY timestamps recorded
+    // in ActionHistory. 0 disables the throttle.
+    public int MaxNewPositionsPerHour { get; set; } = 2;
+
+    // Extra per-pair cooldown after a stop-loss fill (additive to CooldownAfterSell).
+    // A pair cannot be re-bought within this many seconds of its last SELL_STOP_LOSS.
+    // 0 disables it; plain (non-stop-loss) sells keep using CooldownAfterSellSeconds.
+    public int CooldownAfterStopLossSeconds { get; set; } = 14400;
 }
 
 internal sealed class PositionExitOptions
@@ -407,12 +429,40 @@ internal sealed class PositionExitOptions
     // disable the max-hold guard.
     public int MaxHoldMinutes { get; set; } = 240;
 
+    // Controlled-loss floor for CONFIRMED bearish signal-flip exits (only used when
+    // exit hysteresis is enabled, Strategy.ExitEmaGapPercent > 0). For those flips the
+    // signal-flip sell is allowed when conservative PnL percent >= this value,
+    // replacing the MinProfitToExitOnSignalFlipPercent guard. It is a loss floor
+    // (negative), e.g. -1.2: exit a confirmed bearish position while its loss is still
+    // shallow, but leave deeper losses to stop-loss / max-hold. 0 disables it (legacy
+    // min-profit behavior). Value is clamped to <= 0.
+    public decimal MaxSignalFlipLossExitPercent { get; set; } = -1.2m;
+
     // Trailing stop (forced exit, TIER 2). Once the conservative peak PnL reaches
     // TrailingActivationPercent, sell if PnL falls TrailingDistancePercent below that
     // peak. Either value at 0 disables the trailing stop. TakeProfitPercent stays the
     // hard cap above it.
     public decimal TrailingActivationPercent { get; set; } = 1.5m;
     public decimal TrailingDistancePercent { get; set; } = 1.0m;
+}
+
+internal sealed class CorrelationRiskOptions
+{
+    // Per-group open-position and exposure caps. Every value uses the 0 = disabled
+    // convention so a default-constructed (unconfigured) options object is inert.
+    public int MaxOpenPositionsPerGroup { get; set; } = 0;
+    public decimal MaxExposureEurPerGroup { get; set; } = 0m;
+
+    // Aggregate caps across all high-beta groups (and ungrouped high-beta singletons).
+    public int MaxHighBetaPositions { get; set; } = 0;
+    public decimal MaxHighBetaExposureEur { get; set; } = 0m;
+
+    // Group names considered high-beta. A pair absent from every group is an implicit
+    // singleton group "UNGROUPED:<pair>" that is ALWAYS treated as high-beta.
+    public List<string> HighBetaGroups { get; set; } = new();
+
+    // Correlation group name -> member pairs (e.g. "L1_L2" -> ["SOL/EUR", ...]).
+    public Dictionary<string, List<string>> Groups { get; set; } = new();
 }
 
 internal sealed class InstrumentOptions
