@@ -14,6 +14,7 @@ WORKER_LOG_DIR="${DEPLOY_DIR}/logs"
 DATABASE_DIR="${DEPLOY_DIR}/database"
 
 : "${UI_IMAGE_NAME:?UI_IMAGE_NAME is required}"
+: "${API_IMAGE_NAME:?API_IMAGE_NAME is required}"
 : "${WORKER_IMAGE_NAME:?WORKER_IMAGE_NAME is required}"
 : "${GHCR_USERNAME:?GHCR_USERNAME is required}"
 : "${GHCR_TOKEN:?GHCR_TOKEN is required}"
@@ -23,11 +24,13 @@ DATABASE_DIR="${DEPLOY_DIR}/database"
 : "${TRADINGBOT_OPENAI_API_KEY:?TRADINGBOT_OPENAI_API_KEY is required}"
 
 UI_IMAGE_TAG="${UI_IMAGE_TAG:-latest}"
+API_IMAGE_TAG="${API_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 WORKER_IMAGE_TAG="${WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 TRAEFIK_NETWORK="${TRAEFIK_NETWORK:-traefik}"
 
 echo "Deploying stack '${PROJECT_NAME}' to ${DEPLOY_DIR}"
 echo "  ui     = ${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
+echo "  api    = ${API_IMAGE_NAME}:${API_IMAGE_TAG}"
 echo "  worker = ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG}"
 
 mkdir -p "${DEPLOY_DIR}" "${TRAEFIK_DYNAMIC_DIR}" "${WORKER_DATA_DIR}" "${WORKER_LOG_DIR}" "${DATABASE_DIR}"
@@ -59,6 +62,8 @@ echo "${GHCR_TOKEN}" | docker login ghcr.io \
 
 export UI_IMAGE_NAME
 export UI_IMAGE_TAG
+export API_IMAGE_NAME
+export API_IMAGE_TAG
 export WORKER_IMAGE_NAME
 export WORKER_IMAGE_TAG
 export TRAEFIK_NETWORK
@@ -91,6 +96,13 @@ docker compose \
   -f "${COMPOSE_FILE}" \
   exec -T ui wget -q -O /tmp/trading-bot-ui-healthcheck.html http://127.0.0.1/
 echo "Health check passed for trading-bot-ui container."
+
+# API health: read-only HTTP API must answer inside the compose network.
+docker compose \
+  -p "${PROJECT_NAME}" \
+  -f "${COMPOSE_FILE}" \
+  exec -T ui wget -q -O - http://trading-bot-api:8080/api/health
+echo "Health check passed for trading-bot-api container."
 
 # Worker health: it has no HTTP endpoint, so verify the container is running.
 WORKER_RUNNING="$(docker inspect -f '{{.State.Running}}' trading-bot-worker 2>/dev/null || echo false)"

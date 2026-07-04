@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blynai Capital - Portfolio</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #050505;
+      --panel: #11120f;
+      --line: rgba(246, 218, 160, 0.13);
+      --ink: #f6efe1;
+      --soft: #c8bba6;
+      --muted: #81786b;
+      --gold: #f5b84f;
+      --green: #41eda0;
+      --red: #ff5367;
+      --blue: #6faeff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        linear-gradient(120deg, rgba(5, 5, 5, 0.98), rgba(14, 15, 12, 0.96) 52%, rgba(4, 15, 12, 0.94)),
+        radial-gradient(circle at 12% 8%, rgba(245, 184, 79, 0.11), transparent 32%),
+        radial-gradient(circle at 88% 12%, rgba(65, 237, 160, 0.08), transparent 35%),
+        var(--bg);
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 44px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 0 26px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+    }
+
+    .coin {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #201304;
+      font-weight: 800;
+      font-size: 12px;
+      background: linear-gradient(145deg, #fff1bf, #f5b84f 48%, #7d491d);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.65), 0 0 26px rgba(245,184,79,.24);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 52px);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 38px;
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .82);
+      color: var(--soft);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 14px rgba(111, 174, 255, .5);
+    }
+
+    .dot.ok {
+      background: var(--green);
+      box-shadow: 0 0 14px rgba(65, 237, 160, .5);
+    }
+
+    .dot.bad {
+      background: var(--red);
+      box-shadow: 0 0 14px rgba(255, 83, 103, .5);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: 24px 0;
+    }
+
+    .metric, .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012)), rgba(17,18,15,.9);
+      box-shadow: 0 22px 60px rgba(0,0,0,.28);
+    }
+
+    .metric {
+      min-height: 118px;
+      padding: 18px;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+
+    .value {
+      margin-top: 15px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: clamp(24px, 3vw, 34px);
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+
+    .subvalue {
+      margin-top: 9px;
+      color: var(--soft);
+      font-size: 13px;
+    }
+
+    .positive { color: var(--green); }
+    .negative { color: var(--red); }
+    .gold { color: var(--gold); }
+
+    .panel {
+      overflow: hidden;
+    }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(23, 24, 18, .75);
+    }
+
+    .panel-title {
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .updated {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 13px 18px;
+      border-bottom: 1px solid rgba(246, 218, 160, .08);
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      background: rgba(0,0,0,.12);
+    }
+
+    td {
+      color: var(--soft);
+      font-size: 14px;
+    }
+
+    td.num, th.num {
+      text-align: right;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .empty {
+      padding: 34px 18px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .warning {
+      display: none;
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      border: 1px solid rgba(245, 184, 79, .32);
+      border-radius: 8px;
+      background: rgba(245, 184, 79, .08);
+      color: var(--gold);
+      font-size: 13px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    @media (max-width: 900px) {
+      header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 560px) {
+      main {
+        width: min(100% - 20px, 1180px);
+        padding-top: 18px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      th, td {
+        padding: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand">
+        <div class="coin">BC</div>
+        <div>
+          <h1>Blynai Capital</h1>
+          <div class="subtitle">Live portfolio dashboard</div>
+        </div>
+      </div>
+      <div class="status">
+        <span id="status-dot" class="dot"></span>
+        <span id="status-text">Loading portfolio</span>
+      </div>
+    </header>
+
+    <section class="grid" aria-label="Portfolio summary">
+      <div class="metric">
+        <div class="label">Total value</div>
+        <div id="total-value" class="value gold">--</div>
+        <div class="subvalue">Cash + open positions</div>
+      </div>
+      <div class="metric">
+        <div class="label">Cash</div>
+        <div id="cash" class="value">--</div>
+        <div class="subvalue">Available virtual EUR</div>
+      </div>
+      <div class="metric">
+        <div class="label">Positions value</div>
+        <div id="positions-value" class="value">--</div>
+        <div id="open-positions" class="subvalue">-- open positions</div>
+      </div>
+      <div class="metric">
+        <div class="label">Daily realized PnL</div>
+        <div id="daily-pnl" class="value">--</div>
+        <div id="daily-date" class="subvalue">UTC day</div>
+      </div>
+    </section>
+
+    <div id="warning" class="warning"></div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-title">Open positions</div>
+        <div id="updated" class="updated">not updated yet</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Pair</th>
+              <th>Side</th>
+              <th class="num">Qty</th>
+              <th class="num">Entry</th>
+              <th class="num">Last</th>
+              <th class="num">Value</th>
+              <th class="num">Unrealized PnL</th>
+            </tr>
+          </thead>
+          <tbody id="positions-body">
+            <tr><td class="empty" colspan="7">Loading positions</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const els = {
+      statusDot: document.getElementById("status-dot"),
+      statusText: document.getElementById("status-text"),
+      totalValue: document.getElementById("total-value"),
+      cash: document.getElementById("cash"),
+      positionsValue: document.getElementById("positions-value"),
+      openPositions: document.getElementById("open-positions"),
+      dailyPnl: document.getElementById("daily-pnl"),
+      dailyDate: document.getElementById("daily-date"),
+      warning: document.getElementById("warning"),
+      updated: document.getElementById("updated"),
+      positionsBody: document.getElementById("positions-body")
+    };
+
+    const eur = new Intl.NumberFormat("en-IE", {
+      style: "currency",
+      currency: "EUR",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+
+    const compact = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
+
+    function money(value) {
+      return Number.isFinite(Number(value)) ? eur.format(Number(value)) : "--";
+    }
+
+    function number(value) {
+      return Number.isFinite(Number(value)) ? compact.format(Number(value)) : "--";
+    }
+
+    function signedMoney(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "--";
+      return `${n >= 0 ? "+" : ""}${eur.format(n)}`;
+    }
+
+    function signedPercent(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "";
+      return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+    }
+
+    function pnlClass(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n === 0) return "";
+      return n > 0 ? "positive" : "negative";
+    }
+
+    function setStatus(kind, text) {
+      els.statusDot.className = `dot ${kind === "ok" ? "ok" : kind === "bad" ? "bad" : ""}`;
+      els.statusText.textContent = text;
+    }
+
+    function setWarning(text) {
+      els.warning.style.display = text ? "block" : "none";
+      els.warning.textContent = text || "";
+    }
+
+    function renderPositions(positions) {
+      if (!positions || positions.length === 0) {
+        els.positionsBody.innerHTML = '<tr><td class="empty" colspan="7">No open positions</td></tr>';
+        return;
+      }
+
+      els.positionsBody.innerHTML = positions.map(position => {
+        const pnl = Number(position.unrealizedPnlEur);
+        const pnlPercent = signedPercent(position.unrealizedPnlPercent);
+        const cls = pnlClass(pnl);
+        return `
+          <tr>
+            <td>${position.pair}</td>
+            <td>${position.side}</td>
+            <td class="num">${number(position.quantity)}</td>
+            <td class="num">${money(position.entryPrice)}</td>
+            <td class="num">${money(position.lastPrice)}</td>
+            <td class="num">${money(position.marketValueEur)}</td>
+            <td class="num ${cls}">${signedMoney(pnl)} ${pnlPercent}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function render(data) {
+      const summary = data.summary;
+      setWarning(data.warning);
+
+      if (!summary) {
+        els.totalValue.textContent = "--";
+        els.cash.textContent = "--";
+        els.positionsValue.textContent = "--";
+        els.openPositions.textContent = "0 open positions";
+        els.dailyPnl.textContent = "--";
+        els.dailyDate.textContent = "UTC day";
+        els.updated.textContent = "waiting for worker data";
+        renderPositions([]);
+        setStatus("ok", "API connected");
+        return;
+      }
+
+      els.totalValue.textContent = money(summary.totalValueEur);
+      els.cash.textContent = money(summary.cashEur);
+      els.positionsValue.textContent = money(summary.positionsValueEur);
+      els.openPositions.textContent = `${summary.openPositions} open position${summary.openPositions === 1 ? "" : "s"}`;
+      els.dailyPnl.textContent = signedMoney(summary.dailyRealizedPnlEur ?? 0);
+      els.dailyPnl.className = `value ${pnlClass(summary.dailyRealizedPnlEur ?? 0)}`;
+      els.dailyDate.textContent = summary.dailyRiskDateUtc ? `${summary.dailyRiskDateUtc} UTC` : "UTC day";
+      els.updated.textContent = `portfolio updated ${new Date(summary.updatedAt).toLocaleString()}`;
+
+      renderPositions(data.positions || []);
+      setStatus("ok", "Live data");
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch("/api/portfolio", { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        render(await response.json());
+      } catch (error) {
+        setStatus("bad", "API unavailable");
+        setWarning(error.message || "Failed to load portfolio");
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 10000);
+  </script>
+</body>
+</html>

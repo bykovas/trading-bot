@@ -16,6 +16,15 @@ http:
         certResolver: letsencrypt
       service: trading-bot
 
+    trading-bot-api-https:
+      rule: "Host(`fin.bykovas.lt`) && PathPrefix(`/api`)"
+      entryPoints:
+        - websecure
+      priority: 20
+      tls:
+        certResolver: letsencrypt
+      service: trading-bot-api
+
   middlewares:
     trading-bot-https-redirect:
       redirectScheme:
@@ -27,3 +36,8 @@ http:
       loadBalancer:
         servers:
           - url: "http://trading-bot-ui:80"
+
+    trading-bot-api:
+      loadBalancer:
+        servers:
+          - url: "http://trading-bot-api:8080"

@@ -6,6 +6,18 @@ services:
     networks:
       - traefik
 
+  api:
+    container_name: trading-bot-api
+    image: ${API_IMAGE_NAME}:${API_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - /opt/trading-bot/.env
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - traefik
+
   worker:
     container_name: trading-bot-worker
     image: ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG:-latest}

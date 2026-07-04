@@ -12,6 +12,7 @@ permissions:
 
 env:
   UI_IMAGE_NAME: ghcr.io/bykovas/trading-bot-ui
+  API_IMAGE_NAME: ghcr.io/bykovas/trading-bot-api
   WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-worker
 
 jobs:
@@ -44,10 +45,20 @@ jobs:
             --tag "${WORKER_IMAGE_NAME}:${{ github.sha }}" \
             .
 
+      - name: Build API image
+        run: |
+          docker build \
+            --file src/TradingBot.Api/Dockerfile \
+            --tag "${API_IMAGE_NAME}:latest" \
+            --tag "${API_IMAGE_NAME}:${{ github.sha }}" \
+            .
+
       - name: Push images
         run: |
           docker push "${UI_IMAGE_NAME}:latest"
           docker push "${UI_IMAGE_NAME}:${{ github.sha }}"
+          docker push "${API_IMAGE_NAME}:latest"
+          docker push "${API_IMAGE_NAME}:${{ github.sha }}"
           docker push "${WORKER_IMAGE_NAME}:latest"
           docker push "${WORKER_IMAGE_NAME}:${{ github.sha }}"
 
@@ -60,6 +71,8 @@ jobs:
     env:
       UI_IMAGE_NAME: ghcr.io/bykovas/trading-bot-ui
       UI_IMAGE_TAG: ${{ github.sha }}
+      API_IMAGE_NAME: ghcr.io/bykovas/trading-bot-api
+      API_IMAGE_TAG: ${{ github.sha }}
       WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-worker
       WORKER_IMAGE_TAG: ${{ github.sha }}
       GHCR_USERNAME: ${{ github.actor }}
