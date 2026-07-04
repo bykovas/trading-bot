@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -322,7 +323,7 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
         limit @limit offset @offset
         """,
         connection);
-    command.Parameters.AddWithValue("cycle_id", (object?)cycleId ?? DBNull.Value);
+    command.Parameters.Add("cycle_id", NpgsqlDbType.Text).Value = (object?)cycleId ?? DBNull.Value;
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
 
@@ -384,8 +385,8 @@ static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
         limit @limit offset @offset
         """,
         connection);
-    command.Parameters.AddWithValue("cycle_id", (object?)cycleId ?? DBNull.Value);
-    command.Parameters.AddWithValue("pair", (object?)NormalizePairFilter(pair) ?? DBNull.Value);
+    command.Parameters.Add("cycle_id", NpgsqlDbType.Text).Value = (object?)cycleId ?? DBNull.Value;
+    command.Parameters.Add("pair", NpgsqlDbType.Text).Value = (object?)NormalizePairFilter(pair) ?? DBNull.Value;
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
 
