@@ -136,6 +136,26 @@ app.MapGet("/api/decisions", async (string? cycleId, int? limit, int? offset, Ca
         items.Count == page.Limit ? page.Offset + page.Limit : null));
 });
 
+app.MapGet("/api/entry-diagnostics", async (string? cycleId, int? limit, int? offset, CancellationToken cancellationToken) =>
+{
+    var connectionString = GetConnectionString(builder.Configuration);
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return Results.Problem("TRADINGBOT_DATABASE_CONNECTION_STRING is not configured.");
+    }
+
+    var page = PageRequest.Create(limit, offset);
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    var items = await ReadEntryDiagnostics(connection, cycleId, page, cancellationToken);
+    return Results.Ok(new PageResponse<CycleEntryDiagnosticsDto>(
+        items,
+        page.Limit,
+        page.Offset,
+        items.Count == page.Limit ? page.Offset + page.Limit : null));
+});
+
 app.MapGet("/api/market-snapshots", async (
     string? cycleId,
     string? pair,
@@ -401,7 +421,12 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
             portfolio_value_after_eur,
             reason,
             hold_reason_code,
-            exit_reason_code
+            exit_reason_code,
+            entry_rejection_reason,
+            spread_percent,
+            price_action_direction,
+            price_action_trend_percent,
+            exploratory
         from dry_run_decisions
         where (@cycle_id is null or cycle_id = @cycle_id)
         order by utc desc, cycle_id desc, pair
@@ -436,7 +461,12 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
             GetNullableDecimal(reader, 16),
             reader.IsDBNull(17) ? string.Empty : reader.GetString(17),
             reader.IsDBNull(18) ? null : reader.GetString(18),
-            reader.IsDBNull(19) ? null : reader.GetString(19)));
+            reader.IsDBNull(19) ? null : reader.GetString(19),
+            reader.IsDBNull(20) ? null : reader.GetString(20),
+            GetNullableDecimal(reader, 21),
+            reader.IsDBNull(22) ? null : reader.GetString(22),
+            GetNullableDecimal(reader, 23),
+            reader.IsDBNull(24) ? null : reader.GetBoolean(24)));
     }
 
     return decisions;
@@ -444,6 +474,73 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
 
 static decimal? GetNullableDecimal(NpgsqlDataReader reader, int ordinal) =>
     reader.IsDBNull(ordinal) ? null : reader.GetDecimal(ordinal);
+
+static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
+    NpgsqlConnection connection,
+    string? cycleId,
+    PageRequest page,
+    CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand(
+        """
+        select
+            cycle_id,
+            utc,
+            snapshot_pairs_available,
+            active_pairs_evaluated,
+            entry_pairs_evaluated,
+            score_at_least_075,
+            score_at_least_080,
+            score_at_least_085,
+            score_at_least_090,
+            hard_filter_pass_count,
+            eligible_entry_candidates,
+            chosen_pair,
+            no_trade_reason,
+            rejection_counts::text,
+            top_candidates::text,
+            excluded_pairs::text
+        from dry_run_cycle_entry_diagnostics
+        where (@cycle_id is null or cycle_id = @cycle_id)
+        order by utc desc, cycle_id desc
+        limit @limit offset @offset
+        """,
+        connection);
+    command.Parameters.Add("cycle_id", NpgsqlDbType.Text).Value = (object?)cycleId ?? DBNull.Value;
+    command.Parameters.AddWithValue("limit", page.Limit);
+    command.Parameters.AddWithValue("offset", page.Offset);
+
+    var items = new List<CycleEntryDiagnosticsDto>();
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    while (await reader.ReadAsync(cancellationToken))
+    {
+        items.Add(new CycleEntryDiagnosticsDto(
+            reader.GetString(0),
+            reader.GetDateTime(1),
+            GetNullableInt(reader, 2),
+            GetNullableInt(reader, 3),
+            GetNullableInt(reader, 4),
+            GetNullableInt(reader, 5),
+            GetNullableInt(reader, 6),
+            GetNullableInt(reader, 7),
+            GetNullableInt(reader, 8),
+            GetNullableInt(reader, 9),
+            GetNullableInt(reader, 10),
+            reader.IsDBNull(11) ? null : reader.GetString(11),
+            reader.IsDBNull(12) ? null : reader.GetString(12),
+            ParseJsonOrNull(reader, 13),
+            ParseJsonOrNull(reader, 14),
+            ParseJsonOrNull(reader, 15)));
+    }
+
+    return items;
+}
+
+static int? GetNullableInt(NpgsqlDataReader reader, int ordinal) =>
+    reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
+
+static JsonElement? ParseJsonOrNull(NpgsqlDataReader reader, int ordinal) =>
+    reader.IsDBNull(ordinal) ? null : JsonDocument.Parse(reader.GetString(ordinal)).RootElement.Clone();
 
 static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
     NpgsqlConnection connection,
@@ -689,7 +786,30 @@ internal sealed record DecisionSummaryDto(
     decimal? PortfolioValueAfterEur,
     string Reason,
     string? HoldReasonCode,
-    string? ExitReasonCode);
+    string? ExitReasonCode,
+    string? EntryRejectionReason,
+    decimal? SpreadPercent,
+    string? PriceActionDirection,
+    decimal? PriceActionTrendPercent,
+    bool? Exploratory);
+
+internal sealed record CycleEntryDiagnosticsDto(
+    string CycleId,
+    DateTime Utc,
+    int? SnapshotPairsAvailable,
+    int? ActivePairsEvaluated,
+    int? EntryPairsEvaluated,
+    int? ScoreAtLeast075,
+    int? ScoreAtLeast080,
+    int? ScoreAtLeast085,
+    int? ScoreAtLeast090,
+    int? HardFilterPassCount,
+    int? EligibleEntryCandidates,
+    string? ChosenPair,
+    string? NoTradeReason,
+    JsonElement? RejectionCounts,
+    JsonElement? TopCandidates,
+    JsonElement? ExcludedPairs);
 
 internal sealed record MarketSnapshotDto(
     string CycleId,

@@ -339,9 +339,34 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
                 (decision -> 'dryRunAction' ->> 'portfolioValueAfterEur')::numeric as portfolio_value_after_eur,
                 decision -> 'dryRunAction' ->> 'reason' as reason,
                 decision -> 'dryRunAction' ->> 'holdReasonCode' as hold_reason_code,
-                decision -> 'dryRunAction' ->> 'exitReasonCode' as exit_reason_code
+                decision -> 'dryRunAction' ->> 'exitReasonCode' as exit_reason_code,
+                decision ->> 'entryRejectionReason' as entry_rejection_reason,
+                (decision ->> 'spreadPercent')::numeric as spread_percent,
+                decision ->> 'priceActionDirection' as price_action_direction,
+                (decision ->> 'priceActionTrendPercent')::numeric as price_action_trend_percent,
+                (decision ->> 'exploratory')::boolean as exploratory
             from dry_run_cycles cycle
             cross join lateral jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision;
+
+            create or replace view dry_run_cycle_entry_diagnostics as
+            select
+                cycle.cycle_id,
+                cycle.utc,
+                (cycle.record_json -> 'entryDiagnostics' ->> 'snapshotPairsAvailable')::int as snapshot_pairs_available,
+                (cycle.record_json -> 'entryDiagnostics' ->> 'activePairsEvaluated')::int as active_pairs_evaluated,
+                (cycle.record_json -> 'entryDiagnostics' ->> 'entryPairsEvaluated')::int as entry_pairs_evaluated,
+                (cycle.record_json -> 'entryDiagnostics' ->> 'scoreAtLeast075')::int as score_at_least_075,
+                (cycle.record_json -> 'entryDiagnostics' ->> 'scoreAtLeast080')::int as score_at_least_080,
+                (cycle.record_json -> 'entryDiagnostics' ->> 'scoreAtLeast085')::int as score_at_least_085,
+                (cycle.record_json -> 'entryDiagnostics' ->> 'scoreAtLeast090')::int as score_at_least_090,
+                (cycle.record_json -> 'entryDiagnostics' ->> 'hardFilterPassCount')::int as hard_filter_pass_count,
+                (cycle.record_json -> 'entryDiagnostics' ->> 'eligibleEntryCandidates')::int as eligible_entry_candidates,
+                cycle.record_json -> 'entryDiagnostics' ->> 'chosenPair' as chosen_pair,
+                cycle.record_json -> 'entryDiagnostics' ->> 'noTradeReason' as no_trade_reason,
+                cycle.record_json -> 'entryDiagnostics' -> 'rejectionCounts' as rejection_counts,
+                cycle.record_json -> 'entryDiagnostics' -> 'topCandidates' as top_candidates,
+                cycle.record_json -> 'entryDiagnostics' -> 'excludedPairs' as excluded_pairs
+            from dry_run_cycles cycle;
             """,
             connection);
         command.ExecuteNonQuery();

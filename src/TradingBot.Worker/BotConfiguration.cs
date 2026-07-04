@@ -96,6 +96,25 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_EXECUTION_MAX_NEW_POSITIONS_PER_HOUR", value => config.ExecutionPolicy.MaxNewPositionsPerHour = ParseInt(value, config.ExecutionPolicy.MaxNewPositionsPerHour));
         SetIfPresent("TRADINGBOT_EXECUTION_COOLDOWN_AFTER_STOP_LOSS_SECONDS", value => config.ExecutionPolicy.CooldownAfterStopLossSeconds = ParseInt(value, config.ExecutionPolicy.CooldownAfterStopLossSeconds));
         SetIfPresent("TRADINGBOT_POSITION_EXIT_MAX_SIGNAL_FLIP_LOSS_EXIT_PERCENT", value => config.PositionExit.MaxSignalFlipLossExitPercent = ParseDecimal(value, config.PositionExit.MaxSignalFlipLossExitPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_LONG_SCORE", value => config.Strategy.MinimumLongScore = ParseDecimal(value, config.Strategy.MinimumLongScore));
+        SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_ENTRIES_ENABLED", value => config.Strategy.ExploratoryEntriesEnabled = ParseBool(value, config.Strategy.ExploratoryEntriesEnabled));
+        SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_MINIMUM_LONG_SCORE", value => config.Strategy.ExploratoryMinimumLongScore = ParseDecimal(value, config.Strategy.ExploratoryMinimumLongScore));
+        SetIfPresent("TRADINGBOT_STRATEGY_PRICE_ACTION_MAX_DECLINE_PERCENT", value => config.Strategy.PriceActionMaxDeclinePercent = ParseDecimal(value, config.Strategy.PriceActionMaxDeclinePercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_MISSING_VOLUME_SCORE_CAP", value => config.Strategy.MissingVolumeScoreCap = ParseDecimal(value, config.Strategy.MissingVolumeScoreCap));
+        SetIfPresent("TRADINGBOT_STRATEGY_PRICE_ACTION_LOOKBACK_SNAPSHOTS", value => config.Strategy.PriceActionLookbackSnapshots = ParseInt(value, config.Strategy.PriceActionLookbackSnapshots));
+        SetIfPresent("TRADINGBOT_STRATEGY_PRICE_ACTION_MIN_SNAPSHOTS", value => config.Strategy.PriceActionMinSnapshots = ParseInt(value, config.Strategy.PriceActionMinSnapshots));
+        SetIfPresent("TRADINGBOT_STRATEGY_PRICE_ACTION_MAX_NON_RISING_SNAPSHOTS", value => config.Strategy.PriceActionMaxNonRisingSnapshots = ParseInt(value, config.Strategy.PriceActionMaxNonRisingSnapshots));
+        SetIfPresent("TRADINGBOT_STRATEGY_NEGATIVE_PRICE_ACTION_PENALTY", value => config.Strategy.NegativePriceActionPenalty = ParseDecimal(value, config.Strategy.NegativePriceActionPenalty));
+        SetIfPresent("TRADINGBOT_STRATEGY_MIN_DAILY_VOLUME_EUR", value => config.Strategy.MinDailyVolumeEur = ParseDecimal(value, config.Strategy.MinDailyVolumeEur));
+        SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_MAX_RANK", value => config.Strategy.ExploratoryMaxRank = ParseInt(value, config.Strategy.ExploratoryMaxRank));
+        SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_ALLOWED_IN_LIVE", value => config.Strategy.ExploratoryAllowedInLive = ParseBool(value, config.Strategy.ExploratoryAllowedInLive));
+        SetIfPresent("TRADINGBOT_STRATEGY_REQUIRE_PRICE_ACTION_DATA", value => config.Strategy.RequirePriceActionData = ParseBool(value, config.Strategy.RequirePriceActionData));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_SCORE_DECAY_MIN_ENTRY_SCORE", value => config.PositionExit.ScoreDecayMinEntryScore = ParseDecimal(value, config.PositionExit.ScoreDecayMinEntryScore));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_SCORE_DECAY_DEFENSIVE_SCORE", value => config.PositionExit.ScoreDecayDefensiveScore = ParseDecimal(value, config.PositionExit.ScoreDecayDefensiveScore));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_SCORE_DECAY_DEFENSIVE_CYCLES", value => config.PositionExit.ScoreDecayDefensiveCycles = ParseInt(value, config.PositionExit.ScoreDecayDefensiveCycles));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_SCORE_DECAY_IMMEDIATE_SCORE", value => config.PositionExit.ScoreDecayImmediateScore = ParseDecimal(value, config.PositionExit.ScoreDecayImmediateScore));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_POST_ENTRY_ADVERSE_WINDOW_MINUTES", value => config.PositionExit.PostEntryAdverseWindowMinutes = ParseInt(value, config.PositionExit.PostEntryAdverseWindowMinutes));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_POST_ENTRY_ADVERSE_LOSS_PERCENT", value => config.PositionExit.PostEntryAdverseLossPercent = ParseDecimal(value, config.PositionExit.PostEntryAdverseLossPercent));
     }
 
     private void Normalize()
@@ -122,6 +141,27 @@ internal sealed class BotConfiguration
         Strategy.VolumeConfirmationMultiple = Math.Max(1m, Strategy.VolumeConfirmationMultiple);
         Strategy.MaxEntrySpreadPercent = Math.Max(0m, Strategy.MaxEntrySpreadPercent);
         Strategy.ExitEmaGapPercent = Math.Max(0m, Strategy.ExitEmaGapPercent);
+        Strategy.PriceActionLookbackSnapshots = Math.Max(1, Strategy.PriceActionLookbackSnapshots);
+        Strategy.PriceActionMinSnapshots = Math.Max(2, Strategy.PriceActionMinSnapshots);
+        Strategy.PriceActionMaxDeclinePercent = Math.Max(0m, Strategy.PriceActionMaxDeclinePercent);
+        Strategy.PriceActionMaxNonRisingSnapshots = Math.Max(0, Strategy.PriceActionMaxNonRisingSnapshots);
+        Strategy.NegativePriceActionPenalty = Math.Max(0m, Strategy.NegativePriceActionPenalty);
+        Strategy.MissingVolumeScoreCap = Math.Clamp(Strategy.MissingVolumeScoreCap, 0m, 1m);
+        Strategy.MinDailyVolumeEur = Math.Max(0m, Strategy.MinDailyVolumeEur);
+        Strategy.ExploratoryMinimumLongScore = Math.Clamp(Strategy.ExploratoryMinimumLongScore, 0m, Strategy.MinimumLongScore);
+        Strategy.ExploratoryMaxRank = Math.Max(1, Strategy.ExploratoryMaxRank);
+        // Exploratory sampling is a dry-run tool. Live trading keeps the firm
+        // threshold unless the operator explicitly opts in.
+        if (Trading.LiveTradingEnabled && !Strategy.ExploratoryAllowedInLive)
+        {
+            Strategy.ExploratoryEntriesEnabled = false;
+        }
+        // Live entries must never bypass the anti-lag guard via missing history: force
+        // the warm-up requirement on whenever live trading is enabled.
+        if (Trading.LiveTradingEnabled)
+        {
+            Strategy.RequirePriceActionData = true;
+        }
         NormalizePositionSizing();
         Portfolio.StartingCashEur = Portfolio.StartingCashEur < 0 ? 0m : Portfolio.StartingCashEur;
         Logging.Directory = string.IsNullOrWhiteSpace(Logging.Directory) ? "logs" : Logging.Directory.Trim();
@@ -148,6 +188,12 @@ internal sealed class BotConfiguration
         // Loss floor for confirmed bearish flips is a loss (<= 0); a positive value is
         // nonsensical, so clamp it up to 0 (which also disables the mechanism).
         PositionExit.MaxSignalFlipLossExitPercent = Math.Min(0m, PositionExit.MaxSignalFlipLossExitPercent);
+        PositionExit.ScoreDecayMinEntryScore = Math.Clamp(PositionExit.ScoreDecayMinEntryScore, 0m, 1m);
+        PositionExit.ScoreDecayDefensiveScore = Math.Clamp(PositionExit.ScoreDecayDefensiveScore, 0m, 1m);
+        PositionExit.ScoreDecayDefensiveCycles = Math.Max(0, PositionExit.ScoreDecayDefensiveCycles);
+        PositionExit.ScoreDecayImmediateScore = Math.Clamp(PositionExit.ScoreDecayImmediateScore, 0m, 1m);
+        PositionExit.PostEntryAdverseWindowMinutes = Math.Max(0, PositionExit.PostEntryAdverseWindowMinutes);
+        PositionExit.PostEntryAdverseLossPercent = Math.Max(0m, PositionExit.PostEntryAdverseLossPercent);
         CorrelationRisk.MaxOpenPositionsPerGroup = Math.Max(0, CorrelationRisk.MaxOpenPositionsPerGroup);
         CorrelationRisk.MaxExposureEurPerGroup = Math.Max(0m, CorrelationRisk.MaxExposureEurPerGroup);
         CorrelationRisk.MaxHighBetaPositions = Math.Max(0, CorrelationRisk.MaxHighBetaPositions);
@@ -318,6 +364,54 @@ internal sealed class StrategyOptions
     // weak-but-not-bearish signal becomes a HOLD, not a flip. 0 restores the old
     // behavior (flip to NONE as soon as the bullish entry score is lost).
     public decimal ExitEmaGapPercent { get; set; } = 0.15m;
+
+    // ---- Anti-lag recent price action (light-snapshot ticker series) ----
+    // Number of most recent per-cycle snapshots the trend / rolling average is
+    // computed over. At a 5-minute loop, 6 snapshots ~= the last 30 minutes.
+    public int PriceActionLookbackSnapshots { get; set; } = 6;
+
+    // Minimum snapshots required before the price-action guard may reject anything.
+    // Below this the guard abstains (it blocks on evidence, never on missing data).
+    public int PriceActionMinSnapshots { get; set; } = 4;
+
+    // Hard anti-lag guard: reject a LONG entry when the last price declined at least
+    // this percent over the lookback window. 0 disables the decline rule.
+    public decimal PriceActionMaxDeclinePercent { get; set; } = 0.5m;
+
+    // Reject a LONG entry when the last price failed to rise for this many
+    // consecutive snapshots while the lookback trend is non-positive. 0 disables.
+    public int PriceActionMaxNonRisingSnapshots { get; set; } = 3;
+
+    // Score penalty applied to a bullish signal whose recent snapshot trend is
+    // negative (lagging indicators vs falling real prices). 0 disables the penalty.
+    public decimal NegativePriceActionPenalty { get; set; } = 0.05m;
+
+    // ---- Volume confirmation weighting ----
+    // Without volume confirmation the final score is capped at this value, keeping
+    // "no volume" setups below a 0.90 firm entry bar. 0 disables the cap.
+    public decimal MissingVolumeScoreCap { get; set; } = 0.85m;
+
+    // ---- Liquidity hard filter ----
+    // Minimum estimated 24h volume in EUR required to open a NEW entry. 0 disables.
+    public decimal MinDailyVolumeEur { get; set; } = 0m;
+
+    // ---- Exploratory entry mode (dry-run sampling) ----
+    // When enabled, entries are also allowed at ExploratoryMinimumLongScore (below
+    // MinimumLongScore) but ONLY with positive recent price action, a clean spread,
+    // and a top-ExploratoryMaxRank slot in the cycle's candidate ranking. Meant for
+    // dry-run sample collection; live mode force-disables it unless
+    // ExploratoryAllowedInLive is explicitly set.
+    public bool ExploratoryEntriesEnabled { get; set; } = false;
+    public decimal ExploratoryMinimumLongScore { get; set; } = 0.85m;
+    public int ExploratoryMaxRank { get; set; } = 2;
+    public bool ExploratoryAllowedInLive { get; set; } = false;
+
+    // ---- Price-action warm-up ----
+    // When true, NEW entries are blocked until the pair has PriceActionMinSnapshots
+    // observations, so the anti-lag guard never has to abstain for an actual entry.
+    // Normalize() forces this to true in live mode: after a restart the worker must
+    // warm up (~PriceActionMinSnapshots cycles) before it may open live positions.
+    public bool RequirePriceActionData { get; set; } = false;
 }
 
 internal sealed class PositionSizingOptions
@@ -449,6 +543,29 @@ internal sealed class PositionExitOptions
     // hard cap above it.
     public decimal TrailingActivationPercent { get; set; } = 1.5m;
     public decimal TrailingDistancePercent { get; set; } = 1.0m;
+
+    // ---- Score-decay defensive exits (TIER 2.5) ----
+    // Only positions opened at or above this entry score are decay-protected; the
+    // rules exist to stop a failed HIGH-conviction entry from riding to stop-loss.
+    // 0 disables all score-decay rules.
+    public decimal ScoreDecayMinEntryScore { get; set; } = 0.90m;
+
+    // Defensive rule: exit (when not profitable) after the current score has stayed
+    // at or below this level for ScoreDecayDefensiveCycles consecutive cycles.
+    public decimal ScoreDecayDefensiveScore { get; set; } = 0.50m;
+    public int ScoreDecayDefensiveCycles { get; set; } = 2;
+
+    // Immediate rule: exit (when not profitable) as soon as the current score falls
+    // to or below this level. 0 disables the immediate rule.
+    public decimal ScoreDecayImmediateScore { get; set; } = 0.40m;
+
+    // ---- Post-entry adverse movement guard (TIER 2.5) ----
+    // Within this many minutes of entry, a position that is down at least
+    // PostEntryAdverseLossPercent while its score no longer confirms the entry and
+    // recent price action is negative is cut early instead of drifting to stop-loss.
+    // Either value at 0 disables the guard.
+    public int PostEntryAdverseWindowMinutes { get; set; } = 30;
+    public decimal PostEntryAdverseLossPercent { get; set; } = 1.2m;
 }
 
 internal sealed class CorrelationRiskOptions

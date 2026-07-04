@@ -13,6 +13,11 @@ internal sealed class DecisionWorker(
 {
     private readonly WorkerBuildInfo _buildInfo = buildInfo ?? WorkerBuildInfo.FromEnvironment();
 
+    // Rolling per-pair history of light ticker snapshots feeding the anti-lag
+    // price-action guard. In-memory only: after a restart the guard abstains until
+    // enough fresh snapshots accumulate.
+    private readonly SnapshotPriceHistory _priceHistory = new();
+
     // Number of consecutive failed cycles that auto-trips the kill switch. A crash
     // loop with unmonitored stop-losses is far more dangerous than pausing, so after
     // this many back-to-back failures we halt new orders and let the operator look.
@@ -79,6 +84,9 @@ internal sealed class DecisionWorker(
         // delay trading, so it is best-effort — a store failure is logged and ignored.
         PersistMarketSnapshots(cycleId, utc, lightCandidates);
 
+        // Feed the rolling snapshot history used by the anti-lag price-action guard.
+        _priceHistory.Record(utc, lightCandidates);
+
         var maxRecommendations = Math.Min(config.Trading.MaxActiveInstruments, config.Ai.MaxRecommendations);
         var advice = await watchlistAdvisor.SelectAsync(lightCandidates, maxRecommendations, cancellationToken);
         PrintWatchlistAdvice(advice);
@@ -130,6 +138,7 @@ internal sealed class DecisionWorker(
         // per-cycle and max-open limits go to the best candidates, not to whichever
         // pairs happen to come first in CandidateUniverse.
         var buyCandidates = new List<(PreparedDecision Prepared, EntryCandidate Rank)>();
+        var entryEvaluations = new List<PreparedDecision>();
         var entryIndex = 0;
         foreach (var marketState in entryStates)
         {
@@ -140,6 +149,7 @@ internal sealed class DecisionWorker(
                 continue;
             }
 
+            entryEvaluations.Add(prepared);
             if (prepared.Proposal.DesiredPosition == "LONG_MICRO" && prepared.Risk.Approved)
             {
                 buyCandidates.Add((prepared, new EntryCandidate(
@@ -161,14 +171,32 @@ internal sealed class DecisionWorker(
             entryIndex++;
         }
 
+        var rankPosition = 0;
         foreach (var ranked in EntryRanking.Rank(buyCandidates.Select(candidate => candidate.Rank)))
         {
+            rankPosition++;
             var prepared = buyCandidates.First(candidate => ReferenceEquals(candidate.Rank, ranked)).Prepared;
+
+            // Exploratory candidates (admitted below the firm score threshold) only
+            // trade from a top-N ranking slot; lower slots are recorded and skipped.
+            if (prepared.Proposal.ExploratoryCandidate && rankPosition > config.Strategy.ExploratoryMaxRank)
+            {
+                decisionRecords.Add(BuildSkippedBuyRecord(
+                    prepared,
+                    workingPortfolio,
+                    "EXPLORATORY_RANK",
+                    $"exploratory candidate skipped: ranked #{rankPosition}, only top {config.Strategy.ExploratoryMaxRank} exploratory candidates may enter"));
+                continue;
+            }
 
             if (config.ExecutionPolicy.MaxNewPositionsPerCycle > 0
                 && newPositionsThisCycle >= config.ExecutionPolicy.MaxNewPositionsPerCycle)
             {
-                decisionRecords.Add(BuildSkippedBuyRecord(prepared, workingPortfolio));
+                decisionRecords.Add(BuildSkippedBuyRecord(
+                    prepared,
+                    workingPortfolio,
+                    "CYCLE_POSITION_LIMIT",
+                    "buy candidate skipped because higher-ranked candidates consumed max new positions per cycle"));
                 continue;
             }
 
@@ -194,6 +222,14 @@ internal sealed class DecisionWorker(
             Console.WriteLine("decision-cycle: skipped because active watchlist is empty");
         }
 
+        var entryDiagnostics = BuildEntryDiagnostics(
+            lightCandidates,
+            selected,
+            entryEvaluations,
+            buyCandidates.Count,
+            decisionRecords);
+        PrintEntryDiagnostics(entryDiagnostics);
+
         var portfolioAfter = workingPortfolio.Clone();
         PrintPortfolio("portfolio-after", portfolioAfter);
 
@@ -210,11 +246,205 @@ internal sealed class DecisionWorker(
                 ActivePairs = selected.Select(candidate => candidate.Instrument.Pair).ToList(),
                 Decisions = decisionRecords,
                 PortfolioBefore = portfolioBefore,
-                PortfolioAfter = portfolioAfter
+                PortfolioAfter = portfolioAfter,
+                EntryDiagnostics = entryDiagnostics
             });
             Console.WriteLine($"dry-run-written state={dryRunPortfolio.GetStatePath()} events={dryRunPortfolio.GetEventsPath()}");
         }
     }
+
+    // ---- Per-cycle entry funnel diagnostics ----
+    // Explains every no-trade cycle: how many pairs were snapshotted vs evaluated,
+    // where candidates fell out of the funnel (hard filters, quality filters,
+    // ranking, portfolio gates), and the final chosen entry or explicit reason.
+    private CycleEntryDiagnostics BuildEntryDiagnostics(
+        IReadOnlyList<InstrumentMarketState> lightCandidates,
+        IReadOnlyList<InstrumentMarketState> selected,
+        IReadOnlyList<PreparedDecision> entryEvaluations,
+        int eligibleEntryCandidates,
+        IReadOnlyList<DryRunDecisionRecord> decisionRecords)
+    {
+        var recordsByPair = decisionRecords
+            .GroupBy(record => record.Pair, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+
+        var candidates = new List<CandidateDiagnostic>();
+        var rejectionCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var prepared in entryEvaluations)
+        {
+            recordsByPair.TryGetValue(prepared.Proposal.Pair, out var record);
+            var diagnostic = BuildCandidateDiagnostic(prepared, record);
+            candidates.Add(diagnostic);
+            if (diagnostic.RejectionReason is { } reason)
+            {
+                rejectionCounts[reason] = rejectionCounts.GetValueOrDefault(reason) + 1;
+            }
+        }
+
+        var allScores = decisionRecords.Select(record => record.Score).ToList();
+        var chosenPairs = decisionRecords
+            .Where(record => record.DryRunAction.Action == "WOULD_BUY")
+            .Select(record => record.Pair)
+            .ToList();
+
+        var excluded = lightCandidates
+            .Where(candidate => !selected.Any(state => state.Instrument.Pair.Equals(candidate.Instrument.Pair, StringComparison.OrdinalIgnoreCase)))
+            .Select(candidate => new ExcludedPairDiagnostic(
+                candidate.Instrument.Pair,
+                string.IsNullOrWhiteSpace(candidate.DataWarning)
+                    ? $"not selected by watchlist advisor ({EntryRejection.ActivePairFilter})"
+                    : $"unusable data: {candidate.DataWarning}",
+                candidate.LastPrice,
+                candidate.ChangePercent))
+            .ToList();
+
+        var chosenPair = chosenPairs.Count > 0 ? string.Join(", ", chosenPairs) : null;
+        return new CycleEntryDiagnostics(
+            SnapshotPairsAvailable: lightCandidates.Count,
+            ActivePairsEvaluated: selected.Count,
+            EntryPairsEvaluated: entryEvaluations.Count,
+            ScoreAtLeast075: allScores.Count(score => score >= 0.75m),
+            ScoreAtLeast080: allScores.Count(score => score >= 0.80m),
+            ScoreAtLeast085: allScores.Count(score => score >= 0.85m),
+            ScoreAtLeast090: allScores.Count(score => score >= 0.90m),
+            HardFilterPassCount: candidates.Count(candidate => candidate.HardFiltersPassed),
+            EligibleEntryCandidates: eligibleEntryCandidates,
+            ChosenPair: chosenPair,
+            NoTradeReason: chosenPair is null
+                ? BuildNoTradeReason(candidates, eligibleEntryCandidates, rejectionCounts, decisionRecords)
+                : null,
+            RejectionCounts: rejectionCounts,
+            TopCandidates: candidates
+                .OrderByDescending(candidate => candidate.Score)
+                .ThenBy(candidate => candidate.SpreadPercent)
+                .Take(5)
+                .ToList(),
+            ExcludedPairs: excluded);
+    }
+
+    private CandidateDiagnostic BuildCandidateDiagnostic(PreparedDecision prepared, DryRunDecisionRecord? record)
+    {
+        var proposal = prepared.Proposal;
+        var marketState = prepared.MarketState;
+
+        // The gate-level rejection wins; if the gate passed but the portfolio layer
+        // blocked the buy, map its hold-reason code onto the same vocabulary.
+        var rejection = proposal.EntryRejectionReason;
+        if (rejection is null && record is { DryRunAction.Action: not "WOULD_BUY" })
+        {
+            rejection = EntryRejection.FromHoldReasonCode(record.DryRunAction.HoldReasonCode)
+                ?? (record.DryRunAction.Action == "WOULD_BUY_BLOCKED" ? EntryRejection.RiskLimits : null);
+        }
+
+        var missing = new List<string>();
+        foreach (var contribution in proposal.Contributions)
+        {
+            switch (contribution.Name)
+            {
+                case "Momentum" when contribution.Value <= 0m:
+                    missing.Add("MOMENTUM");
+                    break;
+                case "Volume" when contribution.Value <= 0m:
+                    missing.Add("VOLUME");
+                    break;
+                case "Trend" when contribution.Value <= 0m:
+                    missing.Add("TREND");
+                    break;
+                case "RSI" when contribution.Value <= 0m:
+                    missing.Add("RSI");
+                    break;
+                case "PriceAction" when contribution.Value < 0m:
+                    missing.Add("PRICE_ACTION");
+                    break;
+            }
+        }
+
+        if (rejection == EntryRejection.SpreadTooWide)
+        {
+            missing.Add("SPREAD");
+        }
+
+        var hardFiltersPassed = rejection is not (EntryRejection.SpreadTooWide or EntryRejection.PairUnavailable or EntryRejection.LowLiquidity);
+        return new CandidateDiagnostic(
+            proposal.Pair,
+            proposal.Score,
+            proposal.DesiredPosition,
+            decimal.Round(proposal.SpreadPercent, 3),
+            marketState.LastPrice,
+            marketState.BestBid,
+            marketState.BestAsk,
+            prepared.PriceAction?.Direction ?? "UNKNOWN",
+            prepared.PriceAction?.TrendPercent,
+            hardFiltersPassed,
+            QualityFiltersPassed: proposal.DesiredPosition == "LONG_MICRO",
+            missing,
+            rejection,
+            proposal.ExploratoryCandidate);
+    }
+
+    private static string BuildNoTradeReason(
+        IReadOnlyList<CandidateDiagnostic> candidates,
+        int eligibleEntryCandidates,
+        IReadOnlyDictionary<string, int> rejectionCounts,
+        IReadOnlyList<DryRunDecisionRecord> decisionRecords)
+    {
+        if (candidates.Count == 0)
+        {
+            return "no evaluable entry pairs this cycle (active watchlist empty, all pairs held, or data unusable)";
+        }
+
+        if (eligibleEntryCandidates > 0)
+        {
+            var blocked = decisionRecords
+                .Where(record => record.DryRunAction.Action == "WOULD_BUY_BLOCKED")
+                .Select(record => $"{record.Pair}:{record.DryRunAction.HoldReasonCode ?? "RISK_LIMITS"}")
+                .ToList();
+            return blocked.Count > 0
+                ? $"eligible candidates were blocked by portfolio gates: {string.Join(", ", blocked)}"
+                : "eligible candidates existed but none produced a buy (see decision records)";
+        }
+
+        var best = candidates.OrderByDescending(candidate => candidate.Score).First();
+        var topRejections = string.Join(
+            ", ",
+            rejectionCounts.OrderByDescending(item => item.Value).Take(3).Select(item => $"{item.Key} x{item.Value}"));
+        return $"no eligible entry candidates: best score {best.Score:0.##} on {best.Pair} ({best.RejectionReason ?? "no rejection recorded"}); rejections: {topRejections}";
+    }
+
+    private static void PrintEntryDiagnostics(CycleEntryDiagnostics diagnostics)
+    {
+        Console.WriteLine("cycle-entry-diagnostics:");
+        Console.WriteLine(
+            $"  snapshots={diagnostics.SnapshotPairsAvailable} evaluated={diagnostics.ActivePairsEvaluated} entryPairs={diagnostics.EntryPairsEvaluated} " +
+            $"score>=0.75:{diagnostics.ScoreAtLeast075} >=0.80:{diagnostics.ScoreAtLeast080} >=0.85:{diagnostics.ScoreAtLeast085} >=0.90:{diagnostics.ScoreAtLeast090} " +
+            $"hardFilterPass={diagnostics.HardFilterPassCount} eligible={diagnostics.EligibleEntryCandidates}");
+        foreach (var candidate in diagnostics.TopCandidates)
+        {
+            Console.WriteLine(
+                $"  top {candidate.Pair}: score={candidate.Score:0.##} desired={candidate.DesiredPosition} spread={candidate.SpreadPercent:0.###}% " +
+                $"price={candidate.Price:0.######} bid={candidate.Bid:0.######} ask={candidate.Ask:0.######} " +
+                $"priceAction={candidate.PriceActionDirection}({FormatTrend(candidate.PriceActionTrendPercent)}) " +
+                $"hard={(candidate.HardFiltersPassed ? "pass" : "FAIL")} quality={(candidate.QualityFiltersPassed ? "pass" : "FAIL")} " +
+                $"missing=[{string.Join(",", candidate.MissingConfirmations)}] " +
+                $"reject={candidate.RejectionReason ?? "-"}{(candidate.Exploratory ? " (exploratory)" : string.Empty)}");
+        }
+
+        if (diagnostics.ExcludedPairs.Count > 0)
+        {
+            Console.WriteLine($"  excluded pairs ({diagnostics.ExcludedPairs.Count} of {diagnostics.SnapshotPairsAvailable} snapshot pairs):");
+            foreach (var excluded in diagnostics.ExcludedPairs)
+            {
+                Console.WriteLine($"    {excluded.Pair}: {excluded.Reason} (last={excluded.Last:0.######} change={excluded.ChangePercent:+0.##;-0.##;0}%)");
+            }
+        }
+
+        Console.WriteLine(diagnostics.ChosenPair is { } chosen
+            ? $"  chosen: {chosen}"
+            : $"  no-trade: {diagnostics.NoTradeReason}");
+    }
+
+    private static string FormatTrend(decimal? trendPercent) =>
+        trendPercent is { } trend ? $"{trend:+0.###;-0.###;0}%" : "n/a";
 
     // Best-effort per-cycle persistence of the light market snapshot. Failures here
     // must NEVER block or delay trading, so everything is wrapped and only logged.
@@ -371,7 +601,8 @@ internal sealed class DecisionWorker(
         InstrumentMarketState MarketState,
         IndicatorSnapshot Indicators,
         DecisionProposal Proposal,
-        RiskEvaluation Risk);
+        RiskEvaluation Risk,
+        PriceActionAssessment? PriceAction);
 
     private PreparedDecision? PrepareDecision(InstrumentMarketState marketState, PortfolioState portfolio)
     {
@@ -385,9 +616,13 @@ internal sealed class DecisionWorker(
         var currentExposureEur = portfolio.Positions.Sum(position => position.EntryNotionalEur);
         var hasOpenPosition = portfolio.Positions.Any(position =>
             position.Pair.Equals(marketState.Instrument.Pair, StringComparison.OrdinalIgnoreCase));
-        var proposal = decisionEngine.Decide(marketState, indicators, config.Trading, config.Strategy, config.PositionSizing, config.Risk, portfolio.CashEur, currentExposureEur, hasOpenPosition);
+        var priceAction = _priceHistory.Assess(
+            marketState.Instrument.Pair,
+            config.Strategy.PriceActionLookbackSnapshots,
+            config.Strategy.PriceActionMinSnapshots);
+        var proposal = decisionEngine.Decide(marketState, indicators, config.Trading, config.Strategy, config.PositionSizing, config.Risk, portfolio.CashEur, currentExposureEur, hasOpenPosition, priceAction);
         var risk = riskManager.Evaluate(proposal, config.Risk, hasOpenPosition);
-        return new PreparedDecision(marketState, indicators, proposal, risk);
+        return new PreparedDecision(marketState, indicators, proposal, risk, priceAction);
     }
 
     private static decimal BullishEmaGapPercent(IndicatorSnapshot indicators)
@@ -400,15 +635,18 @@ internal sealed class DecisionWorker(
         return (fast - slow) / slow * 100m;
     }
 
-    // Record for a ranked BUY candidate that lost the per-cycle entry race to
-    // higher-ranked candidates. No portfolio mutation, no broker call.
-    private DryRunDecisionRecord BuildSkippedBuyRecord(PreparedDecision prepared, PortfolioState portfolio)
+    // Record for a ranked BUY candidate that lost the per-cycle entry race (cycle
+    // position limit or exploratory rank cut). No portfolio mutation, no broker call.
+    private DryRunDecisionRecord BuildSkippedBuyRecord(
+        PreparedDecision prepared,
+        PortfolioState portfolio,
+        string holdReasonCode,
+        string reason)
     {
-        const string reason = "buy candidate skipped because higher-ranked candidates consumed max new positions per cycle";
         Console.WriteLine($"decision {prepared.Proposal.Pair}:");
         Console.WriteLine($"  desired={prepared.Proposal.DesiredPosition} score={prepared.Proposal.Score:0.##} targetEur={prepared.Proposal.TargetNotionalEur:0.##}");
         Console.WriteLine("  execution=WOULD_BUY_BLOCKED");
-        Console.WriteLine("  execution-hold-reason-code: CYCLE_POSITION_LIMIT");
+        Console.WriteLine($"  execution-hold-reason-code: {holdReasonCode}");
         Console.WriteLine($"  execution-reason: {reason}");
 
         return new DryRunDecisionRecord
@@ -428,7 +666,7 @@ internal sealed class DecisionWorker(
                 Pair = prepared.Proposal.Pair,
                 Action = "WOULD_BUY_BLOCKED",
                 Reason = reason,
-                HoldReasonCode = "CYCLE_POSITION_LIMIT",
+                HoldReasonCode = holdReasonCode,
                 DesiredPosition = prepared.Proposal.DesiredPosition,
                 TargetNotionalEur = prepared.Proposal.TargetNotionalEur,
                 CashBeforeEur = portfolio.CashEur,
@@ -436,7 +674,41 @@ internal sealed class DecisionWorker(
                 PortfolioValueBeforeEur = portfolio.TotalValueEur,
                 PortfolioValueAfterEur = portfolio.TotalValueEur
             },
-            Broker = null
+            Broker = null,
+            EntryRejectionReason = holdReasonCode == "EXPLORATORY_RANK" ? EntryRejection.ExploratoryRank : EntryRejection.CyclePositionLimit,
+            SpreadPercent = decimal.Round(prepared.Proposal.SpreadPercent, 3),
+            PriceActionDirection = prepared.PriceAction?.Direction,
+            PriceActionTrendPercent = prepared.PriceAction?.TrendPercent,
+            Exploratory = prepared.Proposal.ExploratoryCandidate
+        };
+    }
+
+    // A live order the exchange did NOT execute (error or pre-flight skip). The
+    // virtual portfolio stays untouched, so state and exchange remain consistent:
+    // a failed BUY leaves no phantom position, a failed SELL keeps the position
+    // (the asset is in fact still held) and the exit retries next cycle.
+    private static DryRunAction BuildLiveOrderNotExecutedAction(
+        DryRunAction previewAction,
+        PortfolioState portfolio,
+        string brokerVerdict)
+    {
+        Console.WriteLine($"  !!! live order NOT executed, virtual portfolio left unchanged: {brokerVerdict}");
+        return new DryRunAction
+        {
+            Pair = previewAction.Pair,
+            Action = "LIVE_ORDER_FAILED",
+            Reason = $"intended {previewAction.Action} was not executed by the exchange: {brokerVerdict}",
+            HoldReasonCode = "LIVE_ORDER_FAILED",
+            ExitReasonCode = null,
+            DesiredPosition = previewAction.DesiredPosition,
+            TargetNotionalEur = previewAction.TargetNotionalEur,
+            CashBeforeEur = portfolio.CashEur,
+            CashAfterEur = portfolio.CashEur,
+            PortfolioValueBeforeEur = portfolio.TotalValueEur,
+            PortfolioValueAfterEur = portfolio.TotalValueEur,
+            CorrelationGroup = previewAction.CorrelationGroup,
+            CorrelationGroupOpenPositions = previewAction.CorrelationGroupOpenPositions,
+            CorrelationGroupExposureEur = previewAction.CorrelationGroupExposureEur
         };
     }
 
@@ -451,7 +723,46 @@ internal sealed class DecisionWorker(
         var proposal = prepared.Proposal;
         var risk = prepared.Risk;
         var currentPositionBeforeAction = portfolio.Positions.FirstOrDefault(position => position.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase))?.Clone();
-        var dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk, newPositionsThisCycle);
+
+        // Execution ordering depends on the mode:
+        //   dry-run / validate-only: virtual fill first, then an informational
+        //     validate-only broker call (its outcome never changes the portfolio).
+        //   LIVE: the intended action is computed on a CLONE (no mutation), the real
+        //     order goes to the broker FIRST, and the virtual portfolio is committed
+        //     only after the exchange accepted the order. A failed/skipped live order
+        //     therefore never creates phantom positions or phantom exits.
+        DryRunAction dryRunAction;
+        string? brokerVerdict;
+        if (LiveOrdersActive)
+        {
+            var previewAction = dryRunPortfolio.Apply(portfolio.Clone(), marketState, proposal, risk, config.Risk, newPositionsThisCycle, prepared.PriceAction);
+            if (previewAction.Action is "WOULD_BUY" or "WOULD_SELL")
+            {
+                brokerVerdict = await RunBrokerAsync(marketState, previewAction, cancellationToken);
+                if (brokerVerdict is null || brokerVerdict.StartsWith("LIVE_SUBMITTED", StringComparison.Ordinal))
+                {
+                    // Exchange accepted (or no broker is wired at all): commit the same
+                    // deterministic action to the real portfolio state.
+                    dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk, newPositionsThisCycle, prepared.PriceAction);
+                }
+                else
+                {
+                    dryRunAction = BuildLiveOrderNotExecutedAction(previewAction, portfolio, brokerVerdict);
+                }
+            }
+            else
+            {
+                // No order intended: applying to the real state is pure bookkeeping
+                // (mark-to-market, hold counters); nothing was sent to the exchange.
+                dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk, newPositionsThisCycle, prepared.PriceAction);
+                brokerVerdict = null;
+            }
+        }
+        else
+        {
+            dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk, newPositionsThisCycle, prepared.PriceAction);
+            brokerVerdict = await RunBrokerAsync(marketState, dryRunAction, cancellationToken);
+        }
 
         Console.WriteLine($"decision {proposal.Pair}:");
         Console.WriteLine($"  price={marketState.LastPrice:0.####} ema{config.Strategy.FastEmaPeriod}={Format(indicators.FastEma)} ema{config.Strategy.SlowEmaPeriod}={Format(indicators.SlowEma)} rsi{config.Strategy.RsiPeriod}={Format(indicators.Rsi)}");
@@ -493,7 +804,6 @@ internal sealed class DecisionWorker(
         Console.WriteLine($"  portfolio-cash: {dryRunAction.CashBeforeEur:0.##} -> {dryRunAction.CashAfterEur:0.##} EUR");
         Console.WriteLine($"  portfolio-value: {dryRunAction.PortfolioValueBeforeEur:0.##} -> {dryRunAction.PortfolioValueAfterEur:0.##} EUR");
 
-        var brokerVerdict = await RunBrokerAsync(marketState, dryRunAction, cancellationToken);
         if (brokerVerdict is not null)
         {
             Console.WriteLine($"  broker={brokerVerdict}");
@@ -512,7 +822,15 @@ internal sealed class DecisionWorker(
             RiskReasons = risk.Reasons,
             Contributions = proposal.Contributions,
             DryRunAction = dryRunAction,
-            Broker = brokerVerdict
+            Broker = brokerVerdict,
+            EntryRejectionReason = proposal.EntryRejectionReason
+                ?? (dryRunAction.Action == "WOULD_BUY_BLOCKED"
+                    ? EntryRejection.FromHoldReasonCode(dryRunAction.HoldReasonCode) ?? EntryRejection.RiskLimits
+                    : null),
+            SpreadPercent = decimal.Round(proposal.SpreadPercent, 3),
+            PriceActionDirection = prepared.PriceAction?.Direction,
+            PriceActionTrendPercent = prepared.PriceAction?.TrendPercent,
+            Exploratory = proposal.ExploratoryCandidate
         };
     }
 

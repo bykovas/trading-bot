@@ -11,6 +11,16 @@ internal sealed record ExitEvaluation(
     string? HoldReasonCode,
     string Reason);
 
+// Score history of a held position as seen by the defensive exit rules: the score at
+// entry time, the score this cycle, how many consecutive cycles the score has been at
+// or below the defensive level, and whether the current score still clears the
+// original entry threshold.
+internal sealed record ScoreDecaySnapshot(
+    decimal? EntryScore,
+    decimal CurrentScore,
+    int ConsecutiveLowScoreCycles,
+    bool ScoreConfirmsEntry);
+
 // Deterministic exit policy for a currently held LONG position.
 //
 // The evaluation is a pure function of the position age, conservative unrealized
@@ -55,7 +65,9 @@ internal static class PositionExitPolicy
         ExecutionPolicyOptions executionPolicy,
         PositionExitOptions positionExit,
         decimal? peakPnlPercent = null,
-        bool exitHysteresisEnabled = false)
+        bool exitHysteresisEnabled = false,
+        ScoreDecaySnapshot? scoreDecay = null,
+        bool recentPriceActionNegative = false)
     {
         var pnl = conservativeUnrealizedPnlPercent;
 
@@ -71,6 +83,16 @@ internal static class PositionExitPolicy
         if (forcedExit is not null)
         {
             return forcedExit;
+        }
+
+        // TIER 2.5 - DEFENSIVE EXITS. Score decay and post-entry adverse movement.
+        // These protect a failed high-score entry from drifting into the full
+        // stop-loss: they bypass min-hold / min-profit but rank below take-profit,
+        // trailing stop and max-hold so a profitable position is never cut by them.
+        var defensiveExit = EvaluateDefensiveExits(pnl, positionAgeSeconds, canValuePosition, scoreDecay, recentPriceActionNegative, positionExit);
+        if (defensiveExit is not null)
+        {
+            return defensiveExit;
         }
 
         // TIER 3 - STRATEGY EXITS (the only tier subject to the soft profit/hold guards).
@@ -150,6 +172,72 @@ internal static class PositionExitPolicy
         return null;
     }
 
+    // TIER 2.5: defensive exits for failed high-score entries. Only losing (or flat)
+    // positions are ever cut here — a profitable position is left to take-profit /
+    // trailing rules. Returns null when nothing fires.
+    private static ExitEvaluation? EvaluateDefensiveExits(
+        decimal pnl,
+        double positionAgeSeconds,
+        bool canValuePosition,
+        ScoreDecaySnapshot? scoreDecay,
+        bool recentPriceActionNegative,
+        PositionExitOptions positionExit)
+    {
+        if (!canValuePosition || scoreDecay is null)
+        {
+            return null;
+        }
+
+        var highConvictionEntry =
+            positionExit.ScoreDecayMinEntryScore > 0m
+            && scoreDecay.EntryScore is { } entryScore
+            && entryScore >= positionExit.ScoreDecayMinEntryScore;
+
+        // Score-decay rule 1 (immediate): the score collapsed outright and the
+        // position is not profitable — the original thesis is gone, exit now while
+        // the loss is still shallower than the stop-loss.
+        if (highConvictionEntry
+            && positionExit.ScoreDecayImmediateScore > 0m
+            && scoreDecay.CurrentScore <= positionExit.ScoreDecayImmediateScore
+            && pnl <= 0m)
+        {
+            return Sell(
+                ExitReason.ScoreDecay,
+                $"score-decay exit: entry score {scoreDecay.EntryScore:0.##} collapsed to {scoreDecay.CurrentScore:0.##} <= {positionExit.ScoreDecayImmediateScore:0.##} with PnL {Percent(pnl)}%; exiting before stop-loss");
+        }
+
+        // Score-decay rule 2 (persistent): the score stayed below the defensive level
+        // for N consecutive cycles and the position is not profitable.
+        if (highConvictionEntry
+            && positionExit.ScoreDecayDefensiveScore > 0m
+            && positionExit.ScoreDecayDefensiveCycles > 0
+            && scoreDecay.ConsecutiveLowScoreCycles >= positionExit.ScoreDecayDefensiveCycles
+            && pnl <= 0m)
+        {
+            return Sell(
+                ExitReason.ScoreDecay,
+                $"score-decay exit: score <= {positionExit.ScoreDecayDefensiveScore:0.##} for {scoreDecay.ConsecutiveLowScoreCycles} consecutive cycles (entry score {scoreDecay.EntryScore:0.##}) with PnL {Percent(pnl)}%; defensive exit before stop-loss");
+        }
+
+        // Post-entry adverse movement guard: inside the initial monitoring window a
+        // fresh position that is already down more than the friction-adjusted
+        // threshold, whose score no longer confirms the entry, and whose recent price
+        // action is negative gets cut early instead of drifting into the stop-loss.
+        if (positionExit.PostEntryAdverseWindowMinutes > 0
+            && positionExit.PostEntryAdverseLossPercent > 0m
+            && positionAgeSeconds <= positionExit.PostEntryAdverseWindowMinutes * 60.0
+            && pnl <= -positionExit.PostEntryAdverseLossPercent
+            && scoreDecay.ScoreConfirmsEntry == false
+            && recentPriceActionNegative)
+        {
+            return Sell(
+                ExitReason.PostEntryAdverse,
+                $"post-entry adverse exit: PnL {Percent(pnl)}% <= -{Percent(positionExit.PostEntryAdverseLossPercent)}% within {positionExit.PostEntryAdverseWindowMinutes}m of entry, score {scoreDecay.CurrentScore:0.##} no longer confirms and recent price action is negative");
+        }
+
+        return null;
+    }
+
     // TIER 3: strategy exits. This is the ONLY tier where MinHoldSeconds and
     // MinProfitToExitOnSignalFlipPercent may suppress an exit.
     private static ExitEvaluation EvaluateStrategyExit(
@@ -215,6 +303,8 @@ internal static class PositionExitPolicy
         Worker.ExitReason.EmergencyRisk => "SELL_EMERGENCY_RISK",
         Worker.ExitReason.BrokerSafety => "SELL_BROKER_SAFETY",
         Worker.ExitReason.TrailingStop => "SELL_TRAILING_STOP",
+        Worker.ExitReason.ScoreDecay => "SELL_SCORE_DECAY",
+        Worker.ExitReason.PostEntryAdverse => "SELL_POST_ENTRY_ADVERSE",
         _ => "SELL_SIGNAL_FLIP"
     };
 

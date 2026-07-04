@@ -83,7 +83,10 @@ internal sealed record TechnicalSignal(
     string Direction,
     bool AllowsLong,
     decimal? BullishEmaGapPercent,
-    IReadOnlyList<SignalContribution> Contributions);
+    IReadOnlyList<SignalContribution> Contributions,
+    // Score before the missing-volume cap was applied. Equals Score when no cap fired.
+    decimal UncappedScore = 0m,
+    bool VolumeConfirmed = false);
 
 internal sealed record SignalContribution(
     string Name,
@@ -95,7 +98,15 @@ internal sealed record DecisionProposal(
     string DesiredPosition,
     decimal Score,
     decimal TargetNotionalEur,
-    IReadOnlyList<SignalContribution> Contributions);
+    IReadOnlyList<SignalContribution> Contributions,
+    // Compact machine-readable reason (REJECT_*) why this pair did NOT become a firm
+    // entry this cycle. Null for firm entries and for held positions.
+    string? EntryRejectionReason = null,
+    // Dry-run exploratory candidate: passed every quality gate at the exploratory
+    // threshold but not the live one. It may be upgraded to a real entry by the
+    // ranking layer when it lands in the top ExploratoryMaxRank candidates.
+    bool ExploratoryCandidate = false,
+    decimal SpreadPercent = 0m);
 
 internal sealed record PositionSizeSelection(
     decimal TargetNotionalEur,

@@ -17,4 +17,8 @@
     <ProjectReference Include="..\..\src\TradingBot.Worker\TradingBot.Worker.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="TestData\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

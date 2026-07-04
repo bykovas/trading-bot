@@ -11,12 +11,11 @@ internal sealed class TechnicalDecisionEngine
         RiskOptions risk,
         decimal cashEur,
         decimal currentExposureEur,
-        bool hasOpenPosition = false)
+        bool hasOpenPosition = false,
+        PriceActionAssessment? priceAction = null)
     {
-        var signal = EvaluateSignal(marketState, indicators, strategy);
+        var signal = EvaluateSignal(marketState, indicators, strategy, priceAction);
         var entryDesired = signal.AllowsLong && signal.Score >= strategy.MinimumLongScore ? "LONG_MICRO" : "NONE";
-        var desiredPosition = entryDesired;
-        var targetNotional = 0m;
         var contributions = signal.Contributions.ToList();
 
         if (hasOpenPosition)
@@ -27,36 +26,42 @@ internal sealed class TechnicalDecisionEngine
             // hard exits (stop-loss / take-profit / trailing / max-hold / kill switch)
             // are evaluated independently downstream.
             var held = EvaluateHeldDesire(indicators, strategy, entryDesired);
-            desiredPosition = held.Desired;
             contributions.Add(held.Note);
-            if (desiredPosition == "LONG_MICRO")
+            if (held.Desired == "LONG_MICRO")
             {
                 // A held position needs no new-entry sizing; a capacity-driven zero target
                 // must never masquerade as a signal flip.
                 contributions.Add(new SignalContribution("PositionSizing", 0m, "holding existing position; new-entry sizing skipped"));
             }
+
+            return new DecisionProposal(
+                marketState.Instrument.Pair,
+                held.Desired,
+                signal.Score,
+                0m,
+                contributions,
+                SpreadPercent: EntrySpreadPercent(marketState));
         }
-        else if (entryDesired == "LONG_MICRO")
+
+        // NEW-entry decisioning happens in explicit layers (see EntryGate):
+        //   A. hard safety filters (spread, liquidity, tradability),
+        //   B. quality filters (score thresholds, anti-lag price-action guard),
+        //   C. ranking + portfolio-level gates run downstream in the worker/portfolio.
+        var gate = EntryGate.Evaluate(signal, marketState, priceAction, strategy, trading.LiveTradingEnabled);
+        contributions.AddRange(gate.Notes);
+        var desiredPosition = gate.DesiredPosition;
+        var rejectionReason = gate.RejectionReason;
+        var targetNotional = 0m;
+
+        if (desiredPosition == "LONG_MICRO")
         {
-            // Friction guard for NEW entries only: if the current bid/ask spread alone
-            // is wide, the round-trip cost (fees + slippage + spread) likely exceeds any
-            // realistic edge, so we skip the entry. Held positions bypass this so exits
-            // are never blocked by a temporarily wide book.
-            var spreadPercent = EntrySpreadPercent(marketState);
-            if (strategy.MaxEntrySpreadPercent > 0m && spreadPercent > strategy.MaxEntrySpreadPercent)
+            var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur);
+            targetNotional = size.TargetNotionalEur;
+            contributions.Add(new SignalContribution("PositionSizing", 0m, size.Reason));
+            if (targetNotional <= 0m)
             {
                 desiredPosition = "NONE";
-                contributions.Add(new SignalContribution("Friction", 0m, $"entry skipped: spread {spreadPercent:0.###}% exceeds max {strategy.MaxEntrySpreadPercent:0.###}%"));
-            }
-            else
-            {
-                var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur);
-                targetNotional = size.TargetNotionalEur;
-                contributions.Add(new SignalContribution("PositionSizing", 0m, size.Reason));
-                if (targetNotional <= 0m)
-                {
-                    desiredPosition = "NONE";
-                }
+                rejectionReason = "REJECT_NO_CAPACITY";
             }
         }
 
@@ -65,7 +70,10 @@ internal sealed class TechnicalDecisionEngine
             desiredPosition,
             signal.Score,
             targetNotional,
-            contributions);
+            contributions,
+            rejectionReason,
+            gate.Exploratory && desiredPosition == "LONG_MICRO",
+            gate.SpreadPercent);
     }
 
     // Exit hysteresis for a held position (2.1). Returns the desired position plus a
@@ -110,7 +118,8 @@ internal sealed class TechnicalDecisionEngine
     private static TechnicalSignal EvaluateSignal(
         InstrumentMarketState marketState,
         IndicatorSnapshot indicators,
-        StrategyOptions strategy)
+        StrategyOptions strategy,
+        PriceActionAssessment? priceAction = null)
     {
         var contributions = new List<SignalContribution>();
         decimal score = 0.30m;
@@ -207,6 +216,7 @@ internal sealed class TechnicalDecisionEngine
         // to create real score dispersion: an ordinary "EMA up + RSI ok + calm" signal
         // lands at 0.80 and must earn at least one confirmation to reach the 0.85 entry
         // bar, while a genuinely strong setup (momentum + volume + trend) can reach ~1.00.
+        var volumeConfirmed = false;
         if (allowsLong)
         {
             if (TryMomentumPercent(marketState.Candles, strategy.MomentumLookbackBars, out var momentumPercent)
@@ -220,7 +230,8 @@ internal sealed class TechnicalDecisionEngine
                 contributions.Add(new SignalContribution("Momentum", 0m, $"no confirmed momentum over last {strategy.MomentumLookbackBars} candles"));
             }
 
-            if (VolumeConfirmed(marketState.Candles, strategy.VolumeConfirmationMultiple))
+            volumeConfirmed = VolumeConfirmed(marketState.Candles, strategy.VolumeConfirmationMultiple);
+            if (volumeConfirmed)
             {
                 score += 0.05m;
                 contributions.Add(new SignalContribution("Volume", 0.05m, $"last candle volume above {strategy.VolumeConfirmationMultiple:0.##}x recent average"));
@@ -239,11 +250,47 @@ internal sealed class TechnicalDecisionEngine
             {
                 contributions.Add(new SignalContribution("Trend", 0m, $"price not above {strategy.TrendFilterMaPeriod}-period trend filter"));
             }
+
+            // Anti-lag score adjustment: EMA/momentum/trend all read CANDLES, which lag.
+            // When the light-snapshot ticker series says the price is already falling,
+            // the bullish score loses credit so a stale breakout cannot look pristine.
+            if (priceAction is { DataSufficient: true })
+            {
+                if (priceAction.TrendPercent < 0m && strategy.NegativePriceActionPenalty > 0m)
+                {
+                    score -= strategy.NegativePriceActionPenalty;
+                    contributions.Add(new SignalContribution(
+                        "PriceAction",
+                        -strategy.NegativePriceActionPenalty,
+                        $"recent snapshot price action is negative ({priceAction.TrendPercent:0.###}% over last {strategy.PriceActionLookbackSnapshots} snapshots)"));
+                }
+                else
+                {
+                    contributions.Add(new SignalContribution(
+                        "PriceAction",
+                        0m,
+                        $"recent snapshot price action {priceAction.TrendPercent:0.###}% ({priceAction.Direction})"));
+                }
+            }
         }
 
         score = Math.Clamp(score, 0m, 1m);
+        var uncappedScore = decimal.Round(score, 2);
+
+        // Volume confirmation is not optional for high-confidence entries: without it
+        // the final score is capped below the firm entry bar, so a lagging-indicator
+        // stack (EMA + RSI + momentum) alone can never mint a 0.95 "sure thing".
+        if (allowsLong && !volumeConfirmed && strategy.MissingVolumeScoreCap > 0m && uncappedScore > strategy.MissingVolumeScoreCap)
+        {
+            score = strategy.MissingVolumeScoreCap;
+            contributions.Add(new SignalContribution(
+                "VolumeCap",
+                decimal.Round(score - uncappedScore, 2),
+                $"score capped at {strategy.MissingVolumeScoreCap:0.##} (from {uncappedScore:0.##}) because volume confirmation is missing"));
+        }
+
         var direction = score >= 0.55m ? "LONG_BIAS" : "NEUTRAL";
-        return new TechnicalSignal(decimal.Round(score, 2), direction, allowsLong, bullishEmaGapPercent, contributions);
+        return new TechnicalSignal(decimal.Round(score, 2), direction, allowsLong, bullishEmaGapPercent, contributions, uncappedScore, volumeConfirmed);
     }
 
     private static decimal? CalculateEmaGapPercent(decimal fastEma, decimal slowEma) =>
@@ -252,18 +299,8 @@ internal sealed class TechnicalDecisionEngine
     private static bool EmaGapPassesFilter(decimal emaGapPercent, decimal minimumEmaGapPercent) =>
         minimumEmaGapPercent <= 0m || emaGapPercent >= minimumEmaGapPercent;
 
-    private static decimal EntrySpreadPercent(InstrumentMarketState marketState)
-    {
-        var bid = marketState.BestBid;
-        var ask = marketState.BestAsk;
-        if (bid <= 0m || ask <= 0m || ask < bid)
-        {
-            return 0m;
-        }
-
-        var mid = (bid + ask) / 2m;
-        return mid == 0m ? 0m : (ask - bid) / mid * 100m;
-    }
+    private static decimal EntrySpreadPercent(InstrumentMarketState marketState) =>
+        EntryGate.SpreadPercentOf(marketState);
 
     private static bool TryMomentumPercent(IReadOnlyList<Candle> candles, int lookbackBars, out decimal changePercent)
     {

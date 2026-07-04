@@ -106,13 +106,14 @@ internal sealed class DryRunPortfolio(
         DecisionProposal proposal,
         RiskEvaluation risk,
         RiskOptions riskOptions,
-        int newPositionsThisCycle)
+        int newPositionsThisCycle,
+        PriceActionAssessment? priceAction = null)
     {
         // The correlation snapshot is resolved for the pair regardless of the decision
         // so its diagnostics land on every record (even holds and sells). It is used to
         // reject BUYs only; exits and holds are never blocked by the correlation layer.
         var correlation = BuildCorrelationSnapshot(state, proposal.Pair);
-        var action = ApplyCore(state, marketState, proposal, risk, riskOptions, newPositionsThisCycle, correlation);
+        var action = ApplyCore(state, marketState, proposal, risk, riskOptions, newPositionsThisCycle, correlation, priceAction);
         action.CorrelationGroup = correlation.Group;
         action.CorrelationGroupOpenPositions = correlation.GroupOpenPositions;
         action.CorrelationGroupExposureEur = correlation.GroupExposureEur;
@@ -126,7 +127,8 @@ internal sealed class DryRunPortfolio(
         RiskEvaluation risk,
         RiskOptions riskOptions,
         int newPositionsThisCycle,
-        CorrelationSnapshot correlation)
+        CorrelationSnapshot correlation,
+        PriceActionAssessment? priceAction)
     {
         var now = _clock.UtcNow;
         var position = state.Positions.FirstOrDefault(item => item.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase));
@@ -140,7 +142,7 @@ internal sealed class DryRunPortfolio(
         // blocked by it.
         if (position is not null)
         {
-            return ApplyHeldPosition(state, marketState, proposal, riskOptions, position, beforeCash, beforeValue, now, desiredLong);
+            return ApplyHeldPosition(state, marketState, proposal, riskOptions, position, beforeCash, beforeValue, now, desiredLong, priceAction);
         }
 
         if (!risk.Approved)
@@ -236,7 +238,7 @@ internal sealed class DryRunPortfolio(
 
             if (state.Positions.Count >= riskOptions.MaxOpenPositions)
             {
-                return BuildAction("WOULD_BUY_BLOCKED", $"max open positions {riskOptions.MaxOpenPositions} already reached", proposal, position, beforeCash, beforeValue, state);
+                return BuildAction("WOULD_BUY_BLOCKED", $"max open positions {riskOptions.MaxOpenPositions} already reached", proposal, position, beforeCash, beforeValue, state, holdReasonCode: "MAX_POSITIONS");
             }
 
             if (executionPolicy.MaxNewPositionsPerCycle > 0 && newPositionsThisCycle >= executionPolicy.MaxNewPositionsPerCycle)
@@ -247,17 +249,17 @@ internal sealed class DryRunPortfolio(
             var currentExposureEur = state.Positions.Sum(item => item.EntryNotionalEur);
             if (riskOptions.MaxTotalExposureEur > 0m && currentExposureEur + proposal.TargetNotionalEur > riskOptions.MaxTotalExposureEur)
             {
-                return BuildAction("WOULD_BUY_BLOCKED", $"total exposure EUR {currentExposureEur + proposal.TargetNotionalEur:0.##} would exceed max EUR {riskOptions.MaxTotalExposureEur:0.##}", proposal, position, beforeCash, beforeValue, state);
+                return BuildAction("WOULD_BUY_BLOCKED", $"total exposure EUR {currentExposureEur + proposal.TargetNotionalEur:0.##} would exceed max EUR {riskOptions.MaxTotalExposureEur:0.##}", proposal, position, beforeCash, beforeValue, state, holdReasonCode: "EXPOSURE_LIMIT");
             }
 
             if (proposal.TargetNotionalEur > state.CashEur)
             {
-                return BuildAction("WOULD_BUY_BLOCKED", $"cash EUR {state.CashEur:0.##} is below target EUR {proposal.TargetNotionalEur:0.##}", proposal, position, beforeCash, beforeValue, state);
+                return BuildAction("WOULD_BUY_BLOCKED", $"cash EUR {state.CashEur:0.##} is below target EUR {proposal.TargetNotionalEur:0.##}", proposal, position, beforeCash, beforeValue, state, holdReasonCode: "INSUFFICIENT_CASH");
             }
 
             if (positionSizing.Enabled && state.CashEur - proposal.TargetNotionalEur < positionSizing.CashReserveEur)
             {
-                return BuildAction("WOULD_BUY_BLOCKED", $"cash reserve EUR {positionSizing.CashReserveEur:0.##} would be breached by target EUR {proposal.TargetNotionalEur:0.##}", proposal, position, beforeCash, beforeValue, state);
+                return BuildAction("WOULD_BUY_BLOCKED", $"cash reserve EUR {positionSizing.CashReserveEur:0.##} would be breached by target EUR {proposal.TargetNotionalEur:0.##}", proposal, position, beforeCash, beforeValue, state, holdReasonCode: "CASH_RESERVE_BLOCK");
             }
 
             if (marketState.LastPrice <= 0m)
@@ -285,7 +287,8 @@ internal sealed class DryRunPortfolio(
                 LastPrice = marketState.LastPrice,
                 MarketValueEur = CalculateLiquidationValue(quantity, marketState),
                 OpenedAtUtc = now,
-                LastActionAtUtc = now
+                LastActionAtUtc = now,
+                EntryScore = proposal.Score
             };
 
             if (options.ApplyVirtualFills)
@@ -323,11 +326,13 @@ internal sealed class DryRunPortfolio(
         decimal beforeCash,
         decimal beforeValue,
         DateTimeOffset now,
-        bool desiredLong)
+        bool desiredLong,
+        PriceActionAssessment? priceAction)
     {
         var canValue = marketState.LastPrice > 0m;
         var pnlPercent = ConservativeUnrealizedPnlPercent(position, marketState, canValue);
         var ageSeconds = PositionAgeSeconds(position, now);
+        var scoreDecay = UpdateScoreDecay(position, proposal.Score);
 
         var evaluation = PositionExitPolicy.EvaluateHeldPosition(
             desiredLong,
@@ -338,7 +343,15 @@ internal sealed class DryRunPortfolio(
             executionPolicy,
             positionExit,
             position.PeakPnlPercent,
-            ExitHysteresisEnabled);
+            ExitHysteresisEnabled,
+            scoreDecay,
+            recentPriceActionNegative: priceAction is { DataSufficient: true, TrendPercent: < 0m });
+
+        if (scoreDecay.EntryScore is { } trackedEntryScore && scoreDecay.ConsecutiveLowScoreCycles > 0)
+        {
+            Console.WriteLine(
+                $"score-decay {proposal.Pair}: entry score {trackedEntryScore:0.##} current {scoreDecay.CurrentScore:0.##} lowScoreCycles={scoreDecay.ConsecutiveLowScoreCycles} action={(evaluation.ShouldSell ? "SELL" : "HOLD")}");
+        }
 
         if (!evaluation.ShouldSell)
         {
@@ -391,6 +404,24 @@ internal sealed class DryRunPortfolio(
             grossExitValue,
             exitValue,
             exitReasonCode: exitReasonCode);
+    }
+
+    // Updates the per-position consecutive-low-score counter from this cycle's score
+    // and returns the snapshot the defensive exit rules consume.
+    private ScoreDecaySnapshot UpdateScoreDecay(PortfolioPosition position, decimal currentScore)
+    {
+        if (positionExit.ScoreDecayDefensiveScore > 0m)
+        {
+            position.LowScoreCycles = currentScore <= positionExit.ScoreDecayDefensiveScore
+                ? position.LowScoreCycles + 1
+                : 0;
+        }
+
+        return new ScoreDecaySnapshot(
+            position.EntryScore,
+            currentScore,
+            position.LowScoreCycles,
+            ScoreConfirmsEntry: currentScore >= _strategy.MinimumLongScore);
     }
 
     private void MarkToMarket(PortfolioState state, IReadOnlyList<InstrumentMarketState> marketStates)
@@ -732,6 +763,14 @@ internal sealed class PortfolioPosition
     // fire the trailing stop until it establishes a fresh peak.
     public decimal? PeakPnlPercent { get; set; }
 
+    // Strategy score at the moment the position was opened, used by the score-decay
+    // defensive exit. Null for legacy positions (decay rules then stay inert).
+    public decimal? EntryScore { get; set; }
+
+    // Consecutive decision cycles in which the current score sat at or below the
+    // configured defensive score level. Reset to 0 whenever the score recovers.
+    public int LowScoreCycles { get; set; }
+
     public PortfolioPosition Clone() => new()
     {
         Pair = Pair,
@@ -745,7 +784,9 @@ internal sealed class PortfolioPosition
         UnrealizedPnlPercent = UnrealizedPnlPercent,
         OpenedAtUtc = OpenedAtUtc,
         LastActionAtUtc = LastActionAtUtc,
-        PeakPnlPercent = PeakPnlPercent
+        PeakPnlPercent = PeakPnlPercent,
+        EntryScore = EntryScore,
+        LowScoreCycles = LowScoreCycles
     };
 }
 
@@ -780,7 +821,13 @@ internal enum ExitReason
     TrailingStop,
     KillSwitch,
     EmergencyRisk,
-    BrokerSafety
+    BrokerSafety,
+
+    // Defensive exits: a high-score entry whose score collapsed (ScoreDecay), or a
+    // fresh position that moved adversely while its signal stopped confirming
+    // (PostEntryAdverse). Both bypass min-hold / min-profit guards.
+    ScoreDecay,
+    PostEntryAdverse
 }
 
 internal sealed class DryRunAction
@@ -839,6 +886,10 @@ internal sealed class DryRunCycleRecord
     public required IReadOnlyList<DryRunDecisionRecord> Decisions { get; init; }
     public required PortfolioState PortfolioBefore { get; init; }
     public required PortfolioState PortfolioAfter { get; init; }
+
+    // Per-cycle entry funnel (candidate counts, top candidates, rejection reasons,
+    // excluded pairs and the explicit no-trade reason). Null only in legacy records.
+    public CycleEntryDiagnostics? EntryDiagnostics { get; init; }
 }
 
 internal sealed class DryRunDecisionRecord
@@ -858,4 +909,12 @@ internal sealed class DryRunDecisionRecord
     // Exchange verdict for actionable decisions: VALIDATED_OK / VALIDATE_REJECTED /
     // LIVE_SUBMITTED / LIVE_ERROR / SKIPPED. Null when no broker call was made.
     public string? Broker { get; init; }
+
+    // Compact REJECT_* reason why this pair did not become a firm entry (null for
+    // firm entries and held positions), plus entry-quality context.
+    public string? EntryRejectionReason { get; init; }
+    public decimal SpreadPercent { get; init; }
+    public string? PriceActionDirection { get; init; }
+    public decimal? PriceActionTrendPercent { get; init; }
+    public bool Exploratory { get; init; }
 }
