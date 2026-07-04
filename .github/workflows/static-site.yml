@@ -95,6 +95,9 @@ jobs:
       TRADINGBOT_KRAKEN_API_KEY: ${{ secrets.TRADINGBOT_KRAKEN_API_KEY }}
       TRADINGBOT_KRAKEN_API_SECRET: ${{ secrets.TRADINGBOT_KRAKEN_API_SECRET }}
       TRADINGBOT_OPENAI_API_KEY: ${{ secrets.TRADINGBOT_OPENAI_API_KEY }}
+      # Live trading is controlled from the PROD environment variable, never from
+      # code: flipping it requires editing the GitHub environment, not a commit.
+      TRADINGBOT_LIVE_TRADING_ENABLED: ${{ vars.TRADINGBOT_LIVE_TRADING_ENABLED }}
 
     steps:
       - name: Checkout
