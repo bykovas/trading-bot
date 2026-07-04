@@ -16,6 +16,7 @@ services:
       database:
         condition: service_healthy
     networks:
+      - default
       - traefik
 
   worker:
