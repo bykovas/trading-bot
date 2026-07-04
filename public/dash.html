@@ -429,16 +429,17 @@
           <thead>
             <tr>
               <th>Pair</th>
+              <th class="num">Opened</th>
+              <th class="num">Unrealized PnL</th>
               <th>Side</th>
               <th class="num">Qty</th>
               <th class="num">Entry</th>
               <th class="num">Last</th>
               <th class="num">Value</th>
-              <th class="num">Unrealized PnL</th>
             </tr>
           </thead>
           <tbody id="positions-body">
-            <tr><td class="empty" colspan="7">Loading positions</td></tr>
+            <tr><td class="empty" colspan="8">Loading positions</td></tr>
           </tbody>
         </table>
       </div>
@@ -489,6 +490,14 @@
       return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
     }
 
+    function ageMinutes(value) {
+      if (!value) return "--";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "--";
+      const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
+      return `${minutes}m`;
+    }
+
     function pnlClass(value) {
       const n = Number(value);
       if (!Number.isFinite(n) || n === 0) return "";
@@ -507,7 +516,7 @@
 
     function renderPositions(positions) {
       if (!positions || positions.length === 0) {
-        els.positionsBody.innerHTML = '<tr><td class="empty" colspan="7">No open positions</td></tr>';
+        els.positionsBody.innerHTML = '<tr><td class="empty" colspan="8">No open positions</td></tr>';
         return;
       }
 
@@ -518,12 +527,13 @@
         return `
           <tr>
             <td>${position.pair}</td>
+            <td class="num">${ageMinutes(position.openedAtUtc)}</td>
+            <td class="num ${cls}">${signedMoney(pnl)} ${pnlPercent}</td>
             <td>${position.side}</td>
             <td class="num">${number(position.quantity)}</td>
             <td class="num">${money(position.entryPrice)}</td>
             <td class="num">${money(position.lastPrice)}</td>
             <td class="num">${money(position.marketValueEur)}</td>
-            <td class="num ${cls}">${signedMoney(pnl)} ${pnlPercent}</td>
           </tr>
         `;
       }).join("");
