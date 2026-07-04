@@ -920,4 +920,12 @@ internal sealed class DryRunDecisionRecord
     public string? PriceActionDirection { get; init; }
     public decimal? PriceActionTrendPercent { get; init; }
     public bool Exploratory { get; init; }
+    public bool HasBullishStructure { get; init; }
+    public bool EmaFullyConfirmed { get; init; }
+    public decimal? BullishEmaGapPercent { get; init; }
+    public decimal? EmaGapVelocityPercent { get; init; }
+    public bool EarlyEntryEligible { get; init; }
+    public string? EarlyEntryReason { get; init; }
+    public decimal EarlyEntryDiagnosticScore { get; init; }
+    public decimal EarlyEntrySuggestedNotionalEur { get; init; }
 }

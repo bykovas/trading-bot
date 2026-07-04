@@ -103,7 +103,7 @@ public class PriceActionGuardTests
     };
 
     private static TechnicalSignal Signal(decimal score, bool allowsLong = true, decimal uncapped = 0m, bool volumeConfirmed = true) =>
-        new(score, "LONG_BIAS", allowsLong, 0.4m, Array.Empty<SignalContribution>(), uncapped == 0m ? score : uncapped, volumeConfirmed);
+        new(score, "LONG_BIAS", allowsLong, allowsLong, allowsLong, 0.4m, null, Array.Empty<SignalContribution>(), uncapped == 0m ? score : uncapped, volumeConfirmed);
 
     [Fact]
     public void Gate_rejects_wide_spread_as_hard_filter()

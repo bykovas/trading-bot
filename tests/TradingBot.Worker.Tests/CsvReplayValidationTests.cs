@@ -119,7 +119,7 @@ public class CsvReplayValidationTests
         // OP/EUR is not a firm entry any more. With the missing-volume cap the score
         // is 0.85 (exploratory band), and the gate must name the real blocker: the
         // known-negative price action fails the positive-price-action requirement.
-        var signal = new TechnicalSignal(0.85m, "LONG_BIAS", true, 0.4m, Array.Empty<SignalContribution>(), UncappedScore: 0.95m, VolumeConfirmed: false);
+        var signal = new TechnicalSignal(0.85m, "LONG_BIAS", true, true, true, 0.4m, null, Array.Empty<SignalContribution>(), UncappedScore: 0.95m, VolumeConfirmed: false);
         var buySnapshot = SnapshotNear("OP/EUR", buyTime);
         var gate = EntryGate.Evaluate(signal, MarketState("OP/EUR", buySnapshot.Bid, buySnapshot.Ask, buySnapshot.Last), assessment, strategy);
 
@@ -174,7 +174,7 @@ public class CsvReplayValidationTests
         Assert.NotNull(assessment);
         Assert.True(assessment!.IsPositive, $"expected positive TON/EUR price action, got {assessment.TrendPercent}% ({assessment.Direction})");
 
-        var signal = new TechnicalSignal(0.85m, "LONG_BIAS", true, 0.4m, Array.Empty<SignalContribution>(), 0.85m, VolumeConfirmed: true);
+        var signal = new TechnicalSignal(0.85m, "LONG_BIAS", true, true, true, 0.4m, null, Array.Empty<SignalContribution>(), 0.85m, VolumeConfirmed: true);
         var snapshot = SnapshotNear("TON/EUR", atUtc);
         var gate = EntryGate.Evaluate(signal, MarketState("TON/EUR", snapshot.Bid, snapshot.Ask, snapshot.Last), assessment, strategy);
 
@@ -191,7 +191,7 @@ public class CsvReplayValidationTests
         // there is no price-action evidence yet -> exploratory admission must refuse.
         var firstCycle = DateTimeOffset.Parse("2026-07-04T05:33:35Z", CultureInfo.InvariantCulture);
         var early = AssessAt("SOL/EUR", firstCycle.AddSeconds(1), strategy);
-        var signal = new TechnicalSignal(0.85m, "LONG_BIAS", true, 0.4m, Array.Empty<SignalContribution>(), 0.85m, VolumeConfirmed: false);
+        var signal = new TechnicalSignal(0.85m, "LONG_BIAS", true, true, true, 0.4m, null, Array.Empty<SignalContribution>(), 0.85m, VolumeConfirmed: false);
         var earlySnapshot = SnapshotsFor("SOL/EUR").First();
         var earlyGate = EntryGate.Evaluate(signal, MarketState("SOL/EUR", earlySnapshot.Bid, earlySnapshot.Ask, earlySnapshot.Last), early, strategy);
 
@@ -214,7 +214,7 @@ public class CsvReplayValidationTests
         var spread = (snapshot.Ask - snapshot.Bid) / ((snapshot.Ask + snapshot.Bid) / 2m) * 100m;
         Assert.True(spread > strategy.MaxEntrySpreadPercent, $"fixture sanity: expected wide spread, got {spread}%");
 
-        var signal = new TechnicalSignal(0.95m, "LONG_BIAS", true, 0.6m, Array.Empty<SignalContribution>(), 0.95m, VolumeConfirmed: true);
+        var signal = new TechnicalSignal(0.95m, "LONG_BIAS", true, true, true, 0.6m, null, Array.Empty<SignalContribution>(), 0.95m, VolumeConfirmed: true);
         var gate = EntryGate.Evaluate(
             signal,
             MarketState("M/EUR", snapshot.Bid, snapshot.Ask, snapshot.Last),

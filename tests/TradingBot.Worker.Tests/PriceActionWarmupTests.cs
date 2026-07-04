@@ -41,7 +41,10 @@ public class PriceActionWarmupTests
             score,
             "LONG_BIAS",
             AllowsLong: true,
+            HasBullishStructure: true,
+            EmaFullyConfirmed: true,
             BullishEmaGapPercent: 0.4m,
+            EmaGapVelocityPercent: null,
             Contributions:
             [
                 new SignalContribution("EMA", 0.30m, "bullish cross"),

@@ -14,7 +14,7 @@ internal sealed class TechnicalDecisionEngine
         bool hasOpenPosition = false,
         PriceActionAssessment? priceAction = null)
     {
-        var signal = EvaluateSignal(marketState, indicators, strategy, priceAction);
+        var signal = EvaluateSignal(marketState, indicators, strategy, priceAction, includeEarlyEntryDiagnostics: !hasOpenPosition);
         var entryDesired = signal.AllowsLong && signal.Score >= strategy.MinimumLongScore ? "LONG_MICRO" : "NONE";
         var contributions = signal.Contributions.ToList();
 
@@ -40,7 +40,11 @@ internal sealed class TechnicalDecisionEngine
                 signal.Score,
                 0m,
                 contributions,
-                SpreadPercent: EntrySpreadPercent(marketState));
+                SpreadPercent: EntrySpreadPercent(marketState),
+                HasBullishStructure: signal.HasBullishStructure,
+                EmaFullyConfirmed: signal.EmaFullyConfirmed,
+                BullishEmaGapPercent: signal.BullishEmaGapPercent,
+                EmaGapVelocityPercent: signal.EmaGapVelocityPercent);
         }
 
         // NEW-entry decisioning happens in explicit layers (see EntryGate):
@@ -73,7 +77,17 @@ internal sealed class TechnicalDecisionEngine
             contributions,
             rejectionReason,
             gate.Exploratory && desiredPosition == "LONG_MICRO",
-            gate.SpreadPercent);
+            gate.SpreadPercent,
+            signal.HasBullishStructure,
+            signal.EmaFullyConfirmed,
+            signal.BullishEmaGapPercent,
+            signal.EmaGapVelocityPercent,
+            EarlyEntryEligible(signal, gate.SpreadPercent, priceAction, strategy),
+            EarlyEntryReason(signal, gate.SpreadPercent, priceAction, strategy),
+            signal.Score,
+            signal.HasBullishStructure && !signal.AllowsLong
+                ? SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur).TargetNotionalEur
+                : 0m);
     }
 
     // Exit hysteresis for a held position (2.1). Returns the desired position plus a
@@ -119,12 +133,16 @@ internal sealed class TechnicalDecisionEngine
         InstrumentMarketState marketState,
         IndicatorSnapshot indicators,
         StrategyOptions strategy,
-        PriceActionAssessment? priceAction = null)
+        PriceActionAssessment? priceAction = null,
+        bool includeEarlyEntryDiagnostics = true)
     {
         var contributions = new List<SignalContribution>();
         decimal score = 0.30m;
         var allowsLong = false;
+        var hasBullishStructure = false;
+        var emaFullyConfirmed = false;
         decimal? bullishEmaGapPercent = null;
+        decimal? emaGapVelocityPercent = CalculateEmaGapVelocityPercent(marketState.Candles, strategy);
 
         if (indicators.FastEma is not null && indicators.SlowEma is not null)
         {
@@ -135,16 +153,27 @@ internal sealed class TechnicalDecisionEngine
             }
             else if (indicators.FastEma > indicators.SlowEma)
             {
+                bullishEmaGapPercent = emaGapPercent.Value;
+                hasBullishStructure = HasEarlyBullishStructure(emaGapPercent.Value, strategy.MinimumEmaGapPercent);
                 if (EmaGapPassesFilter(emaGapPercent.Value, strategy.MinimumEmaGapPercent))
                 {
                     score += 0.30m;
                     allowsLong = true;
-                    bullishEmaGapPercent = emaGapPercent.Value;
+                    emaFullyConfirmed = true;
                     contributions.Add(new SignalContribution("EMA", 0.30m, $"fast EMA is above slow EMA by {emaGapPercent.Value:0.###}%"));
                 }
                 else
                 {
-                    contributions.Add(new SignalContribution("EMA", 0m, $"EMA crossover ignored because gap {emaGapPercent.Value:0.000}% < configured minimum {strategy.MinimumEmaGapPercent:0.000}%"));
+                    var partial = includeEarlyEntryDiagnostics
+                        ? SmoothBullishEmaContribution(emaGapPercent.Value, strategy.MinimumEmaGapPercent)
+                        : 0m;
+                    score += partial;
+                    contributions.Add(new SignalContribution(
+                        "EMA",
+                        decimal.Round(partial, 2),
+                        partial > 0m
+                            ? $"fast EMA is above slow EMA by {emaGapPercent.Value:0.###}% but below configured minimum {strategy.MinimumEmaGapPercent:0.###}%; partial early-structure credit"
+                            : $"EMA crossover ignored because gap {emaGapPercent.Value:0.000}% < configured minimum {strategy.MinimumEmaGapPercent:0.000}%"));
                 }
             }
             else if (indicators.FastEma < indicators.SlowEma)
@@ -217,7 +246,7 @@ internal sealed class TechnicalDecisionEngine
         // lands at 0.80 and must earn at least one confirmation to reach the 0.85 entry
         // bar, while a genuinely strong setup (momentum + volume + trend) can reach ~1.00.
         var volumeConfirmed = false;
-        if (allowsLong)
+        if (allowsLong || (includeEarlyEntryDiagnostics && hasBullishStructure))
         {
             if (TryMomentumPercent(marketState.Candles, strategy.MomentumLookbackBars, out var momentumPercent)
                 && momentumPercent >= strategy.MomentumMinPercent)
@@ -274,6 +303,14 @@ internal sealed class TechnicalDecisionEngine
             }
         }
 
+        if (emaGapVelocityPercent is { } velocity)
+        {
+            contributions.Add(new SignalContribution(
+                "EmaGapVelocity",
+                0m,
+                $"EMA gap velocity diagnostic {velocity:+0.###;-0.###;0}% versus previous candle; not used for trading"));
+        }
+
         score = Math.Clamp(score, 0m, 1m);
         var uncappedScore = decimal.Round(score, 2);
 
@@ -290,8 +327,155 @@ internal sealed class TechnicalDecisionEngine
         }
 
         var direction = score >= 0.55m ? "LONG_BIAS" : "NEUTRAL";
-        return new TechnicalSignal(decimal.Round(score, 2), direction, allowsLong, bullishEmaGapPercent, contributions, uncappedScore, volumeConfirmed);
+        return new TechnicalSignal(
+            decimal.Round(score, 2),
+            direction,
+            allowsLong,
+            hasBullishStructure,
+            emaFullyConfirmed,
+            bullishEmaGapPercent,
+            emaGapVelocityPercent,
+            contributions,
+            uncappedScore,
+            volumeConfirmed);
     }
+
+    private static bool HasEarlyBullishStructure(decimal emaGapPercent, decimal minimumEmaGapPercent)
+    {
+        if (EmaGapPassesFilter(emaGapPercent, minimumEmaGapPercent))
+        {
+            return true;
+        }
+
+        var earlyFloor = minimumEmaGapPercent <= 0m
+            ? 0m
+            : Math.Min(0.10m, minimumEmaGapPercent);
+        return emaGapPercent >= earlyFloor;
+    }
+
+    private static decimal SmoothBullishEmaContribution(decimal emaGapPercent, decimal minimumEmaGapPercent)
+    {
+        if (minimumEmaGapPercent <= 0m || emaGapPercent >= minimumEmaGapPercent)
+        {
+            return 0.30m;
+        }
+
+        var floor = Math.Min(0.10m, minimumEmaGapPercent);
+        if (emaGapPercent < floor)
+        {
+            return 0m;
+        }
+
+        var range = minimumEmaGapPercent - floor;
+        if (range <= 0m)
+        {
+            return 0m;
+        }
+
+        var ratio = (emaGapPercent - floor) / range;
+        return decimal.Round(Math.Clamp(ratio, 0m, 1m) * 0.30m, 4);
+    }
+
+    private static decimal? CalculateEmaGapVelocityPercent(IReadOnlyList<Candle> candles, StrategyOptions strategy)
+    {
+        if (candles.Count <= Math.Max(strategy.FastEmaPeriod, strategy.SlowEmaPeriod))
+        {
+            return null;
+        }
+
+        var current = CalculateEmaGapPercentForCloses(candles.Select(candle => candle.Close).ToList(), strategy);
+        var previous = CalculateEmaGapPercentForCloses(candles.Take(candles.Count - 1).Select(candle => candle.Close).ToList(), strategy);
+        return current is { } currentGap && previous is { } previousGap
+            ? decimal.Round(currentGap - previousGap, 3)
+            : null;
+    }
+
+    private static decimal? CalculateEmaGapPercentForCloses(IReadOnlyList<decimal> closes, StrategyOptions strategy)
+    {
+        var fast = CalculateLatestEma(closes, strategy.FastEmaPeriod);
+        var slow = CalculateLatestEma(closes, strategy.SlowEmaPeriod);
+        return fast is { } fastEma && slow is { } slowEma && slowEma != 0m
+            ? (fastEma - slowEma) / slowEma * 100m
+            : null;
+    }
+
+    private static decimal? CalculateLatestEma(IReadOnlyList<decimal> values, int period)
+    {
+        if (period <= 1 || values.Count < period)
+        {
+            return null;
+        }
+
+        var ema = values.Take(period).Average();
+        var multiplier = 2m / (period + 1);
+        for (var i = period; i < values.Count; i++)
+        {
+            ema = (values[i] - ema) * multiplier + ema;
+        }
+
+        return decimal.Round(ema, 6);
+    }
+
+    private static bool EarlyEntryEligible(
+        TechnicalSignal signal,
+        decimal spreadPercent,
+        PriceActionAssessment? priceAction,
+        StrategyOptions strategy) =>
+        signal.HasBullishStructure
+        && !signal.AllowsLong
+        && signal.Score >= Math.Min(strategy.ExploratoryMinimumLongScore, strategy.MinimumLongScore)
+        && priceAction is { IsPositive: true }
+        && (strategy.MaxExploratorySpreadPercent <= 0m || spreadPercent <= strategy.MaxExploratorySpreadPercent)
+        && (HasPositiveContribution(signal, "Momentum") || signal.VolumeConfirmed);
+
+    private static string EarlyEntryReason(
+        TechnicalSignal signal,
+        decimal spreadPercent,
+        PriceActionAssessment? priceAction,
+        StrategyOptions strategy)
+    {
+        if (!signal.HasBullishStructure)
+        {
+            return "not early-eligible: no early bullish EMA structure";
+        }
+
+        if (signal.AllowsLong)
+        {
+            return "not early-eligible: EMA is already fully confirmed; normal gate applies";
+        }
+
+        var diagnosticThreshold = Math.Min(strategy.ExploratoryMinimumLongScore, strategy.MinimumLongScore);
+        if (signal.Score < diagnosticThreshold)
+        {
+            return $"not early-eligible: diagnostic score {signal.Score:0.##} below {diagnosticThreshold:0.##}";
+        }
+
+        if (priceAction is not { DataSufficient: true })
+        {
+            return $"not early-eligible: price action is {PriceActionAssessment.WarmupStateOf(priceAction)}";
+        }
+
+        if (!priceAction.IsPositive)
+        {
+            return $"not early-eligible: price action is {priceAction.Direction}";
+        }
+
+        if (strategy.MaxExploratorySpreadPercent > 0m && spreadPercent > strategy.MaxExploratorySpreadPercent)
+        {
+            return $"not early-eligible: spread {spreadPercent:0.###}% exceeds diagnostic max {strategy.MaxExploratorySpreadPercent:0.###}%";
+        }
+
+        if (!HasPositiveContribution(signal, "Momentum") && !signal.VolumeConfirmed)
+        {
+            return "not early-eligible: needs momentum or volume confirmation";
+        }
+
+        return $"early-entry diagnostic only: partial EMA structure score {signal.Score:0.##}, positive price action and confirmation present; normal gate still blocks trading";
+    }
+
+    private static bool HasPositiveContribution(TechnicalSignal signal, string name) =>
+        signal.Contributions.Any(contribution =>
+            contribution.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && contribution.Value > 0m);
 
     private static decimal? CalculateEmaGapPercent(decimal fastEma, decimal slowEma) =>
         slowEma == 0m ? null : Math.Abs(fastEma - slowEma) / slowEma * 100m;

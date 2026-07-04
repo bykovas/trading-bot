@@ -82,7 +82,10 @@ internal sealed record TechnicalSignal(
     decimal Score,
     string Direction,
     bool AllowsLong,
+    bool HasBullishStructure,
+    bool EmaFullyConfirmed,
     decimal? BullishEmaGapPercent,
+    decimal? EmaGapVelocityPercent,
     IReadOnlyList<SignalContribution> Contributions,
     // Score before the missing-volume cap was applied. Equals Score when no cap fired.
     decimal UncappedScore = 0m,
@@ -106,7 +109,15 @@ internal sealed record DecisionProposal(
     // threshold but not the live one. It may be upgraded to a real entry by the
     // ranking layer when it lands in the top ExploratoryMaxRank candidates.
     bool ExploratoryCandidate = false,
-    decimal SpreadPercent = 0m);
+    decimal SpreadPercent = 0m,
+    bool HasBullishStructure = false,
+    bool EmaFullyConfirmed = false,
+    decimal? BullishEmaGapPercent = null,
+    decimal? EmaGapVelocityPercent = null,
+    bool EarlyEntryEligible = false,
+    string? EarlyEntryReason = null,
+    decimal EarlyEntryDiagnosticScore = 0m,
+    decimal EarlyEntrySuggestedNotionalEur = 0m);
 
 internal sealed record PositionSizeSelection(
     decimal TargetNotionalEur,

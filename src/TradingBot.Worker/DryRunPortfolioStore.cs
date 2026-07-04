@@ -416,7 +416,17 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
                 (decision ->> 'spreadPercent')::numeric as spread_percent,
                 decision ->> 'priceActionDirection' as price_action_direction,
                 (decision ->> 'priceActionTrendPercent')::numeric as price_action_trend_percent,
-                (decision ->> 'exploratory')::boolean as exploratory
+                (decision ->> 'exploratory')::boolean as exploratory,
+                -- Appended after initial rollout: CREATE OR REPLACE VIEW only allows
+                -- new columns at the END, so these diagnostic-only fields stay last.
+                (decision ->> 'hasBullishStructure')::boolean as has_bullish_structure,
+                (decision ->> 'emaFullyConfirmed')::boolean as ema_fully_confirmed,
+                (decision ->> 'bullishEmaGapPercent')::numeric as bullish_ema_gap_percent,
+                (decision ->> 'emaGapVelocityPercent')::numeric as ema_gap_velocity_percent,
+                (decision ->> 'earlyEntryEligible')::boolean as early_entry_eligible,
+                decision ->> 'earlyEntryReason' as early_entry_reason,
+                (decision ->> 'earlyEntryDiagnosticScore')::numeric as early_entry_diagnostic_score,
+                (decision ->> 'earlyEntrySuggestedNotionalEur')::numeric as early_entry_suggested_notional_eur
             from dry_run_cycles cycle
             cross join lateral jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision;
 

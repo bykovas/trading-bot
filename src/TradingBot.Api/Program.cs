@@ -426,7 +426,15 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
             spread_percent,
             price_action_direction,
             price_action_trend_percent,
-            exploratory
+            exploratory,
+            has_bullish_structure,
+            ema_fully_confirmed,
+            bullish_ema_gap_percent,
+            ema_gap_velocity_percent,
+            early_entry_eligible,
+            early_entry_reason,
+            early_entry_diagnostic_score,
+            early_entry_suggested_notional_eur
         from dry_run_decisions
         where (@cycle_id is null or cycle_id = @cycle_id)
         order by utc desc, cycle_id desc, pair
@@ -466,7 +474,15 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
             GetNullableDecimal(reader, 21),
             reader.IsDBNull(22) ? null : reader.GetString(22),
             GetNullableDecimal(reader, 23),
-            reader.IsDBNull(24) ? null : reader.GetBoolean(24)));
+            reader.IsDBNull(24) ? null : reader.GetBoolean(24),
+            reader.IsDBNull(25) ? null : reader.GetBoolean(25),
+            reader.IsDBNull(26) ? null : reader.GetBoolean(26),
+            GetNullableDecimal(reader, 27),
+            GetNullableDecimal(reader, 28),
+            reader.IsDBNull(29) ? null : reader.GetBoolean(29),
+            reader.IsDBNull(30) ? null : reader.GetString(30),
+            GetNullableDecimal(reader, 31),
+            GetNullableDecimal(reader, 32)));
     }
 
     return decisions;
@@ -793,7 +809,15 @@ internal sealed record DecisionSummaryDto(
     decimal? SpreadPercent,
     string? PriceActionDirection,
     decimal? PriceActionTrendPercent,
-    bool? Exploratory);
+    bool? Exploratory,
+    bool? HasBullishStructure,
+    bool? EmaFullyConfirmed,
+    decimal? BullishEmaGapPercent,
+    decimal? EmaGapVelocityPercent,
+    bool? EarlyEntryEligible,
+    string? EarlyEntryReason,
+    decimal? EarlyEntryDiagnosticScore,
+    decimal? EarlyEntrySuggestedNotionalEur);
 
 internal sealed record CycleEntryDiagnosticsDto(
     string CycleId,

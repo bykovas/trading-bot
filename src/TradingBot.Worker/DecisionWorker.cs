@@ -462,6 +462,14 @@ internal sealed class DecisionWorker(
             marketState.LastPrice,
             marketState.BestBid,
             marketState.BestAsk,
+            proposal.HasBullishStructure,
+            proposal.EmaFullyConfirmed,
+            proposal.BullishEmaGapPercent,
+            proposal.EmaGapVelocityPercent,
+            proposal.EarlyEntryEligible,
+            proposal.EarlyEntryReason,
+            proposal.EarlyEntryDiagnosticScore,
+            proposal.EarlyEntrySuggestedNotionalEur,
             priceAction?.Direction ?? "UNKNOWN",
             priceAction?.TrendPercent,
             PriceActionAssessment.WarmupStateOf(priceAction),
@@ -521,6 +529,9 @@ internal sealed class DecisionWorker(
                 $"priceAction={candidate.PriceActionDirection}({FormatTrend(candidate.PriceActionTrendPercent)}) " +
                 $"paState={candidate.PriceActionState}({candidate.PriceActionSamplesAvailable}/{candidate.PriceActionSamplesRequired}) " +
                 $"hard={(candidate.HardFiltersPassed ? "pass" : "FAIL")} quality={(candidate.QualityFiltersPassed ? "pass" : "FAIL")} " +
+                $"emaGap={FormatTrend(candidate.BullishEmaGapPercent)} emaVelocity={FormatTrend(candidate.EmaGapVelocityPercent)} " +
+                $"earlyEligible={(candidate.EarlyEntryEligible ? "yes" : "no")} earlyScore={candidate.EarlyEntryDiagnosticScore:0.##} " +
+                $"earlySize={candidate.EarlyEntrySuggestedNotionalEur:0.##} " +
                 $"missing=[{string.Join(",", candidate.MissingConfirmations)}] " +
                 $"reject={candidate.RejectionReason ?? "-"}{(candidate.Exploratory ? " (exploratory)" : string.Empty)}");
         }
@@ -805,7 +816,15 @@ internal sealed class DecisionWorker(
             SpreadPercent = decimal.Round(prepared.Proposal.SpreadPercent, 3),
             PriceActionDirection = prepared.PriceAction?.Direction,
             PriceActionTrendPercent = prepared.PriceAction?.TrendPercent,
-            Exploratory = prepared.Proposal.ExploratoryCandidate
+            Exploratory = prepared.Proposal.ExploratoryCandidate,
+            HasBullishStructure = prepared.Proposal.HasBullishStructure,
+            EmaFullyConfirmed = prepared.Proposal.EmaFullyConfirmed,
+            BullishEmaGapPercent = prepared.Proposal.BullishEmaGapPercent,
+            EmaGapVelocityPercent = prepared.Proposal.EmaGapVelocityPercent,
+            EarlyEntryEligible = prepared.Proposal.EarlyEntryEligible,
+            EarlyEntryReason = prepared.Proposal.EarlyEntryReason,
+            EarlyEntryDiagnosticScore = prepared.Proposal.EarlyEntryDiagnosticScore,
+            EarlyEntrySuggestedNotionalEur = prepared.Proposal.EarlyEntrySuggestedNotionalEur
         };
     }
 
@@ -956,7 +975,15 @@ internal sealed class DecisionWorker(
             SpreadPercent = decimal.Round(proposal.SpreadPercent, 3),
             PriceActionDirection = prepared.PriceAction?.Direction,
             PriceActionTrendPercent = prepared.PriceAction?.TrendPercent,
-            Exploratory = proposal.ExploratoryCandidate
+            Exploratory = proposal.ExploratoryCandidate,
+            HasBullishStructure = proposal.HasBullishStructure,
+            EmaFullyConfirmed = proposal.EmaFullyConfirmed,
+            BullishEmaGapPercent = proposal.BullishEmaGapPercent,
+            EmaGapVelocityPercent = proposal.EmaGapVelocityPercent,
+            EarlyEntryEligible = proposal.EarlyEntryEligible,
+            EarlyEntryReason = proposal.EarlyEntryReason,
+            EarlyEntryDiagnosticScore = proposal.EarlyEntryDiagnosticScore,
+            EarlyEntrySuggestedNotionalEur = proposal.EarlyEntrySuggestedNotionalEur
         };
     }
 

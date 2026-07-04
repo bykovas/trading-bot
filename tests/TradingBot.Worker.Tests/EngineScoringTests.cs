@@ -62,9 +62,16 @@ public class EngineScoringTests
     }
 
     private static DecisionProposal Decide(InstrumentMarketState marketState, StrategyOptions strategy, PriceActionAssessment? priceAction = null) =>
+        Decide(marketState, BullishIndicators(), strategy, priceAction);
+
+    private static DecisionProposal Decide(
+        InstrumentMarketState marketState,
+        IndicatorSnapshot indicators,
+        StrategyOptions strategy,
+        PriceActionAssessment? priceAction = null) =>
         Engine.Decide(
             marketState,
-            BullishIndicators(),
+            indicators,
             new TradingOptions { TargetOrderEur = 10m },
             strategy,
             new PositionSizingOptions { Enabled = false },
@@ -73,6 +80,59 @@ public class EngineScoringTests
             currentExposureEur: 0m,
             hasOpenPosition: false,
             priceAction);
+
+    [Fact]
+    public void Partial_bullish_ema_structure_gets_score_and_confirmations_without_opening_entry()
+    {
+        var strategy = Strategy();
+        strategy.ExploratoryEntriesEnabled = false;
+        var indicators = new IndicatorSnapshot(FastEma: 1.003m, SlowEma: 1.000m, Rsi: 55m);
+        var rising = new PriceActionAssessment(
+            "TEST/EUR",
+            SnapshotCount: 6,
+            DataSufficient: true,
+            LastPrice: 1.005m,
+            TrendPercent: 0.4m,
+            RollingAveragePrice: 1.003m,
+            ConsecutiveNonRisingSnapshots: 0);
+
+        var proposal = Decide(MarketState(volumeSpike: true), indicators, strategy, rising);
+
+        Assert.Equal("NONE", proposal.DesiredPosition);
+        Assert.Equal(EntryRejection.NoBullishSignal, proposal.EntryRejectionReason);
+        Assert.True(proposal.HasBullishStructure);
+        Assert.False(proposal.EmaFullyConfirmed);
+        Assert.True(proposal.Score > 0.50m);
+        Assert.Contains(proposal.Contributions, c => c.Name == "Momentum" && c.Value > 0m);
+        Assert.Contains(proposal.Contributions, c => c.Name == "Volume" && c.Value > 0m);
+        Assert.Contains(proposal.Contributions, c => c.Name == "Trend" && c.Value >= 0m);
+        Assert.True(proposal.EarlyEntryEligible);
+        Assert.Equal(proposal.Score, proposal.EarlyEntryDiagnosticScore);
+        Assert.Equal(10m, proposal.EarlyEntrySuggestedNotionalEur);
+    }
+
+    [Fact]
+    public void Tiny_ema_cross_still_does_not_get_early_structure_or_confirmations()
+    {
+        var strategy = Strategy();
+        var indicators = new IndicatorSnapshot(FastEma: 1.0005m, SlowEma: 1.000m, Rsi: 55m);
+        var rising = new PriceActionAssessment(
+            "TEST/EUR",
+            SnapshotCount: 6,
+            DataSufficient: true,
+            LastPrice: 1.005m,
+            TrendPercent: 0.4m,
+            RollingAveragePrice: 1.003m,
+            ConsecutiveNonRisingSnapshots: 0);
+
+        var proposal = Decide(MarketState(volumeSpike: true), indicators, strategy, rising);
+
+        Assert.Equal("NONE", proposal.DesiredPosition);
+        Assert.False(proposal.HasBullishStructure);
+        Assert.False(proposal.EarlyEntryEligible);
+        Assert.DoesNotContain(proposal.Contributions, c => c.Name == "Momentum");
+        Assert.DoesNotContain(proposal.Contributions, c => c.Name == "Volume");
+    }
 
     [Fact]
     public void High_score_without_volume_confirmation_is_capped_below_the_firm_threshold()

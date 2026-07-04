@@ -38,6 +38,14 @@ public class CycleEntryDiagnosticsTests
         foreach (var candidate in topCandidates)
         {
             Assert.False(string.IsNullOrWhiteSpace(candidate.GetProperty("rejectionReason").GetString()));
+            Assert.True(candidate.TryGetProperty("hasBullishStructure", out _));
+            Assert.True(candidate.TryGetProperty("emaFullyConfirmed", out _));
+            Assert.True(candidate.TryGetProperty("bullishEmaGapPercent", out _));
+            Assert.True(candidate.TryGetProperty("emaGapVelocityPercent", out _));
+            Assert.True(candidate.TryGetProperty("earlyEntryEligible", out _));
+            Assert.True(candidate.TryGetProperty("earlyEntryReason", out _));
+            Assert.True(candidate.TryGetProperty("earlyEntryDiagnosticScore", out _));
+            Assert.True(candidate.TryGetProperty("earlyEntrySuggestedNotionalEur", out _));
         }
 
         var excluded = diagnostics.GetProperty("excludedPairs").EnumerateArray().ToList();

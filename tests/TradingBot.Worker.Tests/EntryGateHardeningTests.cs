@@ -23,7 +23,7 @@ public class EntryGateHardeningTests
     };
 
     private static TechnicalSignal FirmSignal() =>
-        new(0.95m, "LONG_BIAS", true, 0.5m, Array.Empty<SignalContribution>(), UncappedScore: 0.95m, VolumeConfirmed: true);
+        new(0.95m, "LONG_BIAS", true, true, true, 0.5m, null, Array.Empty<SignalContribution>(), UncappedScore: 0.95m, VolumeConfirmed: true);
 
     private static PriceActionAssessment Rising(int snapshots = 6) => new(
         "TEST/EUR",
