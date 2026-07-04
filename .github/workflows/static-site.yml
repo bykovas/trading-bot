@@ -11,7 +11,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/bykovas/trading-bot
+  UI_IMAGE_NAME: ghcr.io/bykovas/trading-bot-ui
   WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-worker
 
 jobs:
@@ -32,8 +32,8 @@ jobs:
       - name: Build UI image
         run: |
           docker build \
-            --tag "${IMAGE_NAME}:latest" \
-            --tag "${IMAGE_NAME}:${{ github.sha }}" \
+            --tag "${UI_IMAGE_NAME}:latest" \
+            --tag "${UI_IMAGE_NAME}:${{ github.sha }}" \
             .
 
       - name: Build worker image
@@ -46,8 +46,8 @@ jobs:
 
       - name: Push images
         run: |
-          docker push "${IMAGE_NAME}:latest"
-          docker push "${IMAGE_NAME}:${{ github.sha }}"
+          docker push "${UI_IMAGE_NAME}:latest"
+          docker push "${UI_IMAGE_NAME}:${{ github.sha }}"
           docker push "${WORKER_IMAGE_NAME}:latest"
           docker push "${WORKER_IMAGE_NAME}:${{ github.sha }}"
 
@@ -58,8 +58,8 @@ jobs:
     environment: PROD
 
     env:
-      IMAGE_NAME: ghcr.io/bykovas/trading-bot
-      IMAGE_TAG: ${{ github.sha }}
+      UI_IMAGE_NAME: ghcr.io/bykovas/trading-bot-ui
+      UI_IMAGE_TAG: ${{ github.sha }}
       WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-worker
       WORKER_IMAGE_TAG: ${{ github.sha }}
       GHCR_USERNAME: ${{ github.actor }}

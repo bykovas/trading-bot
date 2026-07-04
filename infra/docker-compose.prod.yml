@@ -1,7 +1,7 @@
 services:
-  trading-bot:
-    container_name: trading-bot
-    image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
+  ui:
+    container_name: trading-bot-ui
+    image: ${UI_IMAGE_NAME}:${UI_IMAGE_TAG:-latest}
     restart: unless-stopped
     networks:
       - traefik

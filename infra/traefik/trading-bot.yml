@@ -26,4 +26,4 @@ http:
     trading-bot:
       loadBalancer:
         servers:
-          - url: "http://trading-bot:80"
+          - url: "http://trading-bot-ui:80"
