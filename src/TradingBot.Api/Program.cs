@@ -73,8 +73,8 @@ app.MapGet("/api/cycles", async (int? limit, int? offset, CancellationToken canc
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
 
-    var items = await ReadCycles(connection, page, cancellationToken);
-    return Results.Ok(new PageResponse<CycleSummaryDto>(
+    var items = await ReadRawCycles(connection, page, cancellationToken);
+    return Results.Ok(new PageResponse<CycleRawDto>(
         items,
         page.Limit,
         page.Offset,
@@ -199,7 +199,7 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
     return positions;
 }
 
-static async Task<IReadOnlyList<CycleSummaryDto>> ReadCycles(
+static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
     NpgsqlConnection connection,
     PageRequest page,
     CancellationToken cancellationToken)
@@ -209,18 +209,8 @@ static async Task<IReadOnlyList<CycleSummaryDto>> ReadCycles(
         select
             cycle_id,
             utc,
-            market_data_mode,
-            ai_provider,
-            active_pairs_count,
-            decisions_count,
-            cash_before_eur,
-            cash_after_eur,
-            portfolio_value_before_eur,
-            portfolio_value_after_eur,
-            would_buy_count,
-            would_sell_count,
-            validated_order_count
-        from dry_run_cycle_summary
+            record_json::text
+        from dry_run_cycles
         order by utc desc, cycle_id desc
         limit @limit offset @offset
         """,
@@ -228,24 +218,15 @@ static async Task<IReadOnlyList<CycleSummaryDto>> ReadCycles(
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
 
-    var cycles = new List<CycleSummaryDto>();
+    var cycles = new List<CycleRawDto>();
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
     while (await reader.ReadAsync(cancellationToken))
     {
-        cycles.Add(new CycleSummaryDto(
+        using var document = JsonDocument.Parse(reader.GetString(2));
+        cycles.Add(new CycleRawDto(
             reader.GetString(0),
             reader.GetDateTime(1),
-            reader.GetString(2),
-            reader.GetString(3),
-            reader.GetInt32(4),
-            reader.GetInt32(5),
-            reader.GetDecimal(6),
-            reader.GetDecimal(7),
-            reader.GetDecimal(8),
-            reader.GetDecimal(9),
-            reader.GetInt64(10),
-            reader.GetInt64(11),
-            reader.GetInt64(12)));
+            document.RootElement.Clone()));
     }
 
     return cycles;
@@ -398,20 +379,10 @@ internal sealed record PageResponse<T>(
     int Offset,
     int? NextOffset);
 
-internal sealed record CycleSummaryDto(
+internal sealed record CycleRawDto(
     string CycleId,
     DateTime Utc,
-    string MarketDataMode,
-    string AiProvider,
-    int ActivePairsCount,
-    int DecisionsCount,
-    decimal CashBeforeEur,
-    decimal CashAfterEur,
-    decimal PortfolioValueBeforeEur,
-    decimal PortfolioValueAfterEur,
-    long WouldBuyCount,
-    long WouldSellCount,
-    long ValidatedOrderCount);
+    JsonElement Record);
 
 internal sealed record CycleDetailDto(
     string CycleId,
