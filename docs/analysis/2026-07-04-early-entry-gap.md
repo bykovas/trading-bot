@@ -178,3 +178,86 @@ The bot is not broken. It is confirmation-heavy.
 It is designed to avoid false positives more than to catch early momentum. That is why it missed XRP/EUR while a discretionary manual trade could capture a small move.
 
 The likely improvement is not simply lowering EMA gap globally. It is adding an explicit early-entry or breakout score path that can coexist with the existing conservative EMA path.
+
+## Follow-up Changes Applied
+
+After this analysis, the worker config was tuned in change set:
+
+```text
+2026-07-04-tight-stop-wide-take-profit
+```
+
+The changes were intentionally narrow:
+
+- `PositionExit.StopLossPercent`: `2.5 -> 1.5`
+- `PositionExit.TakeProfitPercent`: `3.0 -> 4.0`
+- `ExecutionPolicy.EntryBlackoutUtcFromHour`: `20 -> 22`
+- `ExecutionPolicy.EntryBlackoutMinutes`: `600 -> 360`
+
+In Lithuania summer time this changes the new-entry blackout from roughly:
+
+```text
+23:00-09:00 LT
+```
+
+to roughly:
+
+```text
+01:00-07:00 LT
+```
+
+Interpretation:
+
+- weaker positions should be cut earlier instead of drifting toward a deeper stop;
+- stronger movers have more room to reach a larger take-profit;
+- the bot can still open positions during late evening and early morning liquidity if the normal entry filters pass;
+- existing positions can still exit during blackout, because blackout only blocks new entries.
+
+This was not intended to optimize to one CSV day. It should be reviewed over several dry-run days by comparing:
+
+- number of `SELL_STOP_LOSS` events;
+- average loss per stopped trade;
+- number of trades that would have recovered after touching `-1.5%`;
+- number of trades that reached `+4%` after previously hitting the old `+3%` take-profit;
+- total realized PnL after fees and slippage, not raw price movement.
+
+## Follow-up Idea: Separate Exit Cadence
+
+Current discussion: the normal strategy cycle around every 5 minutes is acceptable for entries, because the entry signals are not intended to be one-minute scalps.
+
+However, exits have a different job. Once a position is open, stop-loss, take-profit, and emergency exits may benefit from a faster check cadence.
+
+Proposed experiment:
+
+```text
+entry scan cadence:      every 5 minutes
+open-position exit scan: every 1 minute
+```
+
+The one-minute exit scan should be limited to already-open positions and should not evaluate new entries. It should only:
+
+- refresh bid/ask for held pairs;
+- compute conservative PnL using fee/slippage assumptions;
+- trigger hard exits: stop-loss, take-profit, max-hold, kill/emergency;
+- optionally run lightweight signal/score-decay checks only if the needed indicators are already fresh enough;
+- persist clear diagnostics showing that this was an exit-only check.
+
+Why this may help:
+
+- reduce delay between crossing `-1.5%` and actually exiting;
+- reduce delay between crossing `+4%` and locking profit;
+- avoid increasing entry churn or buying one-minute noise;
+- keep API/DB load modest because only held pairs are checked.
+
+Risks / questions:
+
+- repeated one-minute exit checks must not create duplicate sells;
+- the worker must preserve ordering: exits first, entries later;
+- missing/stale held-pair prices should fail conservative, but should not break the normal 5-minute cycle;
+- if signal-based exits need full indicators, they may still belong in the 5-minute strategy cycle while hard price exits run every minute.
+
+Suggested validation:
+
+- add diagnostics first: `exitOnlyCheck=true`, held pair count, price age, PnL, would-exit reason;
+- run for at least several days in dry-run;
+- compare actual 5-minute exits vs simulated 1-minute hard exits on the same open positions.
