@@ -139,15 +139,45 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
         using var connection = OpenConnection();
         using var command = new NpgsqlCommand(
             """
-            insert into dry_run_cycles (cycle_id, utc, record_json)
-            values (@cycle_id, @utc, @record_json)
+            insert into dry_run_cycles (
+                cycle_id,
+                utc,
+                worker_version,
+                worker_commit,
+                worker_build_utc,
+                worker_image_tag,
+                strategy_version,
+                change_set,
+                record_json)
+            values (
+                @cycle_id,
+                @utc,
+                @worker_version,
+                @worker_commit,
+                @worker_build_utc,
+                @worker_image_tag,
+                @strategy_version,
+                @change_set,
+                @record_json)
             on conflict (cycle_id) do update set
                 utc = excluded.utc,
+                worker_version = excluded.worker_version,
+                worker_commit = excluded.worker_commit,
+                worker_build_utc = excluded.worker_build_utc,
+                worker_image_tag = excluded.worker_image_tag,
+                strategy_version = excluded.strategy_version,
+                change_set = excluded.change_set,
                 record_json = excluded.record_json
             """,
             connection);
         command.Parameters.AddWithValue("cycle_id", record.CycleId);
         command.Parameters.AddWithValue("utc", record.Utc.UtcDateTime);
+        command.Parameters.AddWithValue("worker_version", record.Worker.Version);
+        command.Parameters.AddWithValue("worker_commit", record.Worker.Commit);
+        command.Parameters.AddWithValue("worker_build_utc", record.Worker.BuildUtc);
+        command.Parameters.AddWithValue("worker_image_tag", record.Worker.ImageTag);
+        command.Parameters.AddWithValue("strategy_version", record.Worker.StrategyVersion);
+        command.Parameters.AddWithValue("change_set", record.Worker.ChangeSet);
         command.Parameters.Add("record_json", NpgsqlDbType.Jsonb).Value = JsonSerializer.Serialize(record, _jsonOptions);
         command.ExecuteNonQuery();
     }
@@ -203,7 +233,18 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
                 record_json jsonb not null
             );
 
+            alter table dry_run_cycles
+                add column if not exists worker_version text,
+                add column if not exists worker_commit text,
+                add column if not exists worker_build_utc text,
+                add column if not exists worker_image_tag text,
+                add column if not exists strategy_version text,
+                add column if not exists change_set text;
+
             create index if not exists ix_dry_run_cycles_utc on dry_run_cycles (utc desc);
+            create index if not exists ix_dry_run_cycles_worker_commit on dry_run_cycles (worker_commit, utc desc);
+            create index if not exists ix_dry_run_cycles_strategy_version on dry_run_cycles (strategy_version, utc desc);
+            create index if not exists ix_dry_run_cycles_change_set on dry_run_cycles (change_set, utc desc);
 
             create table if not exists market_snapshots (
                 cycle_id text not null,

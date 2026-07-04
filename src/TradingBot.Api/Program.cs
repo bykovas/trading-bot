@@ -64,7 +64,15 @@ app.MapGet("/api/positions", async (CancellationToken cancellationToken) =>
     return Results.Ok(await ReadPositions(connection, cancellationToken));
 });
 
-app.MapGet("/api/cycles", async (int? limit, int? offset, CancellationToken cancellationToken) =>
+app.MapGet("/api/cycles", async (
+    int? limit,
+    int? offset,
+    string? workerVersion,
+    string? workerCommit,
+    string? strategyVersion,
+    string? changeSet,
+    bool? latestStrategy,
+    CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -73,10 +81,18 @@ app.MapGet("/api/cycles", async (int? limit, int? offset, CancellationToken canc
     }
 
     var page = PageRequest.Create(limit, offset);
+    var filters = new CycleQueryFilters(
+        Clean(workerVersion),
+        Clean(workerCommit),
+        Clean(strategyVersion),
+        Clean(changeSet),
+        latestStrategy == true);
+
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
+    await EnsureCycleMetadataColumns(connection, cancellationToken);
 
-    var items = await ReadRawCycles(connection, page, cancellationToken);
+    var items = await ReadRawCycles(connection, page, filters, cancellationToken);
     return Results.Ok(new PageResponse<CycleRawDto>(
         items,
         page.Limit,
@@ -94,6 +110,7 @@ app.MapGet("/api/cycles/{cycleId}", async (string cycleId, CancellationToken can
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
+    await EnsureCycleMetadataColumns(connection, cancellationToken);
 
     var cycle = await ReadCycleDetail(connection, cycleId, cancellationToken);
     return cycle is null ? Results.NotFound() : Results.Ok(cycle);
@@ -244,6 +261,7 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
 static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
     NpgsqlConnection connection,
     PageRequest page,
+    CycleQueryFilters filters,
     CancellationToken cancellationToken)
 {
     await using var command = new NpgsqlCommand(
@@ -251,27 +269,78 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
         select
             cycle_id,
             utc,
+            worker_version,
+            worker_commit,
+            worker_build_utc,
+            worker_image_tag,
+            strategy_version,
+            change_set,
             record_json::text
         from dry_run_cycles
+        where (@worker_version is null or worker_version = @worker_version)
+          and (@worker_commit is null or worker_commit = @worker_commit)
+          and (@strategy_version is null or strategy_version = @strategy_version)
+          and (@change_set is null or change_set = @change_set)
+          and (
+              @latest_strategy = false
+              or strategy_version = (
+                  select latest.strategy_version
+                  from dry_run_cycles latest
+                  where latest.strategy_version is not null
+                  order by latest.utc desc, latest.cycle_id desc
+                  limit 1
+              )
+          )
         order by utc desc, cycle_id desc
         limit @limit offset @offset
         """,
         connection);
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
+    command.Parameters.Add("worker_version", NpgsqlDbType.Text).Value = (object?)filters.WorkerVersion ?? DBNull.Value;
+    command.Parameters.Add("worker_commit", NpgsqlDbType.Text).Value = (object?)filters.WorkerCommit ?? DBNull.Value;
+    command.Parameters.Add("strategy_version", NpgsqlDbType.Text).Value = (object?)filters.StrategyVersion ?? DBNull.Value;
+    command.Parameters.Add("change_set", NpgsqlDbType.Text).Value = (object?)filters.ChangeSet ?? DBNull.Value;
+    command.Parameters.Add("latest_strategy", NpgsqlDbType.Boolean).Value = filters.LatestStrategy;
 
     var cycles = new List<CycleRawDto>();
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
     while (await reader.ReadAsync(cancellationToken))
     {
-        using var document = JsonDocument.Parse(reader.GetString(2));
+        using var document = JsonDocument.Parse(reader.GetString(8));
         cycles.Add(new CycleRawDto(
             reader.GetString(0),
             reader.GetDateTime(1),
+            ReadNullableString(reader, 2),
+            ReadNullableString(reader, 3),
+            ReadNullableString(reader, 4),
+            ReadNullableString(reader, 5),
+            ReadNullableString(reader, 6),
+            ReadNullableString(reader, 7),
             document.RootElement.Clone()));
     }
 
     return cycles;
+}
+
+static async Task EnsureCycleMetadataColumns(NpgsqlConnection connection, CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand(
+        """
+        alter table dry_run_cycles
+            add column if not exists worker_version text,
+            add column if not exists worker_commit text,
+            add column if not exists worker_build_utc text,
+            add column if not exists worker_image_tag text,
+            add column if not exists strategy_version text,
+            add column if not exists change_set text;
+
+        create index if not exists ix_dry_run_cycles_worker_commit on dry_run_cycles (worker_commit, utc desc);
+        create index if not exists ix_dry_run_cycles_strategy_version on dry_run_cycles (strategy_version, utc desc);
+        create index if not exists ix_dry_run_cycles_change_set on dry_run_cycles (change_set, utc desc);
+        """,
+        connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
 static async Task<CycleDetailDto?> ReadCycleDetail(
@@ -434,13 +503,23 @@ static async Task WriteCyclesAndSnapshotsCsv(
 {
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
+    await EnsureCycleMetadataColumns(connection, cancellationToken);
 
     await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), leaveOpen: true);
-    await writer.WriteLineAsync("record_type,cycle_id,utc,pair,bid,ask,last,volume24h,change_percent,record_json");
+    await writer.WriteLineAsync("record_type,cycle_id,utc,worker_version,worker_commit,worker_build_utc,worker_image_tag,strategy_version,change_set,pair,bid,ask,last,volume24h,change_percent,record_json");
 
     await using (var command = new NpgsqlCommand(
         """
-        select cycle_id, utc, record_json::text
+        select
+            cycle_id,
+            utc,
+            worker_version,
+            worker_commit,
+            worker_build_utc,
+            worker_image_tag,
+            strategy_version,
+            change_set,
+            record_json::text
         from dry_run_cycles
         order by utc asc, cycle_id asc
         """,
@@ -454,13 +533,19 @@ static async Task WriteCyclesAndSnapshotsCsv(
                 CsvText("cycle"),
                 CsvText(reader.GetString(0)),
                 CsvText(FormatUtc(reader.GetDateTime(1))),
+                CsvText(ReadNullableString(reader, 2)),
+                CsvText(ReadNullableString(reader, 3)),
+                CsvText(ReadNullableString(reader, 4)),
+                CsvText(ReadNullableString(reader, 5)),
+                CsvText(ReadNullableString(reader, 6)),
+                CsvText(ReadNullableString(reader, 7)),
                 "",
                 "",
                 "",
                 "",
                 "",
                 "",
-                CsvText(reader.GetString(2))
+                CsvText(reader.GetString(8))
             }));
         }
     }
@@ -481,6 +566,12 @@ static async Task WriteCyclesAndSnapshotsCsv(
                 CsvText("market_snapshot"),
                 CsvText(reader.GetString(0)),
                 CsvText(FormatUtc(reader.GetDateTime(1))),
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 CsvText(reader.GetString(2)),
                 CsvDecimal(reader.GetDecimal(3)),
                 CsvDecimal(reader.GetDecimal(4)),
@@ -495,6 +586,12 @@ static async Task WriteCyclesAndSnapshotsCsv(
 
 static string FormatUtc(DateTime value) =>
     DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("O", CultureInfo.InvariantCulture);
+
+static string? Clean(string? value) =>
+    string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+static string? ReadNullableString(NpgsqlDataReader reader, int ordinal) =>
+    reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
 
 static string CsvDecimal(decimal value) => CsvText(value.ToString(CultureInfo.InvariantCulture));
 
@@ -552,7 +649,20 @@ internal sealed record PageResponse<T>(
 internal sealed record CycleRawDto(
     string CycleId,
     DateTime Utc,
+    string? WorkerVersion,
+    string? WorkerCommit,
+    string? WorkerBuildUtc,
+    string? WorkerImageTag,
+    string? StrategyVersion,
+    string? ChangeSet,
     JsonElement Record);
+
+internal sealed record CycleQueryFilters(
+    string? WorkerVersion,
+    string? WorkerCommit,
+    string? StrategyVersion,
+    string? ChangeSet,
+    bool LatestStrategy);
 
 internal sealed record CycleDetailDto(
     string CycleId,
