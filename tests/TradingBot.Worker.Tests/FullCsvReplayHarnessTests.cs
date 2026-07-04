@@ -356,7 +356,9 @@ public class FullCsvReplayHarnessTests
 
         var buyCycle = outcomes.Single(o => o.Pair == "OP/EUR" && o.Utc.ToString("HH:mm:ss") == "06:04:44");
         Assert.Equal("NONE", buyCycle.DesiredPosition);
-        Assert.Equal(EntryRejection.NegativeRecentPriceAction, buyCycle.RejectionReason);
+        // The volume-capped 0.85 score puts OP in the exploratory band, and the
+        // FALLING price action fails its positive-price-action requirement.
+        Assert.Equal(EntryRejection.ExploratoryRequiresPositivePriceAction, buyCycle.RejectionReason);
 
         // And across the whole 4-hour window, no OP/EUR entry is ever admitted.
         Assert.DoesNotContain(admissions, a => a.Pair == "OP/EUR");

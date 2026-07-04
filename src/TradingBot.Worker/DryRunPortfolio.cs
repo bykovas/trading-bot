@@ -87,6 +87,9 @@ internal sealed class DryRunPortfolio(
         _store.AppendMarketSnapshots(snapshots);
     }
 
+    public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc) =>
+        _store.LoadRecentMarketSnapshots(sinceUtc);
+
     public string GetStatePath() => _store.StateDescription;
     public string GetEventsPath() => _store.EventsDescription;
 

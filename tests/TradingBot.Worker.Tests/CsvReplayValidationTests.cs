@@ -117,13 +117,14 @@ public class CsvReplayValidationTests
 
         // And the full gate: even granting the original (lagging) 0.95-style signal,
         // OP/EUR is not a firm entry any more. With the missing-volume cap the score
-        // is 0.85; the gate must reject on negative recent price action.
+        // is 0.85 (exploratory band), and the gate must name the real blocker: the
+        // known-negative price action fails the positive-price-action requirement.
         var signal = new TechnicalSignal(0.85m, "LONG_BIAS", true, 0.4m, Array.Empty<SignalContribution>(), UncappedScore: 0.95m, VolumeConfirmed: false);
         var buySnapshot = SnapshotNear("OP/EUR", buyTime);
         var gate = EntryGate.Evaluate(signal, MarketState("OP/EUR", buySnapshot.Bid, buySnapshot.Ask, buySnapshot.Last), assessment, strategy);
 
         Assert.Equal("NONE", gate.DesiredPosition);
-        Assert.Equal(EntryRejection.NegativeRecentPriceAction, gate.RejectionReason);
+        Assert.Equal(EntryRejection.ExploratoryRequiresPositivePriceAction, gate.RejectionReason);
     }
 
     [Fact]
@@ -163,9 +164,11 @@ public class CsvReplayValidationTests
     {
         var strategy = ReplayStrategy();
 
-        // 07:46 UTC: TON/EUR had been scoring 0.80-0.85 and its snapshots were rising
-        // (1.571 -> 1.585 over the prior half hour).
-        var atUtc = DateTimeOffset.Parse("2026-07-04T07:46:17Z", CultureInfo.InvariantCulture);
+        // 07:49 UTC: TON/EUR had been scoring 0.80-0.85, its snapshots were rising
+        // (1.571 -> 1.588 over the prior half hour) and the spread (0.126%) is inside
+        // the stricter exploratory limit. (At 07:46 the spread was 0.316%, which the
+        // exploratory spread cap now correctly refuses.)
+        var atUtc = DateTimeOffset.Parse("2026-07-04T07:49:43Z", CultureInfo.InvariantCulture);
         var assessment = AssessAt("TON/EUR", atUtc, strategy);
 
         Assert.NotNull(assessment);

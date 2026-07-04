@@ -186,7 +186,7 @@ public class PriceActionGuardTests
         var rising = new PriceActionAssessment("X/EUR", 7, true, 1.585m, 0.9m, 1.575m, 0);
         var admitted = EntryGate.Evaluate(
             Signal(0.85m, volumeConfirmed: false),
-            MarketState(bid: 1.582m, ask: 1.587m, last: 1.585m),
+            MarketState(bid: 1.584m, ask: 1.586m, last: 1.585m),
             rising,
             strategy);
 
@@ -196,19 +196,20 @@ public class PriceActionGuardTests
         var falling = new PriceActionAssessment("X/EUR", 7, true, 1.560m, -0.8m, 1.575m, 3);
         var refused = EntryGate.Evaluate(
             Signal(0.85m, volumeConfirmed: false),
-            MarketState(bid: 1.559m, ask: 1.562m, last: 1.560m),
+            MarketState(bid: 1.559m, ask: 1.561m, last: 1.560m),
             falling,
             strategy);
 
         Assert.Equal("NONE", refused.DesiredPosition);
-        Assert.Equal(EntryRejection.NegativeRecentPriceAction, refused.RejectionReason);
+        Assert.Equal(EntryRejection.ExploratoryRequiresPositivePriceAction, refused.RejectionReason);
     }
 
     [Fact]
     public void Exploratory_mode_refuses_when_price_action_history_is_insufficient()
     {
         // SOL/EUR lesson: a bare 0.85 score with no positive price-action evidence
-        // must NOT be admitted just because the exploratory threshold is 0.85.
+        // must NOT be admitted just because the exploratory threshold is 0.85 — and
+        // the rejection must name the real blocker: the price action is UNKNOWN.
         var strategy = Strategy();
         strategy.ExploratoryEntriesEnabled = true;
 
@@ -220,7 +221,7 @@ public class PriceActionGuardTests
             strategy);
 
         Assert.Equal("NONE", result.DesiredPosition);
-        Assert.Equal(EntryRejection.ScoreBelowThreshold, result.RejectionReason);
+        Assert.Equal(EntryRejection.PriceActionUnknown, result.RejectionReason);
     }
 
     [Fact]

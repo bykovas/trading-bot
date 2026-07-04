@@ -499,7 +499,8 @@ static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
             no_trade_reason,
             rejection_counts::text,
             top_candidates::text,
-            excluded_pairs::text
+            excluded_pairs::text,
+            price_action_ready_count
         from dry_run_cycle_entry_diagnostics
         where (@cycle_id is null or cycle_id = @cycle_id)
         order by utc desc, cycle_id desc
@@ -530,7 +531,8 @@ static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
             reader.IsDBNull(12) ? null : reader.GetString(12),
             ParseJsonOrNull(reader, 13),
             ParseJsonOrNull(reader, 14),
-            ParseJsonOrNull(reader, 15)));
+            ParseJsonOrNull(reader, 15),
+            GetNullableInt(reader, 16)));
     }
 
     return items;
@@ -809,7 +811,8 @@ internal sealed record CycleEntryDiagnosticsDto(
     string? NoTradeReason,
     JsonElement? RejectionCounts,
     JsonElement? TopCandidates,
-    JsonElement? ExcludedPairs);
+    JsonElement? ExcludedPairs,
+    int? PriceActionReadyCount);
 
 internal sealed record MarketSnapshotDto(
     string CycleId,

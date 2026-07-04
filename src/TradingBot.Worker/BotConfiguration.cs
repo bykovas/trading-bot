@@ -109,6 +109,10 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_MAX_RANK", value => config.Strategy.ExploratoryMaxRank = ParseInt(value, config.Strategy.ExploratoryMaxRank));
         SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_ALLOWED_IN_LIVE", value => config.Strategy.ExploratoryAllowedInLive = ParseBool(value, config.Strategy.ExploratoryAllowedInLive));
         SetIfPresent("TRADINGBOT_STRATEGY_REQUIRE_PRICE_ACTION_DATA", value => config.Strategy.RequirePriceActionData = ParseBool(value, config.Strategy.RequirePriceActionData));
+        SetIfPresent("TRADINGBOT_STRATEGY_MAX_EXPLORATORY_SPREAD_PERCENT", value => config.Strategy.MaxExploratorySpreadPercent = ParseDecimal(value, config.Strategy.MaxExploratorySpreadPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_PRICE_ACTION_MAX_SAMPLE_AGE_MINUTES", value => config.Strategy.PriceActionMaxSampleAgeMinutes = ParseInt(value, config.Strategy.PriceActionMaxSampleAgeMinutes));
+        SetIfPresent("TRADINGBOT_STRATEGY_PRICE_ACTION_HYDRATION_MINUTES", value => config.Strategy.PriceActionHydrationMinutes = ParseInt(value, config.Strategy.PriceActionHydrationMinutes));
+        SetIfPresent("TRADINGBOT_STRATEGY_ALLOW_ENTRIES_WITHOUT_PRICE_ACTION_IN_LIVE", value => config.Strategy.AllowEntriesWithoutPriceActionInLive = ParseBool(value, config.Strategy.AllowEntriesWithoutPriceActionInLive));
         SetIfPresent("TRADINGBOT_POSITION_EXIT_SCORE_DECAY_MIN_ENTRY_SCORE", value => config.PositionExit.ScoreDecayMinEntryScore = ParseDecimal(value, config.PositionExit.ScoreDecayMinEntryScore));
         SetIfPresent("TRADINGBOT_POSITION_EXIT_SCORE_DECAY_DEFENSIVE_SCORE", value => config.PositionExit.ScoreDecayDefensiveScore = ParseDecimal(value, config.PositionExit.ScoreDecayDefensiveScore));
         SetIfPresent("TRADINGBOT_POSITION_EXIT_SCORE_DECAY_DEFENSIVE_CYCLES", value => config.PositionExit.ScoreDecayDefensiveCycles = ParseInt(value, config.PositionExit.ScoreDecayDefensiveCycles));
@@ -150,6 +154,9 @@ internal sealed class BotConfiguration
         Strategy.MinDailyVolumeEur = Math.Max(0m, Strategy.MinDailyVolumeEur);
         Strategy.ExploratoryMinimumLongScore = Math.Clamp(Strategy.ExploratoryMinimumLongScore, 0m, Strategy.MinimumLongScore);
         Strategy.ExploratoryMaxRank = Math.Max(1, Strategy.ExploratoryMaxRank);
+        Strategy.MaxExploratorySpreadPercent = Math.Max(0m, Strategy.MaxExploratorySpreadPercent);
+        Strategy.PriceActionMaxSampleAgeMinutes = Math.Max(0, Strategy.PriceActionMaxSampleAgeMinutes);
+        Strategy.PriceActionHydrationMinutes = Math.Max(0, Strategy.PriceActionHydrationMinutes);
         // Exploratory sampling is a dry-run tool. Live trading keeps the firm
         // threshold unless the operator explicitly opts in.
         if (Trading.LiveTradingEnabled && !Strategy.ExploratoryAllowedInLive)
@@ -157,8 +164,10 @@ internal sealed class BotConfiguration
             Strategy.ExploratoryEntriesEnabled = false;
         }
         // Live entries must never bypass the anti-lag guard via missing history: force
-        // the warm-up requirement on whenever live trading is enabled.
-        if (Trading.LiveTradingEnabled)
+        // the warm-up requirement on whenever live trading is enabled. The ONLY way
+        // out is the explicit AllowEntriesWithoutPriceActionInLive override — UNKNOWN
+        // price action never silently becomes a safe condition.
+        if (Trading.LiveTradingEnabled && !Strategy.AllowEntriesWithoutPriceActionInLive)
         {
             Strategy.RequirePriceActionData = true;
         }
@@ -406,12 +415,31 @@ internal sealed class StrategyOptions
     public int ExploratoryMaxRank { get; set; } = 2;
     public bool ExploratoryAllowedInLive { get; set; } = false;
 
+    // Stricter spread limit for exploratory entries: a small sampling position must
+    // not pay a 0.4%+ spread even when it is below the hard MaxEntrySpreadPercent.
+    // 0 disables the extra limit (the hard max still applies).
+    public decimal MaxExploratorySpreadPercent { get; set; } = 0.30m;
+
     // ---- Price-action warm-up ----
     // When true, NEW entries are blocked until the pair has PriceActionMinSnapshots
     // observations, so the anti-lag guard never has to abstain for an actual entry.
     // Normalize() forces this to true in live mode: after a restart the worker must
-    // warm up (~PriceActionMinSnapshots cycles) before it may open live positions.
+    // warm up (hydration usually makes this instant) before it may open live
+    // positions. AllowEntriesWithoutPriceActionInLive is the explicit, deliberate
+    // override for operators who accept blind live entries; it is never implied.
     public bool RequirePriceActionData { get; set; } = false;
+    public bool AllowEntriesWithoutPriceActionInLive { get; set; } = false;
+
+    // A price-action series whose newest sample is older than this is STALE and
+    // treated as insufficient (direction UNKNOWN, guard abstains, warm-up block
+    // applies). Protects against trusting hydrated/frozen history. 0 disables.
+    public int PriceActionMaxSampleAgeMinutes { get; set; } = 30;
+
+    // On startup, snapshot history is hydrated from the persisted market snapshots
+    // of the last N minutes so the guard is not blind for PriceActionMinSnapshots
+    // cycles after every restart. Only recent rows are loaded on purpose: a long
+    // downtime gap must not be bridged into a fake "recent" trend. 0 disables.
+    public int PriceActionHydrationMinutes { get; set; } = 45;
 }
 
 internal sealed class PositionSizingOptions

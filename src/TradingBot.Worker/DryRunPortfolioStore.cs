@@ -15,6 +15,11 @@ internal interface IDryRunPortfolioStore
     // Persist the per-cycle light market snapshot (one row per universe pair) in a
     // single batch. Callers wrap this so a failure never blocks the trading cycle.
     void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots);
+
+    // Recent persisted market snapshots (utc >= sinceUtc), oldest first. Used to
+    // hydrate the price-action history after a restart so the anti-lag guard is not
+    // blind for several cycles. Callers wrap this: a failure only skips hydration.
+    IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc);
 }
 
 internal sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunPortfolioStore
@@ -83,6 +88,40 @@ internal sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunP
         Directory.CreateDirectory(options.OutputDirectory);
         var lines = snapshots.Select(snapshot => JsonSerializer.Serialize(snapshot, _eventJsonOptions));
         File.AppendAllLines(MarketSnapshotsPath, lines);
+    }
+
+    public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc)
+    {
+        if (!File.Exists(MarketSnapshotsPath))
+        {
+            return [];
+        }
+
+        var results = new List<MarketSnapshotRecord>();
+        foreach (var line in File.ReadLines(MarketSnapshotsPath))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            MarketSnapshotRecord? record;
+            try
+            {
+                record = JsonSerializer.Deserialize<MarketSnapshotRecord>(line, _eventJsonOptions);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (record is not null && record.Utc >= sinceUtc)
+            {
+                results.Add(record);
+            }
+        }
+
+        return results.OrderBy(record => record.Utc).ToList();
     }
 }
 
@@ -209,6 +248,39 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
         }
 
         writer.Complete();
+    }
+
+    public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc)
+    {
+        EnsureSchema();
+
+        using var connection = OpenConnection();
+        using var command = new NpgsqlCommand(
+            """
+            select cycle_id, utc, pair, bid, ask, last, volume24h, change_percent
+            from market_snapshots
+            where utc >= @since
+            order by utc
+            """,
+            connection);
+        command.Parameters.AddWithValue("since", sinceUtc.UtcDateTime);
+
+        var results = new List<MarketSnapshotRecord>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            results.Add(new MarketSnapshotRecord(
+                reader.GetString(0),
+                new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc)),
+                reader.GetString(2),
+                reader.GetDecimal(3),
+                reader.GetDecimal(4),
+                reader.GetDecimal(5),
+                reader.GetDecimal(6),
+                reader.GetDecimal(7)));
+        }
+
+        return results;
     }
 
     private void EnsureSchema()
@@ -365,7 +437,10 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
                 cycle.record_json -> 'entryDiagnostics' ->> 'noTradeReason' as no_trade_reason,
                 cycle.record_json -> 'entryDiagnostics' -> 'rejectionCounts' as rejection_counts,
                 cycle.record_json -> 'entryDiagnostics' -> 'topCandidates' as top_candidates,
-                cycle.record_json -> 'entryDiagnostics' -> 'excludedPairs' as excluded_pairs
+                cycle.record_json -> 'entryDiagnostics' -> 'excludedPairs' as excluded_pairs,
+                -- Appended after initial rollout: CREATE OR REPLACE VIEW only allows
+                -- new columns at the END, so this stays last.
+                (cycle.record_json -> 'entryDiagnostics' ->> 'priceActionReadyCount')::int as price_action_ready_count
             from dry_run_cycles cycle;
             """,
             connection);

@@ -26,6 +26,9 @@ internal static class EntryRejection
     public const string CorrelationLimit = "REJECT_CORRELATION_LIMIT";
     public const string InvalidMarketData = "REJECT_INVALID_MARKET_DATA";
     public const string InsufficientPriceHistory = "REJECT_INSUFFICIENT_PRICE_HISTORY";
+    public const string PriceActionUnknown = "REJECT_PRICE_ACTION_UNKNOWN";
+    public const string ExploratoryRequiresPositivePriceAction = "REJECT_EXPLORATORY_REQUIRES_POSITIVE_PRICE_ACTION";
+    public const string NoMomentumConfirmation = "REJECT_NO_MOMENTUM_CONFIRMATION";
 
     // Maps a DryRunPortfolio hold-reason code (a portfolio-level buy block) onto the
     // compact rejection vocabulary for cycle diagnostics.
@@ -154,7 +157,7 @@ internal static class EntryGate
             notes.Add(new SignalContribution(
                 "PriceActionGuard",
                 0m,
-                $"entry rejected: only {seen} of {strategy.PriceActionMinSnapshots} required snapshots observed; warming up price-action history"));
+                $"entry rejected: price-action history is {PriceActionAssessment.WarmupStateOf(priceAction)} ({seen}/{strategy.PriceActionMinSnapshots} snapshots); UNKNOWN price action never passes for safe"));
             return Reject(EntryRejection.InsufficientPriceHistory, spreadPercent, notes);
         }
 
@@ -164,25 +167,48 @@ internal static class EntryGate
         if (!firm)
         {
             // Exploratory admission (dry-run sampling mode): a near-threshold score is
-            // allowed through ONLY with positive recent price action and a clean spread;
-            // ranking downstream additionally requires a top-N slot. Live mode keeps
-            // this disabled unless explicitly configured.
-            var exploratoryEligible =
+            // allowed through ONLY with KNOWN positive recent price action and a spread
+            // within the stricter exploratory limit; ranking downstream additionally
+            // requires a top-N slot. Live mode keeps this disabled unless explicitly
+            // configured.
+            var exploratoryBand =
                 strategy.ExploratoryEntriesEnabled
-                && signal.Score >= strategy.ExploratoryMinimumLongScore
-                && priceAction is { IsPositive: true };
+                && signal.Score >= strategy.ExploratoryMinimumLongScore;
+            var exploratorySpreadOk =
+                strategy.MaxExploratorySpreadPercent <= 0m
+                || spreadPercent <= strategy.MaxExploratorySpreadPercent;
+            var exploratoryEligible =
+                exploratoryBand
+                && priceAction is { IsPositive: true }
+                && exploratorySpreadOk;
 
             if (!exploratoryEligible)
             {
-                // A distinct rejection only when there is EVIDENCE of non-positive
-                // price action; missing/insufficient history falls through to the
-                // ordinary score rejection (block on evidence, never on missing data).
-                if (strategy.ExploratoryEntriesEnabled
-                    && signal.Score >= strategy.ExploratoryMinimumLongScore
-                    && priceAction is { DataSufficient: true, IsPositive: false })
+                // A near-threshold candidate gets the PRECISE first blocker, not a
+                // generic score rejection: unknown price action, non-positive price
+                // action, exploratory spread, then missing volume/momentum.
+                if (exploratoryBand)
                 {
-                    notes.Add(new SignalContribution("Exploratory", 0m, $"exploratory entry refused: recent price action is {priceAction.Direction}, positive required"));
-                    return Reject(EntryRejection.NegativeRecentPriceAction, spreadPercent, notes);
+                    if (priceAction is not { DataSufficient: true })
+                    {
+                        notes.Add(new SignalContribution(
+                            "Exploratory",
+                            0m,
+                            $"exploratory entry refused: price action is {PriceActionAssessment.WarmupStateOf(priceAction)} ({priceAction?.SnapshotCount ?? 0}/{strategy.PriceActionMinSnapshots} snapshots); known POSITIVE price action required"));
+                        return Reject(EntryRejection.PriceActionUnknown, spreadPercent, notes);
+                    }
+
+                    if (!priceAction.IsPositive)
+                    {
+                        notes.Add(new SignalContribution("Exploratory", 0m, $"exploratory entry refused: recent price action is {priceAction.Direction}, positive required"));
+                        return Reject(EntryRejection.ExploratoryRequiresPositivePriceAction, spreadPercent, notes);
+                    }
+
+                    if (!exploratorySpreadOk)
+                    {
+                        notes.Add(new SignalContribution("Exploratory", 0m, $"exploratory entry refused: spread {spreadPercent:0.###}% exceeds exploratory max {strategy.MaxExploratorySpreadPercent:0.###}%"));
+                        return Reject(EntryRejection.SpreadTooWide, spreadPercent, notes);
+                    }
                 }
 
                 // A score that only missed the firm bar because the missing-volume cap
@@ -190,6 +216,22 @@ internal static class EntryGate
                 if (signal.UncappedScore >= strategy.MinimumLongScore && !signal.VolumeConfirmed)
                 {
                     return Reject(EntryRejection.NoVolumeConfirmation, spreadPercent, notes);
+                }
+
+                // Near-threshold candidates blocked by a missing confirmation report it
+                // explicitly instead of a bare score rejection (also when exploratory
+                // mode itself is disabled, e.g. in live mode).
+                if (signal.Score >= strategy.ExploratoryMinimumLongScore)
+                {
+                    if (!HasPositiveContribution(signal, "Momentum"))
+                    {
+                        return Reject(EntryRejection.NoMomentumConfirmation, spreadPercent, notes);
+                    }
+
+                    if (!signal.VolumeConfirmed)
+                    {
+                        return Reject(EntryRejection.NoVolumeConfirmation, spreadPercent, notes);
+                    }
                 }
 
                 return Reject(EntryRejection.ScoreBelowThreshold, spreadPercent, notes);
@@ -214,6 +256,10 @@ internal static class EntryGate
 
         return new EntryGateResult("LONG_MICRO", exploratory, null, spreadPercent, notes);
     }
+
+    private static bool HasPositiveContribution(TechnicalSignal signal, string name) =>
+        signal.Contributions.Any(contribution =>
+            contribution.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && contribution.Value > 0m);
 
     private static EntryGateResult Reject(string reason, decimal spreadPercent, List<SignalContribution> notes) =>
         new("NONE", false, reason, spreadPercent, notes);

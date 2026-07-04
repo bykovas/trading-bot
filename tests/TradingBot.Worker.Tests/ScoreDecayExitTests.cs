@@ -239,5 +239,6 @@ public class ScoreDecayExitTests
         public void Save(PortfolioState state) { }
         public void AppendCycle(DryRunCycleRecord record) { }
         public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots) { }
+        public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc) => [];
     }
 }

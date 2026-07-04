@@ -12,6 +12,11 @@ internal sealed record CandidateDiagnostic(
     decimal Ask,
     string PriceActionDirection,
     decimal? PriceActionTrendPercent,
+    string PriceActionState,
+    int PriceActionSamplesAvailable,
+    int PriceActionSamplesRequired,
+    DateTimeOffset? PriceActionOldestSampleUtc,
+    DateTimeOffset? PriceActionNewestSampleUtc,
     bool HardFiltersPassed,
     bool QualityFiltersPassed,
     IReadOnlyList<string> MissingConfirmations,
@@ -19,12 +24,19 @@ internal sealed record CandidateDiagnostic(
     bool Exploratory);
 
 // Universe pair that received a light snapshot but was NOT evaluated with full data
-// this cycle (typically not picked by the watchlist advisor).
+// this cycle (typically not picked by the watchlist advisor). VolumeRank is the
+// pair's position when all snapshot pairs are ordered by estimated 24h EUR volume,
+// which is what the heuristic advisor ranks by; AdvisorRank is only present when
+// the advisor recommended the pair but it still did not enter the active set.
 internal sealed record ExcludedPairDiagnostic(
     string Pair,
     string Reason,
     decimal Last,
-    decimal ChangePercent);
+    decimal ChangePercent,
+    int? VolumeRank = null,
+    decimal? Est24hVolumeEur = null,
+    decimal? SpreadPercent = null,
+    int? AdvisorRank = null);
 
 // Cycle-level entry funnel: snapshot universe -> active set -> hard filters ->
 // quality filters -> ranking -> chosen entry (or an explicit no-trade reason).
@@ -34,6 +46,7 @@ internal sealed record CycleEntryDiagnostics(
     int SnapshotPairsAvailable,
     int ActivePairsEvaluated,
     int EntryPairsEvaluated,
+    int PriceActionReadyCount,
     int ScoreAtLeast075,
     int ScoreAtLeast080,
     int ScoreAtLeast085,

@@ -27,6 +27,7 @@ internal sealed class DecisionWorker(
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         PrintStartup();
+        HydratePriceHistory();
         await PrintBrokerStartupAsync(cancellationToken);
 
         do
@@ -227,7 +228,8 @@ internal sealed class DecisionWorker(
             selected,
             entryEvaluations,
             buyCandidates.Count,
-            decisionRecords);
+            decisionRecords,
+            advice);
         PrintEntryDiagnostics(entryDiagnostics);
 
         var portfolioAfter = workingPortfolio.Clone();
@@ -262,7 +264,8 @@ internal sealed class DecisionWorker(
         IReadOnlyList<InstrumentMarketState> selected,
         IReadOnlyList<PreparedDecision> entryEvaluations,
         int eligibleEntryCandidates,
-        IReadOnlyList<DryRunDecisionRecord> decisionRecords)
+        IReadOnlyList<DryRunDecisionRecord> decisionRecords,
+        WatchlistAdvice? advice = null)
     {
         var recordsByPair = decisionRecords
             .GroupBy(record => record.Pair, StringComparer.OrdinalIgnoreCase)
@@ -287,22 +290,24 @@ internal sealed class DecisionWorker(
             .Select(record => record.Pair)
             .ToList();
 
-        var excluded = lightCandidates
-            .Where(candidate => !selected.Any(state => state.Instrument.Pair.Equals(candidate.Instrument.Pair, StringComparison.OrdinalIgnoreCase)))
-            .Select(candidate => new ExcludedPairDiagnostic(
+        var excluded = BuildExcludedPairDiagnostics(lightCandidates, selected, advice);
+
+        // Cycle-level guard readiness: how many snapshot pairs currently have enough
+        // recent history for the anti-lag price-action guard to actually judge them.
+        var priceActionReadyCount = lightCandidates.Count(candidate =>
+            _priceHistory.Assess(
                 candidate.Instrument.Pair,
-                string.IsNullOrWhiteSpace(candidate.DataWarning)
-                    ? $"not selected by watchlist advisor ({EntryRejection.ActivePairFilter})"
-                    : $"unusable data: {candidate.DataWarning}",
-                candidate.LastPrice,
-                candidate.ChangePercent))
-            .ToList();
+                config.Strategy.PriceActionLookbackSnapshots,
+                config.Strategy.PriceActionMinSnapshots,
+                DateTimeOffset.UtcNow,
+                config.Strategy.PriceActionMaxSampleAgeMinutes) is { DataSufficient: true });
 
         var chosenPair = chosenPairs.Count > 0 ? string.Join(", ", chosenPairs) : null;
         return new CycleEntryDiagnostics(
             SnapshotPairsAvailable: lightCandidates.Count,
             ActivePairsEvaluated: selected.Count,
             EntryPairsEvaluated: entryEvaluations.Count,
+            PriceActionReadyCount: priceActionReadyCount,
             ScoreAtLeast075: allScores.Count(score => score >= 0.75m),
             ScoreAtLeast080: allScores.Count(score => score >= 0.80m),
             ScoreAtLeast085: allScores.Count(score => score >= 0.85m),
@@ -320,6 +325,82 @@ internal sealed class DecisionWorker(
                 .Take(5)
                 .ToList(),
             ExcludedPairs: excluded);
+    }
+
+    // Excluded-pair diagnostics with a CONCRETE reason instead of a generic "not
+    // selected" line: the pair's volume rank in the snapshot universe (what the
+    // heuristic advisor sorts by), its estimated 24h EUR volume, its spread, and the
+    // advisor's own rank/reason when the advisor did recommend it.
+    private ExcludedPairDiagnostic BuildExcludedPairDiagnostic(
+        InstrumentMarketState candidate,
+        int? volumeRank,
+        int totalPairs,
+        int advisorPickCount,
+        WatchlistRecommendation? recommendation)
+    {
+        var pair = candidate.Instrument.Pair;
+        var spreadPercent = decimal.Round(EntryGate.SpreadPercentOf(candidate), 3);
+        var volumeEur = decimal.Round(candidate.LastVolume * candidate.LastPrice, 0);
+
+        string reason;
+        if (!string.IsNullOrWhiteSpace(candidate.DataWarning))
+        {
+            reason = $"unusable data: {candidate.DataWarning}";
+        }
+        else if (recommendation is not null)
+        {
+            reason = $"recommended by advisor (rank #{recommendation.Priority}) but did not enter the active set ({EntryRejection.ActivePairFilter})";
+        }
+        else
+        {
+            var rankText = volumeRank is { } rank
+                ? $"24h EUR volume rank #{rank} of {totalPairs}, advisor takes top {advisorPickCount}"
+                : "no usable volume ranking";
+            var spreadText = config.Strategy.MaxEntrySpreadPercent > 0m && spreadPercent > config.Strategy.MaxEntrySpreadPercent
+                ? $"; spread {spreadPercent:0.###}% also exceeds entry max {config.Strategy.MaxEntrySpreadPercent:0.###}%"
+                : string.Empty;
+            reason = $"not selected by watchlist advisor ({EntryRejection.ActivePairFilter}): {rankText} (est. 24h volume EUR {volumeEur:0}){spreadText}";
+        }
+
+        return new ExcludedPairDiagnostic(
+            pair,
+            reason,
+            candidate.LastPrice,
+            candidate.ChangePercent,
+            VolumeRank: volumeRank,
+            Est24hVolumeEur: volumeEur,
+            SpreadPercent: spreadPercent,
+            AdvisorRank: recommendation?.Priority);
+    }
+
+    private List<ExcludedPairDiagnostic> BuildExcludedPairDiagnostics(
+        IReadOnlyList<InstrumentMarketState> lightCandidates,
+        IReadOnlyList<InstrumentMarketState> selected,
+        WatchlistAdvice? advice)
+    {
+        // Rank every usable snapshot pair by estimated 24h EUR volume — the metric
+        // the heuristic watchlist advisor sorts by — so an excluded pair's reason
+        // can say WHERE it ranked instead of just "not selected".
+        var volumeRanks = lightCandidates
+            .Where(candidate => candidate.LastPrice > 0m && string.IsNullOrWhiteSpace(candidate.DataWarning))
+            .OrderByDescending(candidate => candidate.LastVolume * candidate.LastPrice)
+            .Select((candidate, index) => (candidate.Instrument.Pair, Rank: index + 1))
+            .ToDictionary(item => item.Pair, item => item.Rank, StringComparer.OrdinalIgnoreCase);
+
+        var recommendationsByPair = (advice?.Recommendations ?? [])
+            .GroupBy(recommendation => recommendation.Pair, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var advisorPickCount = Math.Min(config.Trading.MaxActiveInstruments, config.Ai.MaxRecommendations);
+
+        return lightCandidates
+            .Where(candidate => !selected.Any(state => state.Instrument.Pair.Equals(candidate.Instrument.Pair, StringComparison.OrdinalIgnoreCase)))
+            .Select(candidate => BuildExcludedPairDiagnostic(
+                candidate,
+                volumeRanks.TryGetValue(candidate.Instrument.Pair, out var rank) ? rank : null,
+                volumeRanks.Count,
+                advisorPickCount,
+                recommendationsByPair.GetValueOrDefault(candidate.Instrument.Pair)))
+            .ToList();
     }
 
     private CandidateDiagnostic BuildCandidateDiagnostic(PreparedDecision prepared, DryRunDecisionRecord? record)
@@ -364,6 +445,14 @@ internal sealed class DecisionWorker(
             missing.Add("SPREAD");
         }
 
+        // A guard that cannot judge the pair is itself a missing confirmation: an
+        // UNKNOWN price action must show up explicitly, not read as "nothing wrong".
+        var priceAction = prepared.PriceAction;
+        if (priceAction is not { DataSufficient: true })
+        {
+            missing.Add("PRICE_ACTION_UNKNOWN");
+        }
+
         var hardFiltersPassed = rejection is not (EntryRejection.SpreadTooWide or EntryRejection.PairUnavailable or EntryRejection.LowLiquidity);
         return new CandidateDiagnostic(
             proposal.Pair,
@@ -373,8 +462,13 @@ internal sealed class DecisionWorker(
             marketState.LastPrice,
             marketState.BestBid,
             marketState.BestAsk,
-            prepared.PriceAction?.Direction ?? "UNKNOWN",
-            prepared.PriceAction?.TrendPercent,
+            priceAction?.Direction ?? "UNKNOWN",
+            priceAction?.TrendPercent,
+            PriceActionAssessment.WarmupStateOf(priceAction),
+            priceAction?.SnapshotCount ?? 0,
+            priceAction is { SamplesRequired: > 0 } ? priceAction.SamplesRequired : Math.Max(2, config.Strategy.PriceActionMinSnapshots),
+            priceAction?.OldestSampleUtc,
+            priceAction?.NewestSampleUtc,
             hardFiltersPassed,
             QualityFiltersPassed: proposal.DesiredPosition == "LONG_MICRO",
             missing,
@@ -416,6 +510,7 @@ internal sealed class DecisionWorker(
         Console.WriteLine("cycle-entry-diagnostics:");
         Console.WriteLine(
             $"  snapshots={diagnostics.SnapshotPairsAvailable} evaluated={diagnostics.ActivePairsEvaluated} entryPairs={diagnostics.EntryPairsEvaluated} " +
+            $"priceActionReady={diagnostics.PriceActionReadyCount}/{diagnostics.SnapshotPairsAvailable} " +
             $"score>=0.75:{diagnostics.ScoreAtLeast075} >=0.80:{diagnostics.ScoreAtLeast080} >=0.85:{diagnostics.ScoreAtLeast085} >=0.90:{diagnostics.ScoreAtLeast090} " +
             $"hardFilterPass={diagnostics.HardFilterPassCount} eligible={diagnostics.EligibleEntryCandidates}");
         foreach (var candidate in diagnostics.TopCandidates)
@@ -424,6 +519,7 @@ internal sealed class DecisionWorker(
                 $"  top {candidate.Pair}: score={candidate.Score:0.##} desired={candidate.DesiredPosition} spread={candidate.SpreadPercent:0.###}% " +
                 $"price={candidate.Price:0.######} bid={candidate.Bid:0.######} ask={candidate.Ask:0.######} " +
                 $"priceAction={candidate.PriceActionDirection}({FormatTrend(candidate.PriceActionTrendPercent)}) " +
+                $"paState={candidate.PriceActionState}({candidate.PriceActionSamplesAvailable}/{candidate.PriceActionSamplesRequired}) " +
                 $"hard={(candidate.HardFiltersPassed ? "pass" : "FAIL")} quality={(candidate.QualityFiltersPassed ? "pass" : "FAIL")} " +
                 $"missing=[{string.Join(",", candidate.MissingConfirmations)}] " +
                 $"reject={candidate.RejectionReason ?? "-"}{(candidate.Exploratory ? " (exploratory)" : string.Empty)}");
@@ -470,6 +566,34 @@ internal sealed class DecisionWorker(
         catch (Exception ex)
         {
             Console.WriteLine($"market-snapshots: FAILED to persist for cycle {cycleId} ({ex.Message}); continuing cycle");
+        }
+    }
+
+    // Best-effort warm-up hydration: reload the recent persisted market snapshots so
+    // the anti-lag price-action guard is READY on the very first cycle after a
+    // restart instead of being blind for PriceActionMinSnapshots cycles. Only rows
+    // from the configured recency window are loaded, so a long downtime gap results
+    // in a normal warm-up rather than a stitched-together fake trend. A store
+    // failure only skips hydration; it must never prevent the worker from starting.
+    internal void HydratePriceHistory()
+    {
+        if (config.Strategy.PriceActionHydrationMinutes <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var since = DateTimeOffset.UtcNow.AddMinutes(-config.Strategy.PriceActionHydrationMinutes);
+            var snapshots = dryRunPortfolio.LoadRecentMarketSnapshots(since);
+            var loaded = _priceHistory.Hydrate(snapshots);
+            Console.WriteLine(loaded > 0
+                ? $"price-action-hydration: loaded {loaded} persisted snapshots from the last {config.Strategy.PriceActionHydrationMinutes} minutes ({snapshots.Select(snapshot => snapshot.Pair).Distinct(StringComparer.OrdinalIgnoreCase).Count()} pairs)"
+                : $"price-action-hydration: no persisted snapshots in the last {config.Strategy.PriceActionHydrationMinutes} minutes; guard warms up normally");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"price-action-hydration: FAILED ({ex.Message}); guard warms up normally");
         }
     }
 
@@ -619,7 +743,9 @@ internal sealed class DecisionWorker(
         var priceAction = _priceHistory.Assess(
             marketState.Instrument.Pair,
             config.Strategy.PriceActionLookbackSnapshots,
-            config.Strategy.PriceActionMinSnapshots);
+            config.Strategy.PriceActionMinSnapshots,
+            DateTimeOffset.UtcNow,
+            config.Strategy.PriceActionMaxSampleAgeMinutes);
         var proposal = decisionEngine.Decide(marketState, indicators, config.Trading, config.Strategy, config.PositionSizing, config.Risk, portfolio.CashEur, currentExposureEur, hasOpenPosition, priceAction);
         var risk = riskManager.Evaluate(proposal, config.Risk, hasOpenPosition);
         return new PreparedDecision(marketState, indicators, proposal, risk, priceAction);

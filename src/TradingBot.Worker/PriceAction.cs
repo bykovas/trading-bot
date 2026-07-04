@@ -19,8 +19,17 @@ internal sealed record PriceActionAssessment(
     decimal LastPrice,
     decimal? TrendPercent,
     decimal? RollingAveragePrice,
-    int ConsecutiveNonRisingSnapshots)
+    int ConsecutiveNonRisingSnapshots,
+    int SamplesRequired = 0,
+    DateTimeOffset? OldestSampleUtc = null,
+    DateTimeOffset? NewestSampleUtc = null,
+    bool Stale = false)
 {
+    public const string StateReady = "READY";
+    public const string StateWarmingUp = "WARMING_UP";
+    public const string StateStale = "STALE";
+    public const string StateInsufficientData = "INSUFFICIENT_DATA";
+
     // Strictly positive recent trend — required by the dry-run exploratory mode.
     public bool IsPositive => DataSufficient && TrendPercent > 0m;
 
@@ -29,6 +38,19 @@ internal sealed record PriceActionAssessment(
         : TrendPercent > 0m ? "RISING"
         : TrendPercent < 0m ? "FALLING"
         : "FLAT";
+
+    // Explicit warm-up state for diagnostics: READY only when the guard can actually
+    // judge this pair. STALE means enough samples exist but the newest is too old to
+    // trust (e.g. history hydrated across a long downtime gap).
+    public string WarmupState =>
+        Stale ? StateStale
+        : DataSufficient ? StateReady
+        : SnapshotCount > 0 ? StateWarmingUp
+        : StateInsufficientData;
+
+    // Warm-up state for a possibly-missing assessment (no observations at all).
+    public static string WarmupStateOf(PriceActionAssessment? assessment) =>
+        assessment?.WarmupState ?? StateInsufficientData;
 }
 
 // Rolling in-memory history of light snapshots per pair, fed once per cycle.
@@ -69,10 +91,39 @@ internal sealed class SnapshotPriceHistory
         }
     }
 
+    // Bootstraps the rolling history from snapshots persisted before a restart, so
+    // the anti-lag guard is not blind for PriceActionMinSnapshots cycles after every
+    // deploy. Records are replayed in utc order per pair; the caller is responsible
+    // for only passing RECENT snapshots (a long downtime gap must not be bridged).
+    public int Hydrate(IEnumerable<MarketSnapshotRecord> snapshots)
+    {
+        var loaded = 0;
+        foreach (var snapshot in snapshots.OrderBy(record => record.Utc))
+        {
+            if (snapshot.Last <= 0m)
+            {
+                continue;
+            }
+
+            Record(snapshot.Pair, new PriceObservation(snapshot.Utc, snapshot.Last, snapshot.Bid, snapshot.Ask));
+            loaded++;
+        }
+
+        return loaded;
+    }
+
     // Assessment over the most recent snapshots, including the current cycle's one.
     // TrendPercent compares the newest last price against the one lookback snapshots
-    // earlier; the rolling average covers the same window.
-    public PriceActionAssessment? Assess(string pair, int lookbackSnapshots, int minSnapshots)
+    // earlier; the rolling average covers the same window. When maxSampleAgeMinutes
+    // is positive and the newest sample is older than that, the assessment is STALE
+    // and DataSufficient is forced false: an outdated series must never pass for a
+    // live read of the market.
+    public PriceActionAssessment? Assess(
+        string pair,
+        int lookbackSnapshots,
+        int minSnapshots,
+        DateTimeOffset? nowUtc = null,
+        int maxSampleAgeMinutes = 0)
     {
         if (!_history.TryGetValue(pair, out var observations) || observations.Count == 0)
         {
@@ -81,7 +132,11 @@ internal sealed class SnapshotPriceHistory
 
         var lookback = Math.Max(1, lookbackSnapshots);
         var current = observations[^1];
-        var dataSufficient = observations.Count >= Math.Max(2, minSnapshots);
+        var required = Math.Max(2, minSnapshots);
+        var stale = maxSampleAgeMinutes > 0
+            && nowUtc is { } now
+            && current.Utc < now.AddMinutes(-maxSampleAgeMinutes);
+        var dataSufficient = observations.Count >= required && !stale;
 
         decimal? trendPercent = null;
         decimal? rollingAverage = null;
@@ -107,7 +162,11 @@ internal sealed class SnapshotPriceHistory
             current.Last,
             trendPercent,
             rollingAverage,
-            CountConsecutiveNonRising(observations));
+            CountConsecutiveNonRising(observations),
+            SamplesRequired: required,
+            OldestSampleUtc: observations[0].Utc,
+            NewestSampleUtc: current.Utc,
+            Stale: stale);
     }
 
     // Number of most-recent snapshot-to-snapshot steps where the last price did NOT
