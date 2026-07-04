@@ -20,7 +20,7 @@ http:
       rule: "Host(`fin.bykovas.lt`) && PathPrefix(`/api`)"
       entryPoints:
         - websecure
-      priority: 20
+      priority: 1000
       tls:
         certResolver: letsencrypt
       service: trading-bot-api
