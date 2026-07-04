@@ -490,12 +490,14 @@
       return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
     }
 
-    function ageMinutes(value) {
+    function ageDuration(value) {
       if (!value) return "--";
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return "--";
       const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
-      return `${minutes}m`;
+      const hours = Math.floor(minutes / 60);
+      const remainingMinutes = minutes % 60;
+      return `${hours}:${String(remainingMinutes).padStart(2, "0")}`;
     }
 
     function pnlClass(value) {
@@ -527,7 +529,7 @@
         return `
           <tr>
             <td>${position.pair}</td>
-            <td class="num">${ageMinutes(position.openedAtUtc)}</td>
+            <td class="num">${ageDuration(position.openedAtUtc)}</td>
             <td class="num ${cls}">${signedMoney(pnl)} ${pnlPercent}</td>
             <td>${position.side}</td>
             <td class="num">${number(position.quantity)}</td>
