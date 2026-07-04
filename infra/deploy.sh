@@ -41,6 +41,17 @@ cp infra/traefik/trading-bot.yml "${TRAEFIK_DYNAMIC_FILE}"
 echo "Updating ${WORKER_APPSETTINGS} from repository config"
 cp "${WORKER_APPSETTINGS_SOURCE}" "${WORKER_APPSETTINGS}"
 
+# Live trading comes from the GitHub PROD environment variable
+# TRADINGBOT_LIVE_TRADING_ENABLED. Anything but an explicit "true" (any case)
+# deploys with live trading OFF, so a missing/typo'd variable stays safe.
+if [ "$(printf '%s' "${TRADINGBOT_LIVE_TRADING_ENABLED:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+  LIVE_TRADING_FLAG="true"
+  echo "!!! TRADINGBOT_LIVE_TRADING_ENABLED=true from PROD environment: deploying with LIVE trading ON !!!"
+else
+  LIVE_TRADING_FLAG="false"
+  echo "Live trading disabled (TRADINGBOT_LIVE_TRADING_ENABLED='${TRADINGBOT_LIVE_TRADING_ENABLED:-}' is not 'true')"
+fi
+
 echo "Writing worker environment overrides to ${WORKER_ENV_FILE}"
 umask 077
 {
@@ -49,16 +60,7 @@ umask 077
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
   printf 'TRADINGBOT_MARKET_DATA_MODE=kraken\n'
-  # Live trading comes from the GitHub PROD environment variable
-  # TRADINGBOT_LIVE_TRADING_ENABLED. Anything but an explicit "true" (any case)
-  # deploys with live trading OFF, so a missing/typo'd variable stays safe.
-  if [ "$(printf '%s' "${TRADINGBOT_LIVE_TRADING_ENABLED:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
-    echo "!!! TRADINGBOT_LIVE_TRADING_ENABLED=true from PROD environment: deploying with LIVE trading ON !!!"
-    printf 'TRADINGBOT_LIVE_TRADING_ENABLED=true\n'
-  else
-    echo "Live trading disabled (TRADINGBOT_LIVE_TRADING_ENABLED='${TRADINGBOT_LIVE_TRADING_ENABLED:-}' is not 'true')"
-    printf 'TRADINGBOT_LIVE_TRADING_ENABLED=false\n'
-  fi
+  printf 'TRADINGBOT_LIVE_TRADING_ENABLED=%s\n' "${LIVE_TRADING_FLAG}"
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
   printf 'TRADINGBOT_KRAKEN_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_API_KEY:-}"
   printf 'TRADINGBOT_KRAKEN_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_API_SECRET:-}"
