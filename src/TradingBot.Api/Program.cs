@@ -233,7 +233,7 @@ static TradeWindow LocalYesterdayStartUtc()
     var timeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
     var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone);
     var localStart = localNow.Date.AddDays(-1);
-    var utcStart = TimeZoneInfo.ConvertTimeToUtc(localStart, timeZone);
+    var utcStart = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localStart, timeZone), TimeSpan.Zero);
     return new TradeWindow(utcStart, localStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), timeZoneId);
 }
 
@@ -430,7 +430,7 @@ static async Task<CycleDetailDto?> ReadCycleDetail(
 
 static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
     NpgsqlConnection connection,
-    DateTime utcStart,
+    DateTimeOffset utcStart,
     PageRequest page,
     CancellationToken cancellationToken)
 {
@@ -448,9 +448,10 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
             record_json::text
         from dry_run_cycles
         where utc >= @utc_start
-          and (
-              record_json::text like '%WOULD_BUY%'
-              or record_json::text like '%WOULD_SELL%'
+          and exists (
+              select 1
+              from jsonb_array_elements(coalesce(record_json -> 'decisions', '[]'::jsonb)) decision
+              where decision -> 'dryRunAction' ->> 'action' in ('WOULD_BUY', 'WOULD_SELL')
           )
         order by utc desc, cycle_id desc
         limit @limit offset @offset
@@ -849,7 +850,7 @@ internal sealed record PageResponse<T>(
     int? NextOffset);
 
 internal sealed record TradeWindow(
-    DateTime UtcStart,
+    DateTimeOffset UtcStart,
     string LocalStartDate,
     string LocalTimeZone);
 
