@@ -10,6 +10,8 @@ RUN dotnet publish src/TradingBot.Api/TradingBot.Api.csproj -c Release -o /app/p
 FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine
 WORKDIR /app
 
+RUN apk add --no-cache tzdata
+
 ENV ASPNETCORE_URLS=http://+:8080
 COPY --from=build /app/publish ./
 
