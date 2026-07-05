@@ -41,7 +41,7 @@ internal sealed record ScoreDecaySnapshot(
 //
 //   TIER 2 - FORCED EXITS (bypass the profit filter, rank below hard risk)
 //     - Take-profit
-//     - Max-hold
+//     - Conditional max-hold / stale-position exit
 //     (Future position-invalid / data-integrity forced exits plug in here.)
 //
 //   TIER 3 - STRATEGY EXITS (may be filtered)
@@ -81,7 +81,14 @@ internal static class PositionExitPolicy
         }
 
         // TIER 2 - FORCED EXITS. Rank below hard risk but still bypass the profit filter.
-        var forcedExit = EvaluateForcedExits(pnl, positionAgeSeconds, canValuePosition, peakPnlPercent, positionExit);
+        var forcedExit = EvaluateForcedExits(
+            desiredLong,
+            pnl,
+            positionAgeSeconds,
+            canValuePosition,
+            peakPnlPercent,
+            positionExit,
+            scoreDecay);
         if (forcedExit is not null)
         {
             return forcedExit;
@@ -132,11 +139,13 @@ internal static class PositionExitPolicy
     // TIER 2: forced exits. These bypass the profit filter but rank below hard risk.
     // Returns null when none fire.
     private static ExitEvaluation? EvaluateForcedExits(
+        bool desiredLong,
         decimal pnl,
         double positionAgeSeconds,
         bool canValuePosition,
         decimal? peakPnlPercent,
-        PositionExitOptions positionExit)
+        PositionExitOptions positionExit,
+        ScoreDecaySnapshot? scoreDecay)
     {
         // Take-profit. Fires even if the strategy still wants LONG_MICRO. Kept as the
         // hard cap ABOVE the trailing stop.
@@ -162,13 +171,50 @@ internal static class PositionExitPolicy
                 $"trailing-stop exit: unrealized PnL {Percent(pnl)}% <= peak {Percent(peak)}% - {Percent(positionExit.TrailingDistancePercent)}%");
         }
 
-        // Max-hold. Age-based, independent of valuation. Zero disables the guard.
+        // Conditional max-hold / stale-position exit. Age alone is not enough to
+        // flatten: sell when the position is old and either losing, no longer desired,
+        // or the original signal structure has deteriorated. Unknown valuation is not
+        // treated as a loss; it only exits when the thesis is weak.
         if (positionExit.MaxHoldMinutes > 0 && positionAgeSeconds >= positionExit.MaxHoldMinutes * 60.0)
         {
             var ageMinutes = positionAgeSeconds / 60.0;
-            return Sell(
-                ExitReason.MaxHold,
-                $"max-hold exit: position age {ageMinutes.ToString("0", CultureInfo.InvariantCulture)}m >= {positionExit.MaxHoldMinutes}m");
+            var thesisWeak =
+                !desiredLong
+                || scoreDecay is { ScoreConfirmsEntry: false }
+                || scoreDecay is { EmaBullish: false };
+            var losing = canValuePosition && pnl < 0m;
+
+            if (losing || thesisWeak)
+            {
+                var details = new List<string>();
+                if (losing)
+                {
+                    details.Add($"PnL {Percent(pnl)}% < 0%");
+                }
+
+                if (!desiredLong)
+                {
+                    details.Add("desired position is none");
+                }
+
+                if (scoreDecay is { ScoreConfirmsEntry: false })
+                {
+                    details.Add("score no longer confirms entry");
+                }
+
+                if (scoreDecay is { EmaBullish: false })
+                {
+                    details.Add("EMA structure is no longer bullish");
+                }
+
+                return Sell(
+                    ExitReason.MaxHold,
+                    $"conditional max-hold exit: position age {ageMinutes.ToString("0", CultureInfo.InvariantCulture)}m >= {positionExit.MaxHoldMinutes}m and stale-position condition met ({string.Join("; ", details)})");
+            }
+
+            return Hold(
+                "MAX_HOLD_HEALTHY_HOLD",
+                $"conditional max-hold hold: position age {ageMinutes.ToString("0", CultureInfo.InvariantCulture)}m >= {positionExit.MaxHoldMinutes}m but position is non-negative or unvalued and thesis still confirms");
         }
 
         return null;

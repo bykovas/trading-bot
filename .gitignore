@@ -37,6 +37,7 @@ project.lock.json
 appsettings.Development.json
 appsettings.Local.json
 secrets.json
+.ai/private/
 *.pfx
 *.pem
 *.key

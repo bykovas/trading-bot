@@ -552,8 +552,9 @@ internal sealed class PositionExitOptions
     // even if the strategy still wants LONG_MICRO.
     public decimal TakeProfitPercent { get; set; } = 2.0m;
 
-    // Hard exit: sell once the position age reaches this many minutes. Set to 0 to
-    // disable the max-hold guard.
+    // Conditional stale-position exit: once the position age reaches this many
+    // minutes, sell only if the position is losing or the entry thesis has weakened.
+    // Set to 0 to disable the age guard.
     public int MaxHoldMinutes { get; set; } = 240;
 
     // Controlled-loss floor for CONFIRMED bearish signal-flip exits (only used when

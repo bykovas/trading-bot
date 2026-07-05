@@ -645,18 +645,53 @@
       return "info";
     }
 
+    function reasonIncludes(reason, text) {
+      return String(reason || "").toLowerCase().includes(text);
+    }
+
+    function exitLabel(code, reason) {
+      const labels = {
+        SELL_TAKE_PROFIT: "take profit",
+        SELL_STOP_LOSS: "stop loss",
+        SELL_SCORE_DECAY: "score decay",
+        SELL_POST_ENTRY_ADVERSE: "early adverse",
+        SELL_MAX_HOLD: "stale exit",
+        SELL_SIGNAL_FLIP: "signal flip",
+        SELL_TRAILING_STOP: "trailing stop",
+        SELL_KILL_SWITCH: "kill switch",
+        SELL_EMERGENCY_RISK: "emergency",
+        SELL_BROKER_SAFETY: "broker safety"
+      };
+      if (code && labels[code]) return labels[code];
+      if (reasonIncludes(reason, "take-profit")) return labels.SELL_TAKE_PROFIT;
+      if (reasonIncludes(reason, "stop-loss")) return labels.SELL_STOP_LOSS;
+      if (reasonIncludes(reason, "conditional max-hold")) return labels.SELL_MAX_HOLD;
+      if (reasonIncludes(reason, "max-hold")) return labels.SELL_MAX_HOLD;
+      return "exit";
+    }
+
     function exitExplanation(code, reason) {
       const map = {
         SELL_TAKE_PROFIT: "Продал, потому что позиция достигла take-profit. Это фиксация прибыли, а не паника.",
         SELL_STOP_LOSS: "Продал, потому что позиция дошла до hard stop-loss.",
         SELL_SCORE_DECAY: "Продал, потому что первоначальный сильный сигнал развалился, пока позиция была убыточной.",
         SELL_POST_ENTRY_ADVERSE: "Продал, потому что сразу после входа цена пошла против позиции, а сигнал перестал подтверждаться.",
-        SELL_MAX_HOLD: "Продал, потому что позиция держалась дольше максимального времени.",
-        SELL_SIGNAL_FLIP: "Продал, потому что стратегия больше не хотела держать long."
+        SELL_MAX_HOLD: "Продал как stale-позицию: она старая и одновременно была в минусе или сигнал уже не подтверждал long.",
+        SELL_SIGNAL_FLIP: "Продал, потому что стратегия больше не хотела держать long.",
+        SELL_TRAILING_STOP: "Продал по trailing stop: позиция уже была в прибыли, но откатилась от локального пика.",
+        SELL_KILL_SWITCH: "Продал из-за kill switch. Это аварийная защита.",
+        SELL_EMERGENCY_RISK: "Продал из-за emergency risk rule.",
+        SELL_BROKER_SAFETY: "Продал из-за broker/account safety rule."
       };
       if (code && map[code]) return map[code];
-      if (String(reason || "").toLowerCase().includes("take-profit")) return map.SELL_TAKE_PROFIT;
-      if (String(reason || "").toLowerCase().includes("stop-loss")) return map.SELL_STOP_LOSS;
+      if (reasonIncludes(reason, "conditional max-hold exit")) return map.SELL_MAX_HOLD;
+      if (reasonIncludes(reason, "max-hold exit")) return map.SELL_MAX_HOLD;
+      if (reasonIncludes(reason, "take-profit")) return map.SELL_TAKE_PROFIT;
+      if (reasonIncludes(reason, "stop-loss")) return map.SELL_STOP_LOSS;
+      if (reasonIncludes(reason, "score-decay")) return map.SELL_SCORE_DECAY;
+      if (reasonIncludes(reason, "post-entry adverse")) return map.SELL_POST_ENTRY_ADVERSE;
+      if (reasonIncludes(reason, "trailing-stop")) return map.SELL_TRAILING_STOP;
+      if (reasonIncludes(reason, "signal-flip") || reasonIncludes(reason, "confirmed bearish flip")) return map.SELL_SIGNAL_FLIP;
       return "Продал по exit rule. Точный технический текст ниже.";
     }
 
@@ -700,12 +735,13 @@
         actionClass: isBuy ? "buy" : "sell",
         mode: isBuy
           ? (decision.exploratory || action.exploratory ? "exploratory" : "firm")
-          : (action.exitReasonCode || "sell"),
+          : exitLabel(action.exitReasonCode, reason),
         modeClass: isBuy
           ? (decision.exploratory || action.exploratory ? "exploratory" : "firm")
           : "sell",
         explanation: isBuy ? buyExplanation(decision, action, contribs) : exitExplanation(action.exitReasonCode, reason),
         technicalReason: reason,
+        technicalReasonLabel: isBuy ? "Technical fill text" : "Technical exit text",
         score: decision.score,
         price: action.fillPrice || decision.price || action.lastPrice,
         quantity: action.quantity,
@@ -714,6 +750,7 @@
         realized,
         realizedPercent: isBuy ? null : reason.match(/\((-?\d+(?:\.\d+)?)%\)/)?.[1],
         exitReasonCode: action.exitReasonCode,
+        exitReasonLabel: exitLabel(action.exitReasonCode, reason),
         holdReasonCode: action.holdReasonCode,
         spreadPercent: decision.spreadPercent,
         priceActionDirection: decision.priceActionDirection,
@@ -753,7 +790,7 @@
         trade.spreadPercent != null ? `<span class="chip info">spread ${percent(trade.spreadPercent)}</span>` : "",
         trade.priceActionDirection ? `<span class="chip info">PA ${escapeHtml(trade.priceActionDirection)} ${trade.priceActionTrendPercent != null ? percent(trade.priceActionTrendPercent) : ""}</span>` : "",
         trade.emaGap != null ? `<span class="chip info">EMA gap ${percent(trade.emaGap)}</span>` : "",
-        trade.exitReasonCode ? `<span class="chip warn">${escapeHtml(trade.exitReasonCode)}</span>` : ""
+        trade.exitReasonCode ? `<span class="chip warn" title="${escapeHtml(trade.exitReasonCode)}">${escapeHtml(trade.exitReasonLabel)}</span>` : ""
       ].filter(Boolean).join("");
 
       return `
@@ -776,7 +813,7 @@
           <div class="why">
             <div class="why-title">Why</div>
             <div class="why-text">${escapeHtml(trade.explanation)}</div>
-            <div class="plain-reason">${escapeHtml(trade.technicalReason)}</div>
+            ${trade.technicalReason ? `<div class="plain-reason"><span>${escapeHtml(trade.technicalReasonLabel)}:</span> ${escapeHtml(trade.technicalReason)}</div>` : ""}
           </div>
           <div class="detail">
             <div class="detail-title">Signals</div>

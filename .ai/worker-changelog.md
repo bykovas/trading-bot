@@ -2,6 +2,14 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-05-conditional-max-hold
+
+- Changed `PositionExit.MaxHoldMinutes` from an unconditional forced sell timer into a conditional stale-position exit.
+- Positions older than `MaxHoldMinutes` now sell only when they are losing, no longer desired by the strategy, no longer score-confirmed, or no longer have bullish EMA structure.
+- Old positions that are non-negative or temporarily unvalued and still have a confirming thesis now hold with `MAX_HOLD_HEALTHY_HOLD` instead of selling just because the age threshold was reached.
+- Momentum weakness is diagnostic only for this age guard; it does not by itself trigger a max-hold sell.
+- Expected effect: the bot stops closing neutral/profitable positions "from boredom" while cash and entry slots are available, but still clears stale losing or structurally broken positions.
+
 ## 2026-07-05-post-entry-adverse-structure
 
 - Dry-run exit tuning: raised `PositionExit.PostEntryAdverseLossPercent` from 1.2% to 2.0% so the early adverse guard does not behave like a tight stop-loss for volatile altcoins.

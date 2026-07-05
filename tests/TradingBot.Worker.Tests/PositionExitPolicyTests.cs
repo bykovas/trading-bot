@@ -124,9 +124,26 @@ public class PositionExitPolicyTests
         Assert.Contains("take-profit exit", result.Reason);
     }
 
-    // E. Max-hold triggers once the position age reaches MaxHoldMinutes.
+    // E. Conditional max-hold exits old losing positions.
     [Fact]
-    public void MaxHold_sells_when_age_reached()
+    public void MaxHold_sells_when_age_reached_and_position_is_losing()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: true,
+            positionAgeSeconds: 240 * 60,
+            conservativeUnrealizedPnlPercent: -0.1m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(maxHoldMinutes: 240));
+
+        Assert.True(result.ShouldSell);
+        Assert.Equal(ExitReason.MaxHold, result.ExitReason);
+        Assert.Contains("conditional max-hold exit", result.Reason);
+    }
+
+    [Fact]
+    public void MaxHold_holds_when_age_reached_but_position_is_profitable_and_thesis_confirms()
     {
         var result = PositionExitPolicy.EvaluateHeldPosition(
             desiredLong: true,
@@ -135,11 +152,109 @@ public class PositionExitPolicyTests
             canValuePosition: true,
             killSwitchActive: false,
             Execution(minHoldSeconds: 900),
-            Exit(maxHoldMinutes: 240));
+            Exit(maxHoldMinutes: 240),
+            scoreDecay: new ScoreDecaySnapshot(
+                EntryScore: 0.9m,
+                CurrentScore: 0.85m,
+                ConsecutiveLowScoreCycles: 0,
+                ScoreConfirmsEntry: true,
+                EmaBullish: true,
+                MomentumPositive: false));
+
+        Assert.False(result.ShouldSell);
+        Assert.Equal("MAX_HOLD_HEALTHY_HOLD", result.HoldReasonCode);
+        Assert.Contains("conditional max-hold hold", result.Reason);
+    }
+
+    [Fact]
+    public void MaxHold_sells_when_age_reached_and_desired_long_is_false()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: false,
+            positionAgeSeconds: 240 * 60,
+            conservativeUnrealizedPnlPercent: 0.1m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(maxHoldMinutes: 240),
+            scoreDecay: new ScoreDecaySnapshot(
+                EntryScore: 0.9m,
+                CurrentScore: 0.85m,
+                ConsecutiveLowScoreCycles: 0,
+                ScoreConfirmsEntry: true,
+                EmaBullish: true));
 
         Assert.True(result.ShouldSell);
         Assert.Equal(ExitReason.MaxHold, result.ExitReason);
-        Assert.Contains("max-hold exit", result.Reason);
+        Assert.Contains("desired position is none", result.Reason);
+    }
+
+    [Fact]
+    public void MaxHold_sells_when_age_reached_and_score_no_longer_confirms()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: true,
+            positionAgeSeconds: 240 * 60,
+            conservativeUnrealizedPnlPercent: 0.1m,
+            canValuePosition: true,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(maxHoldMinutes: 240),
+            scoreDecay: new ScoreDecaySnapshot(
+                EntryScore: 0.9m,
+                CurrentScore: 0.6m,
+                ConsecutiveLowScoreCycles: 0,
+                ScoreConfirmsEntry: false,
+                EmaBullish: true));
+
+        Assert.True(result.ShouldSell);
+        Assert.Equal(ExitReason.MaxHold, result.ExitReason);
+        Assert.Contains("score no longer confirms entry", result.Reason);
+    }
+
+    [Fact]
+    public void MaxHold_holds_when_age_reached_but_pnl_unknown_and_thesis_confirms()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: true,
+            positionAgeSeconds: 240 * 60,
+            conservativeUnrealizedPnlPercent: 0m,
+            canValuePosition: false,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(maxHoldMinutes: 240),
+            scoreDecay: new ScoreDecaySnapshot(
+                EntryScore: 0.9m,
+                CurrentScore: 0.85m,
+                ConsecutiveLowScoreCycles: 0,
+                ScoreConfirmsEntry: true,
+                EmaBullish: true));
+
+        Assert.False(result.ShouldSell);
+        Assert.Equal("MAX_HOLD_HEALTHY_HOLD", result.HoldReasonCode);
+    }
+
+    [Fact]
+    public void MaxHold_sells_when_age_reached_pnl_unknown_and_desired_long_is_false()
+    {
+        var result = PositionExitPolicy.EvaluateHeldPosition(
+            desiredLong: false,
+            positionAgeSeconds: 240 * 60,
+            conservativeUnrealizedPnlPercent: 0m,
+            canValuePosition: false,
+            killSwitchActive: false,
+            Execution(minHoldSeconds: 900),
+            Exit(maxHoldMinutes: 240),
+            scoreDecay: new ScoreDecaySnapshot(
+                EntryScore: 0.9m,
+                CurrentScore: 0.85m,
+                ConsecutiveLowScoreCycles: 0,
+                ScoreConfirmsEntry: true,
+                EmaBullish: true));
+
+        Assert.True(result.ShouldSell);
+        Assert.Equal(ExitReason.MaxHold, result.ExitReason);
+        Assert.Contains("desired position is none", result.Reason);
     }
 
     // Holding when the desired position still matches (no hard exit).
