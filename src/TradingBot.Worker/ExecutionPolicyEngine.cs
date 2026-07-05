@@ -19,7 +19,9 @@ internal sealed record ScoreDecaySnapshot(
     decimal? EntryScore,
     decimal CurrentScore,
     int ConsecutiveLowScoreCycles,
-    bool ScoreConfirmsEntry);
+    bool ScoreConfirmsEntry,
+    bool EmaBullish = true,
+    bool MomentumPositive = true);
 
 // Deterministic exit policy for a currently held LONG position.
 //
@@ -221,18 +223,21 @@ internal static class PositionExitPolicy
 
         // Post-entry adverse movement guard: inside the initial monitoring window a
         // fresh position that is already down more than the friction-adjusted
-        // threshold, whose score no longer confirms the entry, and whose recent price
-        // action is negative gets cut early instead of drifting into the stop-loss.
+        // threshold is only cut when the setup itself is structurally deteriorating.
+        // A strong score with only noisy negative price action is not enough for this
+        // exit; hard stop-loss owns deeper losses.
+        var postEntryStructureDeteriorated = !scoreDecay.EmaBullish || !scoreDecay.MomentumPositive;
         if (positionExit.PostEntryAdverseWindowMinutes > 0
             && positionExit.PostEntryAdverseLossPercent > 0m
             && positionAgeSeconds <= positionExit.PostEntryAdverseWindowMinutes * 60.0
             && pnl <= -positionExit.PostEntryAdverseLossPercent
-            && scoreDecay.ScoreConfirmsEntry == false
-            && recentPriceActionNegative)
+            && recentPriceActionNegative
+            && postEntryStructureDeteriorated
+            && scoreDecay.CurrentScore < 0.85m)
         {
             return Sell(
                 ExitReason.PostEntryAdverse,
-                $"post-entry adverse exit: PnL {Percent(pnl)}% <= -{Percent(positionExit.PostEntryAdverseLossPercent)}% within {positionExit.PostEntryAdverseWindowMinutes}m of entry, score {scoreDecay.CurrentScore:0.##} no longer confirms and recent price action is negative");
+                $"post-entry adverse exit: PnL {Percent(pnl)}% <= -{Percent(positionExit.PostEntryAdverseLossPercent)}% within {positionExit.PostEntryAdverseWindowMinutes}m of entry, score {scoreDecay.CurrentScore:0.##} is below 0.85, recent price action is negative, and structure deteriorated (EMA bullish={scoreDecay.EmaBullish}, momentum positive={scoreDecay.MomentumPositive})");
         }
 
         return null;

@@ -50,7 +50,7 @@ public class FullCsvReplayHarnessTests
         ScoreDecayDefensiveCycles = 2,
         ScoreDecayImmediateScore = 0.40m,
         PostEntryAdverseWindowMinutes = 30,
-        PostEntryAdverseLossPercent = 1.2m
+        PostEntryAdverseLossPercent = 2.0m
     };
 
     private const int MaxNewPositionsPerCycle = 1;

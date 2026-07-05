@@ -589,11 +589,12 @@ internal sealed class PositionExitOptions
 
     // ---- Post-entry adverse movement guard (TIER 2.5) ----
     // Within this many minutes of entry, a position that is down at least
-    // PostEntryAdverseLossPercent while its score no longer confirms the entry and
-    // recent price action is negative is cut early instead of drifting to stop-loss.
+    // PostEntryAdverseLossPercent can be cut early only when recent price action is
+    // negative, the final score is below the defensive floor, and EMA or momentum
+    // has structurally deteriorated. This stays separate from hard stop-loss.
     // Either value at 0 disables the guard.
     public int PostEntryAdverseWindowMinutes { get; set; } = 30;
-    public decimal PostEntryAdverseLossPercent { get; set; } = 1.2m;
+    public decimal PostEntryAdverseLossPercent { get; set; } = 2.0m;
 }
 
 internal sealed class CorrelationRiskOptions

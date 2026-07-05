@@ -28,7 +28,7 @@ public class ScoreDecayExitTests
         ScoreDecayDefensiveCycles = 2,
         ScoreDecayImmediateScore = 0.40m,
         PostEntryAdverseWindowMinutes = 30,
-        PostEntryAdverseLossPercent = 1.2m
+        PostEntryAdverseLossPercent = 2.0m
     };
 
     private static ExitEvaluation Evaluate(
@@ -134,15 +134,22 @@ public class ScoreDecayExitTests
         Assert.Equal(ExitReason.StopLoss, result.ExitReason);
     }
 
-    // Post-entry adverse guard: fresh position, friction-sized loss, score no longer
-    // confirms, recent price action negative -> exit early.
+    // Post-entry adverse guard: fresh position, deeper early loss, score below the
+    // defensive floor, recent price action negative, and structural deterioration
+    // -> exit early. This is not a normal/tight stop-loss.
     [Fact]
     public void Post_entry_adverse_movement_exits_a_fresh_failing_position()
     {
         var result = Evaluate(
-            pnl: -1.3m,
+            pnl: -2.1m,
             ageSeconds: 900,
-            new ScoreDecaySnapshot(EntryScore: 0.85m, CurrentScore: 0.60m, ConsecutiveLowScoreCycles: 0, ScoreConfirmsEntry: false),
+            new ScoreDecaySnapshot(
+                EntryScore: 0.85m,
+                CurrentScore: 0.60m,
+                ConsecutiveLowScoreCycles: 0,
+                ScoreConfirmsEntry: false,
+                EmaBullish: false,
+                MomentumPositive: true),
             priceActionNegative: true);
 
         Assert.True(result.ShouldSell);
@@ -154,24 +161,43 @@ public class ScoreDecayExitTests
     public void Post_entry_adverse_guard_expires_after_the_window()
     {
         var result = Evaluate(
-            pnl: -1.3m,
+            pnl: -2.1m,
             ageSeconds: 31 * 60,
-            new ScoreDecaySnapshot(0.85m, 0.60m, 0, ScoreConfirmsEntry: false),
+            new ScoreDecaySnapshot(0.85m, 0.60m, 0, ScoreConfirmsEntry: false, EmaBullish: false, MomentumPositive: true),
             priceActionNegative: true);
 
         Assert.False(result.ShouldSell);
     }
 
     [Fact]
-    public void Post_entry_adverse_guard_holds_while_score_still_confirms()
+    public void Post_entry_adverse_guard_holds_while_score_is_still_strong()
     {
         var result = Evaluate(
-            pnl: -1.3m,
+            pnl: -2.1m,
             ageSeconds: 900,
-            new ScoreDecaySnapshot(0.95m, 0.95m, 0, ScoreConfirmsEntry: true),
+            new ScoreDecaySnapshot(0.95m, 0.85m, 0, ScoreConfirmsEntry: false, EmaBullish: true, MomentumPositive: true),
             priceActionNegative: true);
 
         Assert.False(result.ShouldSell);
+    }
+
+    [Fact]
+    public void Post_entry_adverse_guard_does_not_sell_score_085_with_only_negative_price_action()
+    {
+        var result = Evaluate(
+            pnl: -1.53m,
+            ageSeconds: 16 * 60,
+            new ScoreDecaySnapshot(
+                EntryScore: 1.00m,
+                CurrentScore: 0.85m,
+                ConsecutiveLowScoreCycles: 0,
+                ScoreConfirmsEntry: false,
+                EmaBullish: true,
+                MomentumPositive: true),
+            priceActionNegative: true);
+
+        Assert.False(result.ShouldSell);
+        Assert.Equal("DESIRED_LONG", result.HoldReasonCode);
     }
 
     // End-to-end through DryRunPortfolio: the low-score counter is tracked on the

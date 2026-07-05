@@ -335,7 +335,7 @@ internal sealed class DryRunPortfolio(
         var canValue = marketState.LastPrice > 0m;
         var pnlPercent = ConservativeUnrealizedPnlPercent(position, marketState, canValue);
         var ageSeconds = PositionAgeSeconds(position, now);
-        var scoreDecay = UpdateScoreDecay(position, proposal.Score);
+        var scoreDecay = UpdateScoreDecay(position, proposal);
 
         var evaluation = PositionExitPolicy.EvaluateHeldPosition(
             desiredLong,
@@ -411,8 +411,9 @@ internal sealed class DryRunPortfolio(
 
     // Updates the per-position consecutive-low-score counter from this cycle's score
     // and returns the snapshot the defensive exit rules consume.
-    private ScoreDecaySnapshot UpdateScoreDecay(PortfolioPosition position, decimal currentScore)
+    private ScoreDecaySnapshot UpdateScoreDecay(PortfolioPosition position, DecisionProposal proposal)
     {
+        var currentScore = proposal.Score;
         if (positionExit.ScoreDecayDefensiveScore > 0m)
         {
             position.LowScoreCycles = currentScore <= positionExit.ScoreDecayDefensiveScore
@@ -420,11 +421,20 @@ internal sealed class DryRunPortfolio(
                 : 0;
         }
 
+        var emaBullish = proposal.Contributions.Any(contribution =>
+            string.Equals(contribution.Name, "EMA", StringComparison.Ordinal)
+            && contribution.Value > 0m);
+        var momentumPositive = proposal.Contributions.Any(contribution =>
+            string.Equals(contribution.Name, "Momentum", StringComparison.Ordinal)
+            && contribution.Value > 0m);
+
         return new ScoreDecaySnapshot(
             position.EntryScore,
             currentScore,
             position.LowScoreCycles,
-            ScoreConfirmsEntry: currentScore >= _strategy.MinimumLongScore);
+            ScoreConfirmsEntry: currentScore >= _strategy.MinimumLongScore,
+            EmaBullish: emaBullish,
+            MomentumPositive: momentumPositive);
     }
 
     private void MarkToMarket(PortfolioState state, IReadOnlyList<InstrumentMarketState> marketStates)
