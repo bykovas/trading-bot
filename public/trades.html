@@ -477,7 +477,7 @@
       <div class="metric">
         <div class="label">Trades shown</div>
         <div id="trade-count" class="value gold">--</div>
-        <div class="subvalue">Only buys and sells</div>
+        <div class="subvalue">Today and yesterday</div>
       </div>
       <div class="metric">
         <div class="label">Buys</div>
@@ -801,35 +801,41 @@
       els.updated.textContent = `loaded ${ltDateTime(fetchedAt)} LT`;
 
       if (trades.length === 0) {
-        els.tradeList.innerHTML = '<div class="empty">No buy or sell rows found in loaded cycles</div>';
+        els.tradeList.innerHTML = '<div class="empty">No buy or sell rows found for today or yesterday</div>';
       } else {
         els.tradeList.innerHTML = trades.map(renderTrade).join("");
       }
     }
 
-    async function fetchCycles() {
+    async function fetchTradeCycles() {
       const cycles = [];
       let offset = 0;
       const limit = 200;
-      const maxCycles = 1000;
+      let meta = null;
 
-      while (offset != null && cycles.length < maxCycles) {
-        const response = await fetch(`/api/cycles?limit=${limit}&offset=${offset}`, { cache: "no-store" });
+      while (offset != null) {
+        const response = await fetch(`/api/trade-cycles?limit=${limit}&offset=${offset}`, { cache: "no-store" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
+        meta = payload;
         cycles.push(...(payload.items || payload.Items || []));
         offset = payload.nextOffset ?? payload.NextOffset ?? null;
       }
 
-      return { cycles, truncated: offset != null };
+      return { cycles, meta };
     }
 
     async function refresh() {
       try {
-        const { cycles, truncated } = await fetchCycles();
+        const { cycles, meta } = await fetchTradeCycles();
         const trades = collectTrades(cycles);
         render(trades, new Date());
-        setWarning(truncated ? "Showing the newest 1000 cycles only. Older trades may exist in previous pages." : "");
+        const since = meta?.sinceLocalDate || meta?.SinceLocalDate;
+        const zone = meta?.timeZone || meta?.TimeZone || "Europe/Vilnius";
+        if (since) {
+          els.updated.textContent = `${els.updated.textContent} | since ${since} 00:00 ${zone}`;
+        }
+        setWarning("");
         setStatus("ok", "Live data");
       } catch (error) {
         setStatus("bad", "API unavailable");

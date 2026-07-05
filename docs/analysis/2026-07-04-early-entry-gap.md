@@ -258,6 +258,46 @@ Risks / questions:
 
 Suggested validation:
 
+## Follow-up Tool: Missed Breakout Report
+
+Added a reusable replay report for rejected near-breakout candidates:
+
+```text
+tools/analysis/missed_breakout_report.py
+```
+
+Example:
+
+```bash
+python3 tools/analysis/missed_breakout_report.py /path/to/cycles-and-snapshots.csv
+```
+
+The generated report writes:
+
+```text
+docs/analysis/2026-07-05-missed-breakout-candidates.md
+docs/analysis/2026-07-05-missed-breakout-candidates.csv
+```
+
+The first run on the latest export found:
+
+- strict near-breakout candidates: `5`, all `M/EUR`;
+- loose candidates: `482`;
+- strict candidates looked strongest at `30m`, but faded by `60m/120m`;
+- loose candidates had negative average/median `120m` return.
+
+Interpretation: this supports more diagnostics, not a live threshold/spread loosening yet.
+
+Live follow-up candidate added to the report:
+
+```text
+2026-07-05 11:01:30 LT ADA/EUR
+score 0.74, PA RISING +0.368%, EMA gap 0.214%, early structure true,
+but earlyEntryEligible=false because diagnostic score is below 0.85.
+```
+
+Re-check after `30m`, `60m`, and `120m` to see whether this is a useful early-structure miss or normal noise.
+
 - add diagnostics first: `exitOnlyCheck=true`, held pair count, price age, PnL, would-exit reason;
 - run for at least several days in dry-run;
 - compare actual 5-minute exits vs simulated 1-minute hard exits on the same open positions.

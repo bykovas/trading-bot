@@ -116,6 +116,31 @@ app.MapGet("/api/cycles/{cycleId}", async (string cycleId, CancellationToken can
     return cycle is null ? Results.NotFound() : Results.Ok(cycle);
 });
 
+app.MapGet("/api/trade-cycles", async (int? limit, int? offset, CancellationToken cancellationToken) =>
+{
+    var connectionString = GetConnectionString(builder.Configuration);
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return Results.Problem("TRADINGBOT_DATABASE_CONNECTION_STRING is not configured.");
+    }
+
+    var page = PageRequest.Create(limit, offset);
+    var window = LocalYesterdayStartUtc();
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await EnsureCycleMetadataColumns(connection, cancellationToken);
+
+    var items = await ReadTradeCycles(connection, window.UtcStart, page, cancellationToken);
+    return Results.Ok(new TradeCyclesResponse(
+        items,
+        page.Limit,
+        page.Offset,
+        items.Count == page.Limit ? page.Offset + page.Limit : null,
+        window.LocalStartDate,
+        window.LocalTimeZone));
+});
+
 app.MapGet("/api/decisions", async (string? cycleId, int? limit, int? offset, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
@@ -201,6 +226,16 @@ static string GetConnectionString(IConfiguration configuration) =>
     Environment.GetEnvironmentVariable("TRADINGBOT_DATABASE_CONNECTION_STRING")
     ?? configuration.GetConnectionString("TradingBot")
     ?? string.Empty;
+
+static TradeWindow LocalYesterdayStartUtc()
+{
+    const string timeZoneId = "Europe/Vilnius";
+    var timeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+    var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone);
+    var localStart = localNow.Date.AddDays(-1);
+    var utcStart = TimeZoneInfo.ConvertTimeToUtc(localStart, timeZone);
+    return new TradeWindow(utcStart, localStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), timeZoneId);
+}
 
 static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection, CancellationToken cancellationToken)
 {
@@ -391,6 +426,58 @@ static async Task<CycleDetailDto?> ReadCycleDetail(
         reader.GetString(0),
         reader.GetDateTime(1),
         document.RootElement.Clone());
+}
+
+static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
+    NpgsqlConnection connection,
+    DateTime utcStart,
+    PageRequest page,
+    CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand(
+        """
+        select
+            cycle_id,
+            utc,
+            worker_version,
+            worker_commit,
+            worker_build_utc,
+            worker_image_tag,
+            strategy_version,
+            change_set,
+            record_json::text
+        from dry_run_cycles
+        where utc >= @utc_start
+          and (
+              record_json::text like '%WOULD_BUY%'
+              or record_json::text like '%WOULD_SELL%'
+          )
+        order by utc desc, cycle_id desc
+        limit @limit offset @offset
+        """,
+        connection);
+    command.Parameters.Add("utc_start", NpgsqlDbType.TimestampTz).Value = utcStart;
+    command.Parameters.AddWithValue("limit", page.Limit);
+    command.Parameters.AddWithValue("offset", page.Offset);
+
+    var cycles = new List<CycleRawDto>();
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    while (await reader.ReadAsync(cancellationToken))
+    {
+        using var document = JsonDocument.Parse(reader.GetString(8));
+        cycles.Add(new CycleRawDto(
+            reader.GetString(0),
+            reader.GetDateTime(1),
+            ReadNullableString(reader, 2),
+            ReadNullableString(reader, 3),
+            ReadNullableString(reader, 4),
+            ReadNullableString(reader, 5),
+            ReadNullableString(reader, 6),
+            ReadNullableString(reader, 7),
+            document.RootElement.Clone()));
+    }
+
+    return cycles;
 }
 
 static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
@@ -760,6 +847,19 @@ internal sealed record PageResponse<T>(
     int Limit,
     int Offset,
     int? NextOffset);
+
+internal sealed record TradeWindow(
+    DateTime UtcStart,
+    string LocalStartDate,
+    string LocalTimeZone);
+
+internal sealed record TradeCyclesResponse(
+    IReadOnlyList<CycleRawDto> Items,
+    int Limit,
+    int Offset,
+    int? NextOffset,
+    string SinceLocalDate,
+    string TimeZone);
 
 internal sealed record CycleRawDto(
     string CycleId,
