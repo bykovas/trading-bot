@@ -450,8 +450,9 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
         where utc >= @utc_start
           and exists (
               select 1
-              from jsonb_array_elements(coalesce(record_json -> 'decisions', '[]'::jsonb)) decision
-              where decision -> 'dryRunAction' ->> 'action' in ('WOULD_BUY', 'WOULD_SELL')
+              from dry_run_decisions decision
+              where decision.cycle_id = dry_run_cycles.cycle_id
+                and decision.action in ('WOULD_BUY', 'WOULD_SELL')
           )
         order by utc desc, cycle_id desc
         limit @limit offset @offset
