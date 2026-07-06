@@ -155,7 +155,7 @@
 
     .bot-switch {
       display: inline-grid;
-      grid-template-columns: repeat(2, minmax(74px, 1fr));
+      grid-template-columns: repeat(4, minmax(64px, 1fr));
       align-items: center;
       gap: 3px;
       min-height: 34px;
@@ -294,8 +294,10 @@
         <a href="/cycles.html">Cycles</a>
         <a href="/api/export/cycles-and-snapshots.csv">Export CSV</a>
         <div class="bot-switch" role="group" aria-label="Bot instance">
-          <button type="button" data-bot-instance="live">Live</button>
-          <button type="button" data-bot-instance="virtual">Virtual</button>
+          <button type="button" data-bot-instance="spot-live">Spot Live</button>
+          <button type="button" data-bot-instance="spot-virtual">Spot Virt</button>
+          <button type="button" data-bot-instance="futures-live">Fut Live</button>
+          <button type="button" data-bot-instance="futures-virtual">Fut Virt</button>
         </div>
       </nav>
     </header>
@@ -343,7 +345,14 @@
     const pairInput = document.getElementById("pair");
     const cycleInput = document.getElementById("cycle");
     const botButtons = Array.from(document.querySelectorAll("[data-bot-instance]"));
-    let currentBotInstance = "live";
+    let currentBotInstance = "spot-live";
+    // Back-compat: pre-rename ids persisted in localStorage or shared URLs.
+    const botInstances = ["spot-live", "spot-virtual", "futures-live", "futures-virtual"];
+    function normalizeBotInstance(value) {
+      if (value === "live") return "spot-live";
+      if (value === "virtual") return "spot-virtual";
+      return botInstances.includes(value) ? value : "spot-live";
+    }
     const apply = document.getElementById("apply");
     const prev = document.getElementById("prev");
     const next = document.getElementById("next");
@@ -386,7 +395,7 @@
     }
 
     function setBotInstance(value, persist = false) {
-      currentBotInstance = value === "virtual" ? "virtual" : "live";
+      currentBotInstance = normalizeBotInstance(value);
       botButtons.forEach(button => {
         const active = button.dataset.botInstance === currentBotInstance;
         button.classList.toggle("active", active);
@@ -398,7 +407,7 @@
     function initBotSelector() {
       const fromUrl = new URLSearchParams(location.search).get("botInstanceId");
       const saved = localStorage.getItem("tradingBot.botInstanceId");
-      setBotInstance(fromUrl || saved || "live");
+      setBotInstance(fromUrl || saved || "spot-live");
       botButtons.forEach(button => button.addEventListener("click", () => {
         setBotInstance(button.dataset.botInstance, true);
         offset = 0;

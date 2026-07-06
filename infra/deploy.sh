@@ -6,7 +6,7 @@ TRAEFIK_DYNAMIC_DIR="/opt/traefik/dynamic"
 PROJECT_NAME="trading-bot"
 COMPOSE_FILE="${DEPLOY_DIR}/docker-compose.prod.yml"
 TRAEFIK_DYNAMIC_FILE="${TRAEFIK_DYNAMIC_DIR}/trading-bot.yml"
-WORKER_APPSETTINGS_SOURCE="src/TradingBot.Worker/appsettings.json"
+WORKER_APPSETTINGS_SOURCE="src/TradingBot.SpotWorker/appsettings.json"
 API_DIR="${DEPLOY_DIR}/api"
 API_ENV_FILE="${API_DIR}/.env"
 SPOT_DIR="${DEPLOY_DIR}/spot"
@@ -16,13 +16,22 @@ LIVE_APPSETTINGS="${LIVE_DIR}/appsettings.json"
 VIRTUAL_APPSETTINGS="${VIRTUAL_DIR}/appsettings.json"
 LIVE_ENV_FILE="${LIVE_DIR}/.env"
 VIRTUAL_ENV_FILE="${VIRTUAL_DIR}/.env"
+FUTURES_DIR="${DEPLOY_DIR}/futures"
+FUTURES_LIVE_DIR="${FUTURES_DIR}/live"
+FUTURES_VIRTUAL_DIR="${FUTURES_DIR}/virtual"
+FUTURES_APPSETTINGS_SOURCE="src/TradingBot.FuturesWorker/appsettings.json"
+FUTURES_LIVE_APPSETTINGS="${FUTURES_LIVE_DIR}/appsettings.json"
+FUTURES_VIRTUAL_APPSETTINGS="${FUTURES_VIRTUAL_DIR}/appsettings.json"
+FUTURES_LIVE_ENV_FILE="${FUTURES_LIVE_DIR}/.env"
+FUTURES_VIRTUAL_ENV_FILE="${FUTURES_VIRTUAL_DIR}/.env"
 DATABASE_DIR="${DEPLOY_DIR}/database"
 DATABASE_ENV_DIR="${DEPLOY_DIR}/postgres"
 DATABASE_ENV_FILE="${DATABASE_ENV_DIR}/.env"
 
 : "${UI_IMAGE_NAME:?UI_IMAGE_NAME is required}"
 : "${API_IMAGE_NAME:?API_IMAGE_NAME is required}"
-: "${WORKER_IMAGE_NAME:?WORKER_IMAGE_NAME is required}"
+: "${SPOT_WORKER_IMAGE_NAME:?SPOT_WORKER_IMAGE_NAME is required}"
+: "${FUTURES_WORKER_IMAGE_NAME:?FUTURES_WORKER_IMAGE_NAME is required}"
 : "${GHCR_USERNAME:?GHCR_USERNAME is required}"
 : "${GHCR_TOKEN:?GHCR_TOKEN is required}"
 : "${TRADINGBOT_DB_PASSWORD:?TRADINGBOT_DB_PASSWORD is required}"
@@ -32,15 +41,17 @@ DATABASE_ENV_FILE="${DATABASE_ENV_DIR}/.env"
 
 UI_IMAGE_TAG="${UI_IMAGE_TAG:-latest}"
 API_IMAGE_TAG="${API_IMAGE_TAG:-${UI_IMAGE_TAG}}"
-WORKER_IMAGE_TAG="${WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
+SPOT_WORKER_IMAGE_TAG="${SPOT_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
+FUTURES_WORKER_IMAGE_TAG="${FUTURES_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 TRAEFIK_NETWORK="${TRAEFIK_NETWORK:-traefik}"
 
 echo "Deploying stack '${PROJECT_NAME}' to ${DEPLOY_DIR}"
 echo "  ui     = ${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
 echo "  api    = ${API_IMAGE_NAME}:${API_IMAGE_TAG}"
-echo "  worker = ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG}"
+echo "  worker = ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}"
 echo "  live   = trading-bot-spot-worker-live"
 echo "  virtual= trading-bot-spot-worker-virtual"
+echo "  futures= ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG} (dry-run only)"
 
 mkdir -p \
   "${DEPLOY_DIR}" \
@@ -50,6 +61,10 @@ mkdir -p \
   "${LIVE_DIR}/logs" \
   "${VIRTUAL_DIR}/data" \
   "${VIRTUAL_DIR}/logs" \
+  "${FUTURES_LIVE_DIR}/data" \
+  "${FUTURES_LIVE_DIR}/logs" \
+  "${FUTURES_VIRTUAL_DIR}/data" \
+  "${FUTURES_VIRTUAL_DIR}/logs" \
   "${DATABASE_DIR}" \
   "${DATABASE_ENV_DIR}"
 cp infra/docker-compose.prod.yml "${COMPOSE_FILE}"
@@ -65,6 +80,17 @@ else
 fi
 echo "Updating virtual worker appsettings from repository config"
 cp "${WORKER_APPSETTINGS_SOURCE}" "${VIRTUAL_APPSETTINGS}"
+
+# Futures appsettings follow the same rule: live is create-once/operator-owned,
+# virtual is refreshed from the repository on every deploy.
+if [ -f "${FUTURES_LIVE_APPSETTINGS}" ]; then
+  echo "Keeping existing futures live appsettings at ${FUTURES_LIVE_APPSETTINGS}"
+else
+  echo "Creating futures live appsettings at ${FUTURES_LIVE_APPSETTINGS}"
+  cp "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_LIVE_APPSETTINGS}"
+fi
+echo "Updating futures virtual appsettings from repository config"
+cp "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_VIRTUAL_APPSETTINGS}"
 
 # Live trading comes from the GitHub PROD environment variable
 # TRADINGBOT_LIVE_TRADING_ENABLED. Anything but an explicit "true" (any case)
@@ -91,10 +117,17 @@ echo "Writing database environment to ${DATABASE_ENV_FILE}"
 
 if [ -f "${LIVE_ENV_FILE}" ]; then
   echo "Keeping existing live worker environment at ${LIVE_ENV_FILE}"
+  # One-time upgrade of the operator-owned file to the market-prefixed
+  # instance-id scheme; without this the live worker keeps writing rows
+  # under the retired 'live' id.
+  if grep -q '^TRADINGBOT_BOT_INSTANCE_ID=live$' "${LIVE_ENV_FILE}"; then
+    echo "Upgrading live worker instance id: live -> spot-live"
+    sed -i 's/^TRADINGBOT_BOT_INSTANCE_ID=live$/TRADINGBOT_BOT_INSTANCE_ID=spot-live/' "${LIVE_ENV_FILE}"
+  fi
 else
   echo "Creating live worker environment at ${LIVE_ENV_FILE}"
   {
-    printf 'TRADINGBOT_BOT_INSTANCE_ID=live\n'
+    printf 'TRADINGBOT_BOT_INSTANCE_ID=spot-live\n'
     printf 'TRADINGBOT_BOT_INSTANCE_NAME=Live spot worker\n'
     printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
     printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
@@ -110,7 +143,7 @@ fi
 
 echo "Writing virtual worker environment to ${VIRTUAL_ENV_FILE}"
 {
-  printf 'TRADINGBOT_BOT_INSTANCE_ID=virtual\n'
+  printf 'TRADINGBOT_BOT_INSTANCE_ID=spot-virtual\n'
   printf 'TRADINGBOT_BOT_INSTANCE_NAME=Virtual spot worker\n'
   printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
@@ -123,6 +156,33 @@ echo "Writing virtual worker environment to ${VIRTUAL_ENV_FILE}"
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${VIRTUAL_ENV_FILE}"
 
+# Futures workers: dry-run only during the scaffold phase. Both instances run on
+# sample market data and have NO live-trading flag - the worker binary has no
+# live order path. Live env is create-once like spot's.
+if [ -f "${FUTURES_LIVE_ENV_FILE}" ]; then
+  echo "Keeping existing futures live environment at ${FUTURES_LIVE_ENV_FILE}"
+else
+  echo "Creating futures live environment at ${FUTURES_LIVE_ENV_FILE}"
+  {
+    printf 'TRADINGBOT_BOT_INSTANCE_ID=futures-live\n'
+    printf 'TRADINGBOT_BOT_INSTANCE_NAME=Live futures worker\n'
+    printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
+    printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+    printf 'TRADINGBOT_MARKET_DATA_MODE=sample\n'
+    printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
+  } > "${FUTURES_LIVE_ENV_FILE}"
+fi
+
+echo "Writing futures virtual environment to ${FUTURES_VIRTUAL_ENV_FILE}"
+{
+  printf 'TRADINGBOT_BOT_INSTANCE_ID=futures-virtual\n'
+  printf 'TRADINGBOT_BOT_INSTANCE_NAME=Virtual futures worker\n'
+  printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
+  printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  printf 'TRADINGBOT_MARKET_DATA_MODE=sample\n'
+  printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
+} > "${FUTURES_VIRTUAL_ENV_FILE}"
+
 echo "${GHCR_TOKEN}" | docker login ghcr.io \
   --username "${GHCR_USERNAME}" \
   --password-stdin
@@ -131,8 +191,10 @@ export UI_IMAGE_NAME
 export UI_IMAGE_TAG
 export API_IMAGE_NAME
 export API_IMAGE_TAG
-export WORKER_IMAGE_NAME
-export WORKER_IMAGE_TAG
+export SPOT_WORKER_IMAGE_NAME
+export SPOT_WORKER_IMAGE_TAG
+export FUTURES_WORKER_IMAGE_NAME
+export FUTURES_WORKER_IMAGE_TAG
 export TRAEFIK_NETWORK
 
 docker compose \
@@ -195,7 +257,7 @@ run_healthcheck_with_retries "trading-bot-api container" 30 2 \
     exec -T ui wget -q -O - http://trading-bot-api:8080/api/health
 
 # Worker health: workers have no HTTP endpoint, so verify both containers are running.
-for WORKER_CONTAINER in trading-bot-spot-worker-live trading-bot-spot-worker-virtual; do
+for WORKER_CONTAINER in trading-bot-spot-worker-live trading-bot-spot-worker-virtual trading-bot-futures-worker-live trading-bot-futures-worker-virtual; do
   WORKER_RUNNING="$(docker inspect -f '{{.State.Running}}' "${WORKER_CONTAINER}" 2>/dev/null || echo false)"
   if [ "${WORKER_RUNNING}" != "true" ]; then
     echo "ERROR: ${WORKER_CONTAINER} is not running."

@@ -21,7 +21,7 @@ services:
 
   spot-worker-live:
     container_name: trading-bot-spot-worker-live
-    image: ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG:-latest}
+    image: ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file:
       - /opt/trading-bot/spot/live/.env
@@ -36,7 +36,7 @@ services:
 
   spot-worker-virtual:
     container_name: trading-bot-spot-worker-virtual
-    image: ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG:-latest}
+    image: ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file:
       - /opt/trading-bot/spot/virtual/.env
@@ -48,6 +48,36 @@ services:
       - /opt/trading-bot/spot/virtual/appsettings.json:/app/appsettings.json:ro
       - /opt/trading-bot/spot/virtual/data:/app/data
       - /opt/trading-bot/spot/virtual/logs:/app/logs
+
+  futures-worker-live:
+    container_name: trading-bot-futures-worker-live
+    image: ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - /opt/trading-bot/futures/live/.env
+    depends_on:
+      database:
+        condition: service_healthy
+    # Futures workers are dry-run only during the scaffold phase; the worker has
+    # no live order path regardless of environment.
+    volumes:
+      - /opt/trading-bot/futures/live/appsettings.json:/app/appsettings.json:ro
+      - /opt/trading-bot/futures/live/data:/app/data
+      - /opt/trading-bot/futures/live/logs:/app/logs
+
+  futures-worker-virtual:
+    container_name: trading-bot-futures-worker-virtual
+    image: ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - /opt/trading-bot/futures/virtual/.env
+    depends_on:
+      database:
+        condition: service_healthy
+    volumes:
+      - /opt/trading-bot/futures/virtual/appsettings.json:/app/appsettings.json:ro
+      - /opt/trading-bot/futures/virtual/data:/app/data
+      - /opt/trading-bot/futures/virtual/logs:/app/logs
 
   database:
     container_name: trading-bot-db

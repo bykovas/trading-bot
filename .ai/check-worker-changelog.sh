@@ -21,7 +21,7 @@ changelog_changed=false
 while IFS= read -r file; do
   [[ -z "${file}" ]] && continue
 
-  if [[ "${file}" == src/TradingBot.Worker/* ]]; then
+  if [[ "${file}" == src/TradingBot.SpotWorker/* || "${file}" == src/TradingBot.Core/* ]]; then
     worker_changed=true
   fi
 
@@ -31,7 +31,7 @@ while IFS= read -r file; do
 done <<< "${changed_files}"
 
 if [[ "${worker_changed}" == "true" && "${changelog_changed}" != "true" ]]; then
-  echo "ERROR: src/TradingBot.Worker changed, but .ai/worker-changelog.md was not updated."
+  echo "ERROR: src/TradingBot.SpotWorker or src/TradingBot.Core changed, but .ai/worker-changelog.md was not updated."
   echo "Add a latest changelog entry describing the worker logic/tuning change."
   exit 1
 fi
