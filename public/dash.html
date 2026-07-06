@@ -162,6 +162,36 @@
       white-space: nowrap;
     }
 
+    .bot-switch {
+      display: inline-grid;
+      grid-template-columns: repeat(2, minmax(74px, 1fr));
+      align-items: center;
+      gap: 3px;
+      min-height: 38px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .82);
+    }
+
+    .bot-switch button {
+      min-height: 30px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .bot-switch button.active {
+      background: rgba(245, 184, 79, .16);
+      color: var(--gold-soft);
+      box-shadow: inset 0 0 0 1px rgba(245, 184, 79, .28);
+    }
+
     .api-links {
       display: flex;
       gap: 10px;
@@ -386,10 +416,10 @@
         <span id="status-dot" class="dot"></span>
         <span id="status-text">Loading portfolio</span>
       </div>
-      <select id="bot-instance" aria-label="Bot instance">
-        <option value="live">Live</option>
-        <option value="virtual">Virtual</option>
-      </select>
+      <div class="bot-switch" role="group" aria-label="Bot instance">
+        <button type="button" data-bot-instance="live">Live</button>
+        <button type="button" data-bot-instance="virtual">Virtual</button>
+      </div>
     </header>
 
     <nav class="api-links" aria-label="Raw API links">
@@ -452,19 +482,29 @@
   </main>
 
   <script>
-    const botSelect = document.getElementById("bot-instance");
+    const botButtons = Array.from(document.querySelectorAll("[data-bot-instance]"));
+    let currentBotInstance = "live";
     function selectedBotQuery() {
-      const value = botSelect?.value || "";
+      const value = currentBotInstance || "";
       return value ? `?botInstanceId=${encodeURIComponent(value)}` : "";
+    }
+    function setBotInstance(value, persist = false) {
+      currentBotInstance = value === "virtual" ? "virtual" : "live";
+      botButtons.forEach(button => {
+        const active = button.dataset.botInstance === currentBotInstance;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      if (persist) localStorage.setItem("tradingBot.botInstanceId", currentBotInstance);
     }
     function initBotSelector() {
       const fromUrl = new URLSearchParams(location.search).get("botInstanceId");
       const saved = localStorage.getItem("tradingBot.botInstanceId");
-      if (botSelect) botSelect.value = fromUrl || saved || "live";
-      botSelect?.addEventListener("change", () => {
-        localStorage.setItem("tradingBot.botInstanceId", botSelect.value);
+      setBotInstance(fromUrl || saved || "live");
+      botButtons.forEach(button => button.addEventListener("click", () => {
+        setBotInstance(button.dataset.botInstance, true);
         refresh();
-      });
+      }));
     }
     const els = {
       statusDot: document.getElementById("status-dot"),

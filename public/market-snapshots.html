@@ -153,6 +153,34 @@
       text-decoration: none;
     }
 
+    .bot-switch {
+      display: inline-grid;
+      grid-template-columns: repeat(2, minmax(74px, 1fr));
+      align-items: center;
+      gap: 3px;
+      min-height: 34px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .82);
+    }
+
+    .bot-switch button {
+      min-height: 26px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .bot-switch button.active {
+      background: rgba(245, 184, 79, .16);
+      color: var(--gold-soft);
+      box-shadow: inset 0 0 0 1px rgba(245, 184, 79, .28);
+    }
+
     button {
       cursor: pointer;
     }
@@ -265,10 +293,10 @@
         <a href="/dash.html">Portfolio</a>
         <a href="/cycles.html">Cycles</a>
         <a href="/api/export/cycles-and-snapshots.csv">Export CSV</a>
-        <select id="bot-instance" aria-label="Bot instance">
-          <option value="live">Live</option>
-          <option value="virtual">Virtual</option>
-        </select>
+        <div class="bot-switch" role="group" aria-label="Bot instance">
+          <button type="button" data-bot-instance="live">Live</button>
+          <button type="button" data-bot-instance="virtual">Virtual</button>
+        </div>
       </nav>
     </header>
 
@@ -314,7 +342,8 @@
     const statusEl = document.getElementById("status");
     const pairInput = document.getElementById("pair");
     const cycleInput = document.getElementById("cycle");
-    const botSelect = document.getElementById("bot-instance");
+    const botButtons = Array.from(document.querySelectorAll("[data-bot-instance]"));
+    let currentBotInstance = "live";
     const apply = document.getElementById("apply");
     const prev = document.getElementById("prev");
     const next = document.getElementById("next");
@@ -352,19 +381,29 @@
       const params = new URLSearchParams({ limit, offset });
       if (pairInput.value.trim()) params.set("pair", pairInput.value.trim());
       if (cycleInput.value.trim()) params.set("cycleId", cycleInput.value.trim());
-      if (botSelect?.value) params.set("botInstanceId", botSelect.value);
+      if (currentBotInstance) params.set("botInstanceId", currentBotInstance);
       return params.toString();
+    }
+
+    function setBotInstance(value, persist = false) {
+      currentBotInstance = value === "virtual" ? "virtual" : "live";
+      botButtons.forEach(button => {
+        const active = button.dataset.botInstance === currentBotInstance;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      if (persist) localStorage.setItem("tradingBot.botInstanceId", currentBotInstance);
     }
 
     function initBotSelector() {
       const fromUrl = new URLSearchParams(location.search).get("botInstanceId");
       const saved = localStorage.getItem("tradingBot.botInstanceId");
-      if (botSelect) botSelect.value = fromUrl || saved || "live";
-      botSelect?.addEventListener("change", () => {
-        localStorage.setItem("tradingBot.botInstanceId", botSelect.value);
+      setBotInstance(fromUrl || saved || "live");
+      botButtons.forEach(button => button.addEventListener("click", () => {
+        setBotInstance(button.dataset.botInstance, true);
         offset = 0;
         load().catch(error => statusEl.textContent = error.message);
-      });
+      }));
     }
 
     function render(data) {
