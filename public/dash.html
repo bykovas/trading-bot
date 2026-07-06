@@ -386,6 +386,10 @@
         <span id="status-dot" class="dot"></span>
         <span id="status-text">Loading portfolio</span>
       </div>
+      <select id="bot-instance" aria-label="Bot instance">
+        <option value="live">Live</option>
+        <option value="virtual">Virtual</option>
+      </select>
     </header>
 
     <nav class="api-links" aria-label="Raw API links">
@@ -448,6 +452,20 @@
   </main>
 
   <script>
+    const botSelect = document.getElementById("bot-instance");
+    function selectedBotQuery() {
+      const value = botSelect?.value || "";
+      return value ? `?botInstanceId=${encodeURIComponent(value)}` : "";
+    }
+    function initBotSelector() {
+      const fromUrl = new URLSearchParams(location.search).get("botInstanceId");
+      const saved = localStorage.getItem("tradingBot.botInstanceId");
+      if (botSelect) botSelect.value = fromUrl || saved || "live";
+      botSelect?.addEventListener("change", () => {
+        localStorage.setItem("tradingBot.botInstanceId", botSelect.value);
+        refresh();
+      });
+    }
     const els = {
       statusDot: document.getElementById("status-dot"),
       statusText: document.getElementById("status-text"),
@@ -591,7 +609,7 @@
 
     async function refresh() {
       try {
-        const response = await fetch("/api/portfolio", { cache: "no-store" });
+        const response = await fetch(`/api/portfolio${selectedBotQuery()}`, { cache: "no-store" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         render(await response.json());
       } catch (error) {
@@ -600,6 +618,7 @@
       }
     }
 
+    initBotSelector();
     refresh();
     setInterval(refresh, 10000);
   </script>

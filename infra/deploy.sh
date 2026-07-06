@@ -6,12 +6,19 @@ TRAEFIK_DYNAMIC_DIR="/opt/traefik/dynamic"
 PROJECT_NAME="trading-bot"
 COMPOSE_FILE="${DEPLOY_DIR}/docker-compose.prod.yml"
 TRAEFIK_DYNAMIC_FILE="${TRAEFIK_DYNAMIC_DIR}/trading-bot.yml"
-WORKER_APPSETTINGS="${DEPLOY_DIR}/appsettings.json"
 WORKER_APPSETTINGS_SOURCE="src/TradingBot.Worker/appsettings.json"
-WORKER_ENV_FILE="${DEPLOY_DIR}/.env"
-WORKER_DATA_DIR="${DEPLOY_DIR}/data"
-WORKER_LOG_DIR="${DEPLOY_DIR}/logs"
+API_DIR="${DEPLOY_DIR}/api"
+API_ENV_FILE="${API_DIR}/.env"
+SPOT_DIR="${DEPLOY_DIR}/spot"
+LIVE_DIR="${SPOT_DIR}/live"
+VIRTUAL_DIR="${SPOT_DIR}/virtual"
+LIVE_APPSETTINGS="${LIVE_DIR}/appsettings.json"
+VIRTUAL_APPSETTINGS="${VIRTUAL_DIR}/appsettings.json"
+LIVE_ENV_FILE="${LIVE_DIR}/.env"
+VIRTUAL_ENV_FILE="${VIRTUAL_DIR}/.env"
 DATABASE_DIR="${DEPLOY_DIR}/database"
+DATABASE_ENV_DIR="${DEPLOY_DIR}/postgres"
+DATABASE_ENV_FILE="${DATABASE_ENV_DIR}/.env"
 
 : "${UI_IMAGE_NAME:?UI_IMAGE_NAME is required}"
 : "${API_IMAGE_NAME:?API_IMAGE_NAME is required}"
@@ -32,14 +39,32 @@ echo "Deploying stack '${PROJECT_NAME}' to ${DEPLOY_DIR}"
 echo "  ui     = ${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
 echo "  api    = ${API_IMAGE_NAME}:${API_IMAGE_TAG}"
 echo "  worker = ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG}"
+echo "  live   = trading-bot-spot-worker-live"
+echo "  virtual= trading-bot-spot-worker-virtual"
 
-mkdir -p "${DEPLOY_DIR}" "${TRAEFIK_DYNAMIC_DIR}" "${WORKER_DATA_DIR}" "${WORKER_LOG_DIR}" "${DATABASE_DIR}"
+mkdir -p \
+  "${DEPLOY_DIR}" \
+  "${TRAEFIK_DYNAMIC_DIR}" \
+  "${API_DIR}" \
+  "${LIVE_DIR}/data" \
+  "${LIVE_DIR}/logs" \
+  "${VIRTUAL_DIR}/data" \
+  "${VIRTUAL_DIR}/logs" \
+  "${DATABASE_DIR}" \
+  "${DATABASE_ENV_DIR}"
 cp infra/docker-compose.prod.yml "${COMPOSE_FILE}"
 cp infra/traefik/trading-bot.yml "${TRAEFIK_DYNAMIC_FILE}"
 
-# Keep the mounted worker config in sync with repository settings on every deploy.
-echo "Updating ${WORKER_APPSETTINGS} from repository config"
-cp "${WORKER_APPSETTINGS_SOURCE}" "${WORKER_APPSETTINGS}"
+# Keep virtual config in sync with repository settings on every deploy.
+# Live config is created only once and then treated as operator-owned.
+if [ -f "${LIVE_APPSETTINGS}" ]; then
+  echo "Keeping existing live worker appsettings at ${LIVE_APPSETTINGS}"
+else
+  echo "Creating live worker appsettings at ${LIVE_APPSETTINGS}"
+  cp "${WORKER_APPSETTINGS_SOURCE}" "${LIVE_APPSETTINGS}"
+fi
+echo "Updating virtual worker appsettings from repository config"
+cp "${WORKER_APPSETTINGS_SOURCE}" "${VIRTUAL_APPSETTINGS}"
 
 # Live trading comes from the GitHub PROD environment variable
 # TRADINGBOT_LIVE_TRADING_ENABLED. Anything but an explicit "true" (any case)
@@ -52,20 +77,51 @@ else
   echo "Live trading disabled (TRADINGBOT_LIVE_TRADING_ENABLED='${TRADINGBOT_LIVE_TRADING_ENABLED:-}' is not 'true')"
 fi
 
-echo "Writing worker environment overrides to ${WORKER_ENV_FILE}"
+echo "Writing API environment to ${API_ENV_FILE}"
 umask 077
 {
-  printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
+  printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+} > "${API_ENV_FILE}"
+
+echo "Writing database environment to ${DATABASE_ENV_FILE}"
+{
   printf 'POSTGRES_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+} > "${DATABASE_ENV_FILE}"
+
+if [ -f "${LIVE_ENV_FILE}" ]; then
+  echo "Keeping existing live worker environment at ${LIVE_ENV_FILE}"
+else
+  echo "Creating live worker environment at ${LIVE_ENV_FILE}"
+  {
+    printf 'TRADINGBOT_BOT_INSTANCE_ID=live\n'
+    printf 'TRADINGBOT_BOT_INSTANCE_NAME=Live spot worker\n'
+    printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+    printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
+    printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+    printf 'TRADINGBOT_MARKET_DATA_MODE=kraken\n'
+    printf 'TRADINGBOT_KRAKEN_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_API_KEY:-}"
+    printf 'TRADINGBOT_KRAKEN_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_API_SECRET:-}"
+    printf 'TRADINGBOT_OPENAI_API_KEY=%s\n' "${TRADINGBOT_OPENAI_API_KEY:-}"
+    printf 'TRADINGBOT_LIVE_TRADING_ENABLED=%s\n' "${LIVE_TRADING_FLAG}"
+    printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
+  } > "${LIVE_ENV_FILE}"
+fi
+
+echo "Writing virtual worker environment to ${VIRTUAL_ENV_FILE}"
+{
+  printf 'TRADINGBOT_BOT_INSTANCE_ID=virtual\n'
+  printf 'TRADINGBOT_BOT_INSTANCE_NAME=Virtual spot worker\n'
+  printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
   printf 'TRADINGBOT_MARKET_DATA_MODE=kraken\n'
-  printf 'TRADINGBOT_LIVE_TRADING_ENABLED=%s\n' "${LIVE_TRADING_FLAG}"
-  printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
   printf 'TRADINGBOT_KRAKEN_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_API_KEY:-}"
   printf 'TRADINGBOT_KRAKEN_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_API_SECRET:-}"
   printf 'TRADINGBOT_OPENAI_API_KEY=%s\n' "${TRADINGBOT_OPENAI_API_KEY:-}"
-} > "${WORKER_ENV_FILE}"
+  printf 'TRADINGBOT_LIVE_TRADING_ENABLED=false\n'
+  printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
+} > "${VIRTUAL_ENV_FILE}"
 
 echo "${GHCR_TOKEN}" | docker login ghcr.io \
   --username "${GHCR_USERNAME}" \
@@ -115,11 +171,13 @@ docker compose \
   exec -T ui wget -q -O - http://trading-bot-api:8080/api/health
 echo "Health check passed for trading-bot-api container."
 
-# Worker health: it has no HTTP endpoint, so verify the container is running.
-WORKER_RUNNING="$(docker inspect -f '{{.State.Running}}' trading-bot-worker 2>/dev/null || echo false)"
-if [ "${WORKER_RUNNING}" != "true" ]; then
-  echo "ERROR: trading-bot-worker is not running."
-  docker logs --tail 50 trading-bot-worker || true
-  exit 1
-fi
-echo "Health check passed for trading-bot-worker container."
+# Worker health: workers have no HTTP endpoint, so verify both containers are running.
+for WORKER_CONTAINER in trading-bot-spot-worker-live trading-bot-spot-worker-virtual; do
+  WORKER_RUNNING="$(docker inspect -f '{{.State.Running}}' "${WORKER_CONTAINER}" 2>/dev/null || echo false)"
+  if [ "${WORKER_RUNNING}" != "true" ]; then
+    echo "ERROR: ${WORKER_CONTAINER} is not running."
+    docker logs --tail 50 "${WORKER_CONTAINER}" || true
+    exit 1
+  fi
+  echo "Health check passed for ${WORKER_CONTAINER} container."
+done

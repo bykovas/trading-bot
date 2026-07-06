@@ -258,6 +258,10 @@
         <a href="/dash.html">Portfolio</a>
         <a href="/market-snapshots.html">Market snapshots</a>
         <a href="/api/export/cycles-and-snapshots.csv">Export CSV</a>
+        <select id="bot-instance" aria-label="Bot instance">
+          <option value="live">Live</option>
+          <option value="virtual">Virtual</option>
+        </select>
       </nav>
     </header>
 
@@ -293,6 +297,21 @@
   </main>
 
   <script>
+    const botSelect = document.getElementById("bot-instance");
+    function selectedBotParam() {
+      const value = botSelect?.value || "";
+      return value ? `&botInstanceId=${encodeURIComponent(value)}` : "";
+    }
+    function initBotSelector() {
+      const fromUrl = new URLSearchParams(location.search).get("botInstanceId");
+      const saved = localStorage.getItem("tradingBot.botInstanceId");
+      if (botSelect) botSelect.value = fromUrl || saved || "live";
+      botSelect?.addEventListener("change", () => {
+        localStorage.setItem("tradingBot.botInstanceId", botSelect.value);
+        offset = 0;
+        load().catch(error => statusEl.textContent = error.message);
+      });
+    }
     const limit = 50;
     let offset = 0;
     let nextOffset = null;
@@ -363,7 +382,7 @@
 
     async function load() {
       statusEl.textContent = "Loading cycles";
-      const response = await fetch(`/api/cycles?limit=${limit}&offset=${offset}`, { cache: "no-store" });
+      const response = await fetch(`/api/cycles?limit=${limit}&offset=${offset}${selectedBotParam()}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       render(await response.json());
     }
@@ -379,6 +398,7 @@
       load().catch(error => statusEl.textContent = error.message);
     });
 
+    initBotSelector();
     load().catch(error => statusEl.textContent = error.message);
   </script>
 </body>

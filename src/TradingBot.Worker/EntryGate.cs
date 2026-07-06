@@ -145,6 +145,15 @@ internal static class EntryGate
         // ---- Layer B: quality filters ----
         if (!signal.AllowsLong)
         {
+            if (EarlyStructureExploratoryEligible(signal, priceAction, strategy, spreadPercent, liveMode))
+            {
+                notes.Add(new SignalContribution(
+                    "Exploratory",
+                    0m,
+                    $"early-structure exploratory candidate: score {signal.Score:0.##}, partial bullish EMA gap {signal.BullishEmaGapPercent:0.###}% with {priceAction!.Direction} price action ({priceAction.TrendPercent:0.###}%); requires top-{strategy.ExploratoryMaxRank} rank"));
+                return new EntryGateResult("LONG_MICRO", true, null, spreadPercent, notes);
+            }
+
             return Reject(EntryRejection.NoBullishSignal, spreadPercent, notes);
         }
 
@@ -260,6 +269,29 @@ internal static class EntryGate
     private static bool HasPositiveContribution(TechnicalSignal signal, string name) =>
         signal.Contributions.Any(contribution =>
             contribution.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && contribution.Value > 0m);
+
+    private static bool EarlyStructureExploratoryEligible(
+        TechnicalSignal signal,
+        PriceActionAssessment? priceAction,
+        StrategyOptions strategy,
+        decimal spreadPercent,
+        bool liveMode)
+    {
+        if (!strategy.ExploratoryEntriesEnabled
+            || !signal.HasBullishStructure
+            || signal.Score < strategy.ExploratoryMinimumLongScore
+            || priceAction is not { IsPositive: true })
+        {
+            return false;
+        }
+
+        if (strategy.MaxExploratorySpreadPercent > 0m && spreadPercent > strategy.MaxExploratorySpreadPercent)
+        {
+            return false;
+        }
+
+        return HasPositiveContribution(signal, "Momentum") || signal.VolumeConfirmed;
+    }
 
     private static EntryGateResult Reject(string reason, decimal spreadPercent, List<SignalContribution> notes) =>
         new("NONE", false, reason, spreadPercent, notes);

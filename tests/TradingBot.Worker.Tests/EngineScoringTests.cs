@@ -112,6 +112,65 @@ public class EngineScoringTests
     }
 
     [Fact]
+    public void Partial_bullish_ema_structure_can_open_dry_run_exploratory_entry()
+    {
+        var strategy = Strategy();
+        strategy.ExploratoryEntriesEnabled = true;
+        strategy.ExploratoryMinimumLongScore = 0.70m;
+        var indicators = new IndicatorSnapshot(FastEma: 1.003m, SlowEma: 1.000m, Rsi: 55m);
+        var rising = new PriceActionAssessment(
+            "TEST/EUR",
+            SnapshotCount: 6,
+            DataSufficient: true,
+            LastPrice: 1.005m,
+            TrendPercent: 0.4m,
+            RollingAveragePrice: 1.003m,
+            ConsecutiveNonRisingSnapshots: 0);
+
+        var proposal = Decide(MarketState(volumeSpike: true), indicators, strategy, rising);
+
+        Assert.Equal("LONG_MICRO", proposal.DesiredPosition);
+        Assert.True(proposal.ExploratoryCandidate);
+        Assert.Null(proposal.EntryRejectionReason);
+        Assert.True(proposal.HasBullishStructure);
+        Assert.False(proposal.EmaFullyConfirmed);
+        Assert.True(proposal.EarlyEntryEligible);
+    }
+
+    [Fact]
+    public void Partial_bullish_ema_structure_does_not_open_when_exploratory_is_disabled()
+    {
+        var strategy = Strategy();
+        strategy.ExploratoryEntriesEnabled = false;
+        strategy.ExploratoryMinimumLongScore = 0.70m;
+        var indicators = new IndicatorSnapshot(FastEma: 1.003m, SlowEma: 1.000m, Rsi: 55m);
+        var rising = new PriceActionAssessment(
+            "TEST/EUR",
+            SnapshotCount: 6,
+            DataSufficient: true,
+            LastPrice: 1.005m,
+            TrendPercent: 0.4m,
+            RollingAveragePrice: 1.003m,
+            ConsecutiveNonRisingSnapshots: 0);
+
+        var proposal = Engine.Decide(
+            MarketState(volumeSpike: true),
+            indicators,
+            new TradingOptions { LiveTradingEnabled = true, TargetOrderEur = 10m },
+            strategy,
+            new PositionSizingOptions { Enabled = false },
+            new RiskOptions { MaxOrderEur = 10m },
+            cashEur: 100m,
+            currentExposureEur: 0m,
+            hasOpenPosition: false,
+            rising);
+
+        Assert.Equal("NONE", proposal.DesiredPosition);
+        Assert.Equal(EntryRejection.NoBullishSignal, proposal.EntryRejectionReason);
+        Assert.True(proposal.EarlyEntryEligible);
+    }
+
+    [Fact]
     public void Tiny_ema_cross_still_does_not_get_early_structure_or_confirmations()
     {
         var strategy = Strategy();

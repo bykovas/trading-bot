@@ -68,9 +68,10 @@ internal sealed class DecisionWorker(
     private async Task RunCycleAsync(CancellationToken cancellationToken)
     {
         var utc = DateTimeOffset.UtcNow;
-        var cycleId = utc.ToString("yyyyMMddHHmmss");
+        var cycleId = $"{config.BotInstance.Id}-{utc:yyyyMMddHHmmss}";
         Console.WriteLine();
         Console.WriteLine($"cycle={cycleId} utc={utc:O}");
+        Console.WriteLine($"botInstance={config.BotInstance.Id} name={config.BotInstance.Name}");
         Console.WriteLine($"worker-version={_buildInfo.Version} commit={_buildInfo.Commit} strategy={_buildInfo.StrategyVersion} changeSet={_buildInfo.ChangeSet}");
 
         var lightCandidates = await marketDataSource.GetLightMarketStatesAsync(
@@ -241,6 +242,8 @@ internal sealed class DecisionWorker(
             dryRunPortfolio.AppendCycle(new DryRunCycleRecord
             {
                 CycleId = cycleId,
+                BotInstanceId = config.BotInstance.Id,
+                BotInstanceName = config.BotInstance.Name,
                 Utc = utc,
                 MarketDataMode = config.Kraken.MarketDataMode,
                 AiProvider = config.Ai.Provider,
@@ -568,7 +571,8 @@ internal sealed class DecisionWorker(
                     state.BestAsk,
                     state.LastPrice,
                     state.LastVolume,
-                    state.ChangePercent))
+                    state.ChangePercent,
+                    config.BotInstance.Id))
                 .ToList();
 
             dryRunPortfolio.AppendMarketSnapshots(snapshots);
@@ -696,7 +700,7 @@ internal sealed class DecisionWorker(
         }
     }
 
-    private static IReadOnlyList<InstrumentOptions> BuildActiveInstruments(
+    private IReadOnlyList<InstrumentOptions> BuildActiveInstruments(
         WatchlistAdvice advice,
         IReadOnlyList<InstrumentMarketState> candidates,
         PortfolioState portfolio)
@@ -727,7 +731,45 @@ internal sealed class DecisionWorker(
             }
         }
 
+        if (config.Trading.StrongMoverBackfillEnabled
+            && config.Trading.StrongMoverMaxBackfillPairs > 0)
+        {
+            var backfill = candidates
+                .Where(IsStrongMoverBackfillCandidate)
+                .Where(candidate => !selected.Any(instrument => instrument.Pair.Equals(candidate.Instrument.Pair, StringComparison.OrdinalIgnoreCase)))
+                .OrderByDescending(candidate => candidate.ChangePercent)
+                .ThenByDescending(candidate => candidate.LastVolume * candidate.LastPrice)
+                .Take(config.Trading.StrongMoverMaxBackfillPairs)
+                .ToList();
+
+            foreach (var candidate in backfill)
+            {
+                selected.Add(candidate.Instrument);
+                Console.WriteLine(
+                    $"watchlist-backfill {candidate.Instrument.Pair}: strong clean mover change={candidate.ChangePercent:+0.##;-0.##;0}% " +
+                    $"spread={EntryGate.SpreadPercentOf(candidate):0.###}% est24hEur={candidate.LastVolume * candidate.LastPrice:0}");
+            }
+        }
+
         return selected;
+    }
+
+    private bool IsStrongMoverBackfillCandidate(InstrumentMarketState candidate)
+    {
+        if (candidate.LastPrice <= 0m || !string.IsNullOrWhiteSpace(candidate.DataWarning))
+        {
+            return false;
+        }
+
+        var spreadPercent = EntryGate.SpreadPercentOf(candidate);
+        if (config.Trading.StrongMoverMaxSpreadPercent > 0m && spreadPercent > config.Trading.StrongMoverMaxSpreadPercent)
+        {
+            return false;
+        }
+
+        var volumeEur = candidate.LastVolume * candidate.LastPrice;
+        return candidate.ChangePercent >= config.Trading.StrongMoverMinChangePercent
+            && volumeEur >= config.Trading.StrongMoverMinDailyVolumeEur;
     }
 
     // Immutable snapshot of a decision BEFORE it is applied to the portfolio. Lets

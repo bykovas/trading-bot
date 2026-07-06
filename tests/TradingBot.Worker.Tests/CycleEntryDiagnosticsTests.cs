@@ -74,6 +74,35 @@ public class CycleEntryDiagnosticsTests
         Assert.Equal(JsonValueKind.Null, diagnostics.GetProperty("noTradeReason").ValueKind);
     }
 
+    [Fact]
+    public async Task Strong_mover_backfill_evaluates_clean_mover_not_selected_by_advisor()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
+        var config = Config(outputDirectory, "AAA/EUR", "BBB/EUR", "CCC/EUR");
+        config.Trading.StrongMoverBackfillEnabled = true;
+        config.Trading.StrongMoverMinChangePercent = 4m;
+        config.Trading.StrongMoverMaxSpreadPercent = 0.35m;
+        config.Trading.StrongMoverMinDailyVolumeEur = 100_000m;
+        config.Trading.StrongMoverMaxBackfillPairs = 5;
+
+        var worker = Worker(
+            config,
+            new StrongMoverMarketDataSource("CCC/EUR"),
+            new FixedAdvisor("AAA/EUR", "BBB/EUR"));
+        await worker.RunAsync(CancellationToken.None);
+
+        var cycleLine = File.ReadLines(Path.Combine(outputDirectory, "events.jsonl")).Last();
+        using var doc = JsonDocument.Parse(cycleLine);
+        var root = doc.RootElement;
+        var diagnostics = root.GetProperty("entryDiagnostics");
+
+        Assert.Equal(3, diagnostics.GetProperty("activePairsEvaluated").GetInt32());
+        Assert.Contains(root.GetProperty("decisions").EnumerateArray(), decision =>
+            decision.GetProperty("pair").GetString() == "CCC/EUR");
+        Assert.DoesNotContain(diagnostics.GetProperty("excludedPairs").EnumerateArray(), excluded =>
+            excluded.GetProperty("pair").GetString() == "CCC/EUR");
+    }
+
     private static DecisionWorker Worker(
         BotConfiguration config,
         IMarketDataSource marketData,
@@ -189,6 +218,53 @@ public class CycleEntryDiagnosticsTests
                 Instrument = instrument,
                 Candles = candles,
                 Quote = new Quote(1.395m, 1.40m, 1.39m, 100m, 0m),
+                PairRules = new PairRules(instrument.Pair, "online", 0.001m, 0.5m, 8, 2)
+            };
+        }
+    }
+
+    private sealed class StrongMoverMarketDataSource(string strongPair) : IMarketDataSource
+    {
+        public Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
+            IReadOnlyList<InstrumentOptions> instruments,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<InstrumentMarketState>>(
+                instruments.Select(instrument => State(instrument, includeCandles: false)).ToList());
+        }
+
+        public Task<IReadOnlyList<InstrumentMarketState>> GetFullMarketStatesAsync(
+            IReadOnlyList<InstrumentOptions> instruments,
+            int timeframeMinutes,
+            IReadOnlyList<InstrumentMarketState> lightStates,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<InstrumentMarketState>>(
+                instruments.Select(instrument => State(instrument, includeCandles: true)).ToList());
+        }
+
+        private InstrumentMarketState State(InstrumentOptions instrument, bool includeCandles)
+        {
+            var isStrong = instrument.Pair.Equals(strongPair, StringComparison.OrdinalIgnoreCase);
+            var last = isStrong ? 1.08m : 1.00m;
+            var candles = includeCandles
+                ? Enumerable.Range(0, 40)
+                    .Select(index => new Candle(
+                        DateTimeOffset.UtcNow.AddMinutes(-40 + index),
+                        Open: 1m,
+                        High: 1.01m,
+                        Low: 0.99m,
+                        Close: 1m,
+                        Volume: 100m,
+                        TradeCount: 10))
+                    .ToArray()
+                : Array.Empty<Candle>();
+
+            return new InstrumentMarketState
+            {
+                Instrument = instrument,
+                Candles = candles,
+                Quote = new Quote(last * 0.999m, last * 1.001m, last, isStrong ? 200_000m : 100m, isStrong ? 8m : 0m),
                 PairRules = new PairRules(instrument.Pair, "online", 0.001m, 0.5m, 8, 2)
             };
         }

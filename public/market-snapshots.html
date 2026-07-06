@@ -265,6 +265,10 @@
         <a href="/dash.html">Portfolio</a>
         <a href="/cycles.html">Cycles</a>
         <a href="/api/export/cycles-and-snapshots.csv">Export CSV</a>
+        <select id="bot-instance" aria-label="Bot instance">
+          <option value="live">Live</option>
+          <option value="virtual">Virtual</option>
+        </select>
       </nav>
     </header>
 
@@ -310,6 +314,7 @@
     const statusEl = document.getElementById("status");
     const pairInput = document.getElementById("pair");
     const cycleInput = document.getElementById("cycle");
+    const botSelect = document.getElementById("bot-instance");
     const apply = document.getElementById("apply");
     const prev = document.getElementById("prev");
     const next = document.getElementById("next");
@@ -347,7 +352,19 @@
       const params = new URLSearchParams({ limit, offset });
       if (pairInput.value.trim()) params.set("pair", pairInput.value.trim());
       if (cycleInput.value.trim()) params.set("cycleId", cycleInput.value.trim());
+      if (botSelect?.value) params.set("botInstanceId", botSelect.value);
       return params.toString();
+    }
+
+    function initBotSelector() {
+      const fromUrl = new URLSearchParams(location.search).get("botInstanceId");
+      const saved = localStorage.getItem("tradingBot.botInstanceId");
+      if (botSelect) botSelect.value = fromUrl || saved || "live";
+      botSelect?.addEventListener("change", () => {
+        localStorage.setItem("tradingBot.botInstanceId", botSelect.value);
+        offset = 0;
+        load().catch(error => statusEl.textContent = error.message);
+      });
     }
 
     function render(data) {
@@ -398,6 +415,7 @@
       load().catch(error => statusEl.textContent = error.message);
     });
 
+    initBotSelector();
     load().catch(error => statusEl.textContent = error.message);
   </script>
 </body>

@@ -4,6 +4,7 @@ namespace TradingBot.Worker;
 
 internal sealed class BotConfiguration
 {
+    public BotInstanceOptions BotInstance { get; set; } = new();
     public WorkerOptions Worker { get; set; } = new();
     public HttpOptions Http { get; set; } = new();
     public KrakenOptions Kraken { get; set; } = new();
@@ -54,6 +55,8 @@ internal sealed class BotConfiguration
 
     private static void ApplyEnvironment(BotConfiguration config)
     {
+        SetIfPresent("TRADINGBOT_BOT_INSTANCE_ID", value => config.BotInstance.Id = value);
+        SetIfPresent("TRADINGBOT_BOT_INSTANCE_NAME", value => config.BotInstance.Name = value);
         SetIfPresent("TRADINGBOT_MARKET_DATA_MODE", value => config.Kraken.MarketDataMode = value);
         SetIfPresent("TRADINGBOT_KRAKEN_BASE_URL", value => config.Kraken.BaseUrl = value);
         SetIfPresent("TRADINGBOT_KRAKEN_API_KEY", value => config.Kraken.ApiKey = value);
@@ -63,6 +66,11 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_TIMEFRAME_MINUTES", value => config.Trading.TimeframeMinutes = ParseInt(value, config.Trading.TimeframeMinutes));
         SetIfPresent("TRADINGBOT_MAX_ACTIVE_INSTRUMENTS", value => config.Trading.MaxActiveInstruments = ParseInt(value, config.Trading.MaxActiveInstruments));
         SetIfPresent("TRADINGBOT_LIVE_TRADING_ENABLED", value => config.Trading.LiveTradingEnabled = ParseBool(value, config.Trading.LiveTradingEnabled));
+        SetIfPresent("TRADINGBOT_STRONG_MOVER_BACKFILL_ENABLED", value => config.Trading.StrongMoverBackfillEnabled = ParseBool(value, config.Trading.StrongMoverBackfillEnabled));
+        SetIfPresent("TRADINGBOT_STRONG_MOVER_MIN_CHANGE_PERCENT", value => config.Trading.StrongMoverMinChangePercent = ParseDecimal(value, config.Trading.StrongMoverMinChangePercent));
+        SetIfPresent("TRADINGBOT_STRONG_MOVER_MAX_SPREAD_PERCENT", value => config.Trading.StrongMoverMaxSpreadPercent = ParseDecimal(value, config.Trading.StrongMoverMaxSpreadPercent));
+        SetIfPresent("TRADINGBOT_STRONG_MOVER_MIN_DAILY_VOLUME_EUR", value => config.Trading.StrongMoverMinDailyVolumeEur = ParseDecimal(value, config.Trading.StrongMoverMinDailyVolumeEur));
+        SetIfPresent("TRADINGBOT_STRONG_MOVER_MAX_BACKFILL_PAIRS", value => config.Trading.StrongMoverMaxBackfillPairs = ParseInt(value, config.Trading.StrongMoverMaxBackfillPairs));
         SetIfPresent("TRADINGBOT_MAX_ORDER_EUR", value => config.Risk.MaxOrderEur = ParseDecimal(value, config.Risk.MaxOrderEur));
         SetIfPresent("TRADINGBOT_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
         SetIfPresent("TRADINGBOT_STARTING_CASH_EUR", value => config.Portfolio.StartingCashEur = ParseDecimal(value, config.Portfolio.StartingCashEur));
@@ -124,10 +132,16 @@ internal sealed class BotConfiguration
     private void Normalize()
     {
         Worker.LoopIntervalSeconds = Math.Max(10, Worker.LoopIntervalSeconds);
+        BotInstance.Id = NormalizeBotInstanceId(BotInstance.Id);
+        BotInstance.Name = string.IsNullOrWhiteSpace(BotInstance.Name) ? BotInstance.Id : BotInstance.Name.Trim();
         Http.TimeoutSeconds = Math.Clamp(Http.TimeoutSeconds, 5, 120);
         Trading.TimeframeMinutes = Trading.TimeframeMinutes <= 0 ? 5 : Trading.TimeframeMinutes;
         Trading.MaxActiveInstruments = Math.Max(1, Trading.MaxActiveInstruments);
         Trading.TargetOrderEur = Trading.TargetOrderEur <= 0 ? 3m : Trading.TargetOrderEur;
+        Trading.StrongMoverMinChangePercent = Math.Max(0m, Trading.StrongMoverMinChangePercent);
+        Trading.StrongMoverMaxSpreadPercent = Math.Max(0m, Trading.StrongMoverMaxSpreadPercent);
+        Trading.StrongMoverMinDailyVolumeEur = Math.Max(0m, Trading.StrongMoverMinDailyVolumeEur);
+        Trading.StrongMoverMaxBackfillPairs = Math.Max(0, Trading.StrongMoverMaxBackfillPairs);
         Risk.MaxOrderEur = Risk.MaxOrderEur <= 0 ? 3m : Risk.MaxOrderEur;
         Risk.MaxDailyLossEur = Risk.MaxDailyLossEur <= 0 ? 10m : Risk.MaxDailyLossEur;
         Risk.MaxOpenPositions = Math.Max(1, Risk.MaxOpenPositions);
@@ -299,6 +313,22 @@ internal sealed class BotConfiguration
 
     private static bool ParseBool(string value, bool fallback) =>
         bool.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static string NormalizeBotInstanceId(string? value)
+    {
+        value = string.IsNullOrWhiteSpace(value) ? "default" : value.Trim().ToLowerInvariant();
+        var chars = value
+            .Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '-')
+            .ToArray();
+        var normalized = new string(chars).Trim('-', '_');
+        return string.IsNullOrWhiteSpace(normalized) ? "default" : normalized;
+    }
+}
+
+internal sealed class BotInstanceOptions
+{
+    public string Id { get; set; } = "default";
+    public string Name { get; set; } = "default";
 }
 
 internal sealed class WorkerOptions
@@ -342,6 +372,15 @@ internal sealed class TradingOptions
     public int TimeframeMinutes { get; set; } = 5;
     public int MaxActiveInstruments { get; set; } = 2;
     public decimal TargetOrderEur { get; set; } = 3m;
+
+    // Dry-run deterministic backfill for pairs the AI/volume watchlist did not
+    // select but whose current ticker is already moving cleanly. This only broadens
+    // virtual evaluation; live mode keeps the advisor-selected universe.
+    public bool StrongMoverBackfillEnabled { get; set; } = false;
+    public decimal StrongMoverMinChangePercent { get; set; } = 4m;
+    public decimal StrongMoverMaxSpreadPercent { get; set; } = 0.35m;
+    public decimal StrongMoverMinDailyVolumeEur { get; set; } = 100_000m;
+    public int StrongMoverMaxBackfillPairs { get; set; } = 5;
 }
 
 internal sealed class RiskOptions

@@ -891,6 +891,8 @@ internal sealed class DryRunAction
 internal sealed class DryRunCycleRecord
 {
     public required string CycleId { get; init; }
+    public required string BotInstanceId { get; init; }
+    public required string BotInstanceName { get; init; }
     public required DateTimeOffset Utc { get; init; }
     public required string MarketDataMode { get; init; }
     public required string AiProvider { get; init; }

@@ -76,7 +76,7 @@ static IDryRunPortfolioStore CreatePortfolioStore(BotConfiguration config)
 {
     if (config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString))
     {
-        return new PostgresDryRunPortfolioStore(config.Database.ConnectionString);
+        return new PostgresDryRunPortfolioStore(config.Database.ConnectionString, config.BotInstance.Id);
     }
 
     if (config.Database.Enabled)

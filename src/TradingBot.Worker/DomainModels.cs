@@ -147,4 +147,5 @@ internal sealed record MarketSnapshotRecord(
     decimal Ask,
     decimal Last,
     decimal Volume24h,
-    decimal ChangePercent);
+    decimal ChangePercent,
+    string BotInstanceId = "default");

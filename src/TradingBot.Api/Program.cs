@@ -19,7 +19,7 @@ app.MapGet("/api/health", () => Results.Ok(new
     utc = DateTimeOffset.UtcNow
 }));
 
-app.MapGet("/api/portfolio", async (CancellationToken cancellationToken) =>
+app.MapGet("/api/portfolio", async (string? botInstanceId, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -32,8 +32,9 @@ app.MapGet("/api/portfolio", async (CancellationToken cancellationToken) =>
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        var summary = await ReadSummary(connection, cancellationToken);
-        var positions = await ReadPositions(connection, cancellationToken);
+        var bot = Clean(botInstanceId);
+        var summary = await ReadSummary(connection, bot, cancellationToken);
+        var positions = await ReadPositions(connection, bot, cancellationToken);
 
         return Results.Ok(new PortfolioResponse(
             DateTimeOffset.UtcNow,
@@ -51,7 +52,7 @@ app.MapGet("/api/portfolio", async (CancellationToken cancellationToken) =>
     }
 });
 
-app.MapGet("/api/positions", async (CancellationToken cancellationToken) =>
+app.MapGet("/api/positions", async (string? botInstanceId, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -61,7 +62,7 @@ app.MapGet("/api/positions", async (CancellationToken cancellationToken) =>
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
-    return Results.Ok(await ReadPositions(connection, cancellationToken));
+    return Results.Ok(await ReadPositions(connection, Clean(botInstanceId), cancellationToken));
 });
 
 app.MapGet("/api/cycles", async (
@@ -71,6 +72,7 @@ app.MapGet("/api/cycles", async (
     string? workerCommit,
     string? strategyVersion,
     string? changeSet,
+    string? botInstanceId,
     bool? latestStrategy,
     CancellationToken cancellationToken) =>
 {
@@ -86,6 +88,7 @@ app.MapGet("/api/cycles", async (
         Clean(workerCommit),
         Clean(strategyVersion),
         Clean(changeSet),
+        Clean(botInstanceId),
         latestStrategy == true);
 
     await using var connection = new NpgsqlConnection(connectionString);
@@ -116,7 +119,7 @@ app.MapGet("/api/cycles/{cycleId}", async (string cycleId, CancellationToken can
     return cycle is null ? Results.NotFound() : Results.Ok(cycle);
 });
 
-app.MapGet("/api/trade-cycles", async (int? limit, int? offset, CancellationToken cancellationToken) =>
+app.MapGet("/api/trade-cycles", async (int? limit, int? offset, string? botInstanceId, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -131,7 +134,7 @@ app.MapGet("/api/trade-cycles", async (int? limit, int? offset, CancellationToke
     await connection.OpenAsync(cancellationToken);
     await EnsureCycleMetadataColumns(connection, cancellationToken);
 
-    var items = await ReadTradeCycles(connection, window.UtcStart, page, cancellationToken);
+    var items = await ReadTradeCycles(connection, window.UtcStart, Clean(botInstanceId), page, cancellationToken);
     return Results.Ok(new TradeCyclesResponse(
         items,
         page.Limit,
@@ -141,7 +144,7 @@ app.MapGet("/api/trade-cycles", async (int? limit, int? offset, CancellationToke
         window.LocalTimeZone));
 });
 
-app.MapGet("/api/decisions", async (string? cycleId, int? limit, int? offset, CancellationToken cancellationToken) =>
+app.MapGet("/api/decisions", async (string? cycleId, string? botInstanceId, int? limit, int? offset, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -153,7 +156,7 @@ app.MapGet("/api/decisions", async (string? cycleId, int? limit, int? offset, Ca
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
 
-    var items = await ReadDecisions(connection, cycleId, page, cancellationToken);
+    var items = await ReadDecisions(connection, Clean(cycleId), Clean(botInstanceId), page, cancellationToken);
     return Results.Ok(new PageResponse<DecisionSummaryDto>(
         items,
         page.Limit,
@@ -161,7 +164,7 @@ app.MapGet("/api/decisions", async (string? cycleId, int? limit, int? offset, Ca
         items.Count == page.Limit ? page.Offset + page.Limit : null));
 });
 
-app.MapGet("/api/entry-diagnostics", async (string? cycleId, int? limit, int? offset, CancellationToken cancellationToken) =>
+app.MapGet("/api/entry-diagnostics", async (string? cycleId, string? botInstanceId, int? limit, int? offset, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -173,7 +176,7 @@ app.MapGet("/api/entry-diagnostics", async (string? cycleId, int? limit, int? of
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
 
-    var items = await ReadEntryDiagnostics(connection, cycleId, page, cancellationToken);
+    var items = await ReadEntryDiagnostics(connection, Clean(cycleId), Clean(botInstanceId), page, cancellationToken);
     return Results.Ok(new PageResponse<CycleEntryDiagnosticsDto>(
         items,
         page.Limit,
@@ -184,6 +187,7 @@ app.MapGet("/api/entry-diagnostics", async (string? cycleId, int? limit, int? of
 app.MapGet("/api/market-snapshots", async (
     string? cycleId,
     string? pair,
+    string? botInstanceId,
     int? limit,
     int? offset,
     CancellationToken cancellationToken) =>
@@ -198,7 +202,7 @@ app.MapGet("/api/market-snapshots", async (
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
 
-    var items = await ReadMarketSnapshots(connection, cycleId, pair, page, cancellationToken);
+    var items = await ReadMarketSnapshots(connection, Clean(cycleId), Clean(pair), Clean(botInstanceId), page, cancellationToken);
     return Results.Ok(new PageResponse<MarketSnapshotDto>(
         items,
         page.Limit,
@@ -237,23 +241,25 @@ static TradeWindow LocalYesterdayStartUtc()
     return new TradeWindow(utcStart, localStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), timeZoneId);
 }
 
-static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection, CancellationToken cancellationToken)
+static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
 {
     await using var command = new NpgsqlCommand(
         """
         select
             updated_at,
-            cash_eur,
-            positions_value_eur,
-            total_value_eur,
-            open_positions,
-            daily_risk_date_utc,
-            daily_realized_pnl_eur
-        from portfolio_summary
+            (state_json ->> 'cashEur')::numeric as cash_eur,
+            (state_json ->> 'positionsValueEur')::numeric as positions_value_eur,
+            (state_json ->> 'totalValueEur')::numeric as total_value_eur,
+            jsonb_array_length(coalesce(state_json -> 'positions', '[]'::jsonb)) as open_positions,
+            state_json -> 'dailyRisk' ->> 'dateUtc' as daily_risk_date_utc,
+            (state_json -> 'dailyRisk' ->> 'realizedPnlEur')::numeric as daily_realized_pnl_eur
+        from portfolio_state
+        where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
         order by updated_at desc
         limit 1
         """,
         connection);
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
 
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
     if (!await reader.ReadAsync(cancellationToken))
@@ -271,26 +277,29 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
         reader.IsDBNull(6) ? null : reader.GetDecimal(6));
 }
 
-static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConnection connection, CancellationToken cancellationToken)
+static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
 {
     await using var command = new NpgsqlCommand(
         """
         select
-            pair,
-            side,
-            quantity,
-            entry_price,
-            entry_notional_eur,
-            last_price,
-            market_value_eur,
-            unrealized_pnl_eur,
-            unrealized_pnl_percent,
-            opened_at_utc,
-            last_action_at_utc
-        from portfolio_positions
+            position ->> 'pair' as pair,
+            position ->> 'side' as side,
+            (position ->> 'quantity')::numeric as quantity,
+            (position ->> 'entryPrice')::numeric as entry_price,
+            (position ->> 'entryNotionalEur')::numeric as entry_notional_eur,
+            (position ->> 'lastPrice')::numeric as last_price,
+            (position ->> 'marketValueEur')::numeric as market_value_eur,
+            (position ->> 'unrealizedPnlEur')::numeric as unrealized_pnl_eur,
+            (position ->> 'unrealizedPnlPercent')::numeric as unrealized_pnl_percent,
+            (position ->> 'openedAtUtc')::timestamptz as opened_at_utc,
+            (position ->> 'lastActionAtUtc')::timestamptz as last_action_at_utc
+        from portfolio_state state
+        cross join lateral jsonb_array_elements(coalesce(state.state_json -> 'positions', '[]'::jsonb)) as position
+        where (@bot_instance_id is null or state.bot_instance_id = @bot_instance_id)
         order by market_value_eur desc, pair
         """,
         connection);
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
 
     var positions = new List<PortfolioPositionDto>();
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -323,6 +332,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
         """
         select
             cycle_id,
+            bot_instance_id,
             utc,
             worker_version,
             worker_commit,
@@ -333,6 +343,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
             record_json::text
         from dry_run_cycles
         where (@worker_version is null or worker_version = @worker_version)
+          and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
           and (@worker_commit is null or worker_commit = @worker_commit)
           and (@strategy_version is null or strategy_version = @strategy_version)
           and (@change_set is null or change_set = @change_set)
@@ -353,6 +364,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
     command.Parameters.Add("worker_version", NpgsqlDbType.Text).Value = (object?)filters.WorkerVersion ?? DBNull.Value;
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)filters.BotInstanceId ?? DBNull.Value;
     command.Parameters.Add("worker_commit", NpgsqlDbType.Text).Value = (object?)filters.WorkerCommit ?? DBNull.Value;
     command.Parameters.Add("strategy_version", NpgsqlDbType.Text).Value = (object?)filters.StrategyVersion ?? DBNull.Value;
     command.Parameters.Add("change_set", NpgsqlDbType.Text).Value = (object?)filters.ChangeSet ?? DBNull.Value;
@@ -362,16 +374,17 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
     while (await reader.ReadAsync(cancellationToken))
     {
-        using var document = JsonDocument.Parse(reader.GetString(8));
+        using var document = JsonDocument.Parse(reader.GetString(9));
         cycles.Add(new CycleRawDto(
             reader.GetString(0),
-            reader.GetDateTime(1),
-            ReadNullableString(reader, 2),
+            reader.GetString(1),
+            reader.GetDateTime(2),
             ReadNullableString(reader, 3),
             ReadNullableString(reader, 4),
             ReadNullableString(reader, 5),
             ReadNullableString(reader, 6),
             ReadNullableString(reader, 7),
+            ReadNullableString(reader, 8),
             document.RootElement.Clone()));
     }
 
@@ -383,6 +396,7 @@ static async Task EnsureCycleMetadataColumns(NpgsqlConnection connection, Cancel
     await using var command = new NpgsqlCommand(
         """
         alter table dry_run_cycles
+            add column if not exists bot_instance_id text not null default 'default',
             add column if not exists worker_version text,
             add column if not exists worker_commit text,
             add column if not exists worker_build_utc text,
@@ -390,6 +404,14 @@ static async Task EnsureCycleMetadataColumns(NpgsqlConnection connection, Cancel
             add column if not exists strategy_version text,
             add column if not exists change_set text;
 
+        alter table portfolio_state
+            add column if not exists bot_instance_id text not null default 'default';
+
+        alter table market_snapshots
+            add column if not exists bot_instance_id text not null default 'default';
+
+        create index if not exists ix_dry_run_cycles_bot_instance_utc on dry_run_cycles (bot_instance_id, utc desc);
+        create index if not exists ix_market_snapshots_bot_instance_utc on market_snapshots (bot_instance_id, utc desc);
         create index if not exists ix_dry_run_cycles_worker_commit on dry_run_cycles (worker_commit, utc desc);
         create index if not exists ix_dry_run_cycles_strategy_version on dry_run_cycles (strategy_version, utc desc);
         create index if not exists ix_dry_run_cycles_change_set on dry_run_cycles (change_set, utc desc);
@@ -431,6 +453,7 @@ static async Task<CycleDetailDto?> ReadCycleDetail(
 static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
     NpgsqlConnection connection,
     DateTimeOffset utcStart,
+    string? botInstanceId,
     PageRequest page,
     CancellationToken cancellationToken)
 {
@@ -438,6 +461,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
         """
         select
             cycle_id,
+            bot_instance_id,
             utc,
             worker_version,
             worker_commit,
@@ -448,6 +472,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
             record_json::text
         from dry_run_cycles
         where utc >= @utc_start
+          and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
           and exists (
               select 1
               from dry_run_decisions decision
@@ -459,6 +484,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
         """,
         connection);
     command.Parameters.Add("utc_start", NpgsqlDbType.TimestampTz).Value = utcStart;
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
 
@@ -466,16 +492,17 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
     while (await reader.ReadAsync(cancellationToken))
     {
-        using var document = JsonDocument.Parse(reader.GetString(8));
+        using var document = JsonDocument.Parse(reader.GetString(9));
         cycles.Add(new CycleRawDto(
             reader.GetString(0),
-            reader.GetDateTime(1),
-            ReadNullableString(reader, 2),
+            reader.GetString(1),
+            reader.GetDateTime(2),
             ReadNullableString(reader, 3),
             ReadNullableString(reader, 4),
             ReadNullableString(reader, 5),
             ReadNullableString(reader, 6),
             ReadNullableString(reader, 7),
+            ReadNullableString(reader, 8),
             document.RootElement.Clone()));
     }
 
@@ -485,6 +512,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
 static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
     NpgsqlConnection connection,
     string? cycleId,
+    string? botInstanceId,
     PageRequest page,
     CancellationToken cancellationToken)
 {
@@ -492,6 +520,7 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
         """
         select
             cycle_id,
+            bot_instance_id,
             utc,
             pair,
             action,
@@ -526,11 +555,13 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
             early_entry_suggested_notional_eur
         from dry_run_decisions
         where (@cycle_id is null or cycle_id = @cycle_id)
+          and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
         order by utc desc, cycle_id desc, pair
         limit @limit offset @offset
         """,
         connection);
     command.Parameters.Add("cycle_id", NpgsqlDbType.Text).Value = (object?)cycleId ?? DBNull.Value;
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
 
@@ -540,15 +571,15 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
     {
         decisions.Add(new DecisionSummaryDto(
             reader.GetString(0),
-            reader.GetDateTime(1),
-            reader.GetString(2),
+            reader.GetString(1),
+            reader.GetDateTime(2),
             reader.GetString(3),
             reader.GetString(4),
-            reader.GetDecimal(5),
+            reader.GetString(5),
             reader.GetDecimal(6),
-            reader.GetBoolean(7),
-            reader.IsDBNull(8) ? null : reader.GetString(8),
-            GetNullableDecimal(reader, 9),
+            reader.GetDecimal(7),
+            reader.GetBoolean(8),
+            reader.IsDBNull(9) ? null : reader.GetString(9),
             GetNullableDecimal(reader, 10),
             GetNullableDecimal(reader, 11),
             GetNullableDecimal(reader, 12),
@@ -556,22 +587,23 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
             GetNullableDecimal(reader, 14),
             GetNullableDecimal(reader, 15),
             GetNullableDecimal(reader, 16),
-            reader.IsDBNull(17) ? string.Empty : reader.GetString(17),
-            reader.IsDBNull(18) ? null : reader.GetString(18),
+            GetNullableDecimal(reader, 17),
+            reader.IsDBNull(18) ? string.Empty : reader.GetString(18),
             reader.IsDBNull(19) ? null : reader.GetString(19),
             reader.IsDBNull(20) ? null : reader.GetString(20),
-            GetNullableDecimal(reader, 21),
-            reader.IsDBNull(22) ? null : reader.GetString(22),
-            GetNullableDecimal(reader, 23),
-            reader.IsDBNull(24) ? null : reader.GetBoolean(24),
+            reader.IsDBNull(21) ? null : reader.GetString(21),
+            GetNullableDecimal(reader, 22),
+            reader.IsDBNull(23) ? null : reader.GetString(23),
+            GetNullableDecimal(reader, 24),
             reader.IsDBNull(25) ? null : reader.GetBoolean(25),
             reader.IsDBNull(26) ? null : reader.GetBoolean(26),
-            GetNullableDecimal(reader, 27),
+            reader.IsDBNull(27) ? null : reader.GetBoolean(27),
             GetNullableDecimal(reader, 28),
-            reader.IsDBNull(29) ? null : reader.GetBoolean(29),
-            reader.IsDBNull(30) ? null : reader.GetString(30),
-            GetNullableDecimal(reader, 31),
-            GetNullableDecimal(reader, 32)));
+            GetNullableDecimal(reader, 29),
+            reader.IsDBNull(30) ? null : reader.GetBoolean(30),
+            reader.IsDBNull(31) ? null : reader.GetString(31),
+            GetNullableDecimal(reader, 32),
+            GetNullableDecimal(reader, 33)));
     }
 
     return decisions;
@@ -583,6 +615,7 @@ static decimal? GetNullableDecimal(NpgsqlDataReader reader, int ordinal) =>
 static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
     NpgsqlConnection connection,
     string? cycleId,
+    string? botInstanceId,
     PageRequest page,
     CancellationToken cancellationToken)
 {
@@ -590,6 +623,7 @@ static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
         """
         select
             cycle_id,
+            bot_instance_id,
             utc,
             snapshot_pairs_available,
             active_pairs_evaluated,
@@ -608,11 +642,13 @@ static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
             price_action_ready_count
         from dry_run_cycle_entry_diagnostics
         where (@cycle_id is null or cycle_id = @cycle_id)
+          and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
         order by utc desc, cycle_id desc
         limit @limit offset @offset
         """,
         connection);
     command.Parameters.Add("cycle_id", NpgsqlDbType.Text).Value = (object?)cycleId ?? DBNull.Value;
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
 
@@ -622,8 +658,8 @@ static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
     {
         items.Add(new CycleEntryDiagnosticsDto(
             reader.GetString(0),
-            reader.GetDateTime(1),
-            GetNullableInt(reader, 2),
+            reader.GetString(1),
+            reader.GetDateTime(2),
             GetNullableInt(reader, 3),
             GetNullableInt(reader, 4),
             GetNullableInt(reader, 5),
@@ -632,12 +668,13 @@ static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
             GetNullableInt(reader, 8),
             GetNullableInt(reader, 9),
             GetNullableInt(reader, 10),
-            reader.IsDBNull(11) ? null : reader.GetString(11),
+            GetNullableInt(reader, 11),
             reader.IsDBNull(12) ? null : reader.GetString(12),
-            ParseJsonOrNull(reader, 13),
+            reader.IsDBNull(13) ? null : reader.GetString(13),
             ParseJsonOrNull(reader, 14),
             ParseJsonOrNull(reader, 15),
-            GetNullableInt(reader, 16)));
+            ParseJsonOrNull(reader, 16),
+            GetNullableInt(reader, 17)));
     }
 
     return items;
@@ -653,6 +690,7 @@ static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
     NpgsqlConnection connection,
     string? cycleId,
     string? pair,
+    string? botInstanceId,
     PageRequest page,
     CancellationToken cancellationToken)
 {
@@ -660,6 +698,7 @@ static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
         """
         select
             cycle_id,
+            bot_instance_id,
             utc,
             pair,
             bid,
@@ -670,12 +709,14 @@ static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
         from market_snapshots
         where (@cycle_id is null or cycle_id = @cycle_id)
           and (@pair is null or pair = @pair)
+          and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
         order by utc desc, cycle_id desc, pair
         limit @limit offset @offset
         """,
         connection);
     command.Parameters.Add("cycle_id", NpgsqlDbType.Text).Value = (object?)cycleId ?? DBNull.Value;
     command.Parameters.Add("pair", NpgsqlDbType.Text).Value = (object?)NormalizePairFilter(pair) ?? DBNull.Value;
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
 
@@ -685,13 +726,14 @@ static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
     {
         snapshots.Add(new MarketSnapshotDto(
             reader.GetString(0),
-            reader.GetDateTime(1),
-            reader.GetString(2),
-            reader.GetDecimal(3),
+            reader.GetString(1),
+            reader.GetDateTime(2),
+            reader.GetString(3),
             reader.GetDecimal(4),
             reader.GetDecimal(5),
             reader.GetDecimal(6),
-            reader.GetDecimal(7)));
+            reader.GetDecimal(7),
+            reader.GetDecimal(8)));
     }
 
     return snapshots;
@@ -865,6 +907,7 @@ internal sealed record TradeCyclesResponse(
 
 internal sealed record CycleRawDto(
     string CycleId,
+    string BotInstanceId,
     DateTime Utc,
     string? WorkerVersion,
     string? WorkerCommit,
@@ -879,6 +922,7 @@ internal sealed record CycleQueryFilters(
     string? WorkerCommit,
     string? StrategyVersion,
     string? ChangeSet,
+    string? BotInstanceId,
     bool LatestStrategy);
 
 internal sealed record CycleDetailDto(
@@ -888,6 +932,7 @@ internal sealed record CycleDetailDto(
 
 internal sealed record DecisionSummaryDto(
     string CycleId,
+    string BotInstanceId,
     DateTime Utc,
     string Pair,
     string Action,
@@ -923,6 +968,7 @@ internal sealed record DecisionSummaryDto(
 
 internal sealed record CycleEntryDiagnosticsDto(
     string CycleId,
+    string BotInstanceId,
     DateTime Utc,
     int? SnapshotPairsAvailable,
     int? ActivePairsEvaluated,
@@ -942,6 +988,7 @@ internal sealed record CycleEntryDiagnosticsDto(
 
 internal sealed record MarketSnapshotDto(
     string CycleId,
+    string BotInstanceId,
     DateTime Utc,
     string Pair,
     decimal Bid,

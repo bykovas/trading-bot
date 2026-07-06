@@ -125,7 +125,7 @@ internal sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunP
     }
 }
 
-internal sealed class PostgresDryRunPortfolioStore(string connectionString) : IDryRunPortfolioStore
+internal sealed class PostgresDryRunPortfolioStore(string connectionString, string botInstanceId = "default") : IDryRunPortfolioStore
 {
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -134,9 +134,10 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
     };
 
     private bool _schemaReady;
+    private int StateId => StableStateId(botInstanceId);
 
-    public string StateDescription => "postgres:portfolio_state";
-    public string EventsDescription => "postgres:dry_run_cycles";
+    public string StateDescription => $"postgres:portfolio_state[{botInstanceId}]";
+    public string EventsDescription => $"postgres:dry_run_cycles[{botInstanceId}]";
 
     public PortfolioState? Load()
     {
@@ -144,8 +145,10 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
 
         using var connection = OpenConnection();
         using var command = new NpgsqlCommand(
-            "select state_json::text from portfolio_state where id = 1",
+            "select state_json::text from portfolio_state where id = @id and bot_instance_id = @bot_instance_id",
             connection);
+        command.Parameters.AddWithValue("id", StateId);
+        command.Parameters.AddWithValue("bot_instance_id", botInstanceId);
         var value = command.ExecuteScalar() as string;
         return string.IsNullOrWhiteSpace(value)
             ? null
@@ -159,13 +162,16 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
         using var connection = OpenConnection();
         using var command = new NpgsqlCommand(
             """
-            insert into portfolio_state (id, updated_at, state_json)
-            values (1, @updated_at, @state_json)
+            insert into portfolio_state (id, bot_instance_id, updated_at, state_json)
+            values (@id, @bot_instance_id, @updated_at, @state_json)
             on conflict (id) do update set
+                bot_instance_id = excluded.bot_instance_id,
                 updated_at = excluded.updated_at,
                 state_json = excluded.state_json
             """,
             connection);
+        command.Parameters.AddWithValue("id", StateId);
+        command.Parameters.AddWithValue("bot_instance_id", botInstanceId);
         command.Parameters.AddWithValue("updated_at", state.UpdatedAt.UtcDateTime);
         command.Parameters.Add("state_json", NpgsqlDbType.Jsonb).Value = JsonSerializer.Serialize(state, _jsonOptions);
         command.ExecuteNonQuery();
@@ -180,6 +186,7 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
             """
             insert into dry_run_cycles (
                 cycle_id,
+                bot_instance_id,
                 utc,
                 worker_version,
                 worker_commit,
@@ -190,6 +197,7 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
                 record_json)
             values (
                 @cycle_id,
+                @bot_instance_id,
                 @utc,
                 @worker_version,
                 @worker_commit,
@@ -200,6 +208,7 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
                 @record_json)
             on conflict (cycle_id) do update set
                 utc = excluded.utc,
+                bot_instance_id = excluded.bot_instance_id,
                 worker_version = excluded.worker_version,
                 worker_commit = excluded.worker_commit,
                 worker_build_utc = excluded.worker_build_utc,
@@ -210,6 +219,7 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
             """,
             connection);
         command.Parameters.AddWithValue("cycle_id", record.CycleId);
+        command.Parameters.AddWithValue("bot_instance_id", botInstanceId);
         command.Parameters.AddWithValue("utc", record.Utc.UtcDateTime);
         command.Parameters.AddWithValue("worker_version", record.Worker.Version);
         command.Parameters.AddWithValue("worker_commit", record.Worker.Commit);
@@ -233,11 +243,12 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
         // One batch COPY per cycle. Lean by design: no retention, no extra indexes.
         using var connection = OpenConnection();
         using var writer = connection.BeginBinaryImport(
-            "copy market_snapshots (cycle_id, utc, pair, bid, ask, last, volume24h, change_percent) from stdin (format binary)");
+            "copy market_snapshots (cycle_id, bot_instance_id, utc, pair, bid, ask, last, volume24h, change_percent) from stdin (format binary)");
         foreach (var snapshot in snapshots)
         {
             writer.StartRow();
             writer.Write(snapshot.CycleId, NpgsqlDbType.Text);
+            writer.Write(botInstanceId, NpgsqlDbType.Text);
             writer.Write(snapshot.Utc.UtcDateTime, NpgsqlDbType.TimestampTz);
             writer.Write(snapshot.Pair, NpgsqlDbType.Text);
             writer.Write(snapshot.Bid, NpgsqlDbType.Numeric);
@@ -257,13 +268,15 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
         using var connection = OpenConnection();
         using var command = new NpgsqlCommand(
             """
-            select cycle_id, utc, pair, bid, ask, last, volume24h, change_percent
+            select cycle_id, bot_instance_id, utc, pair, bid, ask, last, volume24h, change_percent
             from market_snapshots
             where utc >= @since
+              and bot_instance_id = @bot_instance_id
             order by utc
             """,
             connection);
         command.Parameters.AddWithValue("since", sinceUtc.UtcDateTime);
+        command.Parameters.AddWithValue("bot_instance_id", botInstanceId);
 
         var results = new List<MarketSnapshotRecord>();
         using var reader = command.ExecuteReader();
@@ -271,13 +284,14 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
         {
             results.Add(new MarketSnapshotRecord(
                 reader.GetString(0),
-                new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc)),
-                reader.GetString(2),
-                reader.GetDecimal(3),
+                new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(2), DateTimeKind.Utc)),
+                reader.GetString(3),
                 reader.GetDecimal(4),
                 reader.GetDecimal(5),
                 reader.GetDecimal(6),
-                reader.GetDecimal(7)));
+                reader.GetDecimal(7),
+                reader.GetDecimal(8),
+                reader.GetString(1)));
         }
 
         return results;
@@ -294,18 +308,36 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
         using var command = new NpgsqlCommand(
             """
             create table if not exists portfolio_state (
-                id integer primary key check (id = 1),
+                id integer primary key,
+                bot_instance_id text not null default 'default',
                 updated_at timestamptz not null,
                 state_json jsonb not null
             );
 
+            alter table portfolio_state
+                add column if not exists bot_instance_id text not null default 'default';
+
+            do $$
+            begin
+                if exists (
+                    select 1
+                    from pg_constraint
+                    where conrelid = 'portfolio_state'::regclass
+                      and conname = 'portfolio_state_id_check'
+                ) then
+                    alter table portfolio_state drop constraint portfolio_state_id_check;
+                end if;
+            end $$;
+
             create table if not exists dry_run_cycles (
                 cycle_id text primary key,
+                bot_instance_id text not null default 'default',
                 utc timestamptz not null,
                 record_json jsonb not null
             );
 
             alter table dry_run_cycles
+                add column if not exists bot_instance_id text not null default 'default',
                 add column if not exists worker_version text,
                 add column if not exists worker_commit text,
                 add column if not exists worker_build_utc text,
@@ -314,12 +346,14 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
                 add column if not exists change_set text;
 
             create index if not exists ix_dry_run_cycles_utc on dry_run_cycles (utc desc);
+            create index if not exists ix_dry_run_cycles_bot_instance_utc on dry_run_cycles (bot_instance_id, utc desc);
             create index if not exists ix_dry_run_cycles_worker_commit on dry_run_cycles (worker_commit, utc desc);
             create index if not exists ix_dry_run_cycles_strategy_version on dry_run_cycles (strategy_version, utc desc);
             create index if not exists ix_dry_run_cycles_change_set on dry_run_cycles (change_set, utc desc);
 
             create table if not exists market_snapshots (
                 cycle_id text not null,
+                bot_instance_id text not null default 'default',
                 utc timestamptz not null,
                 pair text not null,
                 bid numeric not null,
@@ -329,11 +363,22 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
                 change_percent numeric not null
             );
 
+            alter table market_snapshots
+                add column if not exists bot_instance_id text not null default 'default';
+
             create index if not exists ix_market_snapshots_cycle_id on market_snapshots (cycle_id);
+            create index if not exists ix_market_snapshots_bot_instance_utc on market_snapshots (bot_instance_id, utc desc);
+
+            drop view if exists dry_run_cycle_entry_diagnostics;
+            drop view if exists dry_run_decisions;
+            drop view if exists dry_run_cycle_summary;
+            drop view if exists portfolio_positions;
+            drop view if exists portfolio_summary;
 
             create or replace view portfolio_summary as
             select
                 id,
+                bot_instance_id,
                 updated_at,
                 (state_json ->> 'cashEur')::numeric as cash_eur,
                 (state_json ->> 'positionsValueEur')::numeric as positions_value_eur,
@@ -346,6 +391,7 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
             create or replace view portfolio_positions as
             select
                 state.id as portfolio_state_id,
+                state.bot_instance_id,
                 state.updated_at as portfolio_updated_at,
                 position ->> 'pair' as pair,
                 position ->> 'side' as side,
@@ -364,6 +410,7 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
             create or replace view dry_run_cycle_summary as
             select
                 cycle.cycle_id,
+                cycle.bot_instance_id,
                 cycle.utc,
                 cycle.record_json ->> 'marketDataMode' as market_data_mode,
                 cycle.record_json ->> 'aiProvider' as ai_provider,
@@ -393,6 +440,7 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
             create or replace view dry_run_decisions as
             select
                 cycle.cycle_id,
+                cycle.bot_instance_id,
                 cycle.utc,
                 decision ->> 'pair' as pair,
                 decision -> 'dryRunAction' ->> 'action' as action,
@@ -433,6 +481,7 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
             create or replace view dry_run_cycle_entry_diagnostics as
             select
                 cycle.cycle_id,
+                cycle.bot_instance_id,
                 cycle.utc,
                 (cycle.record_json -> 'entryDiagnostics' ->> 'snapshotPairsAvailable')::int as snapshot_pairs_available,
                 (cycle.record_json -> 'entryDiagnostics' ->> 'activePairsEvaluated')::int as active_pairs_evaluated,
@@ -463,5 +512,24 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString) : ID
         var connection = new NpgsqlConnection(connectionString);
         connection.Open();
         return connection;
+    }
+
+    private static int StableStateId(string instanceId)
+    {
+        if (instanceId.Equals("default", StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        unchecked
+        {
+            var hash = 23;
+            foreach (var ch in instanceId.ToLowerInvariant())
+            {
+                hash = hash * 31 + ch;
+            }
+
+            return Math.Abs(hash == int.MinValue ? 2 : hash) + 2;
+        }
     }
 }
