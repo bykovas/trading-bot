@@ -116,10 +116,11 @@ internal sealed class FuturesDecisionWorker(
             else
             {
                 var desired = strategy.DecideEntry(signal);
-                if (desired != FuturesDesiredExposure.Flat && newEntriesThisCycle > 0)
+                var remainingSlots = Math.Max(0, config.Futures.MaxPositions - state.Positions.Count);
+                if (desired != FuturesDesiredExposure.Flat && newEntriesThisCycle >= remainingSlots)
                 {
                     desired = FuturesDesiredExposure.Flat;
-                    riskReasons = new[] { "entry skipped: one new futures position per cycle" };
+                    riskReasons = new[] { $"entry skipped: futures position slots exhausted ({config.Futures.MaxPositions} max)" };
                     riskApproved = false;
                 }
                 else
@@ -128,7 +129,8 @@ internal sealed class FuturesDecisionWorker(
                         state, desired, markPrice,
                         config.Futures.TargetNotionalEur,
                         config.Futures.DefaultLeverage,
-                        portfolio.UsedMarginEur(state));
+                        portfolio.UsedMarginEur(state),
+                        marketState.Quote?.FundingRatePercent);
                     riskReasons = evaluation.Reasons;
                     riskApproved = evaluation.Approved;
                     if (!evaluation.Approved)
@@ -163,7 +165,7 @@ internal sealed class FuturesDecisionWorker(
             Decisions = decisions,
             PortfolioBefore = portfolioBefore,
             PortfolioAfter = state.Clone(),
-            EntryDiagnostics = null
+            EntryDiagnostics = BuildEntryDiagnostics(lightStates, active, fullStates, decisions)
         });
         Console.WriteLine($"futures cycle done: decisions={decisions.Count} cash={state.CashEur:0.####} total={state.TotalValueEur:0.####} positions={state.Positions.Count}");
     }
@@ -187,12 +189,110 @@ internal sealed class FuturesDecisionWorker(
         RiskReasons = riskReasons,
         Contributions = signal.Contributions,
         DryRunAction = fill.Action,
-        SpreadPercent = 0m,
+        SpreadPercent = SpreadPercentOf(marketState),
         HasBullishStructure = signal.HasBullishStructure,
         EmaFullyConfirmed = signal.EmaFullyConfirmed,
         BullishEmaGapPercent = signal.BullishEmaGapPercent,
         EmaGapVelocityPercent = signal.EmaGapVelocityPercent
     };
+
+    private CycleEntryDiagnostics BuildEntryDiagnostics(
+        IReadOnlyList<InstrumentMarketState> lightStates,
+        IReadOnlyList<InstrumentOptions> active,
+        IReadOnlyList<InstrumentMarketState> fullStates,
+        IReadOnlyList<DryRunDecisionRecord> decisions)
+    {
+        var activePairs = active.Select(instrument => instrument.Pair).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var decisionByPair = decisions.ToDictionary(decision => decision.Pair, StringComparer.OrdinalIgnoreCase);
+        var entryDecisions = decisions
+            .Where(decision => decision.DryRunAction.Action is "WOULD_OPEN_LONG" or "WOULD_OPEN_SHORT" or "NO_ORDER")
+            .ToList();
+        var rejectionCounts = decisions
+            .Where(decision => !decision.RiskApproved || decision.DryRunAction.Action == "NO_ORDER")
+            .Select(decision => decision.RiskReasons.FirstOrDefault() ?? decision.DryRunAction.Reason)
+            .Where(reason => !string.IsNullOrWhiteSpace(reason))
+            .GroupBy(reason => reason)
+            .ToDictionary(group => group.Key, group => group.Count());
+
+        var topCandidates = fullStates
+            .Where(state => decisionByPair.ContainsKey(state.Instrument.Pair))
+            .OrderByDescending(state => decisionByPair[state.Instrument.Pair].Score)
+            .Take(10)
+            .Select(state =>
+            {
+                var decision = decisionByPair[state.Instrument.Pair];
+                var action = decision.DryRunAction;
+                var riskRejected = !decision.RiskApproved;
+                return new CandidateDiagnostic(
+                    state.Instrument.Pair,
+                    decision.Score,
+                    decision.DesiredPosition,
+                    decision.SpreadPercent,
+                    decision.Price,
+                    state.BestBid,
+                    state.BestAsk,
+                    decision.HasBullishStructure,
+                    decision.EmaFullyConfirmed,
+                    decision.BullishEmaGapPercent,
+                    decision.EmaGapVelocityPercent,
+                    false,
+                    null,
+                    decision.Score,
+                    action.TargetNotionalEur,
+                    "UNKNOWN",
+                    null,
+                    "NOT_USED",
+                    0,
+                    0,
+                    null,
+                    null,
+                    string.IsNullOrWhiteSpace(state.DataWarning),
+                    decision.RiskApproved,
+                    riskRejected ? decision.RiskReasons : Array.Empty<string>(),
+                    riskRejected ? "REJECT_FUTURES_RISK" : action.Action == "NO_ORDER" ? "REJECT_NO_FUTURES_SIGNAL" : null,
+                    false);
+            })
+            .ToList();
+
+        var excludedPairs = lightStates
+            .Where(state => !activePairs.Contains(state.Instrument.Pair))
+            .Select(state => new ExcludedPairDiagnostic(
+                state.Instrument.Pair,
+                "not selected for futures full-data evaluation",
+                state.LastPrice,
+                state.ChangePercent,
+                Est24hVolumeEur: state.LastVolume,
+                SpreadPercent: SpreadPercentOf(state)))
+            .ToList();
+
+        var chosen = decisions.FirstOrDefault(decision => decision.DryRunAction.Action is "WOULD_OPEN_LONG" or "WOULD_OPEN_SHORT")?.Pair;
+        var noTradeReason = chosen is not null
+            ? null
+            : rejectionCounts.Count == 0 ? "NO_FUTURES_SIGNAL" : rejectionCounts.OrderByDescending(item => item.Value).First().Key;
+
+        return new CycleEntryDiagnostics(
+            lightStates.Count,
+            fullStates.Count,
+            entryDecisions.Count,
+            PriceActionReadyCount: 0,
+            ScoreAtLeast075: decisions.Count(decision => decision.Score >= 0.75m),
+            ScoreAtLeast080: decisions.Count(decision => decision.Score >= 0.80m),
+            ScoreAtLeast085: decisions.Count(decision => decision.Score >= 0.85m),
+            ScoreAtLeast090: decisions.Count(decision => decision.Score >= 0.90m),
+            HardFilterPassCount: decisions.Count(decision => decision.RiskApproved),
+            EligibleEntryCandidates: decisions.Count(decision => decision.DryRunAction.Action is "WOULD_OPEN_LONG" or "WOULD_OPEN_SHORT"),
+            ChosenPair: chosen,
+            NoTradeReason: noTradeReason,
+            RejectionCounts: rejectionCounts,
+            TopCandidates: topCandidates,
+            ExcludedPairs: excludedPairs);
+    }
+
+    private static decimal SpreadPercentOf(InstrumentMarketState marketState)
+    {
+        var mid = (marketState.BestBid + marketState.BestAsk) / 2m;
+        return mid <= 0m ? 0m : decimal.Round((marketState.BestAsk - marketState.BestBid) / mid * 100m, 4);
+    }
 
     private void PersistMarketSnapshots(string cycleId, DateTimeOffset utc, IReadOnlyList<InstrumentMarketState> lightStates)
     {

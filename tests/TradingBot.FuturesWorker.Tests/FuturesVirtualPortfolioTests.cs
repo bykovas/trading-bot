@@ -12,7 +12,7 @@ public sealed class FuturesVirtualPortfolioTests
         Futures = new FuturesOptions { AllowShorts = allowShorts, MaxLeverage = 2m, DefaultLeverage = 2m },
         Portfolio = new FuturesPortfolioOptions { StartingCashEur = 100m },
         DryRun = new DryRunOptions { TakerFeeBps = 0m, SlippageBps = 0m },
-        TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 3m, StopLossPercent = 2.5m }
+        TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 3m, StopLossPercent = 2m }
     };
 
     private sealed class NullStore : IDryRunPortfolioStore
@@ -43,7 +43,7 @@ public sealed class FuturesVirtualPortfolioTests
         Assert.Equal("LONG", position.Side);
         Assert.Equal(10m, position.InitialMarginEur);           // 20 notional / 2x
         Assert.Equal(90m, state.CashEur);                       // 100 - 10 margin (no fee)
-        Assert.Equal(97.5m, position.StopLossPrice);            // -2.5%
+        Assert.Equal(98m, position.StopLossPrice);              // -2%
         Assert.Equal(103m, position.TakeProfitPrice);           // +3%
         Assert.NotNull(position.LiquidationPrice);
         Assert.True(position.LiquidationPrice < 100m);

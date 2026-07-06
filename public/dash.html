@@ -472,14 +472,20 @@
               <th class="num">Qty</th>
               <th class="num">Entry</th>
               <th class="num">Last</th>
+              <th class="num">Mark</th>
+              <th class="num">Lev</th>
+              <th class="num">Margin</th>
+              <th class="num">Liq</th>
+              <th class="num">Liq dist</th>
               <th class="num">SL</th>
               <th class="num">TP</th>
               <th class="num">ATR</th>
+              <th>TP/SL</th>
               <th class="num">Value</th>
             </tr>
           </thead>
           <tbody id="positions-body">
-            <tr><td class="empty" colspan="11">Loading positions</td></tr>
+            <tr><td class="empty" colspan="16">Loading positions</td></tr>
           </tbody>
         </table>
       </div>
@@ -610,7 +616,7 @@
 
     function renderPositions(positions) {
       if (!positions || positions.length === 0) {
-        els.positionsBody.innerHTML = '<tr><td class="empty" colspan="11">No open positions</td></tr>';
+        els.positionsBody.innerHTML = '<tr><td class="empty" colspan="16">No open positions</td></tr>';
         return;
       }
 
@@ -627,9 +633,15 @@
             <td class="num">${number(position.quantity)}</td>
             <td class="num">${money(position.entryPrice)}</td>
             <td class="num">${money(position.lastPrice)}</td>
+            <td class="num">${money(position.markPrice)}</td>
+            <td class="num">${position.leverage ? `${number(position.leverage)}x` : "--"}</td>
+            <td class="num">${money(position.initialMarginEur)}</td>
+            <td class="num">${money(position.liquidationPrice)}</td>
+            <td class="num ${pnlClass(position.liquidationDistancePercent)}">${position.liquidationDistancePercent != null ? `${number(position.liquidationDistancePercent)}%` : "--"}</td>
             <td class="num">${price(position.stopLossPrice)}</td>
             <td class="num">${price(position.takeProfitPrice)}</td>
             <td class="num" title="${position.exitMode || ""}">${price(position.entryAtr)}</td>
+            <td>${[position.tpOrderState, position.slOrderState].filter(Boolean).join(" / ") || "--"}</td>
             <td class="num">${money(position.marketValueEur)}</td>
           </tr>
         `;

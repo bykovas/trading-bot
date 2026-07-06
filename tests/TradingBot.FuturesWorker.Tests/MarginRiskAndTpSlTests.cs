@@ -13,7 +13,7 @@ public sealed class MarginRiskAndTpSlTests
             MinLiquidationDistancePercent = 15m,
             MaxAccountMarginUtilizationPercent = 50m
         },
-        TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 3m, StopLossPercent = 2.5m, TriggerSource = "mark" }
+        TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 3m, StopLossPercent = 2m, TriggerSource = "mark" }
     };
 
     private static PortfolioState State(decimal cash = 100m) => new() { CashEur = cash };
@@ -54,6 +54,25 @@ public sealed class MarginRiskAndTpSlTests
     }
 
     [Fact]
+    public void Max_positions_allows_entries_until_configured_cap()
+    {
+        var config = Config();
+        config.Futures.MaxPositions = 3;
+        var risk = new MarginRiskManager(config);
+        var state = State();
+        state.Positions.Add(new PortfolioPosition { Pair = "ETH/USD", Side = "LONG", InitialMarginEur = 10m });
+        state.Positions.Add(new PortfolioPosition { Pair = "SOL/USD", Side = "LONG", InitialMarginEur = 10m });
+
+        var third = risk.EvaluateEntry(state, FuturesDesiredExposure.Long, 100m, 20m, 2m, usedMarginEur: 20m);
+        Assert.True(third.Approved);
+
+        state.Positions.Add(new PortfolioPosition { Pair = "XBT/USD", Side = "LONG", InitialMarginEur = 10m });
+        var fourth = risk.EvaluateEntry(state, FuturesDesiredExposure.Long, 100m, 20m, 2m, usedMarginEur: 30m);
+        Assert.False(fourth.Approved);
+        Assert.Contains(fourth.Reasons, reason => reason.Contains("max futures positions 3"));
+    }
+
+    [Fact]
     public void Shorts_disabled_blocks_short_entry()
     {
         var config = Config();
@@ -75,6 +94,17 @@ public sealed class MarginRiskAndTpSlTests
     }
 
     [Fact]
+    public void Funding_gate_blocks_when_rate_is_unavailable()
+    {
+        var config = Config();
+        config.Funding.MaxAbsFundingRatePercentForEntry = 0.05m;
+        var risk = new MarginRiskManager(config);
+        var evaluation = risk.EvaluateEntry(State(), FuturesDesiredExposure.Long, 100m, 20m, 2m, 0m);
+        Assert.False(evaluation.Approved);
+        Assert.Contains(evaluation.Reasons, reason => reason.Contains("funding rate unavailable"));
+    }
+
+    [Fact]
     public void TpSl_triggers_are_reduce_only_and_cancel_the_sibling_order()
     {
         var orchestrator = new TpSlOrchestrator(Config());
@@ -83,7 +113,7 @@ public sealed class MarginRiskAndTpSlTests
             Pair = "XBT/EUR",
             Side = "LONG",
             EntryPrice = 100m,
-            StopLossPrice = 97.5m,
+            StopLossPrice = 98m,
             TakeProfitPrice = 103m,
             TpOrderState = "SIMULATED_OPEN",
             SlOrderState = "SIMULATED_OPEN"
@@ -111,7 +141,7 @@ public sealed class MarginRiskAndTpSlTests
             Pair = "XBT/EUR",
             Side = "SHORT",
             EntryPrice = 100m,
-            StopLossPrice = 102.5m,
+            StopLossPrice = 102m,
             TakeProfitPrice = 97m,
             TpOrderState = "SIMULATED_OPEN",
             SlOrderState = "SIMULATED_OPEN"

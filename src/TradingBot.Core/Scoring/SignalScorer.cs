@@ -16,9 +16,12 @@ public static class SignalScorer
         var contributions = new List<SignalContribution>();
         decimal score = 0.30m;
         var allowsLong = false;
+        var bearishEmaConfirmed = false;
         var hasBullishStructure = false;
+        var hasBearishStructure = false;
         var emaFullyConfirmed = false;
         decimal? bullishEmaGapPercent = null;
+        decimal? bearishEmaGapPercent = null;
         decimal? emaGapVelocityPercent = CalculateEmaGapVelocityPercent(marketState.Candles, strategy);
 
         if (indicators.FastEma is not null && indicators.SlowEma is not null)
@@ -55,8 +58,11 @@ public static class SignalScorer
             }
             else if (indicators.FastEma < indicators.SlowEma)
             {
+                bearishEmaGapPercent = emaGapPercent.Value;
+                hasBearishStructure = HasEarlyBullishStructure(emaGapPercent.Value, strategy.MinimumEmaGapPercent);
                 if (EmaGapPassesFilter(emaGapPercent.Value, strategy.MinimumEmaGapPercent))
                 {
+                    bearishEmaConfirmed = true;
                     score -= 0.25m;
                     contributions.Add(new SignalContribution("EMA", -0.25m, $"fast EMA is below slow EMA by {emaGapPercent.Value:0.###}%"));
                 }
@@ -75,6 +81,7 @@ public static class SignalScorer
             contributions.Add(new SignalContribution("EMA", 0m, "not enough candles for EMA"));
         }
 
+        var shortScore = bearishEmaConfirmed ? 0.60m : 0.30m;
         if (indicators.Rsi is { } rsi)
         {
             if (rsi >= strategy.RsiIdealMin && rsi <= strategy.RsiIdealMax)
@@ -95,7 +102,16 @@ public static class SignalScorer
             else if (rsi > 72m)
             {
                 score -= 0.25m;
+                if (bearishEmaConfirmed)
+                {
+                    shortScore += 0.15m;
+                }
+
                 contributions.Add(new SignalContribution("RSI", -0.25m, $"RSI {rsi:0.##} is overheated"));
+            }
+            else if (bearishEmaConfirmed && rsi > strategy.RsiIdealMax)
+            {
+                shortScore += 0.05m;
             }
             else
             {
@@ -110,6 +126,11 @@ public static class SignalScorer
         if (marketState.VolatilityPercent <= 1.2m)
         {
             score += 0.05m;
+            if (bearishEmaConfirmed)
+            {
+                shortScore += 0.05m;
+            }
+
             contributions.Add(new SignalContribution("Volatility", 0.05m, $"short-term volatility {marketState.VolatilityPercent:0.##}% is controlled"));
         }
         else
@@ -123,6 +144,7 @@ public static class SignalScorer
         // lands at 0.80 and must earn at least one confirmation to reach the 0.85 entry
         // bar, while a genuinely strong setup (momentum + volume + trend) can reach ~1.00.
         var volumeConfirmed = false;
+        var shortVolumeConfirmed = false;
         if (allowsLong || (includeEarlyEntryDiagnostics && hasBullishStructure))
         {
             if (TryMomentumPercent(marketState.Candles, strategy.MomentumLookbackBars, out var momentumPercent)
@@ -180,6 +202,41 @@ public static class SignalScorer
             }
         }
 
+        if (bearishEmaConfirmed)
+        {
+            if (TryMomentumPercent(marketState.Candles, strategy.MomentumLookbackBars, out var momentumPercent)
+                && momentumPercent <= -strategy.MomentumMinPercent)
+            {
+                shortScore += 0.10m;
+                contributions.Add(new SignalContribution("ShortMomentum", 0.10m, $"price down {Math.Abs(momentumPercent):0.##}% over last {strategy.MomentumLookbackBars} candles"));
+            }
+            else
+            {
+                contributions.Add(new SignalContribution("ShortMomentum", 0m, $"no confirmed downside momentum over last {strategy.MomentumLookbackBars} candles"));
+            }
+
+            shortVolumeConfirmed = VolumeConfirmed(marketState.Candles, strategy.VolumeConfirmationMultiple);
+            if (shortVolumeConfirmed)
+            {
+                shortScore += 0.05m;
+                contributions.Add(new SignalContribution("ShortVolume", 0.05m, $"last candle volume above {strategy.VolumeConfirmationMultiple:0.##}x recent average"));
+            }
+            else
+            {
+                contributions.Add(new SignalContribution("ShortVolume", 0m, "no downside volume confirmation"));
+            }
+
+            if (TrendBelow(marketState.Candles, strategy.TrendFilterMaPeriod))
+            {
+                shortScore += 0.05m;
+                contributions.Add(new SignalContribution("ShortTrend", 0.05m, $"price below {strategy.TrendFilterMaPeriod}-period trend filter"));
+            }
+            else
+            {
+                contributions.Add(new SignalContribution("ShortTrend", 0m, $"price not below {strategy.TrendFilterMaPeriod}-period trend filter"));
+            }
+        }
+
         if (emaGapVelocityPercent is { } velocity)
         {
             contributions.Add(new SignalContribution(
@@ -189,7 +246,9 @@ public static class SignalScorer
         }
 
         score = Math.Clamp(score, 0m, 1m);
+        shortScore = Math.Clamp(shortScore, 0m, 1m);
         var uncappedScore = decimal.Round(score, 2);
+        var roundedShortScore = decimal.Round(shortScore, 2);
 
         // Volume confirmation is not optional for high-confidence entries: without it
         // the final score is capped below the firm entry bar, so a lagging-indicator
@@ -203,7 +262,18 @@ public static class SignalScorer
                 $"score capped at {strategy.MissingVolumeScoreCap:0.##} (from {uncappedScore:0.##}) because volume confirmation is missing"));
         }
 
-        var direction = score >= 0.55m ? "LONG_BIAS" : "NEUTRAL";
+        var allowsShort = bearishEmaConfirmed
+            && roundedShortScore >= strategy.MinimumLongScore
+            && (shortVolumeConfirmed || HasPositiveContribution(contributions, "ShortMomentum") || HasPositiveContribution(contributions, "ShortTrend"));
+        if (bearishEmaConfirmed)
+        {
+            contributions.Add(new SignalContribution(
+                "ShortScore",
+                0m,
+                $"short diagnostic score {roundedShortScore:0.##}; requires bearish EMA plus downside confirmation"));
+        }
+
+        var direction = allowsShort ? "SHORT_BIAS" : score >= 0.55m ? "LONG_BIAS" : "NEUTRAL";
         return new TechnicalSignal(
             decimal.Round(score, 2),
             direction,
@@ -214,7 +284,10 @@ public static class SignalScorer
             emaGapVelocityPercent,
             contributions,
             uncappedScore,
-            volumeConfirmed);
+            volumeConfirmed,
+            allowsShort,
+            hasBearishStructure,
+            bearishEmaGapPercent);
     }
 
     private static bool HasEarlyBullishStructure(decimal emaGapPercent, decimal minimumEmaGapPercent)
@@ -297,6 +370,10 @@ public static class SignalScorer
         signal.Contributions.Any(contribution =>
             contribution.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && contribution.Value > 0m);
 
+    private static bool HasPositiveContribution(IReadOnlyList<SignalContribution> contributions, string name) =>
+        contributions.Any(contribution =>
+            contribution.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && contribution.Value > 0m);
+
     public static decimal? CalculateEmaGapPercent(decimal fastEma, decimal slowEma) =>
         slowEma == 0m ? null : Math.Abs(fastEma - slowEma) / slowEma * 100m;
 
@@ -348,8 +425,21 @@ public static class SignalScorer
         return candles[^1].Close > sma;
     }
 
+    private static bool TrendBelow(IReadOnlyList<Candle> candles, int period)
+    {
+        if (period < 2 || candles.Count < period)
+        {
+            return false;
+        }
+
+        var sma = candles.Skip(candles.Count - period).Take(period).Average(candle => candle.Close);
+        return candles[^1].Close < sma;
+    }
+
     public static SignalIntent IntentOf(TechnicalSignal signal, StrategyOptions strategy) =>
         signal.AllowsLong && signal.Score >= strategy.MinimumLongScore
             ? SignalIntent.LongCandidate
-            : SignalIntent.None;
+            : signal.AllowsShort
+                ? SignalIntent.ShortCandidate
+                : SignalIntent.None;
 }

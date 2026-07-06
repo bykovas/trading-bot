@@ -328,7 +328,15 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             position ->> 'exitMode' as exit_mode,
             (position ->> 'entryAtr')::numeric as entry_atr,
             (position ->> 'stopLossPrice')::numeric as stop_loss_price,
-            (position ->> 'takeProfitPrice')::numeric as take_profit_price
+            (position ->> 'takeProfitPrice')::numeric as take_profit_price,
+            (position ->> 'leverage')::numeric as leverage,
+            (position ->> 'initialMarginEur')::numeric as initial_margin_eur,
+            (position ->> 'markPrice')::numeric as mark_price,
+            (position ->> 'liquidationPrice')::numeric as liquidation_price,
+            (position ->> 'liquidationDistancePercent')::numeric as liquidation_distance_percent,
+            (position ->> 'fundingPaidEur')::numeric as funding_paid_eur,
+            position ->> 'tpOrderState' as tp_order_state,
+            position ->> 'slOrderState' as sl_order_state
         from portfolio_state state
         cross join lateral jsonb_array_elements(coalesce(state.state_json -> 'positions', '[]'::jsonb)) as position
         where (@bot_instance_id is null or state.bot_instance_id = @bot_instance_id)
@@ -356,7 +364,15 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             reader.IsDBNull(11) ? null : reader.GetString(11),
             GetNullableDecimal(reader, 12),
             GetNullableDecimal(reader, 13),
-            GetNullableDecimal(reader, 14)));
+            GetNullableDecimal(reader, 14),
+            GetNullableDecimal(reader, 15),
+            GetNullableDecimal(reader, 16),
+            GetNullableDecimal(reader, 17),
+            GetNullableDecimal(reader, 18),
+            GetNullableDecimal(reader, 19),
+            GetNullableDecimal(reader, 20),
+            reader.IsDBNull(21) ? null : reader.GetString(21),
+            reader.IsDBNull(22) ? null : reader.GetString(22)));
     }
 
     return positions;
@@ -592,7 +608,11 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
             early_entry_eligible,
             early_entry_reason,
             early_entry_diagnostic_score,
-            early_entry_suggested_notional_eur
+            early_entry_suggested_notional_eur,
+            side,
+            reduce_only,
+            leverage,
+            exit_trigger_source
         from dry_run_decisions
         where (@cycle_id is null or cycle_id = @cycle_id)
           and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
@@ -643,7 +663,11 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
             reader.IsDBNull(30) ? null : reader.GetBoolean(30),
             reader.IsDBNull(31) ? null : reader.GetString(31),
             GetNullableDecimal(reader, 32),
-            GetNullableDecimal(reader, 33)));
+            GetNullableDecimal(reader, 33),
+            reader.IsDBNull(34) ? null : reader.GetString(34),
+            reader.IsDBNull(35) ? null : reader.GetBoolean(35),
+            GetNullableDecimal(reader, 36),
+            reader.IsDBNull(37) ? null : reader.GetString(37)));
     }
 
     return decisions;
@@ -917,7 +941,15 @@ internal sealed record PortfolioPositionDto(
     string? ExitMode,
     decimal? EntryAtr,
     decimal? StopLossPrice,
-    decimal? TakeProfitPrice);
+    decimal? TakeProfitPrice,
+    decimal? Leverage,
+    decimal? InitialMarginEur,
+    decimal? MarkPrice,
+    decimal? LiquidationPrice,
+    decimal? LiquidationDistancePercent,
+    decimal? FundingPaidEur,
+    string? TpOrderState,
+    string? SlOrderState);
 
 internal sealed record PageRequest(int Limit, int Offset)
 {
@@ -1008,7 +1040,11 @@ internal sealed record DecisionSummaryDto(
     bool? EarlyEntryEligible,
     string? EarlyEntryReason,
     decimal? EarlyEntryDiagnosticScore,
-    decimal? EarlyEntrySuggestedNotionalEur);
+    decimal? EarlyEntrySuggestedNotionalEur,
+    string? Side,
+    bool? ReduceOnly,
+    decimal? Leverage,
+    string? ExitTriggerSource);
 
 internal sealed record CycleEntryDiagnosticsDto(
     string CycleId,

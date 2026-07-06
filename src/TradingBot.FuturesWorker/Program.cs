@@ -15,8 +15,8 @@ using var httpClient = new HttpClient
     Timeout = TimeSpan.FromSeconds(config.Http.TimeoutSeconds)
 };
 
-// Only "kraken-futures" selects the (stubbed) venue source; anything else runs
-// on deterministic sample data so the dry-run loop works end-to-end today.
+// Only "kraken-futures" selects the public venue source; anything else runs on
+// deterministic sample data so the dry-run loop works end-to-end without network.
 IMarketDataSource marketDataSource = config.Kraken.MarketDataMode.Equals("kraken-futures", StringComparison.OrdinalIgnoreCase)
     ? new KrakenFuturesMarketDataSource(httpClient, config.Kraken)
     : new SampleMarketDataSource();

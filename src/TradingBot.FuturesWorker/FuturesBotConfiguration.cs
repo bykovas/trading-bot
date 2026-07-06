@@ -86,12 +86,12 @@ internal sealed class FuturesBotConfiguration
         Trading.MaxActiveInstruments = Math.Max(1, Trading.MaxActiveInstruments);
         Portfolio.StartingCashEur = Portfolio.StartingCashEur <= 0m ? 100m : Portfolio.StartingCashEur;
 
-        // Blueprint safety defaults: dry-run only, small leverage, no flip, one
-        // position until diagnostics prove behavior. Normalize clamps rather than
-        // trusts config so a typo cannot widen the risk envelope.
+        // Blueprint safety defaults: dry-run only, small leverage, no flip, and a
+        // small portfolio cap. Normalize clamps rather than trusts config so a typo
+        // cannot widen the risk envelope.
         Futures.MaxLeverage = Math.Clamp(Futures.MaxLeverage <= 0m ? 2m : Futures.MaxLeverage, 1m, 2m);
         Futures.DefaultLeverage = Math.Clamp(Futures.DefaultLeverage <= 0m ? 1m : Futures.DefaultLeverage, 1m, Futures.MaxLeverage);
-        Futures.MaxPositions = Math.Clamp(Futures.MaxPositions <= 0 ? 1 : Futures.MaxPositions, 1, 1);
+        Futures.MaxPositions = Math.Clamp(Futures.MaxPositions <= 0 ? 3 : Futures.MaxPositions, 1, 3);
         Futures.AllowFlip = false;
         Futures.TargetNotionalEur = Futures.TargetNotionalEur <= 0m ? 10m : Futures.TargetNotionalEur;
 
@@ -104,7 +104,7 @@ internal sealed class FuturesBotConfiguration
         Funding.MaxAbsFundingRatePercentForEntry = Math.Max(0m, Funding.MaxAbsFundingRatePercentForEntry);
 
         TpSl.TakeProfitPercent = TpSl.TakeProfitPercent <= 0m ? 3m : TpSl.TakeProfitPercent;
-        TpSl.StopLossPercent = TpSl.StopLossPercent <= 0m ? 2.5m : TpSl.StopLossPercent;
+        TpSl.StopLossPercent = TpSl.StopLossPercent <= 0m ? 2m : TpSl.StopLossPercent;
     }
 
     private static void SetIfPresent(string name, Action<string> apply)
@@ -136,7 +136,7 @@ internal sealed class FuturesOptions
 {
     public decimal MaxLeverage { get; set; } = 2m;
     public decimal DefaultLeverage { get; set; } = 1m;
-    public int MaxPositions { get; set; } = 1;
+    public int MaxPositions { get; set; } = 3;
     public bool AllowShorts { get; set; } = true;
 
     // Flips (long -> short in one step) are forbidden by the blueprint; Normalize
@@ -164,7 +164,7 @@ internal sealed class TpSlOptions
 {
     public bool Enabled { get; set; } = true;
     public decimal TakeProfitPercent { get; set; } = 3m;
-    public decimal StopLossPercent { get; set; } = 2.5m;
+    public decimal StopLossPercent { get; set; } = 2m;
 
     // Which price stream triggers simulated TP/SL: "mark" | "index" | "last".
     // Only "mark"/"last" are meaningful for the virtual portfolio today.

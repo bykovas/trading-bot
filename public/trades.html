@@ -783,6 +783,22 @@
       return prefix + detail;
     }
 
+    function futuresOpenExplanation(decision, action, contribs) {
+      const side = action.side || decision.side || "LONG";
+      if (side === "SHORT") {
+        const shortParts = [];
+        const momentum = contribs.get("ShortMomentum");
+        const volume = contribs.get("ShortVolume");
+        const trend = contribs.get("ShortTrend");
+        if (momentum && Number(momentum.value) > 0) shortParts.push("downside momentum подтвердил движение");
+        if (volume && Number(volume.value) > 0) shortParts.push("volume подтвердил short setup");
+        if (trend && Number(trend.value) > 0) shortParts.push("цена ниже trend filter");
+        return `Открыл virtual futures SHORT. ${shortParts.length ? `Основание: ${shortParts.join(", ")}.` : "Подробности сигнала смотри в contributions."}`;
+      }
+
+      return buyExplanation(decision, action, contribs).replace("Купил", "Открыл virtual futures LONG");
+    }
+
     function parseRealizedPnl(reason) {
       const match = String(reason || "").match(/realized PnL EUR ([+-]?\d+(?:\.\d+)?)/i);
       return match ? Number(match[1]) : 0;
@@ -790,35 +806,43 @@
 
     function buildTrade(cycle, decision) {
       const action = decision.dryRunAction || {};
-      const isBuy = action.action === "WOULD_BUY";
+      const isOpen = action.action === "WOULD_BUY" || action.action === "WOULD_OPEN_LONG" || action.action === "WOULD_OPEN_SHORT";
+      const isClose = action.action === "WOULD_SELL" || action.action === "WOULD_CLOSE";
+      const isShortOpen = action.action === "WOULD_OPEN_SHORT" || action.side === "SHORT";
       const contribs = contributionMap(decision);
       const reason = action.reason || "";
-      const realized = isBuy ? 0 : parseRealizedPnl(reason);
+      const realized = isOpen ? 0 : parseRealizedPnl(reason);
 
       return {
         utc: cycle.utc,
         pair: decision.pair || action.pair,
-        action: isBuy ? "BUY" : "SELL",
-        actionClass: isBuy ? "buy" : "sell",
-        mode: isBuy
-          ? (decision.exploratory || action.exploratory ? "exploratory" : "firm")
+        action: isOpen ? (isShortOpen ? "OPEN SHORT" : "OPEN LONG") : "CLOSE",
+        actionClass: isOpen ? "buy" : "sell",
+        mode: isOpen
+          ? (action.action?.startsWith("WOULD_OPEN") ? "futures" : decision.exploratory || action.exploratory ? "exploratory" : "firm")
           : exitLabel(action.exitReasonCode, reason),
-        modeClass: isBuy
-          ? (decision.exploratory || action.exploratory ? "exploratory" : "firm")
+        modeClass: isOpen
+          ? (action.action?.startsWith("WOULD_OPEN") ? "firm" : decision.exploratory || action.exploratory ? "exploratory" : "firm")
           : "sell",
-        explanation: isBuy ? buyExplanation(decision, action, contribs) : exitExplanation(action.exitReasonCode, reason),
+        explanation: isOpen
+          ? (action.action?.startsWith("WOULD_OPEN") ? futuresOpenExplanation(decision, action, contribs) : buyExplanation(decision, action, contribs))
+          : exitExplanation(action.exitReasonCode, reason),
         technicalReason: reason,
-        technicalReasonLabel: isBuy ? "Technical fill text" : "Technical exit text",
+        technicalReasonLabel: isOpen ? "Technical fill text" : "Technical exit text",
         score: decision.score,
         price: action.fillPrice || decision.price || action.lastPrice,
         quantity: action.quantity,
         fee: action.feeEur,
         target: action.targetNotionalEur || action.grossNotionalEur || action.netNotionalEur,
         realized,
-        realizedPercent: isBuy ? null : reason.match(/\((-?\d+(?:\.\d+)?)%\)/)?.[1],
+        realizedPercent: isOpen ? null : reason.match(/\((-?\d+(?:\.\d+)?)%\)/)?.[1],
         exitReasonCode: action.exitReasonCode,
         exitReasonLabel: exitLabel(action.exitReasonCode, reason),
         holdReasonCode: action.holdReasonCode,
+        side: action.side,
+        reduceOnly: action.reduceOnly,
+        leverage: action.leverage,
+        exitTriggerSource: action.exitTriggerSource,
         spreadPercent: decision.spreadPercent,
         priceActionDirection: decision.priceActionDirection,
         priceActionTrendPercent: decision.priceActionTrendPercent,
@@ -834,7 +858,7 @@
         const cycleUtc = cycle.utc || record.utc;
         for (const decision of record.decisions || []) {
           const action = decision.dryRunAction || {};
-          if (action.action === "WOULD_BUY" || action.action === "WOULD_SELL") {
+          if (action.action === "WOULD_BUY" || action.action === "WOULD_SELL" || action.action === "WOULD_OPEN_LONG" || action.action === "WOULD_OPEN_SHORT" || action.action === "WOULD_CLOSE") {
             trades.push(buildTrade({ utc: cycleUtc }, decision));
           }
         }
@@ -843,7 +867,7 @@
     }
 
     function renderTrade(trade) {
-      const realizedHtml = trade.action === "SELL"
+      const realizedHtml = trade.action === "CLOSE"
         ? `<div><span>Realized</span><strong class="${pnlClass(trade.realized)}">${signedMoney(trade.realized)} ${trade.realizedPercent != null ? percent(trade.realizedPercent) : ""}</strong></div>`
         : `<div><span>Target</span><strong>${money(trade.target)}</strong></div>`;
 
@@ -857,6 +881,10 @@
         trade.spreadPercent != null ? `<span class="chip info">spread ${percent(trade.spreadPercent)}</span>` : "",
         trade.priceActionDirection ? `<span class="chip info">PA ${escapeHtml(trade.priceActionDirection)} ${trade.priceActionTrendPercent != null ? percent(trade.priceActionTrendPercent) : ""}</span>` : "",
         trade.emaGap != null ? `<span class="chip info">EMA gap ${percent(trade.emaGap)}</span>` : "",
+        trade.side ? `<span class="chip info">side ${escapeHtml(trade.side)}</span>` : "",
+        trade.leverage != null ? `<span class="chip info">lev ${number(trade.leverage)}x</span>` : "",
+        trade.reduceOnly ? `<span class="chip warn">reduce-only</span>` : "",
+        trade.exitTriggerSource ? `<span class="chip info">trigger ${escapeHtml(trade.exitTriggerSource)}</span>` : "",
         trade.exitReasonCode ? `<span class="chip warn" title="${escapeHtml(trade.exitReasonCode)}">${escapeHtml(trade.exitReasonLabel)}</span>` : ""
       ].filter(Boolean).join("");
 
@@ -893,9 +921,9 @@
     }
 
     function render(trades, fetchedAt) {
-      const buys = trades.filter(trade => trade.action === "BUY").length;
-      const sells = trades.filter(trade => trade.action === "SELL").length;
-      const realized = trades.reduce((sum, trade) => sum + (trade.action === "SELL" ? Number(trade.realized || 0) : 0), 0);
+      const buys = trades.filter(trade => trade.action === "OPEN LONG" || trade.action === "OPEN SHORT").length;
+      const sells = trades.filter(trade => trade.action === "CLOSE").length;
+      const realized = trades.reduce((sum, trade) => sum + (trade.action === "CLOSE" ? Number(trade.realized || 0) : 0), 0);
 
       els.tradeCount.textContent = String(trades.length);
       els.buyCount.textContent = String(buys);

@@ -2,7 +2,12 @@
 
 Этот файл объясняет, как локально запускать текущий минимальный worker и как читать его консольный вывод.
 
-Текущее состояние: decision loop с виртуальным (dry-run) портфелем. Worker берёт sample-данные или публичные данные Kraken, выбирает активный watchlist, считает EMA/RSI, выдаёт `NONE` или `LONG_MICRO`, прогоняет risk gate, симулирует сделки в виртуальном портфеле и пишет результат в консоль/файлы.
+Текущее состояние spot worker: decision loop с виртуальным (dry-run) портфелем. Worker берёт sample-данные или публичные данные Kraken, выбирает активный watchlist, считает EMA/RSI, выдаёт `NONE` или `LONG_MICRO`, прогоняет risk gate, симулирует сделки в виртуальном портфеле и пишет результат в консоль/файлы.
+
+Futures worker находится в `src/TradingBot.FuturesWorker`. Он отдельный и
+dry-run-only: считает long/short exposure, ведет virtual margin ledger, сохраняет
+TP/SL reduce-only simulation и может читать публичные данные Kraken Futures.
+Live futures execution path пока отсутствует в бинарнике.
 
 Дополнительно: если заданы приватные ключи Kraken, worker умеет отправлять ордер на биржу в режиме проверки `validate=true` (без исполнения) и, при явно включённом `LiveTradingEnabled=true`, реальные микро-ордера. См. раздел «Реальные ордера на Kraken (validate → live)» ниже и [docs/implementation/00-live-kraken-ordering.md](docs/implementation/00-live-kraken-ordering.md).
 
@@ -37,6 +42,45 @@ dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
 API-ключ Kraken для этого не нужен. Используются только публичные endpoints `AssetPairs`, `OHLC` и `Ticker`.
+
+## Futures dry-run
+
+Sample data:
+
+```bash
+TRADINGBOT_RUN_ONCE=true \
+dotnet run --project src/TradingBot.FuturesWorker/TradingBot.FuturesWorker.csproj
+```
+
+Public Kraken Futures data:
+
+```bash
+TRADINGBOT_MARKET_DATA_MODE=kraken-futures \
+TRADINGBOT_RUN_ONCE=true \
+dotnet run --project src/TradingBot.FuturesWorker/TradingBot.FuturesWorker.csproj
+```
+
+API-ключ для этого не нужен. Используются только публичные read-only endpoints:
+
+- `/derivatives/api/v3/instruments` для contract metadata;
+- `/derivatives/api/v3/tickers` для mark/bid/ask/volume/funding;
+- `/api/charts/v1/mark/{symbol}/{resolution}` для mark-price candles.
+
+Futures actions в dry-run:
+
+- `WOULD_OPEN_LONG` - открыть virtual long;
+- `WOULD_OPEN_SHORT` - открыть virtual short, только если `Futures.AllowShorts=true`;
+- `WOULD_CLOSE` - закрыть позицию reduce-only;
+- `WOULD_HOLD` / `NO_ORDER` - удержание или отсутствие действия.
+
+Safety envelope:
+
+- live futures order path отсутствует;
+- leverage принудительно зажат до `<= 2x`;
+- одновременно разрешена только одна futures-позиция;
+- flip long -> short / short -> long в один шаг запрещен;
+- reduce-only never opens exposure;
+- если `Funding.MaxAbsFundingRatePercentForEntry > 0`, missing funding rate блокирует entry.
 
 ## Запуск с AI watchlist advisor
 

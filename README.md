@@ -2,6 +2,11 @@
 
 Минимальный runnable slice сейчас находится в `src/TradingBot.SpotWorker`.
 
+Futures scaffold находится в `src/TradingBot.FuturesWorker`. Он запускает
+отдельный dry-run-only цикл с virtual margin ledger, TP/SL simulation и
+read-only public Kraken Futures market data. Live futures execution path в
+бинарнике отсутствует.
+
 Подробный runbook: [RUNBOOK.md](RUNBOOK.md).
 
 Он делает один консольный цикл:
@@ -47,6 +52,27 @@ dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 data/dry-run/portfolio-state.json
 data/dry-run/events.jsonl
 ```
+
+## Futures dry-run
+
+Sample futures loop:
+
+```bash
+TRADINGBOT_RUN_ONCE=true \
+dotnet run --project src/TradingBot.FuturesWorker/TradingBot.FuturesWorker.csproj
+```
+
+Public Kraken Futures data:
+
+```bash
+TRADINGBOT_MARKET_DATA_MODE=kraken-futures \
+TRADINGBOT_RUN_ONCE=true \
+dotnet run --project src/TradingBot.FuturesWorker/TradingBot.FuturesWorker.csproj
+```
+
+Futures worker reads `/derivatives/api/v3/instruments`,
+`/derivatives/api/v3/tickers`, and mark candles from `/api/charts/v1/mark/...`.
+It still only writes virtual fills; there is no futures live-trading override.
 
 Стартовый виртуальный портфель задается в `src/TradingBot.SpotWorker/appsettings.json` в блоке `Portfolio`.
 

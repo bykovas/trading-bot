@@ -71,7 +71,10 @@ public sealed record Quote(
     decimal Ask,
     decimal Last,
     decimal VolumeToday,
-    decimal? ChangePercent = null);
+    decimal? ChangePercent = null,
+    decimal? FundingRatePercent = null,
+    decimal? MarkPrice = null,
+    decimal? IndexPrice = null);
 
 public sealed record IndicatorSnapshot(
     decimal? FastEma,
@@ -89,7 +92,10 @@ public sealed record TechnicalSignal(
     IReadOnlyList<SignalContribution> Contributions,
     // Score before the missing-volume cap was applied. Equals Score when no cap fired.
     decimal UncappedScore = 0m,
-    bool VolumeConfirmed = false);
+    bool VolumeConfirmed = false,
+    bool AllowsShort = false,
+    bool HasBearishStructure = false,
+    decimal? BearishEmaGapPercent = null);
 
 public sealed record SignalContribution(
     string Name,

@@ -10,9 +10,8 @@ internal sealed class LongShortStrategy(FuturesBotConfiguration config)
         return intent switch
         {
             SignalIntent.LongCandidate => FuturesDesiredExposure.Long,
-            // TODO(futures): SignalScorer does not derive ShortCandidate yet; a
-            // bearish scoring path (inverse EMA structure, overheated RSI) must be
-            // designed and replay-tested before shorts trade even in dry-run.
+            // ShortCandidate is futures-only; spot ignores it. The futures worker
+            // still applies AllowShorts, margin, funding, no-flip, and TP/SL gates.
             SignalIntent.ShortCandidate when config.Futures.AllowShorts => FuturesDesiredExposure.Short,
             _ => FuturesDesiredExposure.Flat
         };

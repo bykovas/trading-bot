@@ -66,6 +66,12 @@ internal sealed class MarginRiskManager(FuturesBotConfiguration config)
             return new RiskEvaluation(false, reasons);
         }
 
+        if (config.Funding.MaxAbsFundingRatePercentForEntry > 0m && fundingRatePercent is null)
+        {
+            reasons.Add("funding rate unavailable");
+            return new RiskEvaluation(false, reasons);
+        }
+
         if (config.Funding.MaxAbsFundingRatePercentForEntry > 0m
             && fundingRatePercent is { } funding
             && Math.Abs(funding) > config.Funding.MaxAbsFundingRatePercentForEntry)

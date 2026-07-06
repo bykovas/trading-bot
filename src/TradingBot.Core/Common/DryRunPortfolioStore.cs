@@ -403,7 +403,15 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 (position ->> 'unrealizedPnlEur')::numeric as unrealized_pnl_eur,
                 (position ->> 'unrealizedPnlPercent')::numeric as unrealized_pnl_percent,
                 (position ->> 'openedAtUtc')::timestamptz as opened_at_utc,
-                (position ->> 'lastActionAtUtc')::timestamptz as last_action_at_utc
+                (position ->> 'lastActionAtUtc')::timestamptz as last_action_at_utc,
+                (position ->> 'leverage')::numeric as leverage,
+                (position ->> 'initialMarginEur')::numeric as initial_margin_eur,
+                (position ->> 'markPrice')::numeric as mark_price,
+                (position ->> 'liquidationPrice')::numeric as liquidation_price,
+                (position ->> 'liquidationDistancePercent')::numeric as liquidation_distance_percent,
+                (position ->> 'fundingPaidEur')::numeric as funding_paid_eur,
+                position ->> 'tpOrderState' as tp_order_state,
+                position ->> 'slOrderState' as sl_order_state
             from portfolio_state state
             cross join lateral jsonb_array_elements(coalesce(state.state_json -> 'positions', '[]'::jsonb)) as position;
 
@@ -474,7 +482,11 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 (decision ->> 'earlyEntryEligible')::boolean as early_entry_eligible,
                 decision ->> 'earlyEntryReason' as early_entry_reason,
                 (decision ->> 'earlyEntryDiagnosticScore')::numeric as early_entry_diagnostic_score,
-                (decision ->> 'earlyEntrySuggestedNotionalEur')::numeric as early_entry_suggested_notional_eur
+                (decision ->> 'earlyEntrySuggestedNotionalEur')::numeric as early_entry_suggested_notional_eur,
+                decision -> 'dryRunAction' ->> 'side' as side,
+                (decision -> 'dryRunAction' ->> 'reduceOnly')::boolean as reduce_only,
+                (decision -> 'dryRunAction' ->> 'leverage')::numeric as leverage,
+                decision -> 'dryRunAction' ->> 'exitTriggerSource' as exit_trigger_source
             from dry_run_cycles cycle
             cross join lateral jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision;
 
