@@ -150,26 +150,49 @@ docker compose \
   -f "${COMPOSE_FILE}" \
   ps
 
+run_healthcheck_with_retries() {
+  local description="$1"
+  local attempts="$2"
+  local delay_seconds="$3"
+  shift 3
+
+  local attempt
+  for attempt in $(seq 1 "${attempts}"); do
+    if "$@"; then
+      echo "Health check passed for ${description}."
+      return 0
+    fi
+
+    if [ "${attempt}" -lt "${attempts}" ]; then
+      echo "Health check for ${description} failed; retrying in ${delay_seconds}s (${attempt}/${attempts})..."
+      sleep "${delay_seconds}"
+    fi
+  done
+
+  echo "ERROR: health check failed for ${description} after ${attempts} attempts."
+  return 1
+}
+
 # Database health: Postgres must be ready before the worker can persist dry-run state.
-docker compose \
-  -p "${PROJECT_NAME}" \
-  -f "${COMPOSE_FILE}" \
-  exec -T database pg_isready -U tradingbot -d tradingbot
-echo "Health check passed for trading-bot-db container."
+run_healthcheck_with_retries "trading-bot-db container" 30 2 \
+  docker compose \
+    -p "${PROJECT_NAME}" \
+    -f "${COMPOSE_FILE}" \
+    exec -T database pg_isready -U tradingbot -d tradingbot
 
 # UI health: nginx must answer over HTTP.
-docker compose \
-  -p "${PROJECT_NAME}" \
-  -f "${COMPOSE_FILE}" \
-  exec -T ui wget -q -O /tmp/trading-bot-ui-healthcheck.html http://127.0.0.1/
-echo "Health check passed for trading-bot-ui container."
+run_healthcheck_with_retries "trading-bot-ui container" 30 2 \
+  docker compose \
+    -p "${PROJECT_NAME}" \
+    -f "${COMPOSE_FILE}" \
+    exec -T ui wget -q -O /tmp/trading-bot-ui-healthcheck.html http://127.0.0.1/
 
 # API health: read-only HTTP API must answer inside the compose network.
-docker compose \
-  -p "${PROJECT_NAME}" \
-  -f "${COMPOSE_FILE}" \
-  exec -T ui wget -q -O - http://trading-bot-api:8080/api/health
-echo "Health check passed for trading-bot-api container."
+run_healthcheck_with_retries "trading-bot-api container" 30 2 \
+  docker compose \
+    -p "${PROJECT_NAME}" \
+    -f "${COMPOSE_FILE}" \
+    exec -T ui wget -q -O - http://trading-bot-api:8080/api/health
 
 # Worker health: workers have no HTTP endpoint, so verify both containers are running.
 for WORKER_CONTAINER in trading-bot-spot-worker-live trading-bot-spot-worker-virtual; do

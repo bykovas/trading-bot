@@ -36,15 +36,19 @@ public class PriceActionWarmupTests
         decimal? uncapped = null,
         bool volumeConfirmed = false,
         decimal momentum = 0m,
-        decimal volume = 0m) =>
+        decimal volume = 0m,
+        bool allowsLong = true,
+        bool emaFullyConfirmed = true,
+        decimal? bullishEmaGapPercent = 0.4m,
+        decimal? emaGapVelocityPercent = null) =>
         new(
             score,
             "LONG_BIAS",
-            AllowsLong: true,
+            AllowsLong: allowsLong,
             HasBullishStructure: true,
-            EmaFullyConfirmed: true,
-            BullishEmaGapPercent: 0.4m,
-            EmaGapVelocityPercent: null,
+            EmaFullyConfirmed: emaFullyConfirmed,
+            BullishEmaGapPercent: bullishEmaGapPercent,
+            EmaGapVelocityPercent: emaGapVelocityPercent,
             Contributions:
             [
                 new SignalContribution("EMA", 0.30m, "bullish cross"),
@@ -219,6 +223,69 @@ public class PriceActionWarmupTests
             strategy);
         Assert.Equal("LONG_MICRO", admitted.DesiredPosition);
         Assert.True(admitted.Exploratory);
+    }
+
+    [Fact]
+    public void Exploratory_entries_require_the_configured_minimum_price_action_trend()
+    {
+        var strategy = Strategy();
+        strategy.ExploratoryEntriesEnabled = true;
+        strategy.ExploratoryMinPriceActionTrendPercent = 0.50m;
+
+        var weakRise = new PriceActionAssessment("TEST/EUR", 6, true, 1.001m, 0.20m, 0.999m, 0, 4, Now.AddMinutes(-25), Now);
+        var refused = EntryGate.Evaluate(
+            Signal(0.85m),
+            MarketState(bid: 0.9999m, ask: 1.0001m, last: 1.0m),
+            weakRise,
+            strategy);
+        Assert.Equal(EntryRejection.ExploratoryRequiresPositivePriceAction, refused.RejectionReason);
+
+        var strongRise = new PriceActionAssessment("TEST/EUR", 6, true, 1.006m, 0.60m, 1.000m, 0, 4, Now.AddMinutes(-25), Now);
+        var admitted = EntryGate.Evaluate(
+            Signal(0.85m),
+            MarketState(bid: 0.9999m, ask: 1.0001m, last: 1.0m),
+            strongRise,
+            strategy);
+        Assert.Equal("LONG_MICRO", admitted.DesiredPosition);
+        Assert.True(admitted.Exploratory);
+    }
+
+    [Fact]
+    public void Early_structure_exploratory_entries_require_configured_gap_velocity_and_trend()
+    {
+        var strategy = Strategy();
+        strategy.ExploratoryEntriesEnabled = true;
+        strategy.ExploratoryMinimumLongScore = 0.60m;
+        strategy.ExploratoryMinBullishEmaGapPercent = 0.10m;
+        strategy.ExploratoryMinEmaGapVelocityPercent = 0m;
+        strategy.ExploratoryMinPriceActionTrendPercent = 0.50m;
+
+        var strongRise = new PriceActionAssessment("TEST/EUR", 6, true, 1.006m, 0.60m, 1.000m, 0, 4, Now.AddMinutes(-25), Now);
+        var earlySignal = Signal(
+            0.60m,
+            volumeConfirmed: false,
+            momentum: 0.05m,
+            allowsLong: false,
+            emaFullyConfirmed: false,
+            bullishEmaGapPercent: 0.10m,
+            emaGapVelocityPercent: 0m);
+
+        var admitted = EntryGate.Evaluate(
+            earlySignal,
+            MarketState(bid: 0.9999m, ask: 1.0001m, last: 1.0m),
+            strongRise,
+            strategy);
+        Assert.Equal("LONG_MICRO", admitted.DesiredPosition);
+        Assert.True(admitted.Exploratory);
+
+        var shrinkingGap = earlySignal with { EmaGapVelocityPercent = -0.01m };
+        var refused = EntryGate.Evaluate(
+            shrinkingGap,
+            MarketState(bid: 0.9999m, ask: 1.0001m, last: 1.0m),
+            strongRise,
+            strategy);
+        Assert.Equal("NONE", refused.DesiredPosition);
+        Assert.Equal(EntryRejection.NoBullishSignal, refused.RejectionReason);
     }
 
     [Fact]

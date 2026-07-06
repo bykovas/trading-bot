@@ -425,6 +425,11 @@ internal sealed class TechnicalDecisionEngine
         && !signal.AllowsLong
         && signal.Score >= Math.Min(strategy.ExploratoryMinimumLongScore, strategy.MinimumLongScore)
         && priceAction is { IsPositive: true }
+        && priceAction.TrendPercent >= strategy.ExploratoryMinPriceActionTrendPercent
+        && signal.BullishEmaGapPercent is { } gap
+        && gap >= strategy.ExploratoryMinBullishEmaGapPercent
+        && signal.EmaGapVelocityPercent is { } velocity
+        && velocity >= strategy.ExploratoryMinEmaGapVelocityPercent
         && (strategy.MaxExploratorySpreadPercent <= 0m || spreadPercent <= strategy.MaxExploratorySpreadPercent)
         && (HasPositiveContribution(signal, "Momentum") || signal.VolumeConfirmed);
 
@@ -458,6 +463,23 @@ internal sealed class TechnicalDecisionEngine
         if (!priceAction.IsPositive)
         {
             return $"not early-eligible: price action is {priceAction.Direction}";
+        }
+
+        if (priceAction.TrendPercent < strategy.ExploratoryMinPriceActionTrendPercent)
+        {
+            return $"not early-eligible: price-action trend {priceAction.TrendPercent:0.###}% below {strategy.ExploratoryMinPriceActionTrendPercent:0.###}%";
+        }
+
+        if (signal.BullishEmaGapPercent is not { } gap
+            || gap < strategy.ExploratoryMinBullishEmaGapPercent)
+        {
+            return $"not early-eligible: bullish EMA gap {signal.BullishEmaGapPercent?.ToString("0.###") ?? "unknown"}% below {strategy.ExploratoryMinBullishEmaGapPercent:0.###}%";
+        }
+
+        if (signal.EmaGapVelocityPercent is not { } velocity
+            || velocity < strategy.ExploratoryMinEmaGapVelocityPercent)
+        {
+            return $"not early-eligible: EMA gap velocity {signal.EmaGapVelocityPercent?.ToString("0.###") ?? "unknown"}% below {strategy.ExploratoryMinEmaGapVelocityPercent:0.###}%";
         }
 
         if (strategy.MaxExploratorySpreadPercent > 0m && spreadPercent > strategy.MaxExploratorySpreadPercent)

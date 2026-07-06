@@ -107,6 +107,9 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_LONG_SCORE", value => config.Strategy.MinimumLongScore = ParseDecimal(value, config.Strategy.MinimumLongScore));
         SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_ENTRIES_ENABLED", value => config.Strategy.ExploratoryEntriesEnabled = ParseBool(value, config.Strategy.ExploratoryEntriesEnabled));
         SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_MINIMUM_LONG_SCORE", value => config.Strategy.ExploratoryMinimumLongScore = ParseDecimal(value, config.Strategy.ExploratoryMinimumLongScore));
+        SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_MIN_BULLISH_EMA_GAP_PERCENT", value => config.Strategy.ExploratoryMinBullishEmaGapPercent = ParseDecimal(value, config.Strategy.ExploratoryMinBullishEmaGapPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_MIN_EMA_GAP_VELOCITY_PERCENT", value => config.Strategy.ExploratoryMinEmaGapVelocityPercent = ParseDecimal(value, config.Strategy.ExploratoryMinEmaGapVelocityPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_MIN_PRICE_ACTION_TREND_PERCENT", value => config.Strategy.ExploratoryMinPriceActionTrendPercent = ParseDecimal(value, config.Strategy.ExploratoryMinPriceActionTrendPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_PRICE_ACTION_MAX_DECLINE_PERCENT", value => config.Strategy.PriceActionMaxDeclinePercent = ParseDecimal(value, config.Strategy.PriceActionMaxDeclinePercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MISSING_VOLUME_SCORE_CAP", value => config.Strategy.MissingVolumeScoreCap = ParseDecimal(value, config.Strategy.MissingVolumeScoreCap));
         SetIfPresent("TRADINGBOT_STRATEGY_PRICE_ACTION_LOOKBACK_SNAPSHOTS", value => config.Strategy.PriceActionLookbackSnapshots = ParseInt(value, config.Strategy.PriceActionLookbackSnapshots));
@@ -167,8 +170,10 @@ internal sealed class BotConfiguration
         Strategy.MissingVolumeScoreCap = Math.Clamp(Strategy.MissingVolumeScoreCap, 0m, 1m);
         Strategy.MinDailyVolumeEur = Math.Max(0m, Strategy.MinDailyVolumeEur);
         Strategy.ExploratoryMinimumLongScore = Math.Clamp(Strategy.ExploratoryMinimumLongScore, 0m, Strategy.MinimumLongScore);
+        Strategy.ExploratoryMinBullishEmaGapPercent = Math.Max(0m, Strategy.ExploratoryMinBullishEmaGapPercent);
         Strategy.ExploratoryMaxRank = Math.Max(1, Strategy.ExploratoryMaxRank);
         Strategy.MaxExploratorySpreadPercent = Math.Max(0m, Strategy.MaxExploratorySpreadPercent);
+        Strategy.ExploratoryMinPriceActionTrendPercent = Math.Max(0m, Strategy.ExploratoryMinPriceActionTrendPercent);
         Strategy.PriceActionMaxSampleAgeMinutes = Math.Max(0, Strategy.PriceActionMaxSampleAgeMinutes);
         Strategy.PriceActionHydrationMinutes = Math.Max(0, Strategy.PriceActionHydrationMinutes);
         // Exploratory sampling is a dry-run tool. Live trading keeps the firm
@@ -453,6 +458,9 @@ internal sealed class StrategyOptions
     public decimal ExploratoryMinimumLongScore { get; set; } = 0.85m;
     public int ExploratoryMaxRank { get; set; } = 2;
     public bool ExploratoryAllowedInLive { get; set; } = false;
+    public decimal ExploratoryMinBullishEmaGapPercent { get; set; } = 0m;
+    public decimal ExploratoryMinEmaGapVelocityPercent { get; set; } = 0m;
+    public decimal ExploratoryMinPriceActionTrendPercent { get; set; } = 0m;
 
     // Stricter spread limit for exploratory entries: a small sampling position must
     // not pay a 0.4%+ spread even when it is below the hard MaxEntrySpreadPercent.

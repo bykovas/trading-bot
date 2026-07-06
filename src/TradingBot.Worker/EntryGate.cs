@@ -189,6 +189,7 @@ internal static class EntryGate
             var exploratoryEligible =
                 exploratoryBand
                 && priceAction is { IsPositive: true }
+                && priceAction.TrendPercent >= strategy.ExploratoryMinPriceActionTrendPercent
                 && exploratorySpreadOk;
 
             if (!exploratoryEligible)
@@ -210,6 +211,15 @@ internal static class EntryGate
                     if (!priceAction.IsPositive)
                     {
                         notes.Add(new SignalContribution("Exploratory", 0m, $"exploratory entry refused: recent price action is {priceAction.Direction}, positive required"));
+                        return Reject(EntryRejection.ExploratoryRequiresPositivePriceAction, spreadPercent, notes);
+                    }
+
+                    if (priceAction.TrendPercent < strategy.ExploratoryMinPriceActionTrendPercent)
+                    {
+                        notes.Add(new SignalContribution(
+                            "Exploratory",
+                            0m,
+                            $"exploratory entry refused: recent price action trend {priceAction.TrendPercent:0.###}% is below exploratory minimum {strategy.ExploratoryMinPriceActionTrendPercent:0.###}%"));
                         return Reject(EntryRejection.ExploratoryRequiresPositivePriceAction, spreadPercent, notes);
                     }
 
@@ -280,7 +290,20 @@ internal static class EntryGate
         if (!strategy.ExploratoryEntriesEnabled
             || !signal.HasBullishStructure
             || signal.Score < strategy.ExploratoryMinimumLongScore
-            || priceAction is not { IsPositive: true })
+            || priceAction is not { IsPositive: true }
+            || priceAction.TrendPercent < strategy.ExploratoryMinPriceActionTrendPercent)
+        {
+            return false;
+        }
+
+        if (signal.BullishEmaGapPercent is not { } gap
+            || gap < strategy.ExploratoryMinBullishEmaGapPercent)
+        {
+            return false;
+        }
+
+        if (signal.EmaGapVelocityPercent is not { } velocity
+            || velocity < strategy.ExploratoryMinEmaGapVelocityPercent)
         {
             return false;
         }
