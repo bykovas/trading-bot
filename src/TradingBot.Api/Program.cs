@@ -299,14 +299,20 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
         return null;
     }
 
+    var todayUtc = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    var dailyRiskDate = reader.IsDBNull(5) ? todayUtc : reader.GetString(5);
+    var dailyRealizedPnl = dailyRiskDate == todayUtc && !reader.IsDBNull(6)
+        ? reader.GetDecimal(6)
+        : 0m;
+
     return new PortfolioSummaryDto(
         reader.GetDateTime(0),
         reader.GetDecimal(1),
         reader.GetDecimal(2),
         reader.GetDecimal(3),
         reader.GetInt32(4),
-        reader.IsDBNull(5) ? null : reader.GetString(5),
-        reader.IsDBNull(6) ? null : reader.GetDecimal(6));
+        todayUtc,
+        dailyRealizedPnl);
 }
 
 static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
