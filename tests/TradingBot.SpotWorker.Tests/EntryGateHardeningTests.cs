@@ -1,5 +1,7 @@
-using TradingBot.SpotWorker;
+
 using Xunit;
+
+using TradingBot.SpotWorker;
 
 namespace TradingBot.SpotWorker.Tests;
 

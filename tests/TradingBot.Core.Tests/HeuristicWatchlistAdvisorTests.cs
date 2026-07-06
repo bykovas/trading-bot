@@ -1,7 +1,7 @@
-using TradingBot.SpotWorker;
+
 using Xunit;
 
-namespace TradingBot.SpotWorker.Tests;
+namespace TradingBot.Core.Tests;
 
 public class HeuristicWatchlistAdvisorTests
 {

@@ -1,6 +1,6 @@
-namespace TradingBot.SpotWorker;
+namespace TradingBot.Core.Common;
 
-internal sealed record Candle(
+public sealed record Candle(
     DateTimeOffset OpenTime,
     decimal Open,
     decimal High,
@@ -9,7 +9,7 @@ internal sealed record Candle(
     decimal Volume,
     int TradeCount);
 
-internal sealed record PairRules(
+public sealed record PairRules(
     string Pair,
     string Status,
     decimal OrderMinimum,
@@ -17,7 +17,7 @@ internal sealed record PairRules(
     int LotDecimals,
     int PairDecimals);
 
-internal sealed class InstrumentMarketState
+public sealed class InstrumentMarketState
 {
     public required InstrumentOptions Instrument { get; init; }
     public required IReadOnlyList<Candle> Candles { get; init; }
@@ -66,19 +66,19 @@ internal sealed class InstrumentMarketState
     }
 }
 
-internal sealed record Quote(
+public sealed record Quote(
     decimal Bid,
     decimal Ask,
     decimal Last,
     decimal VolumeToday,
     decimal? ChangePercent = null);
 
-internal sealed record IndicatorSnapshot(
+public sealed record IndicatorSnapshot(
     decimal? FastEma,
     decimal? SlowEma,
     decimal? Rsi);
 
-internal sealed record TechnicalSignal(
+public sealed record TechnicalSignal(
     decimal Score,
     string Direction,
     bool AllowsLong,
@@ -91,12 +91,12 @@ internal sealed record TechnicalSignal(
     decimal UncappedScore = 0m,
     bool VolumeConfirmed = false);
 
-internal sealed record SignalContribution(
+public sealed record SignalContribution(
     string Name,
     decimal Value,
     string Reason);
 
-internal sealed record DecisionProposal(
+public sealed record DecisionProposal(
     string Pair,
     string DesiredPosition,
     decimal Score,
@@ -119,27 +119,27 @@ internal sealed record DecisionProposal(
     decimal EarlyEntryDiagnosticScore = 0m,
     decimal EarlyEntrySuggestedNotionalEur = 0m);
 
-internal sealed record PositionSizeSelection(
+public sealed record PositionSizeSelection(
     decimal TargetNotionalEur,
     string Reason);
 
-internal sealed record RiskEvaluation(
+public sealed record RiskEvaluation(
     bool Approved,
     IReadOnlyList<string> Reasons);
 
-internal sealed record WatchlistAdvice(
+public sealed record WatchlistAdvice(
     string Provider,
     IReadOnlyList<WatchlistRecommendation> Recommendations,
     IReadOnlyList<string> Warnings);
 
-internal sealed record WatchlistRecommendation(
+public sealed record WatchlistRecommendation(
     string Pair,
     int Priority,
     string Reason);
 
 // One light market snapshot row per universe pair per cycle. Captures the bid/ask/
 // spread state that Kraken candles cannot reconstruct after the fact.
-internal sealed record MarketSnapshotRecord(
+public sealed record MarketSnapshotRecord(
     string CycleId,
     DateTimeOffset Utc,
     string Pair,

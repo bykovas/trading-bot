@@ -1,10 +1,10 @@
-namespace TradingBot.SpotWorker;
+namespace TradingBot.Core.Scoring;
 
 // Pure configuration resolver for the correlation-risk layer. It only translates a
 // pair into its correlation group and answers "is this group high-beta?" — it makes
 // no decisions and holds no state, so the actual BUY-rejection logic can stay inside
 // DryRunPortfolio.Apply next to the other risk checks (no parallel risk engine).
-internal static class CorrelationRiskResolver
+public static class CorrelationRiskResolver
 {
     public const string UngroupedPrefix = "UNGROUPED:";
 

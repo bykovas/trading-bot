@@ -1,8 +1,8 @@
 using System.Text;
 
-namespace TradingBot.SpotWorker;
+namespace TradingBot.Core.Diagnostics;
 
-internal static class FileLogging
+public static class FileLogging
 {
     public static IDisposable Configure(string directory)
     {
@@ -35,7 +35,7 @@ internal static class FileLogging
     }
 }
 
-internal sealed class TeeTextWriter(TextWriter first, TextWriter second) : TextWriter
+public sealed class TeeTextWriter(TextWriter first, TextWriter second) : TextWriter
 {
     private readonly object _gate = new();
 
@@ -78,7 +78,7 @@ internal sealed class TeeTextWriter(TextWriter first, TextWriter second) : TextW
     }
 }
 
-internal sealed class DailyFileTextWriter(string directory, string prefix, Encoding encoding) : TextWriter
+public sealed class DailyFileTextWriter(string directory, string prefix, Encoding encoding) : TextWriter
 {
     private readonly object _gate = new();
     private StreamWriter? _writer;

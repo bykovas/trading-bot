@@ -8,9 +8,11 @@ ARG TRADINGBOT_WORKER_IMAGE_TAG=local
 ARG TRADINGBOT_WORKER_STRATEGY_VERSION=local
 ARG TRADINGBOT_WORKER_CHANGE_SET=local
 
+COPY src/TradingBot.Core/TradingBot.Core.csproj src/TradingBot.Core/
 COPY src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj src/TradingBot.SpotWorker/
 RUN dotnet restore src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 
+COPY src/TradingBot.Core/ src/TradingBot.Core/
 COPY src/TradingBot.SpotWorker/ src/TradingBot.SpotWorker/
 RUN dotnet publish src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj \
     -c Release \

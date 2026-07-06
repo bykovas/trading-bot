@@ -1,9 +1,9 @@
-namespace TradingBot.SpotWorker;
+namespace TradingBot.Core.Scoring;
 
 // Rank input for a prospective NEW position (a pair with no currently open
 // position). Held positions never enter ranking: exit/hold logic runs in its own
 // phase before any entry is considered, so exits can never be delayed by entries.
-internal sealed record EntryCandidate(
+public sealed record EntryCandidate(
     string Pair,
     decimal Score,
     decimal BullishEmaGapPercent,
@@ -14,7 +14,7 @@ internal sealed record EntryCandidate(
 // Deterministic best-first ordering of new-entry candidates. Without this, entries
 // were opened in raw CandidateUniverse iteration order, so per-cycle / max-open
 // limits were consumed by whichever pairs happened to come first.
-internal static class EntryRanking
+public static class EntryRanking
 {
     // Priority (fixed, documented order):
     //   1. Higher strategy score first.

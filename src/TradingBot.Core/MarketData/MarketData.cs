@@ -2,9 +2,9 @@ using System.Globalization;
 using System.Net.Http.Json;
 using System.Text.Json;
 
-namespace TradingBot.SpotWorker;
+namespace TradingBot.Core.MarketData;
 
-internal interface IMarketDataSource
+public interface IMarketDataSource
 {
     Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
         IReadOnlyList<InstrumentOptions> instruments,
@@ -17,7 +17,7 @@ internal interface IMarketDataSource
         CancellationToken cancellationToken);
 }
 
-internal sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOptions options) : IMarketDataSource
+public sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOptions options) : IMarketDataSource
 {
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
     // Kraken public endpoints are ~1 req/s per IP; OHLC is per-pair. 500ms between
@@ -415,7 +415,7 @@ internal sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOption
     private sealed record PairMetadata(string AltName, string WsName, string TickerKey, PairRules Rules);
 }
 
-internal sealed class SampleMarketDataSource : IMarketDataSource
+public sealed class SampleMarketDataSource : IMarketDataSource
 {
     public Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
         IReadOnlyList<InstrumentOptions> instruments,

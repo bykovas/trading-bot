@@ -2,9 +2,9 @@ using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
 
-namespace TradingBot.SpotWorker;
+namespace TradingBot.Core.Common;
 
-internal interface IDryRunPortfolioStore
+public interface IDryRunPortfolioStore
 {
     string StateDescription { get; }
     string EventsDescription { get; }
@@ -22,7 +22,7 @@ internal interface IDryRunPortfolioStore
     IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc);
 }
 
-internal sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunPortfolioStore
+public sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunPortfolioStore
 {
     private readonly JsonSerializerOptions _stateJsonOptions = new()
     {
@@ -125,7 +125,7 @@ internal sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunP
     }
 }
 
-internal sealed class PostgresDryRunPortfolioStore(string connectionString, string botInstanceId = "default") : IDryRunPortfolioStore
+public sealed class PostgresDryRunPortfolioStore(string connectionString, string botInstanceId = "default") : IDryRunPortfolioStore
 {
     private readonly JsonSerializerOptions _jsonOptions = new()
     {

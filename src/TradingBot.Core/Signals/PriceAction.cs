@@ -1,7 +1,7 @@
-namespace TradingBot.SpotWorker;
+namespace TradingBot.Core.Signals;
 
 // One light-snapshot observation for a pair (ticker last/bid/ask at cycle time).
-internal sealed record PriceObservation(
+public sealed record PriceObservation(
     DateTimeOffset Utc,
     decimal Last,
     decimal Bid,
@@ -12,7 +12,7 @@ internal sealed record PriceObservation(
 // by design, while the ticker sequence shows what the price is doing RIGHT NOW.
 // This is the input for the anti-lag entry guard that rejects LONG entries whose
 // score is driven by lagging indicators while real prices are already rolling over.
-internal sealed record PriceActionAssessment(
+public sealed record PriceActionAssessment(
     string Pair,
     int SnapshotCount,
     bool DataSufficient,
@@ -56,7 +56,7 @@ internal sealed record PriceActionAssessment(
 // Rolling in-memory history of light snapshots per pair, fed once per cycle.
 // Restart cost: history starts empty, so the anti-lag guard abstains (never
 // rejects) until it has PriceActionMinSnapshots observations for a pair.
-internal sealed class SnapshotPriceHistory
+public sealed class SnapshotPriceHistory
 {
     private const int MaxObservationsPerPair = 60;
 
@@ -194,7 +194,7 @@ internal sealed class SnapshotPriceHistory
 
 // Pure evaluation of the anti-lag LONG entry guard against a strategy's thresholds.
 // Kept separate from the tracker so tests can drive it with hand-built assessments.
-internal static class PriceActionGuard
+public static class PriceActionGuard
 {
     // Returns null when the entry is allowed, otherwise a human-readable reason why
     // recent REAL price action contradicts the (lagging) indicator-driven signal.

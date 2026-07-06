@@ -1,6 +1,6 @@
-namespace TradingBot.SpotWorker;
+namespace TradingBot.Core.Common;
 
-internal sealed record WorkerBuildInfo(
+public sealed record WorkerBuildInfo(
     string Version,
     string Commit,
     string BuildUtc,

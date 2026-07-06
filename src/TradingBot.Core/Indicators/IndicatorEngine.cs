@@ -1,6 +1,6 @@
-namespace TradingBot.SpotWorker;
+namespace TradingBot.Core.Indicators;
 
-internal sealed class IndicatorEngine
+public sealed class IndicatorEngine
 {
     public IndicatorSnapshot Calculate(IReadOnlyList<Candle> candles, StrategyOptions strategy)
     {

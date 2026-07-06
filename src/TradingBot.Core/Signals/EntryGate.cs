@@ -1,9 +1,9 @@
-namespace TradingBot.SpotWorker;
+namespace TradingBot.Core.Signals;
 
 // Compact machine-readable rejection reasons for entry decisioning. One of these is
 // attached to every evaluated no-position pair that did NOT become a firm entry, so
 // dashboards and cycle summaries never have to parse free text.
-internal static class EntryRejection
+public static class EntryRejection
 {
     public const string ScoreBelowThreshold = "REJECT_SCORE_BELOW_THRESHOLD";
     public const string SpreadTooWide = "REJECT_SPREAD_TOO_WIDE";
@@ -49,7 +49,7 @@ internal static class EntryRejection
 // Result of the layered NEW-entry gate. DesiredPosition is LONG_MICRO only when the
 // hard safety layer AND the quality layer both pass; Exploratory marks candidates
 // admitted at the (dry-run) exploratory threshold rather than the firm one.
-internal sealed record EntryGateResult(
+public sealed record EntryGateResult(
     string DesiredPosition,
     bool Exploratory,
     string? RejectionReason,
@@ -70,7 +70,7 @@ internal sealed record EntryGateResult(
 //   Layer C - RANKING runs downstream in DecisionWorker: eligible candidates are
 //     ranked and the per-cycle/max-open limits are consumed best-first; exploratory
 //     candidates additionally must rank in the configured top N.
-internal static class EntryGate
+public static class EntryGate
 {
     private static readonly HashSet<string> NonTradableStatuses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -319,7 +319,7 @@ internal static class EntryGate
     private static EntryGateResult Reject(string reason, decimal spreadPercent, List<SignalContribution> notes) =>
         new("NONE", false, reason, spreadPercent, notes);
 
-    internal static decimal SpreadPercentOf(InstrumentMarketState marketState)
+    public static decimal SpreadPercentOf(InstrumentMarketState marketState)
     {
         var bid = marketState.BestBid;
         var ask = marketState.BestAsk;

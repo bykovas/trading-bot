@@ -45,7 +45,7 @@ jobs:
       - name: Build spot worker image
         run: |
           WORKER_BUILD_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          WORKER_STRATEGY_VERSION="$(git ls-files src/TradingBot.SpotWorker | sort | xargs sha256sum | sha256sum | cut -d ' ' -f1)"
+          WORKER_STRATEGY_VERSION="$(git ls-files src/TradingBot.Core src/TradingBot.SpotWorker | sort | xargs sha256sum | sha256sum | cut -d ' ' -f1)"
           WORKER_CHANGE_SET="$(awk '/^## / {print $2; exit}' .ai/worker-changelog.md)"
           docker build \
             --file src/TradingBot.SpotWorker/Dockerfile \

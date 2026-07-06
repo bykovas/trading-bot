@@ -1,8 +1,8 @@
-namespace TradingBot.SpotWorker;
+namespace TradingBot.Core.Diagnostics;
 
 // Per-pair entry diagnostics for one cycle: everything needed to answer "why did
 // this pair not become a trade?" without re-deriving it from free-text reasons.
-internal sealed record CandidateDiagnostic(
+public sealed record CandidateDiagnostic(
     string Pair,
     decimal Score,
     string DesiredPosition,
@@ -36,7 +36,7 @@ internal sealed record CandidateDiagnostic(
 // pair's position when all snapshot pairs are ordered by estimated 24h EUR volume,
 // which is what the heuristic advisor ranks by; AdvisorRank is only present when
 // the advisor recommended the pair but it still did not enter the active set.
-internal sealed record ExcludedPairDiagnostic(
+public sealed record ExcludedPairDiagnostic(
     string Pair,
     string Reason,
     decimal Last,
@@ -50,7 +50,7 @@ internal sealed record ExcludedPairDiagnostic(
 // quality filters -> ranking -> chosen entry (or an explicit no-trade reason).
 // Persisted inside the cycle record so silent inactivity is impossible: every cycle
 // carries its own explanation.
-internal sealed record CycleEntryDiagnostics(
+public sealed record CycleEntryDiagnostics(
     int SnapshotPairsAvailable,
     int ActivePairsEvaluated,
     int EntryPairsEvaluated,

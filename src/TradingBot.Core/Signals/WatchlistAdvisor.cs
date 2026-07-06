@@ -2,9 +2,9 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
-namespace TradingBot.SpotWorker;
+namespace TradingBot.Core.Signals;
 
-internal interface IWatchlistAdvisor
+public interface IWatchlistAdvisor
 {
     Task<WatchlistAdvice> SelectAsync(
         IReadOnlyList<InstrumentMarketState> candidates,
@@ -12,7 +12,7 @@ internal interface IWatchlistAdvisor
         CancellationToken cancellationToken);
 }
 
-internal sealed class HeuristicWatchlistAdvisor : IWatchlistAdvisor
+public sealed class HeuristicWatchlistAdvisor : IWatchlistAdvisor
 {
     public Task<WatchlistAdvice> SelectAsync(
         IReadOnlyList<InstrumentMarketState> candidates,
@@ -47,7 +47,7 @@ internal sealed class HeuristicWatchlistAdvisor : IWatchlistAdvisor
     }
 }
 
-internal sealed class OpenAiCompatibleWatchlistAdvisor(
+public sealed class OpenAiCompatibleWatchlistAdvisor(
     HttpClient httpClient,
     AiOptions options) : IWatchlistAdvisor
 {
@@ -210,7 +210,7 @@ internal sealed class OpenAiCompatibleWatchlistAdvisor(
     }
 }
 
-internal sealed class CachedWatchlistAdvisor(
+public sealed class CachedWatchlistAdvisor(
     IWatchlistAdvisor refreshAdvisor,
     IWatchlistAdvisor fallbackAdvisor,
     int refreshSeconds,
@@ -348,15 +348,4 @@ internal sealed class CachedWatchlistAdvisor(
 
         return $"{(int)age.TotalHours}h";
     }
-}
-
-internal interface IClock
-{
-    DateTimeOffset UtcNow { get; }
-}
-
-internal sealed class SystemClock : IClock
-{
-    public static readonly SystemClock Instance = new();
-    public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
 }
