@@ -501,6 +501,13 @@ internal sealed class PostgresDryRunPortfolioStore(string connectionString, stri
                 -- new columns at the END, so this stays last.
                 (cycle.record_json -> 'entryDiagnostics' ->> 'priceActionReadyCount')::int as price_action_ready_count
             from dry_run_cycles cycle;
+
+            -- Clean slate for the market-prefixed instance-id scheme (spot-live,
+            -- spot-virtual, futures-live, futures-virtual): rows written under the
+            -- legacy ids are dropped rather than migrated. No-ops once applied.
+            delete from portfolio_state  where bot_instance_id in ('live', 'virtual', 'default');
+            delete from dry_run_cycles   where bot_instance_id in ('live', 'virtual', 'default');
+            delete from market_snapshots where bot_instance_id in ('live', 'virtual', 'default');
             """,
             connection);
         command.ExecuteNonQuery();

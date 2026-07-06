@@ -495,8 +495,8 @@
         <span id="status-text">Loading trades</span>
       </div>
       <div class="bot-switch" role="group" aria-label="Bot instance">
-        <button type="button" data-bot-instance="live">Live</button>
-        <button type="button" data-bot-instance="virtual">Virtual</button>
+        <button type="button" data-bot-instance="spot-live">Live</button>
+        <button type="button" data-bot-instance="spot-virtual">Virtual</button>
       </div>
     </header>
 
@@ -545,13 +545,19 @@
 
   <script>
     const botButtons = Array.from(document.querySelectorAll("[data-bot-instance]"));
-    let currentBotInstance = "live";
+    let currentBotInstance = "spot-live";
+    // Back-compat: pre-rename ids persisted in localStorage or shared URLs.
+    function normalizeBotInstance(value) {
+      if (value === "live") return "spot-live";
+      if (value === "virtual") return "spot-virtual";
+      return value === "spot-virtual" ? "spot-virtual" : "spot-live";
+    }
     function selectedBotParam() {
       const value = currentBotInstance || "";
       return value ? `&botInstanceId=${encodeURIComponent(value)}` : "";
     }
     function setBotInstance(value, persist = false) {
-      currentBotInstance = value === "virtual" ? "virtual" : "live";
+      currentBotInstance = normalizeBotInstance(value);
       botButtons.forEach(button => {
         const active = button.dataset.botInstance === currentBotInstance;
         button.classList.toggle("active", active);
@@ -562,7 +568,7 @@
     function initBotSelector() {
       const fromUrl = new URLSearchParams(location.search).get("botInstanceId");
       const saved = localStorage.getItem("tradingBot.botInstanceId");
-      setBotInstance(fromUrl || saved || "live");
+      setBotInstance(fromUrl || saved || "spot-live");
       botButtons.forEach(button => button.addEventListener("click", () => {
         setBotInstance(button.dataset.botInstance, true);
         refresh();

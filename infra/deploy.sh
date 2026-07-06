@@ -91,10 +91,17 @@ echo "Writing database environment to ${DATABASE_ENV_FILE}"
 
 if [ -f "${LIVE_ENV_FILE}" ]; then
   echo "Keeping existing live worker environment at ${LIVE_ENV_FILE}"
+  # One-time upgrade of the operator-owned file to the market-prefixed
+  # instance-id scheme; without this the live worker keeps writing rows
+  # under the retired 'live' id.
+  if grep -q '^TRADINGBOT_BOT_INSTANCE_ID=live$' "${LIVE_ENV_FILE}"; then
+    echo "Upgrading live worker instance id: live -> spot-live"
+    sed -i 's/^TRADINGBOT_BOT_INSTANCE_ID=live$/TRADINGBOT_BOT_INSTANCE_ID=spot-live/' "${LIVE_ENV_FILE}"
+  fi
 else
   echo "Creating live worker environment at ${LIVE_ENV_FILE}"
   {
-    printf 'TRADINGBOT_BOT_INSTANCE_ID=live\n'
+    printf 'TRADINGBOT_BOT_INSTANCE_ID=spot-live\n'
     printf 'TRADINGBOT_BOT_INSTANCE_NAME=Live spot worker\n'
     printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
     printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
@@ -110,7 +117,7 @@ fi
 
 echo "Writing virtual worker environment to ${VIRTUAL_ENV_FILE}"
 {
-  printf 'TRADINGBOT_BOT_INSTANCE_ID=virtual\n'
+  printf 'TRADINGBOT_BOT_INSTANCE_ID=spot-virtual\n'
   printf 'TRADINGBOT_BOT_INSTANCE_NAME=Virtual spot worker\n'
   printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
