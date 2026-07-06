@@ -539,7 +539,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
               select 1
               from dry_run_decisions decision
               where decision.cycle_id = dry_run_cycles.cycle_id
-                and decision.action in ('WOULD_BUY', 'WOULD_SELL')
+                and decision.action in ('WOULD_BUY', 'WOULD_SELL', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT', 'WOULD_CLOSE')
           )
         order by utc desc, cycle_id desc
         limit @limit offset @offset
