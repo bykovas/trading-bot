@@ -48,11 +48,12 @@ API-ключ Kraken для этого не нужен. Используются 
 Sample data:
 
 ```bash
+TRADINGBOT_MARKET_DATA_MODE=sample \
 TRADINGBOT_RUN_ONCE=true \
 dotnet run --project src/TradingBot.FuturesWorker/TradingBot.FuturesWorker.csproj
 ```
 
-Public Kraken Futures data:
+Public Kraken Futures data (default for the futures worker and deploy envs):
 
 ```bash
 TRADINGBOT_MARKET_DATA_MODE=kraken-futures \

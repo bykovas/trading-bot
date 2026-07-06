@@ -156,9 +156,9 @@ echo "Writing virtual worker environment to ${VIRTUAL_ENV_FILE}"
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${VIRTUAL_ENV_FILE}"
 
-# Futures workers: dry-run only during the scaffold phase. Both instances run on
-# sample market data and have NO live-trading flag - the worker binary has no
-# live order path. Live env is create-once like spot's.
+# Futures workers: dry-run only during the scaffold phase. They use public
+# Kraken Futures market data and have NO live-trading flag - the worker binary
+# has no live order path. Live env is create-once like spot's.
 if [ -f "${FUTURES_LIVE_ENV_FILE}" ]; then
   echo "Keeping existing futures live environment at ${FUTURES_LIVE_ENV_FILE}"
 else
@@ -168,7 +168,7 @@ else
     printf 'TRADINGBOT_BOT_INSTANCE_NAME=Live futures worker\n'
     printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
     printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
-    printf 'TRADINGBOT_MARKET_DATA_MODE=sample\n'
+    printf 'TRADINGBOT_MARKET_DATA_MODE=kraken-futures\n'
     printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
   } > "${FUTURES_LIVE_ENV_FILE}"
 fi
@@ -179,7 +179,7 @@ echo "Writing futures virtual environment to ${FUTURES_VIRTUAL_ENV_FILE}"
   printf 'TRADINGBOT_BOT_INSTANCE_NAME=Virtual futures worker\n'
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
-  printf 'TRADINGBOT_MARKET_DATA_MODE=sample\n'
+  printf 'TRADINGBOT_MARKET_DATA_MODE=kraken-futures\n'
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${FUTURES_VIRTUAL_ENV_FILE}"
 

@@ -117,7 +117,12 @@ internal sealed class FuturesDecisionWorker(
             {
                 var desired = strategy.DecideEntry(signal);
                 var remainingSlots = Math.Max(0, config.Futures.MaxPositions - state.Positions.Count);
-                if (desired != FuturesDesiredExposure.Flat && newEntriesThisCycle >= remainingSlots)
+                if (desired == FuturesDesiredExposure.Flat)
+                {
+                    riskReasons = new[] { ExplainNoEntry(signal) };
+                    riskApproved = true;
+                }
+                else if (newEntriesThisCycle >= remainingSlots)
                 {
                     desired = FuturesDesiredExposure.Flat;
                     riskReasons = new[] { $"entry skipped: futures position slots exhausted ({config.Futures.MaxPositions} max)" };
@@ -189,12 +194,47 @@ internal sealed class FuturesDecisionWorker(
         RiskReasons = riskReasons,
         Contributions = signal.Contributions,
         DryRunAction = fill.Action,
+        EntryRejectionReason = fill.Action.Action == "NO_ORDER"
+            ? (riskApproved ? "REJECT_NO_FUTURES_SIGNAL" : "REJECT_FUTURES_RISK")
+            : null,
         SpreadPercent = SpreadPercentOf(marketState),
         HasBullishStructure = signal.HasBullishStructure,
         EmaFullyConfirmed = signal.EmaFullyConfirmed,
         BullishEmaGapPercent = signal.BullishEmaGapPercent,
         EmaGapVelocityPercent = signal.EmaGapVelocityPercent
     };
+
+    private string ExplainNoEntry(TechnicalSignal signal)
+    {
+        if (signal.HasBullishStructure
+            && !signal.EmaFullyConfirmed
+            && signal.Score >= config.Strategy.MinimumLongScore)
+        {
+            return $"no futures long: score {signal.Score:0.##} passed but EMA gap {signal.BullishEmaGapPercent?.ToString("0.###") ?? "unknown"}% is below required {config.Strategy.MinimumEmaGapPercent:0.###}%";
+        }
+
+        if (signal.HasBullishStructure && !signal.EmaFullyConfirmed)
+        {
+            return $"no futures long: EMA gap {signal.BullishEmaGapPercent?.ToString("0.###") ?? "unknown"}% is below required {config.Strategy.MinimumEmaGapPercent:0.###}% and score {signal.Score:0.##} is below {config.Strategy.MinimumLongScore:0.##}";
+        }
+
+        if (signal.EmaFullyConfirmed && signal.Score < config.Strategy.MinimumLongScore)
+        {
+            return $"no futures long: EMA confirmed but score {signal.Score:0.##} is below required {config.Strategy.MinimumLongScore:0.##}";
+        }
+
+        if (signal.AllowsShort && !config.Futures.AllowShorts)
+        {
+            return "no futures short: short candidate detected but Futures.AllowShorts=false";
+        }
+
+        if (signal.HasBearishStructure && !signal.AllowsShort)
+        {
+            return $"no futures short: bearish EMA structure present but downside confirmation did not clear the short gate; long score {signal.Score:0.##}";
+        }
+
+        return $"no futures signal: score {signal.Score:0.##}, long threshold {config.Strategy.MinimumLongScore:0.##}, EMA gap requirement {config.Strategy.MinimumEmaGapPercent:0.###}%";
+    }
 
     private CycleEntryDiagnostics BuildEntryDiagnostics(
         IReadOnlyList<InstrumentMarketState> lightStates,
@@ -248,8 +288,8 @@ internal sealed class FuturesDecisionWorker(
                     null,
                     string.IsNullOrWhiteSpace(state.DataWarning),
                     decision.RiskApproved,
-                    riskRejected ? decision.RiskReasons : Array.Empty<string>(),
-                    riskRejected ? "REJECT_FUTURES_RISK" : action.Action == "NO_ORDER" ? "REJECT_NO_FUTURES_SIGNAL" : null,
+                    action.Action == "NO_ORDER" || riskRejected ? decision.RiskReasons : Array.Empty<string>(),
+                    decision.EntryRejectionReason,
                     false);
             })
             .ToList();
