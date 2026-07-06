@@ -93,8 +93,8 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_EXECUTION_MIN_HOLD_SECONDS", value => config.ExecutionPolicy.MinHoldSeconds = ParseInt(value, config.ExecutionPolicy.MinHoldSeconds));
         SetIfPresent("TRADINGBOT_EXECUTION_ALLOW_IMMEDIATE_EXIT_ON_SIGNAL_FLIP", value => config.ExecutionPolicy.AllowImmediateExitOnSignalFlip = ParseBool(value, config.ExecutionPolicy.AllowImmediateExitOnSignalFlip));
         SetIfPresent("TRADINGBOT_POSITION_EXIT_MIN_PROFIT_ON_SIGNAL_FLIP_PERCENT", value => config.PositionExit.MinProfitToExitOnSignalFlipPercent = ParseDecimal(value, config.PositionExit.MinProfitToExitOnSignalFlipPercent));
-        SetIfPresent("TRADINGBOT_POSITION_EXIT_STOP_LOSS_PERCENT", value => config.PositionExit.StopLossPercent = ParseDecimal(value, config.PositionExit.StopLossPercent));
-        SetIfPresent("TRADINGBOT_POSITION_EXIT_TAKE_PROFIT_PERCENT", value => config.PositionExit.TakeProfitPercent = ParseDecimal(value, config.PositionExit.TakeProfitPercent));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_STOP_LOSS_PERCENT", value => config.PositionExit.StopLossPercent = ParseDecimal(value, config.PositionExit.StopLossPercent ?? config.PositionExit.FixedStopLossPercent));
+        SetIfPresent("TRADINGBOT_POSITION_EXIT_TAKE_PROFIT_PERCENT", value => config.PositionExit.TakeProfitPercent = ParseDecimal(value, config.PositionExit.TakeProfitPercent ?? config.PositionExit.FixedTakeProfitPercent));
         SetIfPresent("TRADINGBOT_POSITION_EXIT_MAX_HOLD_MINUTES", value => config.PositionExit.MaxHoldMinutes = ParseInt(value, config.PositionExit.MaxHoldMinutes));
         SetIfPresent("TRADINGBOT_STRATEGY_EXIT_EMA_GAP_PERCENT", value => config.Strategy.ExitEmaGapPercent = ParseDecimal(value, config.Strategy.ExitEmaGapPercent));
         SetIfPresent("TRADINGBOT_POSITION_EXIT_TRAILING_ACTIVATION_PERCENT", value => config.PositionExit.TrailingActivationPercent = ParseDecimal(value, config.PositionExit.TrailingActivationPercent));
@@ -208,8 +208,26 @@ internal sealed class BotConfiguration
         ExecutionPolicy.MaxNewPositionsPerHour = Math.Max(0, ExecutionPolicy.MaxNewPositionsPerHour);
         ExecutionPolicy.CooldownAfterStopLossSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterStopLossSeconds);
         PositionExit.MinProfitToExitOnSignalFlipPercent = Math.Max(0m, PositionExit.MinProfitToExitOnSignalFlipPercent);
-        PositionExit.StopLossPercent = Math.Max(0m, PositionExit.StopLossPercent);
-        PositionExit.TakeProfitPercent = Math.Max(0m, PositionExit.TakeProfitPercent);
+        PositionExit.StopLossPercent = PositionExit.StopLossPercent is { } legacyStop ? Math.Max(0m, legacyStop) : null;
+        PositionExit.TakeProfitPercent = PositionExit.TakeProfitPercent is { } legacyTakeProfit ? Math.Max(0m, legacyTakeProfit) : null;
+        PositionExit.Mode = PositionExitOptions.NormalizeMode(PositionExit.Mode);
+        PositionExit.AtrPeriod = Math.Max(1, PositionExit.AtrPeriod);
+        PositionExit.StopLossAtrMultiplier = Math.Max(0m, PositionExit.StopLossAtrMultiplier);
+        PositionExit.TakeProfitAtrMultiplier = Math.Max(0m, PositionExit.TakeProfitAtrMultiplier);
+        PositionExit.FixedStopLossPercent = PositionExit.StopLossPercent is > 0m
+            ? PositionExit.StopLossPercent.Value
+            : Math.Max(0m, PositionExit.FixedStopLossPercent);
+        PositionExit.FixedTakeProfitPercent = PositionExit.TakeProfitPercent is > 0m
+            ? PositionExit.TakeProfitPercent.Value
+            : Math.Max(0m, PositionExit.FixedTakeProfitPercent);
+        if (PositionExit.IsAtrMode
+            && PositionExit.TakeProfitAtrMultiplier > 0m
+            && PositionExit.StopLossAtrMultiplier > 0m
+            && PositionExit.TakeProfitAtrMultiplier < PositionExit.StopLossAtrMultiplier)
+        {
+            throw new InvalidOperationException(
+                $"Invalid PositionExit ATR risk/reward: TakeProfitAtrMultiplier {PositionExit.TakeProfitAtrMultiplier:0.###} is below StopLossAtrMultiplier {PositionExit.StopLossAtrMultiplier:0.###} (risk/reward < 1).");
+        }
         PositionExit.MaxHoldMinutes = Math.Max(0, PositionExit.MaxHoldMinutes);
         PositionExit.TrailingActivationPercent = Math.Max(0m, PositionExit.TrailingActivationPercent);
         PositionExit.TrailingDistancePercent = Math.Max(0m, PositionExit.TrailingDistancePercent);
@@ -588,16 +606,33 @@ internal sealed class ExecutionPolicyOptions
 
 internal sealed class PositionExitOptions
 {
+    public const string ModeAtr = "Atr";
+    public const string ModeFixedPercent = "FixedPercent";
+
+    public string Mode { get; set; } = ModeFixedPercent;
+    public int AtrPeriod { get; set; } = 14;
+    public decimal StopLossAtrMultiplier { get; set; } = 2.0m;
+    public decimal TakeProfitAtrMultiplier { get; set; } = 3.0m;
+    public decimal FixedStopLossPercent { get; set; } = 2.5m;
+    public decimal FixedTakeProfitPercent { get; set; } = 2.0m;
+
     // Normal signal-flip exits are only allowed when the conservative unrealized
     // PnL percent is at least this value. Does not apply to hard exits.
     public decimal MinProfitToExitOnSignalFlipPercent { get; set; } = 1.2m;
 
-    // Hard exit: sell when conservative unrealized PnL percent <= -StopLossPercent.
-    public decimal StopLossPercent { get; set; } = 1.5m;
+    // Legacy aliases. New configs should use FixedStopLossPercent /
+    // FixedTakeProfitPercent; these stay readable for old appsettings and tests.
+    public decimal? StopLossPercent { get; set; }
+    public decimal? TakeProfitPercent { get; set; }
 
-    // Hard exit: sell when conservative unrealized PnL percent >= TakeProfitPercent,
-    // even if the strategy still wants LONG_MICRO.
-    public decimal TakeProfitPercent { get; set; } = 2.0m;
+    public bool IsAtrMode => Mode.Equals(ModeAtr, StringComparison.OrdinalIgnoreCase);
+    public decimal EffectiveFixedStopLossPercent => StopLossPercent ?? FixedStopLossPercent;
+    public decimal EffectiveFixedTakeProfitPercent => TakeProfitPercent ?? FixedTakeProfitPercent;
+
+    public static string NormalizeMode(string? mode) =>
+        string.Equals(mode, ModeAtr, StringComparison.OrdinalIgnoreCase)
+            ? ModeAtr
+            : ModeFixedPercent;
 
     // Conditional stale-position exit: once the position age reaches this many
     // minutes, sell only if the position is losing or the entry thesis has weakened.

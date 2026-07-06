@@ -23,6 +23,12 @@ internal sealed record ScoreDecaySnapshot(
     bool EmaBullish = true,
     bool MomentumPositive = true);
 
+internal sealed record PositionExitLevelsSnapshot(
+    string Side,
+    decimal? StopLossPrice,
+    decimal? TakeProfitPrice,
+    decimal ConservativeExitPrice);
+
 // Deterministic exit policy for a currently held LONG position.
 //
 // The evaluation is a pure function of the position age, conservative unrealized
@@ -69,12 +75,13 @@ internal static class PositionExitPolicy
         decimal? peakPnlPercent = null,
         bool exitHysteresisEnabled = false,
         ScoreDecaySnapshot? scoreDecay = null,
-        bool recentPriceActionNegative = false)
+        bool recentPriceActionNegative = false,
+        PositionExitLevelsSnapshot? exitLevels = null)
     {
         var pnl = conservativeUnrealizedPnlPercent;
 
         // TIER 1 - HARD RISK RULES. Highest priority. Nothing below may block these.
-        var hardRiskExit = EvaluateHardRiskRules(pnl, canValuePosition, killSwitchActive, positionExit);
+        var hardRiskExit = EvaluateHardRiskRules(pnl, canValuePosition, killSwitchActive, positionExit, exitLevels);
         if (hardRiskExit is not null)
         {
             return hardRiskExit;
@@ -88,7 +95,8 @@ internal static class PositionExitPolicy
             canValuePosition,
             peakPnlPercent,
             positionExit,
-            scoreDecay);
+            scoreDecay,
+            exitLevels);
         if (forcedExit is not null)
         {
             return forcedExit;
@@ -114,7 +122,8 @@ internal static class PositionExitPolicy
         decimal pnl,
         bool canValuePosition,
         bool killSwitchActive,
-        PositionExitOptions positionExit)
+        PositionExitOptions positionExit,
+        PositionExitLevelsSnapshot? exitLevels)
     {
         // Kill switch / emergency exit. Uses the existing RiskOptions.KillSwitch and
         // flattens an open position regardless of hold/profit guards.
@@ -124,13 +133,22 @@ internal static class PositionExitPolicy
             return Sell(ExitReason.KillSwitch, "kill-switch exit: flattening position while kill switch is active");
         }
 
-        // Stop-loss. Only evaluated when the position can be valued. A positive
-        // StopLossPercent arms the guard; 0 disables it (never fire on a flat/valued loss).
-        if (canValuePosition && positionExit.StopLossPercent > 0m && pnl <= -positionExit.StopLossPercent)
+        if (canValuePosition
+            && exitLevels?.StopLossPrice is { } stopLossPrice
+            && PriceCrossedStopLoss(exitLevels, stopLossPrice))
         {
             return Sell(
                 ExitReason.StopLoss,
-                $"stop-loss exit: unrealized PnL {Percent(pnl)}% <= -{Percent(positionExit.StopLossPercent)}%");
+                $"stop-loss exit: conservative exit price {Price(exitLevels.ConservativeExitPrice)} crossed saved stop {Price(stopLossPrice)}");
+        }
+
+        // Legacy fallback for positions without saved price levels.
+        var fixedStopLossPercent = positionExit.EffectiveFixedStopLossPercent;
+        if (canValuePosition && fixedStopLossPercent > 0m && pnl <= -fixedStopLossPercent)
+        {
+            return Sell(
+                ExitReason.StopLoss,
+                $"stop-loss exit: unrealized PnL {Percent(pnl)}% <= -{Percent(fixedStopLossPercent)}%");
         }
 
         return null;
@@ -145,15 +163,25 @@ internal static class PositionExitPolicy
         bool canValuePosition,
         decimal? peakPnlPercent,
         PositionExitOptions positionExit,
-        ScoreDecaySnapshot? scoreDecay)
+        ScoreDecaySnapshot? scoreDecay,
+        PositionExitLevelsSnapshot? exitLevels)
     {
-        // Take-profit. Fires even if the strategy still wants LONG_MICRO. Kept as the
-        // hard cap ABOVE the trailing stop.
-        if (canValuePosition && positionExit.TakeProfitPercent > 0m && pnl >= positionExit.TakeProfitPercent)
+        if (canValuePosition
+            && exitLevels?.TakeProfitPrice is { } takeProfitPrice
+            && PriceCrossedTakeProfit(exitLevels, takeProfitPrice))
         {
             return Sell(
                 ExitReason.TakeProfit,
-                $"take-profit exit: unrealized PnL {Percent(pnl)}% >= {Percent(positionExit.TakeProfitPercent)}%");
+                $"take-profit exit: conservative exit price {Price(exitLevels.ConservativeExitPrice)} crossed saved take-profit {Price(takeProfitPrice)}");
+        }
+
+        // Legacy fallback for positions without saved price levels.
+        var fixedTakeProfitPercent = positionExit.EffectiveFixedTakeProfitPercent;
+        if (canValuePosition && fixedTakeProfitPercent > 0m && pnl >= fixedTakeProfitPercent)
+        {
+            return Sell(
+                ExitReason.TakeProfit,
+                $"take-profit exit: unrealized PnL {Percent(pnl)}% >= {Percent(fixedTakeProfitPercent)}%");
         }
 
         // Trailing stop. Once the conservative peak PnL reaches the activation level,
@@ -364,4 +392,16 @@ internal static class PositionExitPolicy
     private static ExitEvaluation Hold(string holdReasonCode, string text) => new(false, null, holdReasonCode, text);
 
     private static string Percent(decimal value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static string Price(decimal value) => value.ToString("0.##########", CultureInfo.InvariantCulture);
+
+    private static bool PriceCrossedStopLoss(PositionExitLevelsSnapshot levels, decimal stopLossPrice) =>
+        levels.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase)
+            ? levels.ConservativeExitPrice >= stopLossPrice
+            : levels.ConservativeExitPrice <= stopLossPrice;
+
+    private static bool PriceCrossedTakeProfit(PositionExitLevelsSnapshot levels, decimal takeProfitPrice) =>
+        levels.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase)
+            ? levels.ConservativeExitPrice <= takeProfitPrice
+            : levels.ConservativeExitPrice >= takeProfitPrice;
 }

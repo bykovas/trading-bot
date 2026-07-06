@@ -271,6 +271,7 @@ internal sealed class DryRunPortfolio(
             }
 
             var buyPrice = CalculateBuyPrice(marketState);
+            var exitLevels = PositionExitLevelCalculator.Calculate("LONG", buyPrice, marketState.Candles, positionExit);
             var feeRate = FeeRate;
             var grossNotional = proposal.TargetNotionalEur / (1m + feeRate);
             var buyFee = proposal.TargetNotionalEur - grossNotional;
@@ -291,7 +292,11 @@ internal sealed class DryRunPortfolio(
                 MarketValueEur = CalculateLiquidationValue(quantity, marketState),
                 OpenedAtUtc = now,
                 LastActionAtUtc = now,
-                EntryScore = proposal.Score
+                EntryScore = proposal.Score,
+                ExitMode = exitLevels.ExitMode,
+                EntryAtr = exitLevels.EntryAtr,
+                StopLossPrice = exitLevels.StopLossPrice,
+                TakeProfitPrice = exitLevels.TakeProfitPrice
             };
 
             if (options.ApplyVirtualFills)
@@ -305,7 +310,7 @@ internal sealed class DryRunPortfolio(
 
             return BuildAction(
                 "WOULD_BUY",
-                $"open virtual long: gross EUR {grossNotional:0.####}, fee EUR {buyFee:0.####}, fill ask+slippage {buyPrice:0.####}",
+                $"open virtual long: gross EUR {grossNotional:0.####}, fee EUR {buyFee:0.####}, fill ask+slippage {buyPrice:0.####}; {exitLevels.Reason}; SL {exitLevels.StopLossPrice:0.####}, TP {exitLevels.TakeProfitPrice:0.####}",
                 proposal,
                 newPosition,
                 beforeCash,
@@ -334,6 +339,7 @@ internal sealed class DryRunPortfolio(
     {
         var canValue = marketState.LastPrice > 0m;
         var pnlPercent = ConservativeUnrealizedPnlPercent(position, marketState, canValue);
+        var conservativeExitPrice = CalculateSellPrice(marketState);
         var ageSeconds = PositionAgeSeconds(position, now);
         var scoreDecay = UpdateScoreDecay(position, proposal);
 
@@ -348,7 +354,8 @@ internal sealed class DryRunPortfolio(
             position.PeakPnlPercent,
             ExitHysteresisEnabled,
             scoreDecay,
-            recentPriceActionNegative: priceAction is { DataSufficient: true, TrendPercent: < 0m });
+            recentPriceActionNegative: priceAction is { DataSufficient: true, TrendPercent: < 0m },
+            exitLevels: new PositionExitLevelsSnapshot(position.Side, position.StopLossPrice, position.TakeProfitPrice, conservativeExitPrice));
 
         if (scoreDecay.EntryScore is { } trackedEntryScore && scoreDecay.ConsecutiveLowScoreCycles > 0)
         {
@@ -779,6 +786,10 @@ internal sealed class PortfolioPosition
     // Strategy score at the moment the position was opened, used by the score-decay
     // defensive exit. Null for legacy positions (decay rules then stay inert).
     public decimal? EntryScore { get; set; }
+    public string? ExitMode { get; set; }
+    public decimal? EntryAtr { get; set; }
+    public decimal? StopLossPrice { get; set; }
+    public decimal? TakeProfitPrice { get; set; }
 
     // Consecutive decision cycles in which the current score sat at or below the
     // configured defensive score level. Reset to 0 whenever the score recovers.
@@ -799,6 +810,10 @@ internal sealed class PortfolioPosition
         LastActionAtUtc = LastActionAtUtc,
         PeakPnlPercent = PeakPnlPercent,
         EntryScore = EntryScore,
+        ExitMode = ExitMode,
+        EntryAtr = EntryAtr,
+        StopLossPrice = StopLossPrice,
+        TakeProfitPrice = TakeProfitPrice,
         LowScoreCycles = LowScoreCycles
     };
 }

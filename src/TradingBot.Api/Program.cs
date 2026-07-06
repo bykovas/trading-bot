@@ -292,7 +292,11 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             (position ->> 'unrealizedPnlEur')::numeric as unrealized_pnl_eur,
             (position ->> 'unrealizedPnlPercent')::numeric as unrealized_pnl_percent,
             (position ->> 'openedAtUtc')::timestamptz as opened_at_utc,
-            (position ->> 'lastActionAtUtc')::timestamptz as last_action_at_utc
+            (position ->> 'lastActionAtUtc')::timestamptz as last_action_at_utc,
+            position ->> 'exitMode' as exit_mode,
+            (position ->> 'entryAtr')::numeric as entry_atr,
+            (position ->> 'stopLossPrice')::numeric as stop_loss_price,
+            (position ->> 'takeProfitPrice')::numeric as take_profit_price
         from portfolio_state state
         cross join lateral jsonb_array_elements(coalesce(state.state_json -> 'positions', '[]'::jsonb)) as position
         where (@bot_instance_id is null or state.bot_instance_id = @bot_instance_id)
@@ -316,7 +320,11 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             reader.GetDecimal(7),
             reader.GetDecimal(8),
             reader.IsDBNull(9) ? null : reader.GetDateTime(9),
-            reader.IsDBNull(10) ? null : reader.GetDateTime(10)));
+            reader.IsDBNull(10) ? null : reader.GetDateTime(10),
+            reader.IsDBNull(11) ? null : reader.GetString(11),
+            GetNullableDecimal(reader, 12),
+            GetNullableDecimal(reader, 13),
+            GetNullableDecimal(reader, 14)));
     }
 
     return positions;
@@ -873,7 +881,11 @@ internal sealed record PortfolioPositionDto(
     decimal UnrealizedPnlEur,
     decimal UnrealizedPnlPercent,
     DateTime? OpenedAtUtc,
-    DateTime? LastActionAtUtc);
+    DateTime? LastActionAtUtc,
+    string? ExitMode,
+    decimal? EntryAtr,
+    decimal? StopLossPrice,
+    decimal? TakeProfitPrice);
 
 internal sealed record PageRequest(int Limit, int Offset)
 {
