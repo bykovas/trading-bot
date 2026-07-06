@@ -8,7 +8,7 @@ internal sealed class DecisionWorker(
     TechnicalDecisionEngine decisionEngine,
     RiskManager riskManager,
     DryRunPortfolio dryRunPortfolio,
-    KrakenBroker? broker,
+    ISpotBroker? broker,
     WorkerBuildInfo? buildInfo = null)
 {
     private readonly WorkerBuildInfo _buildInfo = buildInfo ?? WorkerBuildInfo.FromEnvironment();

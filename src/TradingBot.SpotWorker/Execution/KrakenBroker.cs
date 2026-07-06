@@ -10,7 +10,7 @@ namespace TradingBot.SpotWorker;
 /// <c>validate</c> flag. It never enables live execution by itself — the caller decides the
 /// <c>validate</c> value from the risk/live gate.
 /// </summary>
-internal sealed class KrakenBroker(HttpClient httpClient, KrakenOptions options)
+internal sealed class KrakenBroker(HttpClient httpClient, KrakenOptions options) : ISpotBroker
 {
     private static long _lastNonce;
 
