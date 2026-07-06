@@ -19,6 +19,38 @@ app.MapGet("/api/health", () => Results.Ok(new
     utc = DateTimeOffset.UtcNow
 }));
 
+// Distinct bot instances that have persisted at least one cycle, so the UI
+// toggle can be data-driven instead of hardcoding instance ids.
+app.MapGet("/api/bot-instances", async (CancellationToken cancellationToken) =>
+{
+    var connectionString = GetConnectionString(builder.Configuration);
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return Results.Problem("TRADINGBOT_DATABASE_CONNECTION_STRING is not configured.");
+    }
+
+    try
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            "select distinct bot_instance_id from dry_run_cycles order by bot_instance_id",
+            connection);
+        var instances = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            instances.Add(reader.GetString(0));
+        }
+
+        return Results.Ok(new { utc = DateTimeOffset.UtcNow, instances });
+    }
+    catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedObject)
+    {
+        return Results.Ok(new { utc = DateTimeOffset.UtcNow, instances = Array.Empty<string>() });
+    }
+});
+
 app.MapGet("/api/portfolio", async (string? botInstanceId, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
