@@ -141,6 +141,44 @@
       justify-content: flex-end;
     }
 
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .82);
+      color: var(--soft);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 14px rgba(111, 174, 255, .5);
+    }
+
+    .dot.ok {
+      background: var(--green);
+      box-shadow: 0 0 14px rgba(65, 237, 160, .5);
+    }
+
+    .dot.bad {
+      background: var(--red);
+      box-shadow: 0 0 14px rgba(255, 83, 103, .5);
+    }
+
+    .dot.warn {
+      background: var(--gold);
+      box-shadow: 0 0 14px rgba(245, 184, 79, .5);
+    }
+
     a, button, input {
       min-height: 34px;
       padding: 0 12px;
@@ -289,6 +327,10 @@
           <span class="s">BYKOVAS-FINANCE LAB</span>
         </span>
       </a>
+      <div class="status">
+        <span id="status-dot" class="dot"></span>
+        <span id="status-text">Loading status</span>
+      </div>
       <nav class="actions">
         <a href="/dash.html">Portfolio</a>
         <a href="/cycles.html">Cycles</a>
@@ -335,6 +377,7 @@
     </section>
   </main>
 
+  <script src="/bot-status.js"></script>
   <script>
     const limit = 100;
     let offset = 0;
@@ -357,6 +400,16 @@
     const prev = document.getElementById("prev");
     const next = document.getElementById("next");
     const decimal = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
+
+    function refreshBotStatus() {
+      if (!window.BlynaiBotStatus) return;
+      window.BlynaiBotStatus
+        .updateBadge({ botInstanceId: currentBotInstance })
+        .catch(() => {
+          document.getElementById("status-dot").className = "dot bad";
+          document.getElementById("status-text").textContent = "API unavailable";
+        });
+    }
 
     function num(value) {
       const n = Number(value);
@@ -411,6 +464,7 @@
       botButtons.forEach(button => button.addEventListener("click", () => {
         setBotInstance(button.dataset.botInstance, true);
         offset = 0;
+        refreshBotStatus();
         load().catch(error => statusEl.textContent = error.message);
       }));
     }
@@ -464,6 +518,7 @@
     });
 
     initBotSelector();
+    refreshBotStatus();
     load().catch(error => statusEl.textContent = error.message);
   </script>
 </body>

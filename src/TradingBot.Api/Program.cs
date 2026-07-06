@@ -51,6 +51,31 @@ app.MapGet("/api/bot-instances", async (CancellationToken cancellationToken) =>
     }
 });
 
+app.MapGet("/api/bot-status", async (string? botInstanceId, CancellationToken cancellationToken) =>
+{
+    var connectionString = GetConnectionString(builder.Configuration);
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return Results.Problem("TRADINGBOT_DATABASE_CONNECTION_STRING is not configured.");
+    }
+
+    try
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await EnsureCycleMetadataColumns(connection, cancellationToken);
+
+        var status = await ReadBotStatus(connection, Clean(botInstanceId), cancellationToken);
+        return Results.Ok(status);
+    }
+    catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedObject)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var bot = Clean(botInstanceId);
+        return Results.Ok(BotStatusDto.NoData(now, bot, BotEntryBlackout(bot, now)));
+    }
+});
+
 app.MapGet("/api/portfolio", async (string? botInstanceId, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
@@ -909,6 +934,78 @@ static string? Clean(string? value) =>
 static string? ReadNullableString(NpgsqlDataReader reader, int ordinal) =>
     reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
 
+static async Task<BotStatusDto> ReadBotStatus(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
+{
+    var now = DateTimeOffset.UtcNow;
+    await using var command = new NpgsqlCommand(
+        """
+        select
+            cycle_id,
+            bot_instance_id,
+            utc,
+            record_json ->> 'marketDataMode'
+        from dry_run_cycles
+        where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
+        order by utc desc
+        limit 1
+        """,
+        connection);
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
+
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    if (!await reader.ReadAsync(cancellationToken))
+    {
+        return BotStatusDto.NoData(now, botInstanceId, BotEntryBlackout(botInstanceId, now));
+    }
+
+    var cycleUtc = DateTime.SpecifyKind(reader.GetDateTime(2), DateTimeKind.Utc);
+    var age = now - new DateTimeOffset(cycleUtc);
+    var resolvedBotInstanceId = reader.GetString(1);
+    var blackout = BotEntryBlackout(resolvedBotInstanceId, now);
+    var isStale = age > TimeSpan.FromMinutes(10);
+    var runtimeState = isStale
+        ? "stale"
+        : blackout.IsActive
+            ? "night-window"
+            : "running";
+
+    return new BotStatusDto(
+        now,
+        resolvedBotInstanceId,
+        reader.GetString(0),
+        cycleUtc,
+        (int)Math.Max(0, age.TotalSeconds),
+        reader.IsDBNull(3) ? "unknown" : reader.GetString(3),
+        runtimeState,
+        isStale,
+        blackout);
+}
+
+static EntryBlackoutStatus SpotEntryBlackout(DateTimeOffset nowUtc)
+{
+    const int fromUtcHour = 22;
+    const int minutes = 360;
+    var utc = nowUtc.UtcDateTime;
+    var startUtc = utc.Date.AddHours(fromUtcHour);
+    var endUtc = startUtc.AddMinutes(minutes);
+    var isActive = utc >= startUtc && utc < endUtc;
+    var zone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Vilnius");
+
+    return new EntryBlackoutStatus(
+        true,
+        isActive,
+        fromUtcHour,
+        minutes,
+        TimeZoneInfo.ConvertTimeFromUtc(startUtc, zone).ToString("HH:mm", CultureInfo.InvariantCulture),
+        TimeZoneInfo.ConvertTimeFromUtc(endUtc, zone).ToString("HH:mm", CultureInfo.InvariantCulture),
+        "Europe/Vilnius");
+}
+
+static EntryBlackoutStatus BotEntryBlackout(string? botInstanceId, DateTimeOffset nowUtc) =>
+    botInstanceId?.StartsWith("spot-", StringComparison.OrdinalIgnoreCase) == true
+        ? SpotEntryBlackout(nowUtc)
+        : EntryBlackoutStatus.NotConfigured();
+
 static string CsvDecimal(decimal value) => CsvText(value.ToString(CultureInfo.InvariantCulture));
 
 static string CsvText(string? value)
@@ -922,6 +1019,43 @@ internal sealed record PortfolioResponse(
     PortfolioSummaryDto? Summary,
     IReadOnlyList<PortfolioPositionDto> Positions,
     string? Warning);
+
+internal sealed record BotStatusDto(
+    DateTimeOffset Utc,
+    string? BotInstanceId,
+    string? LatestCycleId,
+    DateTime? LatestCycleUtc,
+    int? LatestCycleAgeSeconds,
+    string MarketDataMode,
+    string RuntimeState,
+    bool IsStale,
+    EntryBlackoutStatus EntryBlackout)
+{
+    public static BotStatusDto NoData(DateTimeOffset utc, string? botInstanceId, EntryBlackoutStatus entryBlackout) =>
+        new(
+            utc,
+            botInstanceId,
+            null,
+            null,
+            null,
+            "unknown",
+            "no-data",
+            true,
+            entryBlackout);
+}
+
+internal sealed record EntryBlackoutStatus(
+    bool Configured,
+    bool IsActive,
+    int? FromUtcHour,
+    int? Minutes,
+    string? LocalStart,
+    string? LocalEnd,
+    string? LocalTimeZone)
+{
+    public static EntryBlackoutStatus NotConfigured() =>
+        new(false, false, null, null, null, null, null);
+}
 
 internal sealed record PortfolioSummaryDto(
     DateTime UpdatedAt,

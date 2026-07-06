@@ -175,6 +175,11 @@
       box-shadow: 0 0 14px rgba(255, 83, 103, .5);
     }
 
+    .dot.warn {
+      background: var(--amber);
+      box-shadow: 0 0 14px rgba(240, 166, 58, .5);
+    }
+
     .api-links {
       display: flex;
       gap: 10px;
@@ -545,6 +550,7 @@
     </section>
   </main>
 
+  <script src="/bot-status.js"></script>
   <script>
     const botButtons = Array.from(document.querySelectorAll("[data-bot-instance]"));
     let currentBotInstance = "spot-live";
@@ -674,8 +680,13 @@
     }
 
     function setStatus(kind, text) {
-      els.statusDot.className = `dot ${kind === "ok" ? "ok" : kind === "bad" ? "bad" : ""}`;
+      els.statusDot.className = `dot ${kind === "ok" ? "ok" : kind === "bad" ? "bad" : kind === "warn" ? "warn" : ""}`;
       els.statusText.textContent = text;
+    }
+
+    async function refreshBotStatus() {
+      if (!window.BlynaiBotStatus) return;
+      await window.BlynaiBotStatus.updateBadge({ botInstanceId: currentBotInstance });
     }
 
     function setWarning(text) {
@@ -968,7 +979,7 @@
           els.updated.textContent = `${els.updated.textContent} | since ${since} 00:00 ${zone}`;
         }
         setWarning("");
-        setStatus("ok", "Live data");
+        refreshBotStatus().catch(() => setStatus("ok", "API connected"));
       } catch (error) {
         setStatus("bad", "API unavailable");
         setWarning(error.message || "Failed to load trades");
