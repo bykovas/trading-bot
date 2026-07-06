@@ -5,11 +5,11 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TradingBot.Worker", "src\TradingBot.Worker\TradingBot.Worker.csproj", "{BE52CAAC-53BA-4D20-A629-AE6A11C246FA}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TradingBot.SpotWorker", "src\TradingBot.SpotWorker\TradingBot.SpotWorker.csproj", "{BE52CAAC-53BA-4D20-A629-AE6A11C246FA}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TradingBot.Worker.Tests", "tests\TradingBot.Worker.Tests\TradingBot.Worker.Tests.csproj", "{CCC05D50-8E98-446C-B58A-794B2B1C6E5C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TradingBot.SpotWorker.Tests", "tests\TradingBot.SpotWorker.Tests\TradingBot.SpotWorker.Tests.csproj", "{CCC05D50-8E98-446C-B58A-794B2B1C6E5C}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TradingBot.Api", "src\TradingBot.Api\TradingBot.Api.csproj", "{D3E6CC3D-FD10-4C8C-8330-4184F4771E32}"
 EndProject

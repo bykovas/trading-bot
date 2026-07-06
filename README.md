@@ -1,6 +1,6 @@
 # trading-bot
 
-Минимальный runnable slice сейчас находится в `src/TradingBot.Worker`.
+Минимальный runnable slice сейчас находится в `src/TradingBot.SpotWorker`.
 
 Подробный runbook: [RUNBOOK.md](RUNBOOK.md).
 
@@ -20,7 +20,7 @@
 По умолчанию используется sample market data:
 
 ```bash
-dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
 ## Запуск с публичными данными Kraken
@@ -29,7 +29,7 @@ dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
 
 ```bash
 TRADINGBOT_MARKET_DATA_MODE=kraken \
-dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
 ## Ночной dry-run
@@ -38,7 +38,7 @@ dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
 TRADINGBOT_MARKET_DATA_MODE=kraken \
 TRADINGBOT_RUN_ONCE=false \
 TRADINGBOT_LOOP_INTERVAL_SECONDS=300 \
-dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
 Результаты пишутся в:
@@ -48,7 +48,7 @@ data/dry-run/portfolio-state.json
 data/dry-run/events.jsonl
 ```
 
-Стартовый виртуальный портфель задается в `src/TradingBot.Worker/appsettings.json` в блоке `Portfolio`.
+Стартовый виртуальный портфель задается в `src/TradingBot.SpotWorker/appsettings.json` в блоке `Portfolio`.
 
 ## Execution policy и position exit
 
@@ -86,7 +86,7 @@ TRADINGBOT_AI_PROVIDER=openai-compatible \
 TRADINGBOT_AI_BASE_URL=https://api.openai.com/v1 \
 TRADINGBOT_AI_MODEL=your-model \
 TRADINGBOT_AI_API_KEY=your-key \
-dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
 Если AI недоступен, ответ невалидный или модель вернула пары вне конфигурации, worker безопасно падает обратно на heuristic watchlist.

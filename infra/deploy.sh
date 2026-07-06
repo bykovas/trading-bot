@@ -6,7 +6,7 @@ TRAEFIK_DYNAMIC_DIR="/opt/traefik/dynamic"
 PROJECT_NAME="trading-bot"
 COMPOSE_FILE="${DEPLOY_DIR}/docker-compose.prod.yml"
 TRAEFIK_DYNAMIC_FILE="${TRAEFIK_DYNAMIC_DIR}/trading-bot.yml"
-WORKER_APPSETTINGS_SOURCE="src/TradingBot.Worker/appsettings.json"
+WORKER_APPSETTINGS_SOURCE="src/TradingBot.SpotWorker/appsettings.json"
 API_DIR="${DEPLOY_DIR}/api"
 API_ENV_FILE="${API_DIR}/.env"
 SPOT_DIR="${DEPLOY_DIR}/spot"
@@ -22,7 +22,7 @@ DATABASE_ENV_FILE="${DATABASE_ENV_DIR}/.env"
 
 : "${UI_IMAGE_NAME:?UI_IMAGE_NAME is required}"
 : "${API_IMAGE_NAME:?API_IMAGE_NAME is required}"
-: "${WORKER_IMAGE_NAME:?WORKER_IMAGE_NAME is required}"
+: "${SPOT_WORKER_IMAGE_NAME:?SPOT_WORKER_IMAGE_NAME is required}"
 : "${GHCR_USERNAME:?GHCR_USERNAME is required}"
 : "${GHCR_TOKEN:?GHCR_TOKEN is required}"
 : "${TRADINGBOT_DB_PASSWORD:?TRADINGBOT_DB_PASSWORD is required}"
@@ -32,13 +32,13 @@ DATABASE_ENV_FILE="${DATABASE_ENV_DIR}/.env"
 
 UI_IMAGE_TAG="${UI_IMAGE_TAG:-latest}"
 API_IMAGE_TAG="${API_IMAGE_TAG:-${UI_IMAGE_TAG}}"
-WORKER_IMAGE_TAG="${WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
+SPOT_WORKER_IMAGE_TAG="${SPOT_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 TRAEFIK_NETWORK="${TRAEFIK_NETWORK:-traefik}"
 
 echo "Deploying stack '${PROJECT_NAME}' to ${DEPLOY_DIR}"
 echo "  ui     = ${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
 echo "  api    = ${API_IMAGE_NAME}:${API_IMAGE_TAG}"
-echo "  worker = ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG}"
+echo "  worker = ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}"
 echo "  live   = trading-bot-spot-worker-live"
 echo "  virtual= trading-bot-spot-worker-virtual"
 
@@ -138,8 +138,8 @@ export UI_IMAGE_NAME
 export UI_IMAGE_TAG
 export API_IMAGE_NAME
 export API_IMAGE_TAG
-export WORKER_IMAGE_NAME
-export WORKER_IMAGE_TAG
+export SPOT_WORKER_IMAGE_NAME
+export SPOT_WORKER_IMAGE_TAG
 export TRAEFIK_NETWORK
 
 docker compose \

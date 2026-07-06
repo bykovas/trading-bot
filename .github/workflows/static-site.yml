@@ -13,7 +13,7 @@ permissions:
 env:
   UI_IMAGE_NAME: ghcr.io/bykovas/trading-bot-ui
   API_IMAGE_NAME: ghcr.io/bykovas/trading-bot-api
-  WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-worker
+  SPOT_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-spot-worker
 
 jobs:
   build:
@@ -42,21 +42,21 @@ jobs:
             --tag "${UI_IMAGE_NAME}:${{ github.sha }}" \
             .
 
-      - name: Build worker image
+      - name: Build spot worker image
         run: |
           WORKER_BUILD_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          WORKER_STRATEGY_VERSION="$(git ls-files src/TradingBot.Worker | sort | xargs sha256sum | sha256sum | cut -d ' ' -f1)"
+          WORKER_STRATEGY_VERSION="$(git ls-files src/TradingBot.SpotWorker | sort | xargs sha256sum | sha256sum | cut -d ' ' -f1)"
           WORKER_CHANGE_SET="$(awk '/^## / {print $2; exit}' .ai/worker-changelog.md)"
           docker build \
-            --file src/TradingBot.Worker/Dockerfile \
+            --file src/TradingBot.SpotWorker/Dockerfile \
             --build-arg "TRADINGBOT_WORKER_VERSION=${{ github.sha }}" \
             --build-arg "TRADINGBOT_WORKER_COMMIT=${{ github.sha }}" \
             --build-arg "TRADINGBOT_WORKER_BUILD_UTC=${WORKER_BUILD_UTC}" \
             --build-arg "TRADINGBOT_WORKER_IMAGE_TAG=${{ github.sha }}" \
             --build-arg "TRADINGBOT_WORKER_STRATEGY_VERSION=${WORKER_STRATEGY_VERSION}" \
             --build-arg "TRADINGBOT_WORKER_CHANGE_SET=${WORKER_CHANGE_SET}" \
-            --tag "${WORKER_IMAGE_NAME}:latest" \
-            --tag "${WORKER_IMAGE_NAME}:${{ github.sha }}" \
+            --tag "${SPOT_WORKER_IMAGE_NAME}:latest" \
+            --tag "${SPOT_WORKER_IMAGE_NAME}:${{ github.sha }}" \
             .
 
       - name: Build API image
@@ -73,8 +73,8 @@ jobs:
           docker push "${UI_IMAGE_NAME}:${{ github.sha }}"
           docker push "${API_IMAGE_NAME}:latest"
           docker push "${API_IMAGE_NAME}:${{ github.sha }}"
-          docker push "${WORKER_IMAGE_NAME}:latest"
-          docker push "${WORKER_IMAGE_NAME}:${{ github.sha }}"
+          docker push "${SPOT_WORKER_IMAGE_NAME}:latest"
+          docker push "${SPOT_WORKER_IMAGE_NAME}:${{ github.sha }}"
 
   deploy:
     needs: build
@@ -87,8 +87,8 @@ jobs:
       UI_IMAGE_TAG: ${{ github.sha }}
       API_IMAGE_NAME: ghcr.io/bykovas/trading-bot-api
       API_IMAGE_TAG: ${{ github.sha }}
-      WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-worker
-      WORKER_IMAGE_TAG: ${{ github.sha }}
+      SPOT_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-spot-worker
+      SPOT_WORKER_IMAGE_TAG: ${{ github.sha }}
       GHCR_USERNAME: ${{ github.actor }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TRADINGBOT_DB_PASSWORD: ${{ secrets.TRADINGBOT_DB_PASSWORD }}

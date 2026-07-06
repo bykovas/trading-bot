@@ -1,0 +1,42 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+ARG TRADINGBOT_WORKER_VERSION=local
+ARG TRADINGBOT_WORKER_COMMIT=unknown
+ARG TRADINGBOT_WORKER_BUILD_UTC=unknown
+ARG TRADINGBOT_WORKER_IMAGE_TAG=local
+ARG TRADINGBOT_WORKER_STRATEGY_VERSION=local
+ARG TRADINGBOT_WORKER_CHANGE_SET=local
+
+COPY src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj src/TradingBot.SpotWorker/
+RUN dotnet restore src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
+
+COPY src/TradingBot.SpotWorker/ src/TradingBot.SpotWorker/
+RUN dotnet publish src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj \
+    -c Release \
+    -o /app \
+    --no-restore
+
+FROM mcr.microsoft.com/dotnet/runtime:8.0 AS runtime
+WORKDIR /app
+
+ARG TRADINGBOT_WORKER_VERSION=local
+ARG TRADINGBOT_WORKER_COMMIT=unknown
+ARG TRADINGBOT_WORKER_BUILD_UTC=unknown
+ARG TRADINGBOT_WORKER_IMAGE_TAG=local
+ARG TRADINGBOT_WORKER_STRATEGY_VERSION=local
+ARG TRADINGBOT_WORKER_CHANGE_SET=local
+
+# Portfolio state + event journal are written here; mount a host volume in prod.
+RUN mkdir -p /app/data
+ENV DOTNET_EnableDiagnostics=0
+ENV TRADINGBOT_WORKER_VERSION=${TRADINGBOT_WORKER_VERSION}
+ENV TRADINGBOT_WORKER_COMMIT=${TRADINGBOT_WORKER_COMMIT}
+ENV TRADINGBOT_WORKER_BUILD_UTC=${TRADINGBOT_WORKER_BUILD_UTC}
+ENV TRADINGBOT_WORKER_IMAGE_TAG=${TRADINGBOT_WORKER_IMAGE_TAG}
+ENV TRADINGBOT_WORKER_STRATEGY_VERSION=${TRADINGBOT_WORKER_STRATEGY_VERSION}
+ENV TRADINGBOT_WORKER_CHANGE_SET=${TRADINGBOT_WORKER_CHANGE_SET}
+
+COPY --from=build /app ./
+
+ENTRYPOINT ["dotnet", "TradingBot.SpotWorker.dll"]

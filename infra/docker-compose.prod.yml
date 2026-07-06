@@ -21,7 +21,7 @@ services:
 
   spot-worker-live:
     container_name: trading-bot-spot-worker-live
-    image: ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG:-latest}
+    image: ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file:
       - /opt/trading-bot/spot/live/.env
@@ -36,7 +36,7 @@ services:
 
   spot-worker-virtual:
     container_name: trading-bot-spot-worker-virtual
-    image: ${WORKER_IMAGE_NAME}:${WORKER_IMAGE_TAG:-latest}
+    image: ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file:
       - /opt/trading-bot/spot/virtual/.env

@@ -10,7 +10,7 @@
 
 ## Где лежит конфиг (единый источник)
 
-Весь конфиг worker'а — в одном файле `src/TradingBot.Worker/appsettings.json`: режим данных, интервал, риск, стратегия, `Trading.LiveTradingEnabled`, universe и пустые поля для API-ключей.
+Весь конфиг worker'а — в одном файле `src/TradingBot.SpotWorker/appsettings.json`: режим данных, интервал, риск, стратегия, `Trading.LiveTradingEnabled`, universe и пустые поля для API-ключей.
 
 - Локально можно временно перебить любое значение через переменную окружения `TRADINGBOT_*` (см. `.env.example`), но это опционально.
 - На сервере worker читает смонтированный файл `/opt/trading-bot/appsettings.json`.
@@ -24,7 +24,7 @@
 Из корня репозитория:
 
 ```bash
-dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
 Это запускает sample market data. Сеть и ключи не нужны.
@@ -33,7 +33,7 @@ dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
 
 ```bash
 TRADINGBOT_MARKET_DATA_MODE=kraken \
-dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
 API-ключ Kraken для этого не нужен. Используются только публичные endpoints `AssetPairs`, `OHLC` и `Ticker`.
@@ -46,7 +46,7 @@ TRADINGBOT_AI_PROVIDER=openai-compatible \
 TRADINGBOT_AI_BASE_URL=https://api.openai.com/v1 \
 TRADINGBOT_AI_MODEL=your-model \
 TRADINGBOT_AI_API_KEY=your-key \
-dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
 Ключи можно задать в `appsettings.json` (`Ai.ApiKey`) — на сервере это файл `/opt/trading-bot/appsettings.json`, он не в git. В репозитории поле держим пустым и реальные значения не коммитим. Локально можно перебить через env, как выше.
@@ -58,7 +58,7 @@ dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
 Файл:
 
 ```text
-src/TradingBot.Worker/appsettings.json
+src/TradingBot.SpotWorker/appsettings.json
 ```
 
 Блок:
@@ -91,7 +91,7 @@ DOT/EUR -> DOTEUR
 Файл:
 
 ```text
-src/TradingBot.Worker/appsettings.json
+src/TradingBot.SpotWorker/appsettings.json
 ```
 
 Блок:
@@ -426,7 +426,7 @@ Dry-run использует эти правила, чтобы симулиро�
 
 - Пункты 1-4 - это hard exits. Они ОБХОДЯТ `MinHoldSeconds` и `MinProfitToExitOnSignalFlipPercent`.
 - `MinHoldSeconds` НЕ означает "держать вечно". Это только защита от мгновенного churn на шумных флипах; hard exits всегда могут закрыть позицию.
-- Логика выхода вынесена в чистую функцию `PositionExitPolicy.EvaluateHeldPosition` и покрыта unit-тестами (`tests/TradingBot.Worker.Tests`).
+- Логика выхода вынесена в чистую функцию `PositionExitPolicy.EvaluateHeldPosition` и покрыта unit-тестами (`tests/TradingBot.SpotWorker.Tests`).
 
 Совместимость со старым state: старые `portfolio-state.json` без полей `openedAtUtc` / `lastActionAtUtc` загружаются без падения. Если у существующей позиции нет `openedAtUtc`, она считается "достаточно старой", и min-hold/max-hold ее не трогают неожиданно (наименее сюрпризное поведение: старые позиции закрываются как раньше, без форсированной продажи сразу после апгрейда формата). Новые позиции всегда получают `openedAtUtc` в момент открытия.
 
@@ -678,7 +678,7 @@ cat data/dry-run/portfolio-state.json
 TRADINGBOT_MARKET_DATA_MODE=kraken \
 TRADINGBOT_RUN_ONCE=false \
 TRADINGBOT_LOOP_INTERVAL_SECONDS=300 \
-dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
 Остановить: `Ctrl+C`.
@@ -770,7 +770,7 @@ execution=NO_ORDER
 Файл:
 
 ```text
-src/TradingBot.Worker/appsettings.json
+src/TradingBot.SpotWorker/appsettings.json
 ```
 
 Настройки:
@@ -819,7 +819,7 @@ validate = НЕ (LiveTradingEnabled И kill-switch выключен И зада�
 
 ```bash
 TRADINGBOT_MARKET_DATA_MODE=kraken \
-dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
 В консоли: `broker=disabled ...`. Только виртуальный портфель.
@@ -832,7 +832,7 @@ dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
 TRADINGBOT_MARKET_DATA_MODE=kraken \
 TRADINGBOT_KRAKEN_API_KEY=... \
 TRADINGBOT_KRAKEN_API_SECRET=... \
-dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
 Что увидишь:
@@ -858,7 +858,7 @@ broker-balance: EUR 50.0000 (auth OK, N assets)
 TRADINGBOT_MARKET_DATA_MODE=kraken \
 TRADINGBOT_KRAKEN_API_KEY=... TRADINGBOT_KRAKEN_API_SECRET=... \
 TRADINGBOT_LIVE_TRADING_ENABLED=true \
-dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
+dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
 На старте будет громкое предупреждение, а по сделкам:
