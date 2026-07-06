@@ -14,6 +14,7 @@ env:
   UI_IMAGE_NAME: ghcr.io/bykovas/trading-bot-ui
   API_IMAGE_NAME: ghcr.io/bykovas/trading-bot-api
   SPOT_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-spot-worker
+  FUTURES_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-futures-worker
 
 jobs:
   build:
@@ -59,6 +60,23 @@ jobs:
             --tag "${SPOT_WORKER_IMAGE_NAME}:${{ github.sha }}" \
             .
 
+      - name: Build futures worker image
+        run: |
+          WORKER_BUILD_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          FUTURES_STRATEGY_VERSION="$(git ls-files src/TradingBot.Core src/TradingBot.FuturesWorker | sort | xargs sha256sum | sha256sum | cut -d ' ' -f1)"
+          WORKER_CHANGE_SET="$(awk '/^## / {print $2; exit}' .ai/worker-changelog.md)"
+          docker build \
+            --file src/TradingBot.FuturesWorker/Dockerfile \
+            --build-arg "TRADINGBOT_WORKER_VERSION=${{ github.sha }}" \
+            --build-arg "TRADINGBOT_WORKER_COMMIT=${{ github.sha }}" \
+            --build-arg "TRADINGBOT_WORKER_BUILD_UTC=${WORKER_BUILD_UTC}" \
+            --build-arg "TRADINGBOT_WORKER_IMAGE_TAG=${{ github.sha }}" \
+            --build-arg "TRADINGBOT_WORKER_STRATEGY_VERSION=${FUTURES_STRATEGY_VERSION}" \
+            --build-arg "TRADINGBOT_WORKER_CHANGE_SET=${WORKER_CHANGE_SET}" \
+            --tag "${FUTURES_WORKER_IMAGE_NAME}:latest" \
+            --tag "${FUTURES_WORKER_IMAGE_NAME}:${{ github.sha }}" \
+            .
+
       - name: Build API image
         run: |
           docker build \
@@ -75,6 +93,8 @@ jobs:
           docker push "${API_IMAGE_NAME}:${{ github.sha }}"
           docker push "${SPOT_WORKER_IMAGE_NAME}:latest"
           docker push "${SPOT_WORKER_IMAGE_NAME}:${{ github.sha }}"
+          docker push "${FUTURES_WORKER_IMAGE_NAME}:latest"
+          docker push "${FUTURES_WORKER_IMAGE_NAME}:${{ github.sha }}"
 
   deploy:
     needs: build
@@ -89,6 +109,8 @@ jobs:
       API_IMAGE_TAG: ${{ github.sha }}
       SPOT_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-spot-worker
       SPOT_WORKER_IMAGE_TAG: ${{ github.sha }}
+      FUTURES_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-futures-worker
+      FUTURES_WORKER_IMAGE_TAG: ${{ github.sha }}
       GHCR_USERNAME: ${{ github.actor }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TRADINGBOT_DB_PASSWORD: ${{ secrets.TRADINGBOT_DB_PASSWORD }}

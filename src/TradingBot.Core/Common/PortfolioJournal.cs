@@ -77,6 +77,18 @@ public sealed class PortfolioPosition
     // configured defensive score level. Reset to 0 whenever the score recovers.
     public int LowScoreCycles { get; set; }
 
+    // Futures-only fields, nullable so spot rows and legacy state files are
+    // untouched. For futures positions MarketValueEur carries the position's
+    // equity contribution (initial margin + unrealized PnL), not asset value.
+    public decimal? Leverage { get; set; }
+    public decimal? InitialMarginEur { get; set; }
+    public decimal? MarkPrice { get; set; }
+    public decimal? LiquidationPrice { get; set; }
+    public decimal? LiquidationDistancePercent { get; set; }
+    public decimal? FundingPaidEur { get; set; }
+    public string? TpOrderState { get; set; }
+    public string? SlOrderState { get; set; }
+
     public PortfolioPosition Clone() => new()
     {
         Pair = Pair,
@@ -96,7 +108,15 @@ public sealed class PortfolioPosition
         EntryAtr = EntryAtr,
         StopLossPrice = StopLossPrice,
         TakeProfitPrice = TakeProfitPrice,
-        LowScoreCycles = LowScoreCycles
+        LowScoreCycles = LowScoreCycles,
+        Leverage = Leverage,
+        InitialMarginEur = InitialMarginEur,
+        MarkPrice = MarkPrice,
+        LiquidationPrice = LiquidationPrice,
+        LiquidationDistancePercent = LiquidationDistancePercent,
+        FundingPaidEur = FundingPaidEur,
+        TpOrderState = TpOrderState,
+        SlOrderState = SlOrderState
     };
 }
 
@@ -183,6 +203,14 @@ public sealed class DryRunAction
     public decimal CashAfterEur { get; set; }
     public decimal PortfolioValueBeforeEur { get; set; }
     public decimal PortfolioValueAfterEur { get; set; }
+
+    // Futures-only fields, nullable so spot rows keep their exact shape. Side is
+    // LONG/SHORT exposure, ReduceOnly marks simulated exits that may only shrink
+    // a position, ExitTriggerSource records which price stream fired a TP/SL.
+    public string? Side { get; set; }
+    public bool? ReduceOnly { get; set; }
+    public decimal? Leverage { get; set; }
+    public string? ExitTriggerSource { get; set; }
 }
 
 public sealed class DryRunCycleRecord
