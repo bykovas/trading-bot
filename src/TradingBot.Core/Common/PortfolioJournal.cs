@@ -247,6 +247,48 @@ public sealed class DryRunAction
     public bool? ReduceOnly { get; set; }
     public decimal? Leverage { get; set; }
     public string? ExitTriggerSource { get; set; }
+
+    // Spot BUY maker-then-IOC execution telemetry (null on every non-entry row and
+    // on futures rows). Kept as a nested object so the flat action shape is unchanged.
+    public EntryExecutionDiagnostics? EntryExecution { get; set; }
+}
+
+// Full trace of the spot BUY entry attempt: the maker phase, the optional IOC
+// taker fallback, and the reconciled final fill. Every field is nullable; only the
+// stages that actually ran are populated. FillSource is the coarse provenance:
+// MAKER, MAKER_PARTIAL, IOC_FALLBACK, MODELED_MAKER_FILL (virtual/validate-only), or
+// NONE (nothing filled).
+public sealed class EntryExecutionDiagnostics
+{
+    public string? ExecutionMode { get; set; }
+
+    public decimal? OriginalMakerBid { get; set; }
+    public decimal? OriginalMakerAsk { get; set; }
+    public string? MakerOrderId { get; set; }
+    public decimal? MakerSubmittedPrice { get; set; }
+    public decimal? MakerExecutedVolume { get; set; }
+    public decimal? MakerAverageFillPrice { get; set; }
+    public decimal? MakerFeeEur { get; set; }
+    public long? MakerWaitMilliseconds { get; set; }
+    public int? MakerRepegs { get; set; }
+    public string? MakerFinalStatus { get; set; }
+
+    public bool? FallbackAttempted { get; set; }
+    public decimal? FallbackBid { get; set; }
+    public decimal? FallbackAsk { get; set; }
+    public decimal? FallbackSpreadPercent { get; set; }
+    public decimal? FallbackMaxAllowedPrice { get; set; }
+    public decimal? FallbackSubmittedPrice { get; set; }
+    public string? FallbackOrderId { get; set; }
+    public decimal? FallbackExecutedVolume { get; set; }
+    public decimal? FallbackAverageFillPrice { get; set; }
+    public decimal? FallbackFeeEur { get; set; }
+    public string? FallbackFinalStatus { get; set; }
+
+    public decimal? FinalExecutedVolume { get; set; }
+    public decimal? FinalAverageFillPrice { get; set; }
+    public decimal? FinalFeeEur { get; set; }
+    public string? FillSource { get; set; }
 }
 
 public sealed class DryRunCycleRecord

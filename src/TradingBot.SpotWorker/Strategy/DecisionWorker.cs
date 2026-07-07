@@ -1047,7 +1047,7 @@ internal sealed class DecisionWorker(
             var previewAction = dryRunPortfolio.Apply(portfolio.Clone(), marketState, proposal, risk, config.Risk, newPositionsThisCycle, prepared.PriceAction);
             if (previewAction.Action is "WOULD_BUY" or "WOULD_SELL")
             {
-                var brokerOutcome = await RunBrokerAsync(marketState, previewAction, cancellationToken);
+                var brokerOutcome = await RunBrokerAsync(marketState, previewAction, portfolio, cancellationToken);
                 brokerVerdict = brokerOutcome.Verdict;
                 if (brokerVerdict is null || brokerVerdict.StartsWith("LIVE_SUBMITTED", StringComparison.Ordinal))
                 {
@@ -1060,6 +1060,7 @@ internal sealed class DecisionWorker(
                     if (brokerVerdict is not null && previewAction.Action == "WOULD_BUY" && liveFill is null)
                     {
                         dryRunAction = BuildLiveOrderNotExecutedAction(previewAction, portfolio, $"{brokerVerdict}; no maker fill confirmed");
+                        dryRunAction.EntryExecution = brokerOutcome.Diagnostics;
                         goto RecordDecision;
                     }
 
@@ -1072,11 +1073,13 @@ internal sealed class DecisionWorker(
                             : 0m;
                         dryRunAction.TimeToFillMs = liveFill.TimeToFillMs;
                         dryRunAction.RepegCount = liveFill.RepegCount;
+                        dryRunAction.EntryExecution = brokerOutcome.Diagnostics;
                     }
                 }
                 else
                 {
                     dryRunAction = BuildLiveOrderNotExecutedAction(previewAction, portfolio, brokerVerdict);
+                    dryRunAction.EntryExecution = brokerOutcome.Diagnostics;
                 }
             }
             else
@@ -1090,7 +1093,18 @@ internal sealed class DecisionWorker(
         else
         {
             dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk, newPositionsThisCycle, prepared.PriceAction);
-            brokerVerdict = (await RunBrokerAsync(marketState, dryRunAction, cancellationToken)).Verdict;
+            brokerVerdict = (await RunBrokerAsync(marketState, dryRunAction, portfolio, cancellationToken)).Verdict;
+            if (dryRunAction.Action == "WOULD_BUY")
+            {
+                // A virtual / validate-only BUY is a MODELED maker fill, not a real
+                // exchange-confirmed one: mark it so downstream analytics never mistake
+                // the simulated instant-at-bid fill for a confirmed maker fill.
+                dryRunAction.EntryExecution = new EntryExecutionDiagnostics
+                {
+                    ExecutionMode = "virtual",
+                    FillSource = "MODELED_MAKER_FILL"
+                };
+            }
         }
 
     RecordDecision:
@@ -1175,10 +1189,16 @@ internal sealed class DecisionWorker(
     // Verdict string plus the exchange transaction ids of a submitted live order,
     // so the caller can read back the real fill. TxIds is empty for every
     // non-LIVE_SUBMITTED outcome.
-    private sealed record BrokerRunOutcome(string? Verdict, IReadOnlyList<string> TxIds, LiveOrderFill? LiveFill = null)
+    private sealed record BrokerRunOutcome(
+        string? Verdict,
+        IReadOnlyList<string> TxIds,
+        LiveOrderFill? LiveFill = null,
+        EntryExecutionDiagnostics? Diagnostics = null)
     {
         public static readonly BrokerRunOutcome None = new(null, Array.Empty<string>());
         public static BrokerRunOutcome WithVerdict(string verdict) => new(verdict, Array.Empty<string>());
+        public static BrokerRunOutcome WithDiagnostics(string verdict, EntryExecutionDiagnostics diagnostics) =>
+            new(verdict, Array.Empty<string>(), null, diagnostics);
     }
 
     // Sends the order to Kraken for the two actionable outcomes only. The validate
@@ -1188,6 +1208,7 @@ internal sealed class DecisionWorker(
     private async Task<BrokerRunOutcome> RunBrokerAsync(
         InstrumentMarketState marketState,
         DryRunAction action,
+        PortfolioState portfolio,
         CancellationToken cancellationToken)
     {
         if (broker is null)
@@ -1226,7 +1247,7 @@ internal sealed class DecisionWorker(
 
         if (side == "buy")
         {
-            return await RunMakerBuyBrokerAsync(marketState, volume, validate, cancellationToken);
+            return await RunMakerBuyBrokerAsync(marketState, action, portfolio, volume, validate, cancellationToken);
         }
 
         var result = await broker.AddOrderAsync(marketState.Instrument.KrakenPair, side, volume, validate, cancellationToken);
@@ -1246,8 +1267,35 @@ internal sealed class DecisionWorker(
         return new BrokerRunOutcome($"LIVE_SUBMITTED side={side} vol={volume} txid={txids}", result.TxIds);
     }
 
+    // Per-pair guard so two overlapping cycles can never fire two entry orders for
+    // the same pair. The decision loop is sequential today, but the fallback adds a
+    // second order path per entry, so this is the concurrency backstop the spec asks
+    // for (and the "duplicate concurrent execution" test exercises it).
+    private readonly object _inFlightLock = new();
+    private readonly HashSet<string> _inFlightEntryPairs = new(StringComparer.OrdinalIgnoreCase);
+
+    private bool TryBeginEntry(string pair)
+    {
+        lock (_inFlightLock)
+        {
+            return _inFlightEntryPairs.Add(pair);
+        }
+    }
+
+    private void EndEntry(string pair)
+    {
+        lock (_inFlightLock)
+        {
+            _inFlightEntryPairs.Remove(pair);
+        }
+    }
+
+    private const int MakerPollIntervalMs = 2000;
+
     private async Task<BrokerRunOutcome> RunMakerBuyBrokerAsync(
         InstrumentMarketState marketState,
+        DryRunAction previewAction,
+        PortfolioState portfolio,
         decimal volume,
         bool validate,
         CancellationToken cancellationToken)
@@ -1275,27 +1323,91 @@ internal sealed class DecisionWorker(
             return BrokerRunOutcome.WithVerdict($"VALIDATED_OK side=buy postOnly=true price={requestedPrice} vol={volume}");
         }
 
-        var started = DateTimeOffset.UtcNow;
-        var deadline = started.AddSeconds(config.Entry.MakerFillTimeoutSec);
-        var repegs = 0;
-        var txids = new List<string>();
-        while (true)
+        var pair = marketState.Instrument.Pair;
+        if (!TryBeginEntry(pair))
         {
-            var submittedAt = DateTimeOffset.UtcNow;
-            var result = await broker.AddLimitPostOnlyOrderAsync(marketState.Instrument.KrakenPair, "buy", volume, requestedPrice, validate: false, cancellationToken);
+            return BrokerRunOutcome.WithVerdict($"SKIPPED: entry already in-flight for {pair}");
+        }
+
+        try
+        {
+            var diag = new EntryExecutionDiagnostics
+            {
+                ExecutionMode = "maker-then-ioc",
+                OriginalMakerBid = marketState.BestBid,
+                OriginalMakerAsk = marketState.BestAsk,
+                FallbackAttempted = false
+            };
+
+            var makerOutcome = await RunMakerPhaseAsync(marketState, volume, requestedPrice, pairDecimals, diag, cancellationToken);
+            if (makerOutcome is not null)
+            {
+                return makerOutcome;
+            }
+
+            // Maker phase closed with executedVolume == 0 -> IOC taker fallback.
+            return await RunIocFallbackBuyAsync(marketState, previewAction, portfolio, volume, diag, cancellationToken);
+        }
+        finally
+        {
+            EndEntry(pair);
+        }
+    }
+
+    // Maker phase. Returns a filled/partial outcome, an early LIVE_ERROR outcome, or
+    // null to signal "maker missed with zero executed volume" so the caller runs the
+    // IOC fallback. Populates the maker fields of <paramref name="diag"/> in all cases.
+    private async Task<BrokerRunOutcome?> RunMakerPhaseAsync(
+        InstrumentMarketState marketState,
+        decimal volume,
+        decimal requestedPrice,
+        int pairDecimals,
+        EntryExecutionDiagnostics diag,
+        CancellationToken cancellationToken)
+    {
+        var started = DateTimeOffset.UtcNow;
+        var overallDeadline = started.AddSeconds(config.Entry.MakerFillTimeoutSec);
+        var totalAttempts = config.Entry.MakerRepegs + 1;
+        var repegs = 0;
+        var makerFinalStatus = "unknown";
+        var txids = new List<string>();
+
+        for (var attempt = 0; attempt < totalAttempts; attempt++)
+        {
+            // Split the remaining budget evenly across the remaining attempts so a
+            // repeg genuinely gets a fresh window (~half the timeout with one repeg)
+            // instead of only firing after the whole timeout already elapsed.
+            var attemptsLeft = totalAttempts - attempt;
+            var now = DateTimeOffset.UtcNow;
+            if (now >= overallDeadline)
+            {
+                break;
+            }
+
+            var attemptDeadline = now + TimeSpan.FromTicks((overallDeadline - now).Ticks / attemptsLeft);
+            var submittedAt = now;
+
+            var result = await broker!.AddLimitPostOnlyOrderAsync(marketState.Instrument.KrakenPair, "buy", volume, requestedPrice, validate: false, cancellationToken);
             if (!result.Success)
             {
-                return BrokerRunOutcome.WithVerdict($"LIVE_ERROR: post-only maker buy rejected: {result.Error}");
+                diag.FillSource = "NONE";
+                diag.MakerExecutedVolume = 0m;
+                diag.MakerRepegs = repegs;
+                return BrokerRunOutcome.WithDiagnostics($"LIVE_ERROR: post-only maker buy rejected: {result.Error}", diag);
             }
 
             var txid = result.TxIds.FirstOrDefault();
             if (string.IsNullOrWhiteSpace(txid))
             {
-                return BrokerRunOutcome.WithVerdict("LIVE_ERROR: post-only maker buy accepted without txid");
+                diag.FillSource = "NONE";
+                return BrokerRunOutcome.WithDiagnostics("LIVE_ERROR: post-only maker buy accepted without txid", diag);
             }
 
             txids.Add(txid);
-            while (DateTimeOffset.UtcNow < deadline)
+            diag.MakerOrderId = txid;
+            diag.MakerSubmittedPrice = requestedPrice;
+
+            while (DateTimeOffset.UtcNow < attemptDeadline)
             {
                 var query = await broker.QueryOrderAsync(txid, cancellationToken);
                 if (query is not null
@@ -1305,48 +1417,298 @@ internal sealed class DecisionWorker(
                 {
                     var fillMs = (long)(DateTimeOffset.UtcNow - submittedAt).TotalMilliseconds;
                     Console.WriteLine($"  maker-entry-fill {marketState.Instrument.Pair}: requested={requestedPrice} fill={query.AveragePrice} timeToFillMs={fillMs} repegCount={repegs} filledEur={query.CostQuote:0.####}");
-                    return new BrokerRunOutcome(
-                        $"LIVE_SUBMITTED side=buy postOnly=true price={requestedPrice} vol={volume} txid={txid} makerFilled=true",
-                        txids,
-                        new LiveOrderFill(query.AveragePrice, query.VolumeExecuted, query.CostQuote, query.FeeQuote, repegs, fillMs, requestedPrice));
+                    return MakerFillOutcome("MAKER", "makerFilled", marketState, requestedPrice, volume, txid, txids, query, repegs, fillMs, diag);
                 }
 
                 if (query is not null && query.VolumeExecuted > 0m)
                 {
+                    // Partial maker fill: cancel the remainder, commit the real filled
+                    // volume, and DO NOT run the IOC fallback for the remainder.
                     await broker.CancelOrderAsync(txid, cancellationToken);
                     var final = await broker.QueryOrderAsync(txid, cancellationToken) ?? query;
                     if (final.VolumeExecuted > 0m && final.AveragePrice > 0m)
                     {
                         var fillMs = (long)(DateTimeOffset.UtcNow - submittedAt).TotalMilliseconds;
                         Console.WriteLine($"  maker-entry-partial {marketState.Instrument.Pair}: requested={requestedPrice} fill={final.AveragePrice} timeToFillMs={fillMs} repegCount={repegs} filledEur={final.CostQuote:0.####}");
-                        return new BrokerRunOutcome(
-                            $"LIVE_SUBMITTED side=buy postOnly=true price={requestedPrice} vol={volume} txid={txid} makerPartial=true",
-                            txids,
-                            new LiveOrderFill(final.AveragePrice, final.VolumeExecuted, final.CostQuote, final.FeeQuote, repegs, fillMs, requestedPrice));
+                        return MakerFillOutcome("MAKER_PARTIAL", "makerPartial", marketState, requestedPrice, volume, txid, txids, final, repegs, fillMs, diag);
                     }
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                var remaining = attemptDeadline - DateTimeOffset.UtcNow;
+                var delay = remaining < TimeSpan.FromMilliseconds(MakerPollIntervalMs) ? remaining : TimeSpan.FromMilliseconds(MakerPollIntervalMs);
+                if (delay > TimeSpan.Zero)
+                {
+                    await Task.Delay(delay, cancellationToken);
+                }
             }
 
-            var cancel = await broker.CancelOrderAsync(txid, cancellationToken);
+            // Attempt window elapsed with no full fill: cancel and reconcile.
+            await broker.CancelOrderAsync(txid, cancellationToken);
             var finalQuery = await broker.QueryOrderAsync(txid, cancellationToken);
+            makerFinalStatus = finalQuery?.Status ?? "unknown";
             if (finalQuery is not null && finalQuery.VolumeExecuted > 0m && finalQuery.AveragePrice > 0m)
             {
                 var fillMs = (long)(DateTimeOffset.UtcNow - submittedAt).TotalMilliseconds;
-                return new BrokerRunOutcome(
-                    $"LIVE_SUBMITTED side=buy postOnly=true price={requestedPrice} vol={volume} txid={txid} makerPartialAfterCancel=true",
-                    txids,
-                    new LiveOrderFill(finalQuery.AveragePrice, finalQuery.VolumeExecuted, finalQuery.CostQuote, finalQuery.FeeQuote, repegs, fillMs, requestedPrice));
+                return MakerFillOutcome("MAKER_PARTIAL", "makerPartialAfterCancel", marketState, requestedPrice, volume, txid, txids, finalQuery, repegs, fillMs, diag);
             }
 
-            if (repegs >= config.Entry.MakerRepegs || DateTimeOffset.UtcNow >= deadline)
+            // Zero fill on this attempt. Repeg with a fresh quote if budget and time remain.
+            if (attempt < totalAttempts - 1 && DateTimeOffset.UtcNow < overallDeadline)
             {
-                return BrokerRunOutcome.WithVerdict($"LIVE_MAKER_MISSED: post-only buy not filled before timeout; cancel={(cancel.Success ? "ok" : cancel.Error ?? "failed")}");
+                repegs++;
+                var refreshed = await RefreshLightStateAsync(marketState.Instrument, cancellationToken);
+                var repegBid = refreshed?.BestBid ?? marketState.BestBid;
+                var repegAsk = refreshed?.BestAsk ?? marketState.BestAsk;
+                requestedPrice = TruncateTo(Math.Min(repegBid, repegAsk - PriceTick(pairDecimals)), pairDecimals);
+                Console.WriteLine($"  maker-entry-repeg {marketState.Instrument.Pair}: attempt={repegs} newPrice={requestedPrice}");
+            }
+        }
+
+        diag.MakerExecutedVolume = 0m;
+        diag.MakerRepegs = repegs;
+        diag.MakerWaitMilliseconds = (long)(DateTimeOffset.UtcNow - started).TotalMilliseconds;
+        diag.MakerFinalStatus = makerFinalStatus;
+        Console.WriteLine($"  maker-entry-missed {marketState.Instrument.Pair}: repegs={repegs} finalStatus={makerFinalStatus}; attempting IOC fallback");
+        return null;
+    }
+
+    private static BrokerRunOutcome MakerFillOutcome(
+        string fillSource,
+        string verdictTag,
+        InstrumentMarketState marketState,
+        decimal requestedPrice,
+        decimal volume,
+        string txid,
+        IReadOnlyList<string> txids,
+        BrokerOrderQuery query,
+        int repegs,
+        long fillMs,
+        EntryExecutionDiagnostics diag)
+    {
+        diag.MakerExecutedVolume = query.VolumeExecuted;
+        diag.MakerAverageFillPrice = query.AveragePrice;
+        diag.MakerFeeEur = query.FeeQuote;
+        diag.MakerWaitMilliseconds = fillMs;
+        diag.MakerRepegs = repegs;
+        diag.MakerFinalStatus = query.Status;
+        diag.FillSource = fillSource;
+        SetFinalFill(diag, query.AveragePrice, query.VolumeExecuted, query.FeeQuote);
+        var reasonCode = fillSource == "MAKER" ? "LIVE_MAKER_FILLED" : "LIVE_MAKER_PARTIAL_FILLED";
+        return new BrokerRunOutcome(
+            $"LIVE_SUBMITTED side=buy postOnly=true {reasonCode} price={requestedPrice} vol={volume} txid={txid} {verdictTag}=true",
+            txids,
+            new LiveOrderFill(query.AveragePrice, query.VolumeExecuted, query.CostQuote, query.FeeQuote, repegs, fillMs, requestedPrice),
+            diag);
+    }
+
+    // Phase 2 — IOC taker fallback, entered only when the maker phase confirmed zero
+    // executed volume. It re-checks the ORIGINAL intent and the execution/risk guards
+    // against a FRESH quote and the CURRENT portfolio (never re-running strategy /
+    // ranking), guards against a late maker fill racing the cancel, and submits a
+    // hard slippage-capped IOC limit — never an unrestricted market order.
+    private async Task<BrokerRunOutcome> RunIocFallbackBuyAsync(
+        InstrumentMarketState marketState,
+        DryRunAction previewAction,
+        PortfolioState portfolio,
+        decimal volume,
+        EntryExecutionDiagnostics diag,
+        CancellationToken cancellationToken)
+    {
+        diag.FallbackAttempted = true;
+        var pair = previewAction.Pair;
+
+        // (a) Race guard: reconcile the FINAL maker state before sending any taker.
+        if (!string.IsNullOrWhiteSpace(diag.MakerOrderId))
+        {
+            var finalMaker = await broker!.QueryOrderAsync(diag.MakerOrderId, cancellationToken);
+            if (finalMaker is null || !IsFinalOrderStatus(finalMaker.Status))
+            {
+                diag.MakerFinalStatus = finalMaker?.Status ?? "unknown";
+                diag.FillSource = "NONE";
+                return BrokerRunOutcome.WithDiagnostics(
+                    $"LIVE_FALLBACK_SKIPPED_UNKNOWN_MAKER_STATE: maker order state '{diag.MakerFinalStatus}' not final; IOC suppressed to avoid a double position",
+                    diag);
             }
 
-            repegs++;
-            requestedPrice = TruncateTo(Math.Min(marketState.BestBid, marketState.BestAsk - PriceTick(pairDecimals)), pairDecimals);
+            diag.MakerFinalStatus = finalMaker.Status;
+            if (finalMaker.VolumeExecuted > 0m && finalMaker.AveragePrice > 0m)
+            {
+                // Late maker fill after cancel: commit that fill, never send the IOC.
+                diag.MakerExecutedVolume = finalMaker.VolumeExecuted;
+                diag.MakerAverageFillPrice = finalMaker.AveragePrice;
+                diag.MakerFeeEur = finalMaker.FeeQuote;
+                diag.FillSource = "MAKER_PARTIAL";
+                SetFinalFill(diag, finalMaker.AveragePrice, finalMaker.VolumeExecuted, finalMaker.FeeQuote);
+                Console.WriteLine($"  fallback-late-maker-fill {pair}: vol={finalMaker.VolumeExecuted} price={finalMaker.AveragePrice}; IOC suppressed");
+                return new BrokerRunOutcome(
+                    $"LIVE_SUBMITTED side=buy LIVE_FALLBACK_SKIPPED_LATE_MAKER_FILL txid={diag.MakerOrderId} makerLateFill=true",
+                    new[] { diag.MakerOrderId! },
+                    new LiveOrderFill(
+                        finalMaker.AveragePrice,
+                        finalMaker.VolumeExecuted,
+                        finalMaker.CostQuote,
+                        finalMaker.FeeQuote,
+                        diag.MakerRepegs ?? 0,
+                        diag.MakerWaitMilliseconds ?? 0,
+                        diag.MakerSubmittedPrice ?? 0m),
+                    diag);
+            }
+        }
+
+        // (b) Fresh quote — never reuse the stale cycle snapshot or `last`.
+        var fresh = await RefreshLightStateAsync(marketState.Instrument, cancellationToken);
+        var quoteFresh = fresh is not null
+            && string.IsNullOrWhiteSpace(fresh.DataWarning)
+            && fresh.Quote is not null
+            && fresh.BestBid > 0m
+            && fresh.BestAsk > 0m;
+        var freshBid = fresh?.BestBid ?? 0m;
+        var freshAsk = fresh?.BestAsk ?? 0m;
+        var spread = fresh is not null ? EntryGate.SpreadPercentOf(fresh) : 0m;
+        var pairRules = fresh?.PairRules ?? marketState.PairRules;
+        var pairDecimals = pairRules?.PairDecimals ?? 8;
+
+        diag.FallbackBid = freshBid;
+        diag.FallbackAsk = freshAsk;
+        diag.FallbackSpreadPercent = decimal.Round(spread, 4);
+
+        // (c) Re-validate the original BUY intent against fresh quote + current portfolio.
+        var alreadyOpen = portfolio.Positions.Any(position => position.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
+        var recentBuys = portfolio.ActionHistory.Count(history => history.LastBuyAtUtc is { } lastBuy && lastBuy > DateTimeOffset.UtcNow.AddHours(-1));
+        var guard = FallbackEntryGuards.Evaluate(new FallbackEntryGuards.Inputs(
+            OriginalMakerBid: diag.OriginalMakerBid ?? 0m,
+            FreshBid: freshBid,
+            FreshAsk: freshAsk,
+            QuoteFresh: quoteFresh,
+            SpreadPercent: spread,
+            MaxEntrySpreadPercent: config.Strategy.MaxEntrySpreadPercent,
+            MaxBuySlippagePercent: config.Entry.MaxBuySlippagePercent,
+            TargetNotionalEur: previewAction.TargetNotionalEur,
+            Volume: volume,
+            PairDecimals: pairDecimals,
+            OrderMinimum: pairRules?.OrderMinimum ?? 0m,
+            CostMinimum: pairRules?.CostMinimum ?? 0m,
+            PositionAlreadyOpen: alreadyOpen,
+            EntryInFlight: false,
+            OpenPositions: portfolio.Positions.Count,
+            MaxOpenPositions: config.Risk.MaxOpenPositions,
+            CashEur: portfolio.CashEur,
+            CashReserveEur: config.PositionSizing.CashReserveEur,
+            CurrentExposureEur: portfolio.PositionsValueEur,
+            MaxTotalExposureEur: config.Risk.MaxTotalExposureEur,
+            RecentEntriesLastHour: recentBuys,
+            MaxNewPositionsPerHour: config.ExecutionPolicy.MaxNewPositionsPerHour));
+
+        diag.FallbackMaxAllowedPrice = guard.MaxAllowedPrice;
+
+        if (guard.Verdict != FallbackEntryGuards.Verdict.Allow)
+        {
+            diag.FillSource = "NONE";
+            var code = guard.Verdict switch
+            {
+                FallbackEntryGuards.Verdict.RejectStaleQuote => "LIVE_FALLBACK_REJECTED_STALE_QUOTE",
+                FallbackEntryGuards.Verdict.RejectSpread => "LIVE_FALLBACK_REJECTED_SPREAD",
+                FallbackEntryGuards.Verdict.RejectSlippage => "LIVE_FALLBACK_REJECTED_SLIPPAGE",
+                _ => "LIVE_FALLBACK_REJECTED_RISK"
+            };
+            Console.WriteLine($"  fallback-rejected {pair}: {code} ({guard.Reason})");
+            return BrokerRunOutcome.WithDiagnostics($"{code}: {guard.Reason}", diag);
+        }
+
+        // (d) Submit the IOC limit BUY at the fresh ask (hard slippage-capped).
+        diag.FallbackSubmittedPrice = guard.IocPrice;
+        var ioc = await broker!.AddLimitIocOrderAsync(marketState.Instrument.KrakenPair, "buy", volume, guard.IocPrice, validate: false, cancellationToken);
+        if (!ioc.Success)
+        {
+            diag.FillSource = "NONE";
+            return BrokerRunOutcome.WithDiagnostics($"LIVE_FALLBACK_ORDER_FAILED: IOC buy rejected: {ioc.Error}", diag);
+        }
+
+        var iocTxid = ioc.TxIds.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(iocTxid))
+        {
+            diag.FillSource = "NONE";
+            return BrokerRunOutcome.WithDiagnostics("LIVE_FALLBACK_ORDER_FAILED: IOC buy accepted without txid", diag);
+        }
+
+        diag.FallbackOrderId = iocTxid;
+        var fill = await ReadImmediateFillAsync(iocTxid, cancellationToken);
+        var iocFinal = await broker.QueryOrderAsync(iocTxid, cancellationToken);
+        diag.FallbackFinalStatus = iocFinal?.Status ?? "unknown";
+        if (fill is not null)
+        {
+            diag.FallbackExecutedVolume = fill.VolumeExecuted;
+            diag.FallbackAverageFillPrice = fill.AveragePrice;
+            diag.FallbackFeeEur = fill.FeeEur;
+            diag.FillSource = "IOC_FALLBACK";
+            SetFinalFill(diag, fill.AveragePrice, fill.VolumeExecuted, fill.FeeEur);
+            Console.WriteLine($"  fallback-ioc-fill {pair}: price={guard.IocPrice} vol={fill.VolumeExecuted} avg={fill.AveragePrice} fee={fill.FeeEur:0.####}");
+            return new BrokerRunOutcome(
+                $"LIVE_SUBMITTED side=buy fallback=true LIVE_FALLBACK_FILLED price={guard.IocPrice} vol={fill.VolumeExecuted} txid={iocTxid}",
+                new[] { iocTxid },
+                fill,
+                diag);
+        }
+
+        diag.FallbackExecutedVolume = 0m;
+        diag.FillSource = "NONE";
+        return BrokerRunOutcome.WithDiagnostics(
+            $"LIVE_FALLBACK_ORDER_FAILED: IOC accepted but produced no confirmed fill (status={diag.FallbackFinalStatus})",
+            diag);
+    }
+
+    private static void SetFinalFill(EntryExecutionDiagnostics diag, decimal price, decimal volume, decimal fee)
+    {
+        diag.FinalAverageFillPrice = price;
+        diag.FinalExecutedVolume = volume;
+        diag.FinalFeeEur = fee;
+    }
+
+    private static bool IsFinalOrderStatus(string status) =>
+        status.Equals("closed", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("canceled", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("cancelled", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("expired", StringComparison.OrdinalIgnoreCase);
+
+    // Reads back a just-submitted IOC/taker order. Unlike TryFetchLiveFillAsync it
+    // accepts a canceled-with-partial-fill order (the normal terminal state of an IOC
+    // that only partially filled), returning the real executed volume/price/fee.
+    private async Task<LiveOrderFill?> ReadImmediateFillAsync(string txid, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= LiveFillQueryAttempts; attempt++)
+        {
+            var query = await broker!.QueryOrderAsync(txid, cancellationToken);
+            if (query is not null && query.VolumeExecuted > 0m && query.AveragePrice > 0m)
+            {
+                return new LiveOrderFill(query.AveragePrice, query.VolumeExecuted, query.CostQuote, query.FeeQuote);
+            }
+
+            // A final status with zero executed volume is a definitive no-fill.
+            if (query is not null && IsFinalOrderStatus(query.Status))
+            {
+                return null;
+            }
+
+            if (attempt < LiveFillQueryAttempts)
+            {
+                await Task.Delay(LiveFillQueryDelay, cancellationToken);
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<InstrumentMarketState?> RefreshLightStateAsync(InstrumentOptions instrument, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var states = await marketDataSource.GetLightMarketStatesAsync(new[] { instrument }, cancellationToken);
+            return states.FirstOrDefault(state => state.Instrument.Pair.Equals(instrument.Pair, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Console.WriteLine($"  fallback-quote-refresh {instrument.Pair}: failed ({ex.Message})");
+            return null;
         }
     }
 
