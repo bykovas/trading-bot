@@ -29,6 +29,10 @@ public static class EntryRejection
     public const string PriceActionUnknown = "REJECT_PRICE_ACTION_UNKNOWN";
     public const string ExploratoryRequiresPositivePriceAction = "REJECT_EXPLORATORY_REQUIRES_POSITIVE_PRICE_ACTION";
     public const string NoMomentumConfirmation = "REJECT_NO_MOMENTUM_CONFIRMATION";
+    public const string PriceExtended = "REJECT_PRICE_EXTENDED";
+    public const string EarlyEntryRank = "REJECT_EARLY_ENTRY_RANK";
+    public const string MarketRegime = "REJECT_MARKET_REGIME";
+    public const string FrictionTooHigh = "REJECT_FRICTION_TOO_HIGH";
 
     // Maps a DryRunPortfolio hold-reason code (a portfolio-level buy block) onto the
     // compact rejection vocabulary for cycle diagnostics.
@@ -41,6 +45,9 @@ public static class EntryRejection
         "ENTRY_BLACKOUT" => EntryBlackout,
         "CORRELATION_GROUP_LIMIT" or "CORRELATION_EXPOSURE_LIMIT" or "HIGH_BETA_LIMIT" => CorrelationLimit,
         "EXPLORATORY_RANK" => ExploratoryRank,
+        "EARLY_ENTRY_RANK" => EarlyEntryRank,
+        "MARKET_REGIME" => MarketRegime,
+        "FRICTION_BLOCK" => FrictionTooHigh,
         "MAX_POSITIONS" => MaxPositions,
         _ => RiskLimits
     };
@@ -48,13 +55,16 @@ public static class EntryRejection
 
 // Result of the layered NEW-entry gate. DesiredPosition is LONG_MICRO only when the
 // hard safety layer AND the quality layer both pass; Exploratory marks candidates
-// admitted at the (dry-run) exploratory threshold rather than the firm one.
+// admitted at the (dry-run) exploratory threshold rather than the firm one;
+// EarlyEntry marks candidates admitted on a forming (not yet fully confirmed) EMA
+// cross via the early-entry channel.
 public sealed record EntryGateResult(
     string DesiredPosition,
     bool Exploratory,
     string? RejectionReason,
     decimal SpreadPercent,
-    IReadOnlyList<SignalContribution> Notes);
+    IReadOnlyList<SignalContribution> Notes,
+    bool EarlyEntry = false);
 
 // Layered decisioning for NEW long entries.
 //

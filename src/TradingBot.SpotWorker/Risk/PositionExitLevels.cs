@@ -14,8 +14,7 @@ internal static class PositionExitLevelCalculator
         string side,
         decimal entryPrice,
         IReadOnlyList<Candle> candles,
-        PositionExitOptions options,
-        decimal roundTripFrictionPercent = 0m)
+        PositionExitOptions options)
     {
         if (entryPrice <= 0m)
         {
@@ -28,8 +27,7 @@ internal static class PositionExitLevelCalculator
             if (atr is { } value && value > 0m)
             {
                 var atrLevels = FromAtr(side, entryPrice, value, options.StopLossAtrMultiplier, options.TakeProfitAtrMultiplier);
-                var reason = $"ATR exit levels: ATR({options.AtrPeriod})={value:0.##########}";
-                return ApplyFrictionFloor(atrLevels with { Reason = reason }, side, entryPrice, options, roundTripFrictionPercent);
+                return atrLevels with { Reason = $"ATR exit levels: ATR({options.AtrPeriod})={value:0.##########}" };
             }
 
             var fixedFallback = FromFixedPercent(side, entryPrice, options.EffectiveFixedStopLossPercent, options.EffectiveFixedTakeProfitPercent);
@@ -38,43 +36,6 @@ internal static class PositionExitLevelCalculator
 
         var fixedLevels = FromFixedPercent(side, entryPrice, options.EffectiveFixedStopLossPercent, options.EffectiveFixedTakeProfitPercent);
         return fixedLevels with { Reason = "fixed-percent exit levels" };
-    }
-
-    // Friction floor: a stop tighter than K x round-trip friction loses more in
-    // guaranteed costs than it saves in avoided drawdown. When the floor lifts the
-    // stop distance, the take-profit distance is scaled by the same factor so the
-    // configured TP/SL ratio is preserved instead of silently degrading.
-    private static PositionExitLevels ApplyFrictionFloor(
-        PositionExitLevels levels,
-        string side,
-        decimal entryPrice,
-        PositionExitOptions options,
-        decimal roundTripFrictionPercent)
-    {
-        if (options.MinStopFrictionMultiplier <= 0m
-            || roundTripFrictionPercent <= 0m
-            || levels.StopLossPrice is not { } stop
-            || levels.TakeProfitPrice is not { } takeProfit)
-        {
-            return levels;
-        }
-
-        var currentStopDistance = Math.Abs(entryPrice - stop);
-        var floorDistance = entryPrice * roundTripFrictionPercent * options.MinStopFrictionMultiplier / 100m;
-        if (currentStopDistance >= floorDistance || currentStopDistance <= 0m)
-        {
-            return levels;
-        }
-
-        var scale = floorDistance / currentStopDistance;
-        var takeProfitDistance = Math.Abs(takeProfit - entryPrice) * scale;
-        var isShort = NormalizeSide(side) == "SHORT";
-        return levels with
-        {
-            StopLossPrice = isShort ? entryPrice + floorDistance : entryPrice - floorDistance,
-            TakeProfitPrice = isShort ? entryPrice - takeProfitDistance : entryPrice + takeProfitDistance,
-            Reason = $"{levels.Reason}; stop floored at {options.MinStopFrictionMultiplier:0.##}x round-trip friction {roundTripFrictionPercent:0.###}% (TP scaled to keep R:R)"
-        };
     }
 
     public static PositionExitLevels FromAtr(

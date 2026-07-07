@@ -141,6 +141,50 @@ public sealed class StrategyOptions
     // 0 disables the extra limit (the hard max still applies).
     public decimal MaxExploratorySpreadPercent { get; set; } = 0.30m;
 
+    // ---- Trade-economics entry gate ----
+    // A trade whose achievable win cannot comfortably pay its own costs must not be
+    // opened at all (friction filters ENTRIES; it never widens the stop, which would
+    // only grow the average loss). The calculated take-profit distance must be at
+    // least this multiple of the round-trip friction (taker fees both ways + current
+    // spread + slippage both ways). With TP=3xATR / SL=2xATR the terminal break-even
+    // win rate is p* = (2*ATR + friction) / (5*ATR): at ATR 0.3% and friction 0.72%
+    // p* is 88% (untradeable); requiring TP >= 3x friction caps p* near 60%.
+    // 0 disables the gate.
+    public decimal MinTakeProfitToFrictionRatio { get; set; } = 0m;
+
+    // ---- Anti-extension entry guards ----
+    // Reject a LONG entry whose price already ran away from its own fast EMA by
+    // more than this percent: by the time the full confirmation stack agrees, an
+    // extended price is a chase, not an entry. 0 disables.
+    public decimal MaxEntryExtensionPercent { get; set; } = 0m;
+
+    // Reject a LONG entry whose recent snapshot trend already gained more than
+    // this percent over the price-action lookback window ("the move happened
+    // without us"). 0 disables.
+    public decimal MaxEntryRunupPercent { get; set; } = 0m;
+
+    // The negative-price-action score penalty only applies once the snapshot trend
+    // has fallen below MINUS this percent. A mild pullback (trend between
+    // -threshold and 0) is a normal entry point, not weakness. 0 keeps the legacy
+    // "any negative trend is penalized" behavior.
+    public decimal NegativePriceActionPenaltyThresholdPercent { get; set; } = 0m;
+
+    // ---- Early-entry channel (forming EMA cross) ----
+    // First-class entries taken BEFORE the EMA gap fully confirms: the gap must be
+    // at least EarlyEntryMinEmaGapPercent, still WIDENING (gap velocity above
+    // EarlyEntryMinGapVelocityPercent, strictly), RSI inside the ideal band, and
+    // recent price action no worse than EarlyEntryMinPriceActionTrendPercent
+    // (mildly negative = pullback is fine; a falling market is not). Ranked entries
+    // are capped at EarlyEntryMaxRank per cycle. Unlike exploratory sampling this
+    // channel is meant for live use; EarlyEntryAllowedInLive gates it there.
+    public bool EarlyEntryEnabled { get; set; } = false;
+    public bool EarlyEntryAllowedInLive { get; set; } = false;
+    public decimal EarlyEntryMinScore { get; set; } = 0.60m;
+    public decimal EarlyEntryMinEmaGapPercent { get; set; } = 0.10m;
+    public decimal EarlyEntryMinGapVelocityPercent { get; set; } = 0m;
+    public decimal EarlyEntryMinPriceActionTrendPercent { get; set; } = -0.2m;
+    public int EarlyEntryMaxRank { get; set; } = 1;
+
     // ---- Price-action warm-up ----
     // When true, NEW entries are blocked until the pair has PriceActionMinSnapshots
     // observations, so the anti-lag guard never has to abstain for an actual entry.

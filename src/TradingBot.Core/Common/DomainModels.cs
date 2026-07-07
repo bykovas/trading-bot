@@ -123,7 +123,10 @@ public sealed record DecisionProposal(
     bool EarlyEntryEligible = false,
     string? EarlyEntryReason = null,
     decimal EarlyEntryDiagnosticScore = 0m,
-    decimal EarlyEntrySuggestedNotionalEur = 0m);
+    decimal EarlyEntrySuggestedNotionalEur = 0m,
+    // First-class early entry on a forming EMA cross (gap above the early floor and
+    // still widening). Ranked entries are capped at Strategy.EarlyEntryMaxRank.
+    bool EarlyEntryCandidate = false);
 
 public sealed record PositionSizeSelection(
     decimal TargetNotionalEur,

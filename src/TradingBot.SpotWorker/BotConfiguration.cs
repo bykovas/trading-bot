@@ -99,7 +99,7 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_STRATEGY_EXIT_EMA_GAP_PERCENT", value => config.Strategy.ExitEmaGapPercent = ParseDecimal(value, config.Strategy.ExitEmaGapPercent));
         SetIfPresent("TRADINGBOT_POSITION_EXIT_TRAILING_ACTIVATION_PERCENT", value => config.PositionExit.TrailingActivationPercent = ParseDecimal(value, config.PositionExit.TrailingActivationPercent));
         SetIfPresent("TRADINGBOT_POSITION_EXIT_TRAILING_DISTANCE_PERCENT", value => config.PositionExit.TrailingDistancePercent = ParseDecimal(value, config.PositionExit.TrailingDistancePercent));
-        SetIfPresent("TRADINGBOT_POSITION_EXIT_MIN_STOP_FRICTION_MULTIPLIER", value => config.PositionExit.MinStopFrictionMultiplier = ParseDecimal(value, config.PositionExit.MinStopFrictionMultiplier));
+        SetIfPresent("TRADINGBOT_STRATEGY_MIN_TAKE_PROFIT_TO_FRICTION_RATIO", value => config.Strategy.MinTakeProfitToFrictionRatio = ParseDecimal(value, config.Strategy.MinTakeProfitToFrictionRatio));
         SetIfPresent("TRADINGBOT_EXECUTION_ENTRY_BLACKOUT_UTC_FROM_HOUR", value => config.ExecutionPolicy.EntryBlackoutUtcFromHour = ParseInt(value, config.ExecutionPolicy.EntryBlackoutUtcFromHour));
         SetIfPresent("TRADINGBOT_EXECUTION_ENTRY_BLACKOUT_MINUTES", value => config.ExecutionPolicy.EntryBlackoutMinutes = ParseInt(value, config.ExecutionPolicy.EntryBlackoutMinutes));
         SetIfPresent("TRADINGBOT_EXECUTION_MAX_NEW_POSITIONS_PER_HOUR", value => config.ExecutionPolicy.MaxNewPositionsPerHour = ParseInt(value, config.ExecutionPolicy.MaxNewPositionsPerHour));
@@ -215,7 +215,7 @@ internal sealed class BotConfiguration
         PositionExit.AtrPeriod = Math.Max(1, PositionExit.AtrPeriod);
         PositionExit.StopLossAtrMultiplier = Math.Max(0m, PositionExit.StopLossAtrMultiplier);
         PositionExit.TakeProfitAtrMultiplier = Math.Max(0m, PositionExit.TakeProfitAtrMultiplier);
-        PositionExit.MinStopFrictionMultiplier = Math.Max(0m, PositionExit.MinStopFrictionMultiplier);
+        Strategy.MinTakeProfitToFrictionRatio = Math.Max(0m, Strategy.MinTakeProfitToFrictionRatio);
         PositionExit.FixedStopLossPercent = PositionExit.StopLossPercent is > 0m
             ? PositionExit.StopLossPercent.Value
             : Math.Max(0m, PositionExit.FixedStopLossPercent);
@@ -430,15 +430,6 @@ internal sealed class PositionExitOptions
     public decimal TakeProfitAtrMultiplier { get; set; } = 3.0m;
     public decimal FixedStopLossPercent { get; set; } = 2.5m;
     public decimal FixedTakeProfitPercent { get; set; } = 2.0m;
-
-    // Friction floor under the stop distance. On a quiet market 2xATR can be
-    // NARROWER than the round-trip cost of the trade (fees both ways + spread +
-    // slippage both ways), which guarantees noise stop-outs that cost more than
-    // they protect. The stop distance is therefore never allowed below
-    // MinStopFrictionMultiplier x roundTripFriction; when the floor lifts the stop,
-    // the take-profit is scaled by the same factor so the configured risk/reward
-    // ratio survives. 0 disables the floor.
-    public decimal MinStopFrictionMultiplier { get; set; } = 2.5m;
 
     // Normal signal-flip exits are only allowed when the conservative unrealized
     // PnL percent is at least this value. Does not apply to hard exits.

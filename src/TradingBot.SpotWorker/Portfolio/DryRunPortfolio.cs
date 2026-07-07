@@ -300,12 +300,31 @@ internal sealed class DryRunPortfolio(
                 fillSource = "MODELED";
             }
 
-            var exitLevels = PositionExitLevelCalculator.Calculate(
-                "LONG",
-                buyPrice,
-                marketState.Candles,
-                positionExit,
-                RoundTripFrictionPercent(marketState));
+            var exitLevels = PositionExitLevelCalculator.Calculate("LONG", buyPrice, marketState.Candles, positionExit);
+
+            // Trade-economics gate: friction filters ENTRIES, it never widens the
+            // stop. If the calculated take-profit distance cannot pay for the round
+            // trip several times over, the achievable win is too small for the trade
+            // to have positive expectancy — skip it instead of risking a full stop.
+            if (_strategy.MinTakeProfitToFrictionRatio > 0m && exitLevels.TakeProfitPrice is { } takeProfitPrice)
+            {
+                var frictionPercent = RoundTripFrictionPercent(marketState);
+                var takeProfitDistancePercent = (takeProfitPrice - buyPrice) / buyPrice * 100m;
+                var requiredPercent = _strategy.MinTakeProfitToFrictionRatio * frictionPercent;
+                if (frictionPercent > 0m && takeProfitDistancePercent < requiredPercent)
+                {
+                    return BuildAction(
+                        "WOULD_BUY_BLOCKED",
+                        $"friction gate: take-profit distance {takeProfitDistancePercent:0.###}% is below {_strategy.MinTakeProfitToFrictionRatio:0.##}x round-trip friction {frictionPercent:0.###}% (required {requiredPercent:0.###}%); achievable win cannot pay the costs",
+                        proposal,
+                        position,
+                        beforeCash,
+                        beforeValue,
+                        state,
+                        holdReasonCode: "FRICTION_BLOCK");
+                }
+            }
+
             if (quantity <= 0m)
             {
                 return BuildAction("WOULD_BUY_BLOCKED", "calculated quantity is zero", proposal, position, beforeCash, beforeValue, state);
