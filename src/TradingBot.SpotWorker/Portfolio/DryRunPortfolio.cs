@@ -300,7 +300,12 @@ internal sealed class DryRunPortfolio(
                 fillSource = "MODELED";
             }
 
-            var exitLevels = PositionExitLevelCalculator.Calculate("LONG", buyPrice, marketState.Candles, positionExit);
+            var exitLevels = PositionExitLevelCalculator.Calculate(
+                "LONG",
+                buyPrice,
+                marketState.Candles,
+                positionExit,
+                RoundTripFrictionPercent(marketState));
             if (quantity <= 0m)
             {
                 return BuildAction("WOULD_BUY_BLOCKED", "calculated quantity is zero", proposal, position, beforeCash, beforeValue, state);
@@ -717,6 +722,19 @@ internal sealed class DryRunPortfolio(
     private decimal FeeRate => options.TakerFeeBps / 10_000m;
 
     private decimal SlippageRate => options.SlippageBps / 10_000m;
+
+    // Full cost of opening AND closing this position as a percent of price: taker
+    // fee both ways, the current bid/ask spread once, and slippage both ways. This
+    // is the floor the trade must clear before a single cent of profit exists.
+    private decimal RoundTripFrictionPercent(InstrumentMarketState marketState)
+    {
+        var bid = marketState.BestBid;
+        var ask = marketState.BestAsk;
+        var spreadPercent = bid > 0m && ask >= bid
+            ? (ask - bid) / ((ask + bid) / 2m) * 100m
+            : 0m;
+        return 2m * FeeRate * 100m + spreadPercent + 2m * SlippageRate * 100m;
+    }
 
     private decimal CalculateBuyPrice(InstrumentMarketState marketState) =>
         marketState.BestAsk * (1m + SlippageRate);

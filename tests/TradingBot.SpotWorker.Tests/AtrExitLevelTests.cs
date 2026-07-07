@@ -43,6 +43,58 @@ public class AtrExitLevelTests
     }
 
     [Fact]
+    public void Stop_narrower_than_friction_floor_is_widened_and_take_profit_scales()
+    {
+        // Calm candles: TR = 0.2 per bar -> ATR(3) = 0.2 -> 2xATR stop distance 0.4
+        // (0.4% of price). Round-trip friction 0.72% x multiplier 2.5 = 1.8% floor:
+        // the ATR stop must be pushed down to it and the TP scaled by the same 4.5x.
+        var candles = CalmCandles(count: 6, price: 100m, range: 0.2m);
+        var options = new PositionExitOptions
+        {
+            Mode = PositionExitOptions.ModeAtr,
+            AtrPeriod = 3,
+            StopLossAtrMultiplier = 2m,
+            TakeProfitAtrMultiplier = 3m,
+            MinStopFrictionMultiplier = 2.5m
+        };
+
+        var levels = PositionExitLevelCalculator.Calculate(
+            "LONG", entryPrice: 100m, candles, options, roundTripFrictionPercent: 0.72m);
+
+        Assert.Equal(98.2m, levels.StopLossPrice);   // 100 - 1.8
+        Assert.Equal(102.7m, levels.TakeProfitPrice); // TP distance 0.6 * (1.8/0.4) = 2.7
+        Assert.Contains("stop floored", levels.Reason);
+    }
+
+    [Fact]
+    public void Stop_wider_than_friction_floor_is_left_untouched()
+    {
+        // Volatile candles: TR = 2 -> ATR(3) = 2 -> stop distance 4 (4%), far above
+        // the 1.8% friction floor. Levels must be the plain ATR levels.
+        var candles = CalmCandles(count: 6, price: 100m, range: 2m);
+        var options = new PositionExitOptions
+        {
+            Mode = PositionExitOptions.ModeAtr,
+            AtrPeriod = 3,
+            StopLossAtrMultiplier = 2m,
+            TakeProfitAtrMultiplier = 3m,
+            MinStopFrictionMultiplier = 2.5m
+        };
+
+        var levels = PositionExitLevelCalculator.Calculate(
+            "LONG", entryPrice: 100m, candles, options, roundTripFrictionPercent: 0.72m);
+
+        Assert.Equal(96m, levels.StopLossPrice);
+        Assert.Equal(106m, levels.TakeProfitPrice);
+        Assert.DoesNotContain("stop floored", levels.Reason);
+    }
+
+    private static Candle[] CalmCandles(int count, decimal price, decimal range) =>
+        Enumerable.Range(0, count)
+            .Select(index => Candle(index, high: price + range / 2m, low: price - range / 2m, close: price))
+            .ToArray();
+
+    [Fact]
     public void Atr_exit_levels_are_mirrored_for_short_entries()
     {
         var levels = PositionExitLevelCalculator.FromAtr(
