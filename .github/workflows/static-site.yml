@@ -104,10 +104,24 @@ jobs:
           docker push "${FUTURES_WORKER_IMAGE_NAME}:latest"
           docker push "${FUTURES_WORKER_IMAGE_NAME}:${{ github.sha }}"
 
+      - name: Upload deploy bundle
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-bundle
+          retention-days: 1
+          path: |
+            infra/deploy.sh
+            infra/docker-compose.prod.yml
+            infra/traefik/trading-bot.yml
+            src/TradingBot.SpotWorker/appsettings.json
+            src/TradingBot.FuturesWorker/appsettings.json
+
   deploy:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: self-hosted
+    timeout-minutes: 10
     environment: PROD
 
     env:
@@ -130,8 +144,10 @@ jobs:
       TRADINGBOT_LIVE_TRADING_ENABLED: ${{ vars.TRADINGBOT_LIVE_TRADING_ENABLED }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Download deploy bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-bundle
 
       - name: Deploy
         run: bash infra/deploy.sh
