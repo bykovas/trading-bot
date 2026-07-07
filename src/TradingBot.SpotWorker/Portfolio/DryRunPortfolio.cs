@@ -792,9 +792,7 @@ internal sealed class DryRunPortfolio(
             ExitReasonCode = exitReasonCode,
             DesiredPosition = proposal.DesiredPosition,
             TargetNotionalEur = proposal.TargetNotionalEur,
-            Quantity = action == "WOULD_BUY"
-                ? position?.Quantity ?? 0m
-                : position?.Quantity ?? 0m,
+            Quantity = position?.Quantity ?? 0m,
             EntryPrice = position?.EntryPrice ?? 0m,
             LastPrice = position?.LastPrice ?? 0m,
             FillPrice = fillPrice,
