@@ -28,6 +28,7 @@ read-only public Kraken Futures market data. Live futures execution path в
 dotnet run --project src/TradingBot.SpotWorker/TradingBot.SpotWorker.csproj
 ```
 
+
 ## Запуск с публичными данными Kraken
 
 Для OHLC/AssetPairs/Ticker API-ключ не нужен:
