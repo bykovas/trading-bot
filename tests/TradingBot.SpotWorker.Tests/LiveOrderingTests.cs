@@ -342,6 +342,161 @@ public class LiveOrderingTests
     }
 
     [Fact]
+    public async Task Ioc_fallback_partial_fill_commits_only_real_executed_volume()
+    {
+        var outputDirectory = TempDir();
+        var config = LiveConfig(outputDirectory);
+        config.Entry.MaxBuySlippagePercent = 1.0m;
+        var iocSubmissions = new Counter();
+        var worker = Worker(config, new BodyAwareStub((path, body) =>
+        {
+            CountIoc(path, body, iocSubmissions);
+            if (IsMakerAdd(path, body)) return AddResponse("MAKER-1");
+            if (IsIocAdd(path, body)) return AddResponse("IOC-1");
+            if (path.Contains("CancelOrder")) return CancelOk();
+            if (path.Contains("QueryOrders") && body.Contains("MAKER-1")) return Order("MAKER-1", "canceled", vol: "0", price: "0", cost: "0", fee: "0");
+            // IOC only partially filled: the remainder is canceled, and the position is
+            // opened from the REAL executed volume (3.0), not the requested volume.
+            if (path.Contains("QueryOrders") && body.Contains("IOC-1")) return Order("IOC-1", "canceled", vol: "3.0", price: "1.40", cost: "4.20", fee: "0.012");
+            return DefaultResponse(path);
+        }));
+
+        await worker.RunAsync(CancellationToken.None);
+
+        var action = ActionFor(outputDirectory, "AAA/EUR");
+        Assert.Equal("WOULD_BUY", action.GetProperty("action").GetString());
+        Assert.Equal("IOC_FALLBACK", action.GetProperty("entryExecution").GetProperty("fillSource").GetString());
+        Assert.Equal(3.0m, action.GetProperty("entryExecution").GetProperty("fallbackExecutedVolume").GetDecimal());
+        Assert.Equal(1, iocSubmissions.Value);
+
+        var position = Assert.Single(PositionsAfter(outputDirectory));
+        Assert.Equal(3.0m, position.GetProperty("quantity").GetDecimal());
+        Assert.Equal(1.40m, position.GetProperty("entryPrice").GetDecimal());
+    }
+
+    [Fact]
+    public async Task Repeg_is_suppressed_and_no_second_maker_placed_when_first_cancel_is_unconfirmed()
+    {
+        // The first maker never reaches a final state (cancel unconfirmed). A second
+        // maker must NOT be placed (double-volume risk), and the IOC must be suppressed.
+        var outputDirectory = TempDir();
+        var config = LiveConfig(outputDirectory);
+        config.Entry.MakerFillTimeoutSec = 2;
+        config.Entry.MakerRepegs = 1; // budget for a repeg that must be suppressed
+        config.Entry.MaxBuySlippagePercent = 1.0m;
+        var makerAdds = new Counter();
+        var iocSubmissions = new Counter();
+        var worker = Worker(config, new BodyAwareStub((path, body) =>
+        {
+            if (IsMakerAdd(path, body)) makerAdds.Increment();
+            CountIoc(path, body, iocSubmissions);
+            if (IsMakerAdd(path, body)) return AddResponse("MAKER-1");
+            if (IsIocAdd(path, body)) return AddResponse("IOC-1");
+            if (path.Contains("CancelOrder")) return CancelOk();
+            // Always non-final: the cancel is never observed as effective.
+            if (path.Contains("QueryOrders")) return Order("MAKER-1", "open", vol: "0", price: "0", cost: "0", fee: "0");
+            return DefaultResponse(path);
+        }));
+
+        await worker.RunAsync(CancellationToken.None);
+
+        var action = ActionFor(outputDirectory, "AAA/EUR");
+        Assert.Equal("LIVE_ORDER_FAILED", action.GetProperty("action").GetString());
+        Assert.Equal(1, makerAdds.Value);      // no second maker despite the repeg budget
+        Assert.Equal(0, iocSubmissions.Value);
+        Assert.Empty(PositionsAfter(outputDirectory));
+    }
+
+    [Fact]
+    public async Task Ioc_fallback_rejected_when_refetched_quote_is_stale()
+    {
+        var outputDirectory = TempDir();
+        var config = LiveConfig(outputDirectory);
+        config.Entry.MaxBuySlippagePercent = 1.0m;
+        var iocSubmissions = new Counter();
+        // Valid quote at cycle start (call 1); stale (null) on the fallback refetch (call 2+).
+        var marketData = new ScriptedMarketDataSource("AAA/EUR", lightQuote: call => call >= 2 ? null : ScriptedMarketDataSource.DefaultQuote);
+        var worker = Worker(config, new BodyAwareStub((path, body) =>
+        {
+            CountIoc(path, body, iocSubmissions);
+            if (IsMakerAdd(path, body)) return AddResponse("MAKER-1");
+            if (IsIocAdd(path, body)) return AddResponse("IOC-1");
+            if (path.Contains("CancelOrder")) return CancelOk();
+            if (path.Contains("QueryOrders")) return Order("MAKER-1", "canceled", vol: "0", price: "0", cost: "0", fee: "0");
+            return DefaultResponse(path);
+        }), marketData);
+
+        await worker.RunAsync(CancellationToken.None);
+
+        var action = ActionFor(outputDirectory, "AAA/EUR");
+        Assert.Equal("LIVE_ORDER_FAILED", action.GetProperty("action").GetString());
+        Assert.Contains("REJECTED_STALE_QUOTE", action.GetProperty("reason").GetString() ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal(0, iocSubmissions.Value);
+        Assert.Empty(PositionsAfter(outputDirectory));
+    }
+
+    [Fact]
+    public async Task Ioc_fallback_rejected_when_refetched_spread_is_too_wide()
+    {
+        var outputDirectory = TempDir();
+        var config = LiveConfig(outputDirectory);
+        config.Entry.MaxBuySlippagePercent = 1.0m;
+        var iocSubmissions = new Counter();
+        // Tight spread at cycle start; a very wide spread on the fallback refetch.
+        var wide = new Quote(1.30m, 1.40m, 1.39m, 100m, 0m);
+        var marketData = new ScriptedMarketDataSource("AAA/EUR", lightQuote: call => call >= 2 ? wide : ScriptedMarketDataSource.DefaultQuote);
+        var worker = Worker(config, new BodyAwareStub((path, body) =>
+        {
+            CountIoc(path, body, iocSubmissions);
+            if (IsMakerAdd(path, body)) return AddResponse("MAKER-1");
+            if (IsIocAdd(path, body)) return AddResponse("IOC-1");
+            if (path.Contains("CancelOrder")) return CancelOk();
+            if (path.Contains("QueryOrders")) return Order("MAKER-1", "canceled", vol: "0", price: "0", cost: "0", fee: "0");
+            return DefaultResponse(path);
+        }), marketData);
+
+        await worker.RunAsync(CancellationToken.None);
+
+        var action = ActionFor(outputDirectory, "AAA/EUR");
+        Assert.Equal("LIVE_ORDER_FAILED", action.GetProperty("action").GetString());
+        Assert.Contains("REJECTED_SPREAD", action.GetProperty("reason").GetString() ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal(0, iocSubmissions.Value);
+        Assert.Empty(PositionsAfter(outputDirectory));
+    }
+
+    [Fact]
+    public async Task Ioc_fallback_rejected_when_risk_limit_tightened_before_fallback()
+    {
+        var outputDirectory = TempDir();
+        var config = LiveConfig(outputDirectory);
+        config.Entry.MaxBuySlippagePercent = 1.0m;
+        var iocSubmissions = new Counter();
+        // The exposure limit is tightened between the maker phase and the fallback
+        // (simulating a concurrent risk-limit change): the fallback guard must reject.
+        var marketData = new ScriptedMarketDataSource("AAA/EUR", onLight: call =>
+        {
+            if (call >= 2) config.Risk.MaxTotalExposureEur = 1m;
+        });
+        var worker = Worker(config, new BodyAwareStub((path, body) =>
+        {
+            CountIoc(path, body, iocSubmissions);
+            if (IsMakerAdd(path, body)) return AddResponse("MAKER-1");
+            if (IsIocAdd(path, body)) return AddResponse("IOC-1");
+            if (path.Contains("CancelOrder")) return CancelOk();
+            if (path.Contains("QueryOrders")) return Order("MAKER-1", "canceled", vol: "0", price: "0", cost: "0", fee: "0");
+            return DefaultResponse(path);
+        }), marketData);
+
+        await worker.RunAsync(CancellationToken.None);
+
+        var action = ActionFor(outputDirectory, "AAA/EUR");
+        Assert.Equal("LIVE_ORDER_FAILED", action.GetProperty("action").GetString());
+        Assert.Contains("REJECTED_RISK", action.GetProperty("reason").GetString() ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal(0, iocSubmissions.Value);
+        Assert.Empty(PositionsAfter(outputDirectory));
+    }
+
+    [Fact]
     public async Task Sell_execution_path_is_unchanged_by_the_buy_fallback()
     {
         // A held position that flips bearish must still exit via a plain market SELL:
@@ -428,6 +583,76 @@ public class LiveOrderingTests
     private static List<JsonElement> PositionsAfter(string outputDirectory) =>
         LastCycle(outputDirectory).GetProperty("portfolioAfter").GetProperty("positions").EnumerateArray().ToList();
 
+    // Market-data double whose fallback refetch (2nd+ light call) can be scripted to
+    // return a stale/wide quote or trigger a side effect (e.g. a risk-limit change),
+    // while the cycle-start light call (call 1) and the full states stay valid so the
+    // entry still fires and the maker phase runs before the fallback.
+    private sealed class ScriptedMarketDataSource : IMarketDataSource
+    {
+        public static readonly Quote DefaultQuote = new(1.395m, 1.40m, 1.39m, 100m, 0m);
+
+        private readonly HashSet<string> _pairs;
+        private readonly Func<int, Quote?>? _lightQuote;
+        private readonly Action<int>? _onLight;
+        private int _lightCalls;
+
+        public ScriptedMarketDataSource(string pair, Func<int, Quote?>? lightQuote = null, Action<int>? onLight = null)
+        {
+            _pairs = new HashSet<string>(new[] { pair }, StringComparer.OrdinalIgnoreCase);
+            _lightQuote = lightQuote;
+            _onLight = onLight;
+        }
+
+        public Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
+            IReadOnlyList<InstrumentOptions> instruments,
+            CancellationToken cancellationToken)
+        {
+            var call = ++_lightCalls;
+            _onLight?.Invoke(call);
+            var quote = _lightQuote is null ? DefaultQuote : _lightQuote(call);
+            return Task.FromResult<IReadOnlyList<InstrumentMarketState>>(
+                instruments.Select(instrument => new InstrumentMarketState
+                {
+                    Instrument = instrument,
+                    Candles = Array.Empty<Candle>(),
+                    Quote = quote,
+                    DataWarning = quote is null ? "Ticker data unavailable." : null
+                }).ToList());
+        }
+
+        public Task<IReadOnlyList<InstrumentMarketState>> GetFullMarketStatesAsync(
+            IReadOnlyList<InstrumentOptions> instruments,
+            int timeframeMinutes,
+            IReadOnlyList<InstrumentMarketState> lightStates,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<InstrumentMarketState>>(
+                instruments.Select(instrument =>
+                {
+                    var candles = _pairs.Contains(instrument.Pair)
+                        ? Enumerable.Range(0, 40)
+                            .Select(index => new Candle(
+                                DateTimeOffset.UtcNow.AddMinutes(-40 + index),
+                                Open: 1m + index * 0.01m,
+                                High: 1.02m + index * 0.01m,
+                                Low: 0.99m + index * 0.01m,
+                                Close: 1m + index * 0.01m,
+                                Volume: 100m + index,
+                                TradeCount: 10))
+                            .ToArray()
+                        : Array.Empty<Candle>();
+
+                    return new InstrumentMarketState
+                    {
+                        Instrument = instrument,
+                        Candles = candles,
+                        Quote = DefaultQuote,
+                        PairRules = new PairRules(instrument.Pair, "online", 0.001m, 0.5m, 8, 2)
+                    };
+                }).ToList());
+        }
+    }
+
     private sealed class BodyAwareStub(Func<string, string, string> respond) : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -451,9 +676,12 @@ public class LiveOrderingTests
         return JsonDocument.Parse(line).RootElement.Clone();
     }
 
-    private static DecisionWorker Worker(BotConfiguration config, HttpMessageHandler brokerHandler) => new(
+    private static DecisionWorker Worker(BotConfiguration config, HttpMessageHandler brokerHandler) =>
+        Worker(config, brokerHandler, new FakeMarketDataSource("AAA/EUR"));
+
+    private static DecisionWorker Worker(BotConfiguration config, HttpMessageHandler brokerHandler, IMarketDataSource marketData) => new(
         config,
-        new FakeMarketDataSource("AAA/EUR"),
+        marketData,
         new FixedAdvisor("AAA/EUR"),
         new IndicatorEngine(),
         new TechnicalDecisionEngine(),

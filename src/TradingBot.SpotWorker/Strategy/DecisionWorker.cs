@@ -1452,6 +1452,19 @@ internal sealed class DecisionWorker(
                 return MakerFillOutcome("MAKER_PARTIAL", "makerPartialAfterCancel", marketState, requestedPrice, volume, txid, txids, finalQuery, repegs, fillMs, diag);
             }
 
+            // Only repeg once the FIRST order is confirmed dead (final status + zero
+            // executed volume). If the cancel is unconfirmed or the state is ambiguous
+            // (query failed, still 'open'), placing a second maker could leave two live
+            // orders and double the filled volume — so stop here and let the IOC
+            // fallback's final-state guard decide (it suppresses the IOC unless the
+            // maker is confirmed cancelled with zero fill).
+            var makerConfirmedDead = finalQuery is not null && IsFinalOrderStatus(finalQuery.Status);
+            if (!makerConfirmedDead)
+            {
+                Console.WriteLine($"  maker-entry-repeg-suppressed {marketState.Instrument.Pair}: first maker not confirmed cancelled (status={makerFinalStatus}); no second maker placed");
+                break;
+            }
+
             // Zero fill on this attempt. Repeg with a fresh quote if budget and time remain.
             if (attempt < totalAttempts - 1 && DateTimeOffset.UtcNow < overallDeadline)
             {
@@ -1571,6 +1584,12 @@ internal sealed class DecisionWorker(
         diag.FallbackBid = freshBid;
         diag.FallbackAsk = freshAsk;
         diag.FallbackSpreadPercent = decimal.Round(spread, 4);
+        if (diag.OriginalMakerBid is > 0m)
+        {
+            var refBid = diag.OriginalMakerBid.Value;
+            diag.FallbackBidMovementPercent = decimal.Round((freshBid - refBid) / refBid * 100m, 4);
+            diag.FallbackAskDisplacementPercent = decimal.Round((freshAsk - refBid) / refBid * 100m, 4);
+        }
 
         // (c) Re-validate the original BUY intent against fresh quote + current portfolio.
         var alreadyOpen = portfolio.Positions.Any(position => position.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));

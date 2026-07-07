@@ -277,6 +277,12 @@ public sealed class EntryExecutionDiagnostics
     public decimal? FallbackBid { get; set; }
     public decimal? FallbackAsk { get; set; }
     public decimal? FallbackSpreadPercent { get; set; }
+    // Market movement between the maker phase and the fallback, both referenced to the
+    // original maker bid: BidMovement = (fallbackBid - originalMakerBid)/originalMakerBid;
+    // AskDisplacement = (fallbackAsk - originalMakerBid)/originalMakerBid (what the taker
+    // actually pays away from the original passive price). Percent units.
+    public decimal? FallbackBidMovementPercent { get; set; }
+    public decimal? FallbackAskDisplacementPercent { get; set; }
     public decimal? FallbackMaxAllowedPrice { get; set; }
     public decimal? FallbackSubmittedPrice { get; set; }
     public string? FallbackOrderId { get; set; }
