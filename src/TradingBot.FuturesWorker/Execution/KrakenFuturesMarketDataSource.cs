@@ -58,12 +58,14 @@ internal sealed class KrakenFuturesMarketDataSource(HttpClient httpClient, Krake
             try
             {
                 var candles = await GetClosedCandlesAsync(symbol, timeframeMinutes, cancellationToken);
+                var orderBook = await GetOrderBookAsync(symbol, cancellationToken);
                 states.Add(new InstrumentMarketState
                 {
                     Instrument = instrument,
                     Candles = candles,
                     PairRules = instrumentMetadata?.Rules,
                     Quote = quote,
+                    OrderBook = orderBook,
                     DataWarning = candles.Count < 30
                         ? CombineWarnings(warning, $"Only {candles.Count} closed mark candles returned.")
                         : warning
@@ -242,10 +244,54 @@ internal sealed class KrakenFuturesMarketDataSource(HttpClient httpClient, Krake
                 GetNullableDecimal(item, "change24h"),
                 GetNullableDecimal(item, "fundingRate"),
                 mark > 0m ? mark : null,
-                GetNullableDecimal(item, "indexPrice"));
+                GetNullableDecimal(item, "indexPrice"),
+                GetNullableDecimal(item, "bidSize"),
+                GetNullableDecimal(item, "askSize"));
         }
 
         return quotes;
+    }
+
+    private async Task<OrderBookSnapshot?> GetOrderBookAsync(string symbol, CancellationToken cancellationToken)
+    {
+        var uri = $"{BaseUrl()}/derivatives/api/v3/orderbook?symbol={Uri.EscapeDataString(symbol)}";
+        using var response = await httpClient.GetAsync(uri, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        ThrowIfErrorResult(document.RootElement, "orderbook");
+
+        if (!document.RootElement.TryGetProperty("orderBook", out var book)
+            || book.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("Kraken Futures orderbook response missing orderBook object.");
+        }
+
+        return new OrderBookSnapshot(ParseLevels(book, "bids"), ParseLevels(book, "asks"));
+    }
+
+    private static IReadOnlyList<OrderBookLevel> ParseLevels(JsonElement book, string propertyName)
+    {
+        if (!book.TryGetProperty(propertyName, out var levels)
+            || levels.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<OrderBookLevel>();
+        }
+
+        var parsed = new List<OrderBookLevel>();
+        foreach (var level in levels.EnumerateArray())
+        {
+            if (level.ValueKind != JsonValueKind.Array || level.GetArrayLength() < 2)
+            {
+                continue;
+            }
+
+            parsed.Add(new OrderBookLevel(ParseDecimal(level[0]), ParseDecimal(level[1])));
+        }
+
+        return propertyName == "bids"
+            ? parsed.OrderByDescending(level => level.Price).ToList()
+            : parsed.OrderBy(level => level.Price).ToList();
     }
 
     private async Task<IReadOnlyList<Candle>> GetClosedCandlesAsync(

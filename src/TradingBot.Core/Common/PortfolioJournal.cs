@@ -73,6 +73,10 @@ public sealed class PortfolioPosition
     public decimal? StopLossPrice { get; set; }
     public decimal? TakeProfitPrice { get; set; }
     public decimal? RoundTripCostEstimatePct { get; set; }
+    public decimal? ExpectedFundingPct { get; set; }
+    public decimal? AtrPct { get; set; }
+    public decimal? StopDistancePct { get; set; }
+    public decimal? TakeProfitDistancePct { get; set; }
 
     // Consecutive decision cycles in which the current score sat at or below the
     // configured defensive score level. Reset to 0 whenever the score recovers.
@@ -110,6 +114,10 @@ public sealed class PortfolioPosition
         StopLossPrice = StopLossPrice,
         TakeProfitPrice = TakeProfitPrice,
         RoundTripCostEstimatePct = RoundTripCostEstimatePct,
+        ExpectedFundingPct = ExpectedFundingPct,
+        AtrPct = AtrPct,
+        StopDistancePct = StopDistancePct,
+        TakeProfitDistancePct = TakeProfitDistancePct,
         LowScoreCycles = LowScoreCycles,
         Leverage = Leverage,
         InitialMarginEur = InitialMarginEur,
@@ -216,12 +224,21 @@ public sealed class DryRunAction
     public decimal? ModeledFillPrice { get; set; }
     public decimal? ModeledFeeEur { get; set; }
     public decimal? RoundTripCostEstimatePct { get; set; }
+    public decimal? ExpectedFundingPct { get; set; }
+    public decimal? AtrPct { get; set; }
+    public decimal? StopDistancePct { get; set; }
+    public decimal? TakeProfitDistancePct { get; set; }
     public decimal? OpenRiskEur { get; set; }
     public decimal? QueueAheadEur { get; set; }
     public decimal? MakerOrderFilledEur { get; set; }
     public decimal? MakerFillRate { get; set; }
     public long? TimeToFillMs { get; set; }
     public int? RepegCount { get; set; }
+    public string? FundingState { get; set; }
+    public string? BtcRegimeState { get; set; }
+    public string? ShortAllowed { get; set; }
+    public decimal? RequestedNotionalEur { get; set; }
+    public decimal? FilledNotionalEur { get; set; }
 
     // Futures-only fields, nullable so spot rows keep their exact shape. Side is
     // LONG/SHORT exposure, ReduceOnly marks simulated exits that may only shrink

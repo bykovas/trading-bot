@@ -72,4 +72,6 @@ public sealed record CycleEntryDiagnostics(
     int PairsPassedVolume = 0,
     int PairsPassedDepth = 0,
     decimal OpenRiskEur = 0m,
-    string BtcRegimeState = "UNKNOWN");
+    string BtcRegimeState = "UNKNOWN",
+    int PairsPassedExitDepth = 0,
+    string FundingState = "UNKNOWN");

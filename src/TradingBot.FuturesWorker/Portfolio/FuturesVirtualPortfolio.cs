@@ -42,7 +42,8 @@ internal sealed class FuturesVirtualPortfolio(
         decimal leverage,
         bool reduceOnly = false,
         string reason = "",
-        string? exitTriggerSource = null)
+        string? exitTriggerSource = null,
+        FuturesEntryPlan? entryPlan = null)
     {
         var position = state.Positions.FirstOrDefault(p => p.Pair == pair);
         var desiredSide = desired switch
@@ -93,7 +94,7 @@ internal sealed class FuturesVirtualPortfolio(
             return NoOrder(state, pair, null, "short entry refused: AllowShorts=false");
         }
 
-        return Open(state, pair, desiredSide!, markPrice, targetNotionalEur, leverage, reason);
+        return Open(state, pair, desiredSide!, markPrice, targetNotionalEur, leverage, reason, entryPlan);
     }
 
     private FuturesFillResult Open(
@@ -103,13 +104,19 @@ internal sealed class FuturesVirtualPortfolio(
         decimal markPrice,
         decimal notionalEur,
         decimal leverage,
-        string reason)
+        string reason,
+        FuturesEntryPlan? entryPlan)
     {
+        var requestedNotionalEur = notionalEur;
+        if (entryPlan is not null)
+        {
+            notionalEur = entryPlan.FilledNotionalEur;
+        }
+
         leverage = Math.Clamp(leverage <= 0m ? 1m : leverage, 1m, config.Futures.MaxLeverage);
-        var slippage = markPrice * config.DryRun.SlippageBps / 10_000m;
-        var fillPrice = side == "SHORT" ? markPrice - slippage : markPrice + slippage;
+        var fillPrice = markPrice;
         var quantity = fillPrice <= 0m ? 0m : notionalEur / fillPrice;
-        var fee = notionalEur * config.DryRun.TakerFeeBps / 10_000m;
+        var fee = notionalEur * config.Fees.MakerPct / 100m;
         var initialMargin = leverage <= 0m ? notionalEur : notionalEur / leverage;
 
         if (quantity <= 0m)
@@ -126,8 +133,10 @@ internal sealed class FuturesVirtualPortfolio(
         state.CashEur -= initialMargin + fee;
 
         var liquidationPrice = FuturesMath.EstimateLiquidationPrice(side, fillPrice, leverage, config.Margin.MaintenanceMarginRatePercent);
-        var tpDistance = fillPrice * config.TpSl.TakeProfitPercent / 100m;
-        var slDistance = fillPrice * config.TpSl.StopLossPercent / 100m;
+        var tpDistancePct = entryPlan?.TakeProfitDistancePct ?? config.Exits.TakeProfitAtrMult;
+        var slDistancePct = entryPlan?.StopDistancePct ?? config.Exits.StopAtrMult;
+        var tpDistance = fillPrice * tpDistancePct / 100m;
+        var slDistance = fillPrice * slDistancePct / 100m;
         state.Positions.Add(new PortfolioPosition
         {
             Pair = pair,
@@ -147,6 +156,8 @@ internal sealed class FuturesVirtualPortfolio(
             FundingPaidEur = 0m,
             StopLossPrice = config.TpSl.Enabled ? (side == "SHORT" ? fillPrice + slDistance : fillPrice - slDistance) : null,
             TakeProfitPrice = config.TpSl.Enabled ? (side == "SHORT" ? fillPrice - tpDistance : fillPrice + tpDistance) : null,
+            EntryAtr = entryPlan?.AtrPct,
+            RoundTripCostEstimatePct = entryPlan?.RoundTripCostEstimatePct,
             TpOrderState = config.TpSl.Enabled ? "SIMULATED_OPEN" : null,
             SlOrderState = config.TpSl.Enabled ? "SIMULATED_OPEN" : null
         });
@@ -159,12 +170,33 @@ internal sealed class FuturesVirtualPortfolio(
         action.ReduceOnly = false;
         action.Leverage = leverage;
         action.TargetNotionalEur = notionalEur;
+        action.RequestedNotionalEur = requestedNotionalEur;
+        action.FilledNotionalEur = notionalEur;
         action.Quantity = quantity;
         action.EntryPrice = fillPrice;
         action.FillPrice = fillPrice;
         action.LastPrice = markPrice;
         action.FeeEur = fee;
         action.GrossNotionalEur = notionalEur;
+        action.FillSource = "MODELED_MAKER";
+        if (entryPlan is not null)
+        {
+            action.RoundTripCostEstimatePct = entryPlan.RoundTripCostEstimatePct;
+            action.ExpectedFundingPct = entryPlan.ExpectedFundingPct;
+            action.AtrPct = entryPlan.AtrPct;
+            action.StopDistancePct = entryPlan.StopDistancePct;
+            action.TakeProfitDistancePct = entryPlan.TakeProfitDistancePct;
+            action.OpenRiskEur = entryPlan.OpenRiskEur;
+            action.QueueAheadEur = entryPlan.QueueAheadEur;
+            action.MakerOrderFilledEur = entryPlan.FilledNotionalEur;
+            action.MakerFillRate = entryPlan.MakerFillRate;
+            action.TimeToFillMs = entryPlan.TimeToFillMs;
+            action.RepegCount = entryPlan.RepegCount;
+            action.FundingState = entryPlan.FundingState;
+            action.BtcRegimeState = entryPlan.BtcRegimeState;
+            action.ShortAllowed = entryPlan.ShortAllowed;
+        }
+        StampOpenHistory(state, pair, _clock.UtcNow);
         FillLedger(action, before, state);
         return new FuturesFillResult(action, PositionOpened: true, PositionClosed: false);
     }
@@ -185,6 +217,7 @@ internal sealed class FuturesVirtualPortfolio(
         var before = Snapshot(state);
         state.CashEur += (position.InitialMarginEur ?? 0m) + pnl - fee;
         state.Positions.Remove(position);
+        StampCloseHistory(state, position.Pair, _clock.UtcNow, reason.Contains("STOP_LOSS", StringComparison.OrdinalIgnoreCase));
 
         var action = BaseAction(position.Pair, "WOULD_CLOSE",
             $"{reason}: close virtual {position.Side.ToLowerInvariant()}, fill {fillPrice:0.####}, realized PnL EUR {pnl:0.####}, fee EUR {fee:0.####}");
@@ -262,4 +295,33 @@ internal sealed class FuturesVirtualPortfolio(
         Action = kind,
         Reason = reason
     };
+
+    private static void StampOpenHistory(PortfolioState state, string pair, DateTimeOffset now)
+    {
+        var history = HistoryFor(state, pair);
+        history.LastBuyAtUtc = now;
+    }
+
+    private static void StampCloseHistory(PortfolioState state, string pair, DateTimeOffset now, bool stopLoss)
+    {
+        var history = HistoryFor(state, pair);
+        history.LastSellAtUtc = now;
+        if (stopLoss)
+        {
+            history.LastStopLossAtUtc = now;
+        }
+    }
+
+    private static PairActionHistory HistoryFor(PortfolioState state, string pair)
+    {
+        state.ActionHistory ??= new List<PairActionHistory>();
+        var history = state.ActionHistory.FirstOrDefault(item => item.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
+        if (history is null)
+        {
+            history = new PairActionHistory { Pair = pair };
+            state.ActionHistory.Add(history);
+        }
+
+        return history;
+    }
 }

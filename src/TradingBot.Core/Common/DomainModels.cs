@@ -75,7 +75,9 @@ public sealed record Quote(
     decimal? ChangePercent = null,
     decimal? FundingRatePercent = null,
     decimal? MarkPrice = null,
-    decimal? IndexPrice = null);
+    decimal? IndexPrice = null,
+    decimal? BidSize = null,
+    decimal? AskSize = null);
 
 public sealed record OrderBookLevel(decimal Price, decimal Volume);
 

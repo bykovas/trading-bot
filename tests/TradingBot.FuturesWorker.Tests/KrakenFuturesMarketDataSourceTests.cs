@@ -36,7 +36,7 @@ public sealed class KrakenFuturesMarketDataSourceTests
                     {
                       "result": "success",
                       "tickers": [
-                        { "symbol": "PF_XBTEUR", "markPrice": 60000.0, "bid": 59990.0, "ask": 60010.0, "volumeQuote": 1000000, "change24h": 1.25, "fundingRate": -0.0001, "indexPrice": 60005.0, "last": 60001.0, "suspended": false, "postOnly": false }
+                        { "symbol": "PF_XBTEUR", "markPrice": 60000.0, "bid": 59990.0, "bidSize": 0.5, "ask": 60010.0, "askSize": 0.25, "volumeQuote": 1000000, "change24h": 1.25, "fundingRate": -0.0001, "indexPrice": 60005.0, "last": 60001.0, "suspended": false, "postOnly": false }
                       ],
                       "serverTime": "2026-07-06T12:00:00.000Z"
                     }
@@ -58,6 +58,8 @@ public sealed class KrakenFuturesMarketDataSourceTests
         Assert.Equal(60010m, state.BestAsk);
         Assert.Equal(-0.0001m, state.Quote!.FundingRatePercent);
         Assert.Equal(60005m, state.Quote.IndexPrice);
+        Assert.Equal(0.5m, state.Quote.BidSize);
+        Assert.Equal(0.25m, state.Quote.AskSize);
         Assert.Equal("online", state.PairRules!.Status);
     }
 
@@ -80,6 +82,11 @@ public sealed class KrakenFuturesMarketDataSourceTests
             if (url.Contains("/api/charts/v1/mark/PF_XBTEUR/15m", StringComparison.Ordinal))
             {
                 return Json($$"""{ "candles": [ {{candles}} ], "more_candles": false }""");
+            }
+
+            if (url.Contains("/orderbook", StringComparison.Ordinal))
+            {
+                return Json("""{ "result": "success", "orderBook": { "bids": [[99, 10], [98, 5]], "asks": [[101, 10], [102, 5]] } }""");
             }
 
             return Json("""{ "result": "success", "tickers": [] }""");
@@ -106,6 +113,8 @@ public sealed class KrakenFuturesMarketDataSourceTests
         Assert.True(state.Candles.Count >= 30);
         Assert.Null(state.DataWarning);
         Assert.Equal(100.5m, state.Candles[0].Close);
+        Assert.NotNull(state.OrderBook);
+        Assert.Equal(101m, state.OrderBook!.Asks[0].Price);
     }
 
     [Fact]

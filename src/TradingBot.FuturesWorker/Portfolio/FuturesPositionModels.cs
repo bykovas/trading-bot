@@ -13,6 +13,28 @@ internal enum FuturesDesiredExposure
 // Outcome of applying one decision to the virtual portfolio.
 internal sealed record FuturesFillResult(DryRunAction Action, bool PositionOpened, bool PositionClosed);
 
+internal sealed record FuturesEntryPlan(
+    decimal RequestedNotionalEur,
+    decimal FilledNotionalEur,
+    decimal AtrPct,
+    decimal StopDistancePct,
+    decimal TakeProfitDistancePct,
+    decimal RoundTripCostEstimatePct,
+    decimal ExpectedFundingPct,
+    decimal QueueAheadEur,
+    decimal MakerFillRate,
+    long TimeToFillMs,
+    int RepegCount,
+    decimal OpenRiskEur,
+    string FundingState,
+    string BtcRegimeState,
+    string ShortAllowed);
+
+internal sealed record BtcRegimeState(
+    bool AllowsLongs,
+    bool AllowsShorts,
+    string Description);
+
 internal static class FuturesMath
 {
     // Rough isolated-margin liquidation estimate. Real Kraken Futures uses tiered

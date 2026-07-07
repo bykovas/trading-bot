@@ -18,7 +18,16 @@ internal sealed class FuturesBotConfiguration
     public StrategyOptions Strategy { get; set; } = new();
     public FuturesOptions Futures { get; set; } = new();
     public MarginOptions Margin { get; set; } = new();
+    public FuturesFeesOptions Fees { get; set; } = new();
     public FundingOptions Funding { get; set; } = new();
+    public FuturesEntryOptions Entry { get; set; } = new();
+    public FuturesFilterOptions Filters { get; set; } = new();
+    public FuturesExitOptions Exits { get; set; } = new();
+    public FuturesRegimeOptions Regime { get; set; } = new();
+    public FuturesShortOptions Shorts { get; set; } = new();
+    public FuturesRiskOptions Risk { get; set; } = new();
+    public FuturesExecutionPolicyOptions ExecutionPolicy { get; set; } = new();
+    public CorrelationRiskOptions CorrelationRisk { get; set; } = new();
     public TpSlOptions TpSl { get; set; } = new();
     public FuturesPortfolioOptions Portfolio { get; set; } = new();
     public DryRunOptions DryRun { get; set; } = new();
@@ -101,10 +110,46 @@ internal sealed class FuturesBotConfiguration
             ? 50m
             : Math.Clamp(Margin.MaxAccountMarginUtilizationPercent, 1m, 100m);
 
-        Funding.MaxAbsFundingRatePercentForEntry = Math.Max(0m, Funding.MaxAbsFundingRatePercentForEntry);
+        Fees.MakerPct = Fees.MakerPct <= 0m ? 0.02m : Fees.MakerPct;
+        Fees.TakerPct = Fees.TakerPct <= 0m ? 0.05m : Fees.TakerPct;
+        Funding.MaxAbsFundingRatePercentForEntry = Funding.MaxAbsFundingRatePercentForEntry <= 0m
+            ? 0.03m
+            : Funding.MaxAbsFundingRatePercentForEntry;
+        Funding.FundingLookbackHours = Math.Max(1, Funding.FundingLookbackHours);
 
-        TpSl.TakeProfitPercent = TpSl.TakeProfitPercent <= 0m ? 3m : TpSl.TakeProfitPercent;
-        TpSl.StopLossPercent = TpSl.StopLossPercent <= 0m ? 2m : TpSl.StopLossPercent;
+        Entry.MakerFillTimeoutSec = Math.Max(1, Entry.MakerFillTimeoutSec);
+        Entry.MakerRepegs = Math.Max(0, Entry.MakerRepegs);
+        Entry.MaxQueueAheadMultiple = Entry.MaxQueueAheadMultiple <= 0m ? 5m : Entry.MaxQueueAheadMultiple;
+        Filters.MinQuoteVolume24h = Filters.MinQuoteVolume24h <= 0m ? 50_000m : Filters.MinQuoteVolume24h;
+        Filters.MinExitDepthMultiple = Filters.MinExitDepthMultiple <= 0m ? 5m : Filters.MinExitDepthMultiple;
+        Filters.MaxExitImpactPct = Filters.MaxExitImpactPct <= 0m ? 0.5m : Filters.MaxExitImpactPct;
+        Exits.StopAtrMult = Exits.StopAtrMult <= 0m ? 2m : Exits.StopAtrMult;
+        Exits.MinStopAtrFloor = Exits.MinStopAtrFloor <= 0m ? 1.5m : Exits.MinStopAtrFloor;
+        Exits.TakeProfitAtrMult = Exits.TakeProfitAtrMult <= 0m ? 3m : Exits.TakeProfitAtrMult;
+        Exits.MinTpVsCostMult = Exits.MinTpVsCostMult <= 0m ? 3m : Exits.MinTpVsCostMult;
+        Exits.SlippageBufferPct = Exits.SlippageBufferPct < 0m ? 0.10m : Exits.SlippageBufferPct;
+        Exits.MaxHoldMinutes = Exits.MaxHoldMinutes <= 0 ? 360 : Exits.MaxHoldMinutes;
+        Exits.TrailingActivationBufferPct = Math.Max(0m, Exits.TrailingActivationBufferPct);
+        Regime.BtcTrendMa = Regime.BtcTrendMa <= 0 ? 50 : Regime.BtcTrendMa;
+        Regime.BtcSlopeLookback = Regime.BtcSlopeLookback <= 0 ? 3 : Regime.BtcSlopeLookback;
+        Regime.BtcCrashLookback = Regime.BtcCrashLookback <= 0 ? 4 : Regime.BtcCrashLookback;
+        Regime.BtcCrashPct = Regime.BtcCrashPct <= 0m ? 2m : Regime.BtcCrashPct;
+        Shorts.MaxChaseDrawdownPct = Shorts.MaxChaseDrawdownPct <= 0m ? 3m : Shorts.MaxChaseDrawdownPct;
+        Shorts.MinShortScore = Shorts.MinShortScore <= 0m ? 0.90m : Shorts.MinShortScore;
+        Risk.MaxConcurrentOpenRisk = Risk.MaxConcurrentOpenRisk <= 0m ? 1.5m : Risk.MaxConcurrentOpenRisk;
+        Risk.EstimatedEmergencyExitCostPct = Math.Max(0m, Risk.EstimatedEmergencyExitCostPct);
+        ExecutionPolicy.CooldownAfterCloseSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterCloseSeconds);
+        ExecutionPolicy.CooldownAfterStopLossSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterStopLossSeconds);
+        ExecutionPolicy.MinHoldSeconds = Math.Max(0, ExecutionPolicy.MinHoldSeconds);
+        ExecutionPolicy.EntryBlackoutUtcFromHour = Math.Clamp(ExecutionPolicy.EntryBlackoutUtcFromHour, 0, 23);
+        ExecutionPolicy.EntryBlackoutMinutes = Math.Max(0, ExecutionPolicy.EntryBlackoutMinutes);
+        CorrelationRisk.MaxOpenPositionsPerGroup = CorrelationRisk.MaxOpenPositionsPerGroup <= 0 ? 1 : CorrelationRisk.MaxOpenPositionsPerGroup;
+        CorrelationRisk.MaxExposureEurPerGroup = CorrelationRisk.MaxExposureEurPerGroup <= 0m ? Futures.TargetNotionalEur : CorrelationRisk.MaxExposureEurPerGroup;
+
+        TpSl.Enabled = true;
+        TpSl.TakeProfitPercent = Exits.TakeProfitAtrMult;
+        TpSl.StopLossPercent = Exits.StopAtrMult;
+        TpSl.TriggerSource = string.IsNullOrWhiteSpace(TpSl.TriggerSource) ? "mark" : TpSl.TriggerSource;
     }
 
     private static void SetIfPresent(string name, Action<string> apply)
@@ -152,12 +197,74 @@ internal sealed class MarginOptions
     public decimal MaxAccountMarginUtilizationPercent { get; set; } = 50m;
 }
 
+internal sealed class FuturesFeesOptions
+{
+    public decimal MakerPct { get; set; } = 0.02m;
+    public decimal TakerPct { get; set; } = 0.05m;
+}
+
 internal sealed class FundingOptions
 {
-    // Entries are skipped when |funding rate| exceeds this per-period percent.
-    // Zero disables the gate (sample data has no funding stream yet).
-    public decimal MaxAbsFundingRatePercentForEntry { get; set; }
+    // Tune later: per funding period percent. Positive Kraken funding means longs
+    // pay shorts; negative means shorts pay longs.
+    public decimal MaxAbsFundingRatePercentForEntry { get; set; } = 0.03m;
     public int FundingLookbackHours { get; set; } = 8;
+}
+
+internal sealed class FuturesEntryOptions
+{
+    public int MakerFillTimeoutSec { get; set; } = 60;
+    public int MakerRepegs { get; set; } = 1;
+    public decimal MaxQueueAheadMultiple { get; set; } = 5m;
+}
+
+internal sealed class FuturesFilterOptions
+{
+    // Tune later: minimum quoted 24h volume in USD for new entries.
+    public decimal MinQuoteVolume24h { get; set; } = 50_000m;
+    public decimal MinExitDepthMultiple { get; set; } = 5m;
+    public decimal MaxExitImpactPct { get; set; } = 0.5m;
+}
+
+internal sealed class FuturesExitOptions
+{
+    public decimal StopAtrMult { get; set; } = 2m;
+    public decimal MinStopAtrFloor { get; set; } = 1.5m;
+    public decimal TakeProfitAtrMult { get; set; } = 3m;
+    public decimal MinTpVsCostMult { get; set; } = 3m;
+    public decimal SlippageBufferPct { get; set; } = 0.10m;
+    public int MaxHoldMinutes { get; set; } = 360;
+    public decimal TrailingActivationBufferPct { get; set; } = 0m;
+}
+
+internal sealed class FuturesRegimeOptions
+{
+    public string BtcPair { get; set; } = "XBT/USD";
+    public int BtcTrendMa { get; set; } = 50;
+    public int BtcSlopeLookback { get; set; } = 3;
+    public int BtcCrashLookback { get; set; } = 4;
+    public decimal BtcCrashPct { get; set; } = 2.0m;
+}
+
+internal sealed class FuturesShortOptions
+{
+    public decimal MaxChaseDrawdownPct { get; set; } = 3.0m;
+    public decimal MinShortScore { get; set; } = 0.90m;
+}
+
+internal sealed class FuturesRiskOptions
+{
+    public decimal MaxConcurrentOpenRisk { get; set; } = 1.5m;
+    public decimal EstimatedEmergencyExitCostPct { get; set; } = 0m;
+}
+
+internal sealed class FuturesExecutionPolicyOptions
+{
+    public int CooldownAfterCloseSeconds { get; set; } = 1800;
+    public int CooldownAfterStopLossSeconds { get; set; } = 14400;
+    public int MinHoldSeconds { get; set; } = 1800;
+    public int EntryBlackoutUtcFromHour { get; set; } = 22;
+    public int EntryBlackoutMinutes { get; set; } = 360;
 }
 
 internal sealed class TpSlOptions

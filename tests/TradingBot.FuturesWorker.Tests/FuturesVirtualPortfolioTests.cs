@@ -11,6 +11,7 @@ public sealed class FuturesVirtualPortfolioTests
     {
         Futures = new FuturesOptions { AllowShorts = allowShorts, MaxLeverage = 2m, DefaultLeverage = 2m },
         Portfolio = new FuturesPortfolioOptions { StartingCashEur = 100m },
+        Fees = new FuturesFeesOptions { MakerPct = 0m, TakerPct = 0m },
         DryRun = new DryRunOptions { TakerFeeBps = 0m, SlippageBps = 0m },
         TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 3m, StopLossPercent = 2m }
     };
@@ -24,6 +25,41 @@ public sealed class FuturesVirtualPortfolioTests
         public void AppendCycle(DryRunCycleRecord record) { }
         public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots) { }
         public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc) => Array.Empty<MarketSnapshotRecord>();
+    }
+
+    [Fact]
+    public void Entry_plan_uses_only_filled_notional_for_partial_maker_fill()
+    {
+        var (portfolio, state) = Setup();
+        var plan = new FuturesEntryPlan(
+            RequestedNotionalEur: 20m,
+            FilledNotionalEur: 8m,
+            AtrPct: 1.2m,
+            StopDistancePct: 2.4m,
+            TakeProfitDistancePct: 3.6m,
+            RoundTripCostEstimatePct: 0.25m,
+            ExpectedFundingPct: 0.05m,
+            QueueAheadEur: 75m,
+            MakerFillRate: 0.4m,
+            TimeToFillMs: 60000,
+            RepegCount: 1,
+            OpenRiskEur: 0.25m,
+            FundingState: "apiField=fundingRate",
+            BtcRegimeState: "btc ok",
+            ShortAllowed: "yes");
+
+        var fill = portfolio.Apply(state, "XBT/EUR", FuturesDesiredExposure.Long, 100m, 20m, 2m, entryPlan: plan);
+
+        Assert.True(fill.PositionOpened);
+        var position = Assert.Single(state.Positions);
+        Assert.Equal(8m, position.EntryNotionalEur);
+        Assert.Equal(4m, position.InitialMarginEur);
+        Assert.Equal(96m, state.CashEur);
+        Assert.Equal(8m, fill.Action.FilledNotionalEur);
+        Assert.Equal(20m, fill.Action.RequestedNotionalEur);
+        Assert.Equal(0.4m, fill.Action.MakerFillRate);
+        Assert.Equal(97.6m, position.StopLossPrice);
+        Assert.Equal(103.6m, position.TakeProfitPrice);
     }
 
     private static (FuturesVirtualPortfolio Portfolio, PortfolioState State) Setup(bool allowShorts = true)

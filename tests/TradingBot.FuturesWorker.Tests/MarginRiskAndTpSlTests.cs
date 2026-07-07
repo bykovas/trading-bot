@@ -18,6 +18,36 @@ public sealed class MarginRiskAndTpSlTests
 
     private static PortfolioState State(decimal cash = 100m) => new() { CashEur = cash };
 
+    private static FuturesEntryRiskInputs Inputs(
+        FuturesBotConfiguration config,
+        PortfolioState? state = null,
+        FuturesDesiredExposure desired = FuturesDesiredExposure.Long,
+        decimal? fundingRatePercent = 0m,
+        decimal? atrPct = 1m,
+        decimal? exitDepthEur = null,
+        decimal projectedOpenRiskEur = 0.5m,
+        bool btcAllowsLongs = true,
+        bool shortAllowed = true) =>
+        new(
+            state ?? State(),
+            desired,
+            MarkPrice: 100m,
+            TargetNotionalEur: 20m,
+            FilledNotionalEur: 20m,
+            Leverage: 2m,
+            UsedMarginEur: 0m,
+            FundingRatePercent: fundingRatePercent,
+            AtrPct: atrPct,
+            StopDistancePct: atrPct is null ? null : 2m,
+            TakeProfitDistancePct: atrPct is null ? null : 3m,
+            Volume24hUsd: config.Filters.MinQuoteVolume24h,
+            ExitDepthEur: exitDepthEur ?? 20m * config.Filters.MinExitDepthMultiple,
+            ProjectedOpenRiskEur: projectedOpenRiskEur,
+            BtcAllowsLongs: btcAllowsLongs,
+            BtcRegimeState: "btc ok",
+            ShortAllowed: shortAllowed,
+            ShortBlockReason: shortAllowed ? null : "btc short gate");
+
     [Fact]
     public void Margin_cap_blocks_oversized_entry()
     {
@@ -60,13 +90,13 @@ public sealed class MarginRiskAndTpSlTests
         config.Futures.MaxPositions = 3;
         var risk = new MarginRiskManager(config);
         var state = State();
-        state.Positions.Add(new PortfolioPosition { Pair = "ETH/USD", Side = "LONG", InitialMarginEur = 10m });
-        state.Positions.Add(new PortfolioPosition { Pair = "SOL/USD", Side = "LONG", InitialMarginEur = 10m });
+        state.Positions.Add(new PortfolioPosition { Pair = "ETH/USD", Side = "LONG", InitialMarginEur = 10m, Quantity = 0.1m, EntryPrice = 100m, StopLossPrice = 95m });
+        state.Positions.Add(new PortfolioPosition { Pair = "SOL/USD", Side = "LONG", InitialMarginEur = 10m, Quantity = 0.1m, EntryPrice = 100m, StopLossPrice = 95m });
 
         var third = risk.EvaluateEntry(state, FuturesDesiredExposure.Long, 100m, 20m, 2m, usedMarginEur: 20m);
         Assert.True(third.Approved);
 
-        state.Positions.Add(new PortfolioPosition { Pair = "XBT/USD", Side = "LONG", InitialMarginEur = 10m });
+        state.Positions.Add(new PortfolioPosition { Pair = "XBT/USD", Side = "LONG", InitialMarginEur = 10m, Quantity = 0.1m, EntryPrice = 100m, StopLossPrice = 95m });
         var fourth = risk.EvaluateEntry(state, FuturesDesiredExposure.Long, 100m, 20m, 2m, usedMarginEur: 30m);
         Assert.False(fourth.Approved);
         Assert.Contains(fourth.Reasons, reason => reason.Contains("max futures positions 3"));
@@ -83,14 +113,20 @@ public sealed class MarginRiskAndTpSlTests
     }
 
     [Fact]
-    public void Funding_gate_blocks_expensive_entries()
+    public void Funding_gate_blocks_directional_adverse_entries()
     {
         var config = Config();
-        config.Funding.MaxAbsFundingRatePercentForEntry = 0.05m;
+        config.Funding.MaxAbsFundingRatePercentForEntry = 0.03m;
         var risk = new MarginRiskManager(config);
-        var evaluation = risk.EvaluateEntry(State(), FuturesDesiredExposure.Long, 100m, 20m, 2m, 0m, fundingRatePercent: -0.2m);
-        Assert.False(evaluation.Approved);
-        Assert.Contains(evaluation.Reasons, reason => reason.Contains("funding rate"));
+        var longPays = risk.EvaluateEntry(Inputs(config, fundingRatePercent: 0.2m));
+        var shortPays = risk.EvaluateEntry(Inputs(config, desired: FuturesDesiredExposure.Short, fundingRatePercent: -0.2m));
+        var longReceives = risk.EvaluateEntry(Inputs(config, fundingRatePercent: -0.2m));
+
+        Assert.False(longPays.Approved);
+        Assert.False(shortPays.Approved);
+        Assert.True(longReceives.Approved);
+        Assert.Contains(longPays.Reasons, reason => reason.Contains("adverse for long"));
+        Assert.Contains(shortPays.Reasons, reason => reason.Contains("adverse for short"));
     }
 
     [Fact]
@@ -99,9 +135,58 @@ public sealed class MarginRiskAndTpSlTests
         var config = Config();
         config.Funding.MaxAbsFundingRatePercentForEntry = 0.05m;
         var risk = new MarginRiskManager(config);
-        var evaluation = risk.EvaluateEntry(State(), FuturesDesiredExposure.Long, 100m, 20m, 2m, 0m);
+        var evaluation = risk.EvaluateEntry(Inputs(config, fundingRatePercent: null));
         Assert.False(evaluation.Approved);
         Assert.Contains(evaluation.Reasons, reason => reason.Contains("funding rate unavailable"));
+    }
+
+    [Fact]
+    public void Atr_and_exit_depth_are_fail_closed_for_new_entries()
+    {
+        var config = Config();
+        var risk = new MarginRiskManager(config);
+
+        var missingAtr = risk.EvaluateEntry(Inputs(config, atrPct: null));
+        var missingDepth = risk.EvaluateEntry(Inputs(config, exitDepthEur: 0m));
+
+        Assert.False(missingAtr.Approved);
+        Assert.False(missingDepth.Approved);
+        Assert.Contains(missingAtr.Reasons, reason => reason.Contains("ATR"));
+        Assert.Contains(missingDepth.Reasons, reason => reason.Contains("exit depth"));
+    }
+
+    [Fact]
+    public void Open_risk_cap_blocks_projected_risk_and_missing_stop_is_fail_unsafe()
+    {
+        var config = Config();
+        config.Risk.MaxConcurrentOpenRisk = 1.5m;
+        config.Futures.MaxPositions = 3;
+        var risk = new MarginRiskManager(config);
+
+        var tooMuchRisk = risk.EvaluateEntry(Inputs(config, projectedOpenRiskEur: 1.6m));
+        var state = State();
+        state.Positions.Add(new PortfolioPosition { Pair = "ETH/USD", Side = "LONG", Quantity = 1m, EntryPrice = 100m });
+        var missingStop = risk.EvaluateEntry(Inputs(config, state));
+
+        Assert.False(tooMuchRisk.Approved);
+        Assert.False(missingStop.Approved);
+        Assert.Contains(tooMuchRisk.Reasons, reason => reason.Contains("open risk"));
+        Assert.Contains(missingStop.Reasons, reason => reason.Contains("valid stop"));
+    }
+
+    [Fact]
+    public void Btc_regime_blocks_longs_and_short_gate_blocks_unapproved_shorts()
+    {
+        var config = Config();
+        var risk = new MarginRiskManager(config);
+
+        var longBlocked = risk.EvaluateEntry(Inputs(config, btcAllowsLongs: false));
+        var shortBlocked = risk.EvaluateEntry(Inputs(config, desired: FuturesDesiredExposure.Short, shortAllowed: false));
+
+        Assert.False(longBlocked.Approved);
+        Assert.False(shortBlocked.Approved);
+        Assert.Contains(longBlocked.Reasons, reason => reason.Contains("BTC regime"));
+        Assert.Contains(shortBlocked.Reasons, reason => reason.Contains("short blocked"));
     }
 
     [Fact]

@@ -17,6 +17,8 @@ internal sealed class FuturesDecisionWorker(
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly WorkerBuildInfo _buildInfo = WorkerBuildInfo.FromEnvironment();
+    private readonly IReadOnlyDictionary<string, string> _pairToCorrelationGroup =
+        CorrelationRiskResolver.BuildPairToGroup(config.CorrelationRisk);
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
@@ -69,8 +71,14 @@ internal sealed class FuturesDecisionWorker(
             .Take(Math.Max(config.Trading.MaxActiveInstruments, heldPairs.Count))
             .Select(candidate => candidate.Instrument)
             .ToList();
+        var btcInstrument = universe.FirstOrDefault(instrument => instrument.Pair.Equals(config.Regime.BtcPair, StringComparison.OrdinalIgnoreCase));
+        if (btcInstrument is not null && active.All(instrument => !instrument.Pair.Equals(btcInstrument.Pair, StringComparison.OrdinalIgnoreCase)))
+        {
+            active.Add(btcInstrument);
+        }
 
         var fullStates = await marketDataSource.GetFullMarketStatesAsync(active, config.Trading.TimeframeMinutes, lightStates, cancellationToken);
+        var btcRegime = EvaluateBtcRegime(fullStates);
         var decisions = new List<DryRunDecisionRecord>();
         var newEntriesThisCycle = 0;
 
@@ -102,20 +110,38 @@ internal sealed class FuturesDecisionWorker(
                     fill.Action.ExitReasonCode = trigger.Kind == "STOP_LOSS" ? "SELL_STOP_LOSS" : "SELL_TAKE_PROFIT";
                     riskReasons = new[] { $"hard exit: {trigger.Kind} via {trigger.TriggerSource} price" };
                 }
+                else if (IsPastMaxHold(held, utc))
+                {
+                    fill = portfolio.Apply(
+                        state, pair, FuturesDesiredExposure.Flat, markPrice,
+                        0m, held.Leverage ?? 1m, reduceOnly: true,
+                        reason: $"MAX_HOLD forced close after {config.Exits.MaxHoldMinutes}m",
+                        exitTriggerSource: config.TpSl.TriggerSource);
+                    fill.Action.ExitReasonCode = "SELL_MAX_HOLD";
+                    riskReasons = new[] { $"hard exit: maxHold {config.Exits.MaxHoldMinutes}m elapsed" };
+                }
                 else
                 {
                     var desired = strategy.DecideHeld(held, signal);
+                    var minHoldBlocked = desired == FuturesDesiredExposure.Flat && IsMinHoldActive(held, utc);
+                    if (minHoldBlocked)
+                    {
+                        desired = held.Side == "SHORT" ? FuturesDesiredExposure.Short : FuturesDesiredExposure.Long;
+                    }
                     fill = portfolio.Apply(
                         state, pair, desired, markPrice,
                         0m, held.Leverage ?? 1m,
                         reduceOnly: desired == FuturesDesiredExposure.Flat,
-                        reason: desired == FuturesDesiredExposure.Flat ? "signal reversal close" : string.Empty);
-                    riskReasons = new[] { "holding existing exposure; TP/SL and reversal rules govern this pair" };
+                        reason: desired == FuturesDesiredExposure.Flat ? "signal reversal close" : minHoldBlocked ? "minimum hold active; reversal ignored" : string.Empty);
+                    riskReasons = minHoldBlocked
+                        ? new[] { $"minimum hold active: reversal ignored until {config.ExecutionPolicy.MinHoldSeconds}s" }
+                        : new[] { "holding existing exposure; TP/SL and reversal rules govern this pair" };
                 }
             }
             else
             {
                 var desired = strategy.DecideEntry(signal);
+                FuturesEntryPlan? entryPlan = null;
                 var remainingSlots = Math.Max(0, config.Futures.MaxPositions - state.Positions.Count);
                 if (desired == FuturesDesiredExposure.Flat)
                 {
@@ -130,26 +156,39 @@ internal sealed class FuturesDecisionWorker(
                 }
                 else
                 {
-                    var evaluation = riskManager.EvaluateEntry(
-                        state, desired, markPrice,
-                        config.Futures.TargetNotionalEur,
-                        config.Futures.DefaultLeverage,
-                        portfolio.UsedMarginEur(state),
-                        marketState.Quote?.FundingRatePercent);
+                    entryPlan = BuildEntryPlan(state, marketState, desired, signal, btcRegime, utc);
+                    var portfolioGate = EvaluatePortfolioEntryGuards(state, pair, desired, utc);
+                    var evaluation = portfolioGate.Approved
+                        ? riskManager.EvaluateEntry(BuildRiskInputs(state, marketState, desired, signal, entryPlan, btcRegime))
+                        : portfolioGate;
                     riskReasons = evaluation.Reasons;
                     riskApproved = evaluation.Approved;
                     if (!evaluation.Approved)
                     {
                         desired = FuturesDesiredExposure.Flat;
                     }
+                    else
+                    {
+                        fill = portfolio.Apply(
+                            state, pair, desired, markPrice,
+                            config.Futures.TargetNotionalEur, config.Futures.DefaultLeverage,
+                            entryPlan: entryPlan);
+                        if (fill.PositionOpened)
+                        {
+                            newEntriesThisCycle++;
+                        }
+
+                        decisions.Add(BuildDecisionRecord(marketState, indicators, signal, fill, riskApproved, riskReasons));
+                        continue;
+                    }
                 }
 
                 fill = portfolio.Apply(
                     state, pair, desired, markPrice,
                     config.Futures.TargetNotionalEur, config.Futures.DefaultLeverage);
-                if (fill.PositionOpened)
+                if (entryPlan is not null)
                 {
-                    newEntriesThisCycle++;
+                    AttachEntryPlanDiagnostics(fill.Action, entryPlan);
                 }
             }
 
@@ -170,9 +209,351 @@ internal sealed class FuturesDecisionWorker(
             Decisions = decisions,
             PortfolioBefore = portfolioBefore,
             PortfolioAfter = state.Clone(),
-            EntryDiagnostics = BuildEntryDiagnostics(lightStates, active, fullStates, decisions)
+            EntryDiagnostics = BuildEntryDiagnostics(lightStates, active, fullStates, decisions, btcRegime)
         });
         Console.WriteLine($"futures cycle done: decisions={decisions.Count} cash={state.CashEur:0.####} total={state.TotalValueEur:0.####} positions={state.Positions.Count}");
+    }
+
+    private bool IsPastMaxHold(PortfolioPosition position, DateTimeOffset utc) =>
+        config.Exits.MaxHoldMinutes > 0
+        && position.OpenedAtUtc is { } opened
+        && utc - opened >= TimeSpan.FromMinutes(config.Exits.MaxHoldMinutes);
+
+    private bool IsMinHoldActive(PortfolioPosition position, DateTimeOffset utc) =>
+        config.ExecutionPolicy.MinHoldSeconds > 0
+        && position.OpenedAtUtc is { } opened
+        && utc - opened < TimeSpan.FromSeconds(config.ExecutionPolicy.MinHoldSeconds);
+
+    private RiskEvaluation EvaluatePortfolioEntryGuards(
+        PortfolioState state,
+        string pair,
+        FuturesDesiredExposure desired,
+        DateTimeOffset utc)
+    {
+        if (desired == FuturesDesiredExposure.Flat)
+        {
+            return new RiskEvaluation(true, new[] { "no exposure requested" });
+        }
+
+        if (IsInEntryBlackout(utc))
+        {
+            return new RiskEvaluation(false, new[] { $"entry blackout active: {config.ExecutionPolicy.EntryBlackoutMinutes}m after {config.ExecutionPolicy.EntryBlackoutUtcFromHour:00}:00 UTC" });
+        }
+
+        var history = state.ActionHistory.FirstOrDefault(item => item.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
+        if (history?.LastSellAtUtc is { } lastSell)
+        {
+            var elapsed = (utc - lastSell).TotalSeconds;
+            if (elapsed < config.ExecutionPolicy.CooldownAfterCloseSeconds)
+            {
+                return new RiskEvaluation(false, new[] { $"cooldown after close active: elapsed {elapsed:0}s below {config.ExecutionPolicy.CooldownAfterCloseSeconds}s" });
+            }
+        }
+
+        if (history?.LastStopLossAtUtc is { } lastStop)
+        {
+            var elapsed = (utc - lastStop).TotalSeconds;
+            if (elapsed < config.ExecutionPolicy.CooldownAfterStopLossSeconds)
+            {
+                return new RiskEvaluation(false, new[] { $"stop-loss cooldown active: elapsed {elapsed:0}s below {config.ExecutionPolicy.CooldownAfterStopLossSeconds}s" });
+            }
+        }
+
+        var group = CorrelationRiskResolver.ResolveGroup(_pairToCorrelationGroup, pair);
+        var groupPositions = state.Positions
+            .Where(position => CorrelationRiskResolver.ResolveGroup(_pairToCorrelationGroup, position.Pair)
+                .Equals(group, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (config.CorrelationRisk.MaxOpenPositionsPerGroup > 0
+            && groupPositions.Count >= config.CorrelationRisk.MaxOpenPositionsPerGroup)
+        {
+            return new RiskEvaluation(false, new[] { $"correlation group {group} position cap {config.CorrelationRisk.MaxOpenPositionsPerGroup} reached" });
+        }
+
+        var groupExposure = groupPositions.Sum(position => position.EntryNotionalEur);
+        if (config.CorrelationRisk.MaxExposureEurPerGroup > 0m
+            && groupExposure + config.Futures.TargetNotionalEur > config.CorrelationRisk.MaxExposureEurPerGroup)
+        {
+            return new RiskEvaluation(false, new[] { $"correlation group {group} exposure EUR {groupExposure + config.Futures.TargetNotionalEur:0.####} exceeds cap EUR {config.CorrelationRisk.MaxExposureEurPerGroup:0.####}" });
+        }
+
+        return new RiskEvaluation(true, new[] { $"portfolio entry guards passed for group {group}" });
+    }
+
+    private bool IsInEntryBlackout(DateTimeOffset utc)
+    {
+        if (config.ExecutionPolicy.EntryBlackoutMinutes <= 0)
+        {
+            return false;
+        }
+
+        var date = utc.UtcDateTime.Date;
+        var windowStart = new DateTimeOffset(date.AddHours(config.ExecutionPolicy.EntryBlackoutUtcFromHour), TimeSpan.Zero);
+        var minutesSinceStart = (utc - windowStart).TotalMinutes;
+        return minutesSinceStart >= 0 && minutesSinceStart < config.ExecutionPolicy.EntryBlackoutMinutes;
+    }
+
+    private FuturesEntryPlan BuildEntryPlan(
+        PortfolioState state,
+        InstrumentMarketState marketState,
+        FuturesDesiredExposure desired,
+        TechnicalSignal signal,
+        BtcRegimeState btcRegime,
+        DateTimeOffset utc)
+    {
+        var markPrice = marketState.Quote?.MarkPrice ?? marketState.LastPrice;
+        var atr = AtrIndicator.CalculateLatestClosedAtr(marketState.Candles, 14);
+        var atrPct = atr is > 0m && markPrice > 0m ? atr.Value / markPrice * 100m : 0m;
+        var stopDistancePct = Math.Max(config.Exits.StopAtrMult, config.Exits.MinStopAtrFloor) * atrPct;
+        var expectedFundingPct = ExpectedFundingPct(desired, marketState.Quote?.FundingRatePercent);
+        var roundTripCost = 2m * config.Fees.TakerPct + config.Exits.SlippageBufferPct + expectedFundingPct;
+        var takeProfitDistancePct = Math.Max(config.Exits.TakeProfitAtrMult * atrPct, config.Exits.MinTpVsCostMult * roundTripCost);
+        var queueAhead = QueueAheadEur(marketState, desired);
+        var makerFilled = SimulatedMakerFillEur(queueAhead, config.Futures.TargetNotionalEur);
+        var openRisk = ProjectedOpenRiskEur(state, desired, markPrice, makerFilled, stopDistancePct, roundTripCost);
+        var shortGate = EvaluateShortGate(desired, signal, btcRegime);
+
+        return new FuturesEntryPlan(
+            RequestedNotionalEur: config.Futures.TargetNotionalEur,
+            FilledNotionalEur: makerFilled,
+            AtrPct: decimal.Round(atrPct, 6),
+            StopDistancePct: decimal.Round(stopDistancePct, 6),
+            TakeProfitDistancePct: decimal.Round(takeProfitDistancePct, 6),
+            RoundTripCostEstimatePct: decimal.Round(roundTripCost, 6),
+            ExpectedFundingPct: decimal.Round(expectedFundingPct, 6),
+            QueueAheadEur: decimal.Round(queueAhead, 6),
+            MakerFillRate: config.Futures.TargetNotionalEur <= 0m ? 0m : decimal.Round(makerFilled / config.Futures.TargetNotionalEur, 6),
+            TimeToFillMs: makerFilled > 0m ? Math.Min(config.Entry.MakerFillTimeoutSec * 1000L, 1000L) : config.Entry.MakerFillTimeoutSec * 1000L,
+            RepegCount: makerFilled > 0m && config.Entry.MakerRepegs > 0 ? 1 : 0,
+            OpenRiskEur: openRisk,
+            FundingState: FundingState(marketState.Quote?.FundingRatePercent, desired),
+            BtcRegimeState: btcRegime.Description,
+            ShortAllowed: shortGate.Allowed ? "yes" : $"no: {shortGate.Reason}");
+    }
+
+    private FuturesEntryRiskInputs BuildRiskInputs(
+        PortfolioState state,
+        InstrumentMarketState marketState,
+        FuturesDesiredExposure desired,
+        TechnicalSignal signal,
+        FuturesEntryPlan plan,
+        BtcRegimeState btcRegime)
+    {
+        var shortGate = EvaluateShortGate(desired, signal, btcRegime);
+        return new FuturesEntryRiskInputs(
+            state,
+            desired,
+            marketState.Quote?.MarkPrice ?? marketState.LastPrice,
+            config.Futures.TargetNotionalEur,
+            plan.FilledNotionalEur,
+            config.Futures.DefaultLeverage,
+            portfolio.UsedMarginEur(state),
+            marketState.Quote?.FundingRatePercent,
+            plan.AtrPct > 0m ? plan.AtrPct : null,
+            plan.StopDistancePct > 0m ? plan.StopDistancePct : null,
+            plan.TakeProfitDistancePct > 0m ? plan.TakeProfitDistancePct : null,
+            marketState.Quote?.VolumeToday,
+            ExitDepthEur(marketState, desired),
+            plan.OpenRiskEur,
+            btcRegime.AllowsLongs,
+            btcRegime.Description,
+            shortGate.Allowed,
+            shortGate.Reason);
+    }
+
+    private static void AttachEntryPlanDiagnostics(DryRunAction action, FuturesEntryPlan plan)
+    {
+        action.RequestedNotionalEur = plan.RequestedNotionalEur;
+        action.FilledNotionalEur = plan.FilledNotionalEur;
+        action.RoundTripCostEstimatePct = plan.RoundTripCostEstimatePct;
+        action.ExpectedFundingPct = plan.ExpectedFundingPct;
+        action.AtrPct = plan.AtrPct;
+        action.StopDistancePct = plan.StopDistancePct;
+        action.TakeProfitDistancePct = plan.TakeProfitDistancePct;
+        action.OpenRiskEur = plan.OpenRiskEur;
+        action.QueueAheadEur = plan.QueueAheadEur;
+        action.MakerOrderFilledEur = plan.FilledNotionalEur;
+        action.MakerFillRate = plan.MakerFillRate;
+        action.TimeToFillMs = plan.TimeToFillMs;
+        action.RepegCount = plan.RepegCount;
+        action.FundingState = plan.FundingState;
+        action.BtcRegimeState = plan.BtcRegimeState;
+        action.ShortAllowed = plan.ShortAllowed;
+    }
+
+    private decimal ExpectedFundingPct(FuturesDesiredExposure desired, decimal? fundingRatePercent)
+    {
+        if (fundingRatePercent is null)
+        {
+            return 0m;
+        }
+
+        var adverse = desired switch
+        {
+            FuturesDesiredExposure.Long => Math.Max(0m, fundingRatePercent.Value),
+            FuturesDesiredExposure.Short => Math.Max(0m, -fundingRatePercent.Value),
+            _ => 0m
+        };
+        var periods = Math.Max(1, (int)Math.Ceiling(config.Exits.MaxHoldMinutes / 240m));
+        return adverse * periods;
+    }
+
+    private decimal QueueAheadEur(InstrumentMarketState marketState, FuturesDesiredExposure desired)
+    {
+        var quote = marketState.Quote;
+        if (quote is null)
+        {
+            return decimal.MaxValue;
+        }
+
+        return desired == FuturesDesiredExposure.Short
+            ? (quote.AskSize ?? 0m) * quote.Ask
+            : (quote.BidSize ?? 0m) * quote.Bid;
+    }
+
+    private decimal SimulatedMakerFillEur(decimal queueAheadEur, decimal requestedNotionalEur)
+    {
+        if (queueAheadEur < 0m || queueAheadEur == decimal.MaxValue)
+        {
+            return 0m;
+        }
+
+        var fullFillQueueCap = requestedNotionalEur * config.Entry.MaxQueueAheadMultiple;
+        if (queueAheadEur <= fullFillQueueCap)
+        {
+            return requestedNotionalEur;
+        }
+
+        var partialFillQueueCap = fullFillQueueCap * Math.Max(1, config.Entry.MakerRepegs + 1);
+        return queueAheadEur <= partialFillQueueCap
+            ? decimal.Round(requestedNotionalEur / 2m, 8)
+            : 0m;
+    }
+
+    private decimal ProjectedOpenRiskEur(
+        PortfolioState state,
+        FuturesDesiredExposure desired,
+        decimal markPrice,
+        decimal filledNotionalEur,
+        decimal stopDistancePct,
+        decimal roundTripCostPct)
+    {
+        var current = state.Positions.Sum(position => PositionRiskEur(position, markPrice));
+        if (filledNotionalEur <= 0m || stopDistancePct <= 0m)
+        {
+            return current;
+        }
+
+        var newRisk = filledNotionalEur * stopDistancePct / 100m
+            + filledNotionalEur * (roundTripCostPct + config.Risk.EstimatedEmergencyExitCostPct) / 100m;
+        return decimal.Round(current + Math.Max(0m, newRisk), 8);
+    }
+
+    private decimal PositionRiskEur(PortfolioPosition position, decimal markPrice)
+    {
+        if (position.StopLossPrice is null or <= 0m || position.EntryPrice <= 0m || position.Quantity <= 0m)
+        {
+            return config.Risk.MaxConcurrentOpenRisk + 1m;
+        }
+
+        var risk = position.Side == "SHORT"
+            ? Math.Max(0m, (position.StopLossPrice.Value - markPrice) * position.Quantity)
+            : Math.Max(0m, (markPrice - position.StopLossPrice.Value) * position.Quantity);
+        var emergency = position.EntryNotionalEur * (config.Fees.TakerPct + config.Risk.EstimatedEmergencyExitCostPct) / 100m;
+        return risk + emergency;
+    }
+
+    private decimal? ExitDepthEur(InstrumentMarketState marketState, FuturesDesiredExposure desired)
+    {
+        if (marketState.OrderBook is null)
+        {
+            return null;
+        }
+
+        var quote = marketState.Quote;
+        if (quote is null || quote.Bid <= 0m || quote.Ask <= 0m)
+        {
+            return null;
+        }
+
+        var levels = desired == FuturesDesiredExposure.Short
+            ? marketState.OrderBook.Bids
+            : marketState.OrderBook.Asks;
+        var reference = desired == FuturesDesiredExposure.Short ? quote.Bid : quote.Ask;
+        var maxImpact = config.Filters.MaxExitImpactPct / 100m;
+        var depth = levels
+            .Where(level => desired == FuturesDesiredExposure.Short
+                ? level.Price >= reference * (1m - maxImpact)
+                : level.Price <= reference * (1m + maxImpact))
+            .Sum(level => level.Price * level.Volume);
+        return decimal.Round(depth, 8);
+    }
+
+    private BtcRegimeState EvaluateBtcRegime(IReadOnlyList<InstrumentMarketState> states)
+    {
+        var btc = states.FirstOrDefault(state => state.Instrument.Pair.Equals(config.Regime.BtcPair, StringComparison.OrdinalIgnoreCase));
+        if (btc is null || btc.Candles.Count < config.Regime.BtcTrendMa + config.Regime.BtcSlopeLookback + 1)
+        {
+            return new BtcRegimeState(false, false, "BTC regime unavailable/stale");
+        }
+
+        var closes = btc.Candles.Select(candle => candle.Close).ToList();
+        var close = closes[^1];
+        var ma = closes.TakeLast(config.Regime.BtcTrendMa).Average();
+        var priorMa = closes.Take(closes.Count - config.Regime.BtcSlopeLookback)
+            .TakeLast(config.Regime.BtcTrendMa)
+            .DefaultIfEmpty(0m)
+            .Average();
+        var slope = ma - priorMa;
+        var lookbackIndex = Math.Max(0, closes.Count - 1 - config.Regime.BtcCrashLookback);
+        var drawdown = closes[lookbackIndex] <= 0m ? 0m : (close - closes[lookbackIndex]) / closes[lookbackIndex] * 100m;
+        var belowMa = close < ma;
+        var downSlope = slope < 0m;
+        var crash = drawdown <= -config.Regime.BtcCrashPct;
+        var allowsLongs = !belowMa && !crash;
+        var allowsShortRegime = belowMa && downSlope && drawdown > -config.Shorts.MaxChaseDrawdownPct;
+        return new BtcRegimeState(
+            allowsLongs,
+            allowsShortRegime,
+            $"close={close:0.####} ma{config.Regime.BtcTrendMa}={ma:0.####} slope={slope:0.####} drawdown{config.Regime.BtcCrashLookback}={drawdown:0.###}% allowsLongs={allowsLongs} allowsShorts={allowsShortRegime}");
+    }
+
+    private (bool Allowed, string? Reason) EvaluateShortGate(FuturesDesiredExposure desired, TechnicalSignal signal, BtcRegimeState btcRegime)
+    {
+        if (desired != FuturesDesiredExposure.Short)
+        {
+            return (true, null);
+        }
+
+        if (!btcRegime.AllowsShorts)
+        {
+            return (false, btcRegime.Description);
+        }
+
+        if (!signal.HasBearishStructure || !signal.AllowsShort)
+        {
+            return (false, "pair bearish signal not confirmed");
+        }
+
+        if (signal.Score < config.Shorts.MinShortScore)
+        {
+            return (false, $"short score {signal.Score:0.##} below {config.Shorts.MinShortScore:0.##}");
+        }
+
+        return (true, "short gates passed");
+    }
+
+    private string FundingState(decimal? fundingRatePercent, FuturesDesiredExposure desired)
+    {
+        if (fundingRatePercent is null)
+        {
+            return "missing";
+        }
+
+        var adverse = desired == FuturesDesiredExposure.Long
+            ? fundingRatePercent > config.Funding.MaxAbsFundingRatePercentForEntry
+            : desired == FuturesDesiredExposure.Short && fundingRatePercent < -config.Funding.MaxAbsFundingRatePercentForEntry;
+        return $"apiField=fundingRate value={fundingRatePercent:0.######}% semantic={(fundingRatePercent >= 0m ? "positive longs pay shorts" : "negative shorts pay longs")} adverse={adverse}";
     }
 
     private static DryRunDecisionRecord BuildDecisionRecord(
@@ -240,7 +621,8 @@ internal sealed class FuturesDecisionWorker(
         IReadOnlyList<InstrumentMarketState> lightStates,
         IReadOnlyList<InstrumentOptions> active,
         IReadOnlyList<InstrumentMarketState> fullStates,
-        IReadOnlyList<DryRunDecisionRecord> decisions)
+        IReadOnlyList<DryRunDecisionRecord> decisions,
+        BtcRegimeState btcRegime)
     {
         var activePairs = active.Select(instrument => instrument.Pair).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var decisionByPair = decisions.ToDictionary(decision => decision.Pair, StringComparer.OrdinalIgnoreCase);
@@ -325,8 +707,21 @@ internal sealed class FuturesDecisionWorker(
             NoTradeReason: noTradeReason,
             RejectionCounts: rejectionCounts,
             TopCandidates: topCandidates,
-            ExcludedPairs: excludedPairs);
+            ExcludedPairs: excludedPairs,
+            ExecutionMode: "dry-run-maker-post-only",
+            FillRate: entryDecisions.Count == 0
+                ? 0m
+                : decimal.Round(entryDecisions.Count(decision => (decision.DryRunAction.MakerFillRate ?? 0m) > 0m) / (decimal)entryDecisions.Count, 4),
+            PairsPassedVolume: fullStates.Count(state => (state.Quote?.VolumeToday ?? 0m) >= config.Filters.MinQuoteVolume24h),
+            PairsPassedDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.Futures.TargetNotionalEur * config.Filters.MinExitDepthMultiple),
+            OpenRiskEur: stateOpenRisk(decisions),
+            BtcRegimeState: btcRegime.Description,
+            PairsPassedExitDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.Futures.TargetNotionalEur * config.Filters.MinExitDepthMultiple),
+            FundingState: string.Join("; ", decisions.Select(decision => decision.DryRunAction.FundingState).Where(value => !string.IsNullOrWhiteSpace(value)).Take(3)));
     }
+
+    private static decimal stateOpenRisk(IReadOnlyList<DryRunDecisionRecord> decisions) =>
+        decisions.Select(decision => decision.DryRunAction.OpenRiskEur).Where(value => value.HasValue).DefaultIfEmpty(0m).Max() ?? 0m;
 
     private static decimal SpreadPercentOf(InstrumentMarketState marketState)
     {
