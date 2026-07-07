@@ -227,7 +227,7 @@ public class PriceActionGuardTests
     }
 
     [Fact]
-    public void Live_mode_disables_exploratory_entries_unless_explicitly_allowed()
+    public void Live_mode_preserves_configured_exploratory_entries_like_virtual()
     {
         var config = new BotConfiguration
         {
@@ -236,7 +236,7 @@ public class PriceActionGuardTests
         };
 
         InvokeNormalize(config);
-        Assert.False(config.Strategy.ExploratoryEntriesEnabled);
+        Assert.True(config.Strategy.ExploratoryEntriesEnabled);
 
         var optIn = new BotConfiguration
         {
@@ -245,8 +245,8 @@ public class PriceActionGuardTests
         };
 
         InvokeNormalize(optIn);
-        Assert.False(optIn.Strategy.ExploratoryEntriesEnabled);
-        Assert.False(optIn.Strategy.ExploratoryAllowedInLive);
+        Assert.True(optIn.Strategy.ExploratoryEntriesEnabled);
+        Assert.True(optIn.Strategy.ExploratoryAllowedInLive);
     }
 
     private static void InvokeNormalize(BotConfiguration config)

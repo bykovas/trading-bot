@@ -227,21 +227,10 @@ internal sealed class BotConfiguration
         Strategy.MaxEntryExtensionPercent = Math.Max(0m, Strategy.MaxEntryExtensionPercent);
         Strategy.MaxEntryRunupPercent = Math.Max(0m, Strategy.MaxEntryRunupPercent);
         Strategy.NegativePriceActionPenaltyThresholdPercent = Math.Max(0m, Strategy.NegativePriceActionPenaltyThresholdPercent);
-        // Exploratory sampling is a dry-run tool. Live trading keeps the firm
-        // threshold unless the operator explicitly opts in.
-        if (Trading.LiveTradingEnabled && !Strategy.ExploratoryAllowedInLive)
-        {
-            Strategy.ExploratoryEntriesEnabled = false;
-        }
-        // Early/exploratory channels are diagnostic only in live spot trading. Weak
-        // scores below the firm threshold must never reach real money.
-        if (Trading.LiveTradingEnabled)
-        {
-            Strategy.EarlyEntryEnabled = false;
-            Strategy.EarlyEntryAllowedInLive = false;
-            Strategy.ExploratoryEntriesEnabled = false;
-            Strategy.ExploratoryAllowedInLive = false;
-        }
+        // Live and virtual workers intentionally use the same configured entry
+        // channels. Safety comes from the hard fail-closed gates below the signal
+        // layer (ATR, spread, depth, volume, BTC regime, open risk, kill switch),
+        // not from silently rewriting the operator's entry-channel config.
         // Live entries must never bypass the anti-lag guard via missing history: force
         // the warm-up requirement on whenever live trading is enabled. The ONLY way
         // out is the explicit AllowEntriesWithoutPriceActionInLive override — UNKNOWN
