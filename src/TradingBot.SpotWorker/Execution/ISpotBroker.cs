@@ -16,6 +16,16 @@ internal interface ISpotBroker
         bool validate,
         CancellationToken cancellationToken);
 
+    Task<BrokerOrderResult> AddLimitPostOnlyOrderAsync(
+        string krakenPair,
+        string side,
+        decimal volume,
+        decimal price,
+        bool validate,
+        CancellationToken cancellationToken);
+
+    Task<BrokerOrderResult> CancelOrderAsync(string txid, CancellationToken cancellationToken);
+
     // Reads back the exchange's view of a submitted order so the portfolio can be
     // committed with the REAL fill (average price, executed volume, quote cost and
     // fee) instead of the modeled ask/bid+slippage fill. Returns null when the
@@ -39,4 +49,7 @@ internal sealed record LiveOrderFill(
     decimal AveragePrice,
     decimal VolumeExecuted,
     decimal CostEur,
-    decimal FeeEur);
+    decimal FeeEur,
+    int RepegCount = 0,
+    long TimeToFillMs = 0,
+    decimal RequestedPrice = 0m);

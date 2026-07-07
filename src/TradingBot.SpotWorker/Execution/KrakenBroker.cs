@@ -103,6 +103,103 @@ internal sealed class KrakenBroker(HttpClient httpClient, KrakenOptions options)
         }
     }
 
+    public Task<BrokerOrderResult> AddLimitPostOnlyOrderAsync(
+        string krakenPair,
+        string side,
+        decimal volume,
+        decimal price,
+        bool validate,
+        CancellationToken cancellationToken)
+    {
+        var fields = new Dictionary<string, string>
+        {
+            ["pair"] = krakenPair,
+            ["type"] = side,
+            ["ordertype"] = "limit",
+            ["oflags"] = "post",
+            ["volume"] = volume.ToString(CultureInfo.InvariantCulture),
+            ["price"] = price.ToString(CultureInfo.InvariantCulture)
+        };
+
+        return AddOrderCoreAsync(fields, validate, cancellationToken);
+    }
+
+    public async Task<BrokerOrderResult> CancelOrderAsync(string txid, CancellationToken cancellationToken)
+    {
+        JsonDocument doc;
+        try
+        {
+            doc = await PostPrivateAsync(
+                "/0/private/CancelOrder",
+                new Dictionary<string, string> { ["txid"] = txid },
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException)
+        {
+            return BrokerOrderResult.Failed(ex.Message);
+        }
+
+        using (doc)
+        {
+            var root = doc.RootElement;
+            var errors = ReadErrors(root);
+            return errors.Count > 0
+                ? BrokerOrderResult.Rejected(string.Join(", ", errors))
+                : BrokerOrderResult.Ok(false, "cancel accepted", Array.Empty<string>());
+        }
+    }
+
+    private async Task<BrokerOrderResult> AddOrderCoreAsync(
+        Dictionary<string, string> fields,
+        bool validate,
+        CancellationToken cancellationToken)
+    {
+        if (validate)
+        {
+            fields["validate"] = "true";
+        }
+
+        JsonDocument doc;
+        try
+        {
+            doc = await PostPrivateAsync("/0/private/AddOrder", fields, cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException)
+        {
+            return BrokerOrderResult.Failed(ex.Message);
+        }
+
+        using (doc)
+        {
+            var root = doc.RootElement;
+            var errors = ReadErrors(root);
+            if (errors.Count > 0)
+            {
+                return BrokerOrderResult.Rejected(string.Join(", ", errors));
+            }
+
+            string? description = null;
+            var txIds = new List<string>();
+            if (root.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.Object)
+            {
+                if (result.TryGetProperty("descr", out var descr) && descr.TryGetProperty("order", out var order))
+                {
+                    description = order.GetString();
+                }
+
+                if (result.TryGetProperty("txid", out var txid) && txid.ValueKind == JsonValueKind.Array)
+                {
+                    txIds.AddRange(txid.EnumerateArray()
+                        .Select(item => item.GetString())
+                        .Where(item => !string.IsNullOrWhiteSpace(item))
+                        .Cast<string>());
+                }
+            }
+
+            return BrokerOrderResult.Ok(validate, description, txIds);
+        }
+    }
+
     public async Task<BrokerOrderQuery?> QueryOrderAsync(string txid, CancellationToken cancellationToken)
     {
         JsonDocument doc;

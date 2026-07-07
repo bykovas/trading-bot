@@ -72,6 +72,7 @@ public sealed class PortfolioPosition
     public decimal? EntryAtr { get; set; }
     public decimal? StopLossPrice { get; set; }
     public decimal? TakeProfitPrice { get; set; }
+    public decimal? RoundTripCostEstimatePct { get; set; }
 
     // Consecutive decision cycles in which the current score sat at or below the
     // configured defensive score level. Reset to 0 whenever the score recovers.
@@ -108,6 +109,7 @@ public sealed class PortfolioPosition
         EntryAtr = EntryAtr,
         StopLossPrice = StopLossPrice,
         TakeProfitPrice = TakeProfitPrice,
+        RoundTripCostEstimatePct = RoundTripCostEstimatePct,
         LowScoreCycles = LowScoreCycles,
         Leverage = Leverage,
         InitialMarginEur = InitialMarginEur,
@@ -213,6 +215,13 @@ public sealed class DryRunAction
     public string? FillSource { get; set; }
     public decimal? ModeledFillPrice { get; set; }
     public decimal? ModeledFeeEur { get; set; }
+    public decimal? RoundTripCostEstimatePct { get; set; }
+    public decimal? OpenRiskEur { get; set; }
+    public decimal? QueueAheadEur { get; set; }
+    public decimal? MakerOrderFilledEur { get; set; }
+    public decimal? MakerFillRate { get; set; }
+    public long? TimeToFillMs { get; set; }
+    public int? RepegCount { get; set; }
 
     // Futures-only fields, nullable so spot rows keep their exact shape. Side is
     // LONG/SHORT exposure, ReduceOnly marks simulated exits that may only shrink

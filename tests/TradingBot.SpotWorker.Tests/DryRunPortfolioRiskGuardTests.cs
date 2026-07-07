@@ -60,7 +60,18 @@ public class DryRunPortfolioRiskGuardTests
 
     // Portfolio wired for the friction gate: ATR exit mode plus a quote so the
     // bid/ask spread contributes to round-trip friction. Candle range controls ATR.
-    private static DryRunPortfolio FrictionPortfolio(decimal minTakeProfitToFrictionRatio) => new(
+    private static DryRunPortfolio FrictionPortfolio(decimal minTakeProfitToFrictionRatio)
+    {
+        var config = new BotConfiguration
+        {
+            Trading = new TradingOptions { TargetOrderEur = 10m, TimeframeMinutes = 5 },
+            Risk = new RiskOptions { MaxOrderEur = 15m, MaxConcurrentOpenRisk = 10m },
+            Fees = new FeeOptions { MakerPct = 0.25m, TakerPct = 0.40m },
+            Filters = new FilterOptions { MinQuoteVolume24h = 0m, MinDepthMultiple = 0m, MaxExitImpactPct = 0.5m, SlippageBufferPct = 0.10m },
+            PositionExit = new PositionExitOptions { Mode = PositionExitOptions.ModeAtr, AtrPeriod = 3, StopLossAtrMultiplier = 2m, TakeProfitAtrMultiplier = 3m, MinTpVsCostMult = minTakeProfitToFrictionRatio },
+            Strategy = new StrategyOptions { MinTakeProfitToFrictionRatio = minTakeProfitToFrictionRatio }
+        };
+        return new DryRunPortfolio(
         new DryRunOptions
         {
             ApplyVirtualFills = true,
@@ -70,14 +81,19 @@ public class DryRunPortfolioRiskGuardTests
         },
         new PortfolioOptions { StartingCashEur = 75m },
         new ExecutionPolicyOptions(),
-        new PositionExitOptions { Mode = PositionExitOptions.ModeAtr, AtrPeriod = 3, StopLossAtrMultiplier = 2m, TakeProfitAtrMultiplier = 3m },
+        config.PositionExit,
         new PositionSizingOptions { Enabled = false },
-        strategy: new StrategyOptions { MinTakeProfitToFrictionRatio = minTakeProfitToFrictionRatio });
+        strategy: config.Strategy,
+        fullConfig: config);
+    }
 
     private static InstrumentMarketState RangedMarketState(decimal range) => new()
     {
         Instrument = new InstrumentOptions { Pair = "NEW/EUR", KrakenPair = "NEWEUR", Venue = "Kraken", Enabled = true },
         Quote = new Quote(Bid: 99.95m, Ask: 100.05m, Last: 100m, VolumeToday: 1000m),
+        OrderBook = new OrderBookSnapshot(
+            [new OrderBookLevel(99.95m, 100m), new OrderBookLevel(99.50m, 100m)],
+            [new OrderBookLevel(100.05m, 100m)]),
         Candles = Enumerable.Range(0, 30)
             .Select(index => new Candle(
                 DateTimeOffset.UtcNow.AddMinutes(-(30 - index)),
@@ -91,7 +107,7 @@ public class DryRunPortfolioRiskGuardTests
     };
 
     [Fact]
-    public void Blocks_new_buy_when_take_profit_cannot_pay_the_round_trip_friction()
+    public void Atr_take_profit_is_lifted_to_clear_round_trip_cost_floor()
     {
         // Calm candles: ATR = 0.3 -> TP distance 0.9 (0.9%). Friction = 0.52% fees
         // + 0.1% spread + 0.2% slippage = 0.82%; required 3 x 0.82 = 2.46% > 0.9%.
@@ -106,10 +122,9 @@ public class DryRunPortfolioRiskGuardTests
             new RiskOptions { MaxOrderEur = 15m, MaxOpenPositions = 6 },
             newPositionsThisCycle: 0);
 
-        Assert.Equal("WOULD_BUY_BLOCKED", action.Action);
-        Assert.Equal("FRICTION_BLOCK", action.HoldReasonCode);
-        Assert.Contains("friction gate", action.Reason);
-        Assert.Empty(state.Positions);
+        Assert.Equal("WOULD_BUY", action.Action);
+        Assert.True(action.RoundTripCostEstimatePct >= 0.85m);
+        Assert.True(Assert.Single(state.Positions).TakeProfitPrice > 102.4m);
     }
 
     [Fact]

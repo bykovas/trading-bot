@@ -92,7 +92,7 @@ public class LiveOrderingTests
     }
 
     [Fact]
-    public async Task Live_buy_falls_back_to_modeled_fill_when_query_orders_fails()
+    public async Task Live_buy_does_not_create_position_when_maker_fill_is_unconfirmed()
     {
         var outputDirectory = TempDir();
         var config = LiveConfig(outputDirectory);
@@ -105,10 +105,9 @@ public class LiveOrderingTests
             .Single(d => d.GetProperty("pair").GetString() == "AAA/EUR");
         var action = decision.GetProperty("dryRunAction");
 
-        Assert.Equal("WOULD_BUY", action.GetProperty("action").GetString());
-        Assert.Equal("MODELED", action.GetProperty("fillSource").GetString());
-        // Position still committed — a filled order must never be dropped.
-        Assert.Single(cycle.GetProperty("portfolioAfter").GetProperty("positions").EnumerateArray().ToList());
+        Assert.Equal("LIVE_ORDER_FAILED", action.GetProperty("action").GetString());
+        Assert.Contains("not executed", action.GetProperty("reason").GetString());
+        Assert.Empty(cycle.GetProperty("portfolioAfter").GetProperty("positions").EnumerateArray().ToList());
     }
 
     // ------------------------------------------------------------------ plumbing
@@ -174,6 +173,7 @@ public class LiveOrderingTests
             EntryBlackoutMinutes = 0,
             MaxNewPositionsPerHour = 0
         },
+        Entry = new EntryOptions { MakerFillTimeoutSec = 1, MakerRepegs = 0 },
         PositionExit = new PositionExitOptions { MinProfitToExitOnSignalFlipPercent = 0m, StopLossPercent = 0m, TakeProfitPercent = 0m, MaxHoldMinutes = 0 },
         CandidateUniverse = new List<InstrumentOptions>
         {

@@ -65,4 +65,11 @@ public sealed record CycleEntryDiagnostics(
     string? NoTradeReason,
     IReadOnlyDictionary<string, int> RejectionCounts,
     IReadOnlyList<CandidateDiagnostic> TopCandidates,
-    IReadOnlyList<ExcludedPairDiagnostic> ExcludedPairs);
+    IReadOnlyList<ExcludedPairDiagnostic> ExcludedPairs,
+    string ExecutionMode = "maker-post-only",
+    decimal FillRate = 0m,
+    int PairsPassedSpread = 0,
+    int PairsPassedVolume = 0,
+    int PairsPassedDepth = 0,
+    decimal OpenRiskEur = 0m,
+    string BtcRegimeState = "UNKNOWN");

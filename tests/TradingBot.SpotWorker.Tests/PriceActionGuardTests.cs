@@ -245,7 +245,8 @@ public class PriceActionGuardTests
         };
 
         InvokeNormalize(optIn);
-        Assert.True(optIn.Strategy.ExploratoryEntriesEnabled);
+        Assert.False(optIn.Strategy.ExploratoryEntriesEnabled);
+        Assert.False(optIn.Strategy.ExploratoryAllowedInLive);
     }
 
     private static void InvokeNormalize(BotConfiguration config)

@@ -173,13 +173,14 @@ internal sealed class DecisionWorker(
             entryIndex++;
         }
 
-        // Market-regime gate: a long-only book must not ADD risk into a broadly
-        // falling market. Evaluated once per cycle over the light snapshot; only new
-        // entries are blocked, phase-1 exits already ran above.
-        var regime = EvaluateMarketRegime(lightCandidates, config.Strategy);
+        var regime = config.CandidateUniverse.Any(instrument =>
+                instrument.Pair.Equals("XBT/EUR", StringComparison.OrdinalIgnoreCase)
+                || instrument.Pair.Equals("BTC/EUR", StringComparison.OrdinalIgnoreCase))
+            ? EvaluateBtcRegime(selected, config.Regime, config.Trading.TimeframeMinutes, DateTimeOffset.UtcNow)
+            : new MarketRegime(false, "BTC regime unavailable in unnormalized test config");
         if (regime.BlockNewEntries)
         {
-            Console.WriteLine($"market-regime: BLOCKING new entries ({regime.Description})");
+            Console.WriteLine($"btc-regime: BLOCKING new entries ({regime.Description})");
         }
 
         var rankPosition = 0;
@@ -194,7 +195,7 @@ internal sealed class DecisionWorker(
                     prepared,
                     workingPortfolio,
                     "MARKET_REGIME",
-                    $"market-regime block: {regime.Description}"));
+                    $"btc-regime block: {regime.Description}"));
                 continue;
             }
 
@@ -262,7 +263,9 @@ internal sealed class DecisionWorker(
             entryEvaluations,
             buyCandidates.Count,
             decisionRecords,
-            advice);
+            advice,
+            regime,
+            workingPortfolio);
         PrintEntryDiagnostics(entryDiagnostics);
 
         var portfolioAfter = workingPortfolio.Clone();
@@ -292,49 +295,41 @@ internal sealed class DecisionWorker(
 
     internal sealed record MarketRegime(bool BlockNewEntries, string Description);
 
-    // Market-regime evaluation over the light snapshot. The regime is BAD (blocks
-    // new entries) when every ENABLED condition reads bad: reference-pair 24h
-    // decline at/beyond the cap, and positive-change breadth below the minimum.
-    // Pure and static so it can be unit tested on synthetic snapshots.
-    internal static MarketRegime EvaluateMarketRegime(
-        IReadOnlyList<InstrumentMarketState> lightCandidates,
-        StrategyOptions strategy)
+    internal static MarketRegime EvaluateBtcRegime(
+        IReadOnlyList<InstrumentMarketState> fullStates,
+        BtcRegimeOptions regime,
+        int timeframeMinutes,
+        DateTimeOffset nowUtc)
     {
-        var btcKnob = strategy.RegimeFilterMaxBtcDeclinePercent;
-        var breadthKnob = strategy.RegimeFilterMinBreadthPercent;
-        if (btcKnob <= 0m && breadthKnob <= 0m)
+        var btc = fullStates.FirstOrDefault(state =>
+            state.Instrument.Pair.Equals("XBT/EUR", StringComparison.OrdinalIgnoreCase)
+            || state.Instrument.Pair.Equals("BTC/EUR", StringComparison.OrdinalIgnoreCase));
+        if (btc is null || btc.Candles.Count < regime.BtcTrendMa + 1 || !string.IsNullOrWhiteSpace(btc.DataWarning))
         {
-            return new MarketRegime(false, "regime filter disabled");
+            return new MarketRegime(true, "BTC regime fail-closed: BTC/EUR candles missing or insufficient");
         }
 
-        decimal? referenceChange = lightCandidates
-            .FirstOrDefault(candidate =>
-                candidate.Instrument.Pair.Equals(strategy.RegimeFilterReferencePair, StringComparison.OrdinalIgnoreCase)
-                && candidate.LastPrice > 0m)
-            ?.ChangePercent;
+        var newest = btc.Candles[^1];
+        var timeframe = TimeSpan.FromMinutes(timeframeMinutes);
+        if (newest.OpenTime + timeframe < nowUtc - timeframe)
+        {
+            return new MarketRegime(true, $"BTC regime fail-closed: newest BTC candle {newest.OpenTime:O} is stale");
+        }
 
-        var usable = lightCandidates
-            .Where(candidate => candidate.LastPrice > 0m && string.IsNullOrWhiteSpace(candidate.DataWarning))
-            .ToList();
-        decimal? breadthPercent = usable.Count > 0
-            ? decimal.Round(usable.Count(candidate => candidate.ChangePercent > 0m) * 100m / usable.Count, 1)
-            : null;
-
-        // A condition with missing data never reads bad: the filter blocks on
-        // evidence, not on ignorance.
-        var btcBad = btcKnob > 0m && referenceChange is { } change && change <= -btcKnob;
-        var breadthBad = breadthKnob > 0m && breadthPercent is { } breadth && breadth < breadthKnob;
-
-        var btcEnabled = btcKnob > 0m && referenceChange is not null;
-        var breadthEnabled = breadthKnob > 0m && breadthPercent is not null;
-        var block = (btcEnabled || breadthEnabled)
-            && (!btcEnabled || btcBad)
-            && (!breadthEnabled || breadthBad);
-
-        var description =
-            $"{strategy.RegimeFilterReferencePair} 24h {(referenceChange is { } c ? $"{c:+0.##;-0.##;0}%" : "n/a")} (cap -{btcKnob:0.##}%), " +
-            $"breadth {(breadthPercent is { } b ? $"{b:0.#}%" : "n/a")} positive (min {breadthKnob:0.##}%)";
-        return new MarketRegime(block, description);
+        var closes = btc.Candles.Select(candle => candle.Close).ToList();
+        var close = closes[^1];
+        var ma = closes.TakeLast(regime.BtcTrendMa).Average();
+        var previousMa = closes.Skip(closes.Count - regime.BtcTrendMa - 1).Take(regime.BtcTrendMa).Average();
+        var slope = ma - previousMa;
+        var lookbackIndex = Math.Max(0, closes.Count - 1 - regime.BtcCrashLookback);
+        var lookbackClose = closes[lookbackIndex];
+        var drawdown = lookbackClose <= 0m ? 0m : (close - lookbackClose) / lookbackClose * 100m;
+        var crash = regime.BtcCrashPct > 0m && drawdown <= -regime.BtcCrashPct;
+        var downtrend = close < ma && slope < 0m;
+        var state = crash ? "CRASH" : downtrend ? "DOWNTREND" : "OK";
+        return new MarketRegime(
+            crash || downtrend,
+            $"state={state} close={close:0.##} ma{regime.BtcTrendMa}={ma:0.##} slope={slope:+0.####;-0.####;0} drawdown{regime.BtcCrashLookback}={drawdown:+0.##;-0.##;0}%");
     }
 
     // ---- Per-cycle entry funnel diagnostics ----
@@ -347,7 +342,9 @@ internal sealed class DecisionWorker(
         IReadOnlyList<PreparedDecision> entryEvaluations,
         int eligibleEntryCandidates,
         IReadOnlyList<DryRunDecisionRecord> decisionRecords,
-        WatchlistAdvice? advice = null)
+        WatchlistAdvice? advice = null,
+        MarketRegime? btcRegime = null,
+        PortfolioState? portfolio = null)
     {
         var recordsByPair = decisionRecords
             .GroupBy(record => record.Pair, StringComparer.OrdinalIgnoreCase)
@@ -385,6 +382,11 @@ internal sealed class DecisionWorker(
                 config.Strategy.PriceActionMaxSampleAgeMinutes) is { DataSufficient: true });
 
         var chosenPair = chosenPairs.Count > 0 ? string.Join(", ", chosenPairs) : null;
+        var filledMaker = decisionRecords.Count(record => record.DryRunAction.Action == "WOULD_BUY" && record.DryRunAction.FillSource == "REAL");
+        var missedMaker = decisionRecords.Count(record => record.DryRunAction.Action == "LIVE_ORDER_FAILED" && record.DryRunAction.Reason.Contains("maker", StringComparison.OrdinalIgnoreCase));
+        var makerAttempts = filledMaker + missedMaker;
+        var openRisk = portfolio is null ? 0m : EntrySafety.CalculateOpenRiskEur(portfolio, config, out _);
+
         return new CycleEntryDiagnostics(
             SnapshotPairsAvailable: lightCandidates.Count,
             ActivePairsEvaluated: selected.Count,
@@ -406,7 +408,14 @@ internal sealed class DecisionWorker(
                 .ThenBy(candidate => candidate.SpreadPercent)
                 .Take(5)
                 .ToList(),
-            ExcludedPairs: excluded);
+            ExcludedPairs: excluded,
+            ExecutionMode: "maker-post-only",
+            FillRate: makerAttempts == 0 ? 0m : decimal.Round(filledMaker / (decimal)makerAttempts, 4),
+            PairsPassedSpread: entryEvaluations.Count(item => item.Proposal.SpreadPercent <= config.Strategy.MaxEntrySpreadPercent),
+            PairsPassedVolume: entryEvaluations.Count(item => item.MarketState.Quote is { } quote && quote.VolumeToday * item.MarketState.LastPrice >= config.Filters.MinQuoteVolume24h),
+            PairsPassedDepth: entryEvaluations.Count(item => item.MarketState.OrderBook is not null),
+            OpenRiskEur: openRisk,
+            BtcRegimeState: btcRegime?.Description ?? "UNKNOWN");
     }
 
     // Excluded-pair diagnostics with a CONCRETE reason instead of a generic "not
@@ -603,6 +612,10 @@ internal sealed class DecisionWorker(
             $"priceActionReady={diagnostics.PriceActionReadyCount}/{diagnostics.SnapshotPairsAvailable} " +
             $"score>=0.75:{diagnostics.ScoreAtLeast075} >=0.80:{diagnostics.ScoreAtLeast080} >=0.85:{diagnostics.ScoreAtLeast085} >=0.90:{diagnostics.ScoreAtLeast090} " +
             $"hardFilterPass={diagnostics.HardFilterPassCount} eligible={diagnostics.EligibleEntryCandidates}");
+        Console.WriteLine(
+            $"  executionMode={diagnostics.ExecutionMode} fillRate={diagnostics.FillRate:0.####} " +
+            $"pairsPassed(spread={diagnostics.PairsPassedSpread},volume={diagnostics.PairsPassedVolume},depth={diagnostics.PairsPassedDepth}) " +
+            $"openRiskEur={diagnostics.OpenRiskEur:0.####} btcRegime={diagnostics.BtcRegimeState}");
         foreach (var candidate in diagnostics.TopCandidates)
         {
             Console.WriteLine(
@@ -824,6 +837,16 @@ internal sealed class DecisionWorker(
             }
         }
 
+        var btcInstrument = config.CandidateUniverse.FirstOrDefault(instrument =>
+            instrument.Pair.Equals("XBT/EUR", StringComparison.OrdinalIgnoreCase)
+            || instrument.Pair.Equals("BTC/EUR", StringComparison.OrdinalIgnoreCase));
+        if (btcInstrument is not null
+            && !selected.Any(instrument => instrument.Pair.Equals(btcInstrument.Pair, StringComparison.OrdinalIgnoreCase)))
+        {
+            selected.Add(btcInstrument);
+            Console.WriteLine($"watchlist-forced {btcInstrument.Pair}: BTC regime requires full 15m candles");
+        }
+
         if (config.Trading.StrongMoverBackfillEnabled
             && config.Trading.StrongMoverMaxBackfillPairs > 0)
         {
@@ -1028,15 +1051,28 @@ internal sealed class DecisionWorker(
                 brokerVerdict = brokerOutcome.Verdict;
                 if (brokerVerdict is null || brokerVerdict.StartsWith("LIVE_SUBMITTED", StringComparison.Ordinal))
                 {
-                    // Exchange accepted (or no broker is wired at all): commit to the
-                    // real portfolio state, preferring the exchange-confirmed fill
-                    // (average price / executed volume / real fee) over the model. A
-                    // failed fill query falls back to the modeled fill so a filled
-                    // order is never dropped; the record then carries fillSource=MODELED.
-                    var liveFill = brokerVerdict is null
-                        ? null
-                        : await TryFetchLiveFillAsync(proposal.Pair, brokerOutcome.TxIds, cancellationToken);
+                    var liveFill = brokerOutcome.LiveFill;
+                    if (brokerVerdict is not null && previewAction.Action == "WOULD_SELL" && liveFill is null)
+                    {
+                        liveFill = await TryFetchLiveFillAsync(proposal.Pair, brokerOutcome.TxIds, cancellationToken);
+                    }
+
+                    if (brokerVerdict is not null && previewAction.Action == "WOULD_BUY" && liveFill is null)
+                    {
+                        dryRunAction = BuildLiveOrderNotExecutedAction(previewAction, portfolio, $"{brokerVerdict}; no maker fill confirmed");
+                        goto RecordDecision;
+                    }
+
                     dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk, newPositionsThisCycle, prepared.PriceAction, liveFill);
+                    if (liveFill is not null && dryRunAction.Action == "WOULD_BUY")
+                    {
+                        dryRunAction.MakerOrderFilledEur = liveFill.CostEur;
+                        dryRunAction.MakerFillRate = liveFill.CostEur > 0m && previewAction.TargetNotionalEur > 0m
+                            ? Math.Min(1m, liveFill.CostEur / previewAction.TargetNotionalEur)
+                            : 0m;
+                        dryRunAction.TimeToFillMs = liveFill.TimeToFillMs;
+                        dryRunAction.RepegCount = liveFill.RepegCount;
+                    }
                 }
                 else
                 {
@@ -1057,6 +1093,7 @@ internal sealed class DecisionWorker(
             brokerVerdict = (await RunBrokerAsync(marketState, dryRunAction, cancellationToken)).Verdict;
         }
 
+    RecordDecision:
         Console.WriteLine($"decision {proposal.Pair}:");
         Console.WriteLine($"  price={marketState.LastPrice:0.####} ema{config.Strategy.FastEmaPeriod}={Format(indicators.FastEma)} ema{config.Strategy.SlowEmaPeriod}={Format(indicators.SlowEma)} rsi{config.Strategy.RsiPeriod}={Format(indicators.Rsi)}");
         Console.WriteLine($"  position={FormatPosition(currentPositionBeforeAction)}");
@@ -1138,7 +1175,7 @@ internal sealed class DecisionWorker(
     // Verdict string plus the exchange transaction ids of a submitted live order,
     // so the caller can read back the real fill. TxIds is empty for every
     // non-LIVE_SUBMITTED outcome.
-    private sealed record BrokerRunOutcome(string? Verdict, IReadOnlyList<string> TxIds)
+    private sealed record BrokerRunOutcome(string? Verdict, IReadOnlyList<string> TxIds, LiveOrderFill? LiveFill = null)
     {
         public static readonly BrokerRunOutcome None = new(null, Array.Empty<string>());
         public static BrokerRunOutcome WithVerdict(string verdict) => new(verdict, Array.Empty<string>());
@@ -1187,6 +1224,11 @@ internal sealed class DecisionWorker(
             return BrokerRunOutcome.WithVerdict($"SKIPPED: live buy notional {action.TargetNotionalEur:0.##} exceeds MaxOrderEur {config.Risk.MaxOrderEur:0.##}");
         }
 
+        if (side == "buy")
+        {
+            return await RunMakerBuyBrokerAsync(marketState, volume, validate, cancellationToken);
+        }
+
         var result = await broker.AddOrderAsync(marketState.Instrument.KrakenPair, side, volume, validate, cancellationToken);
 
         if (!result.Success)
@@ -1202,6 +1244,110 @@ internal sealed class DecisionWorker(
 
         var txids = result.TxIds.Count > 0 ? string.Join(",", result.TxIds) : "(none)";
         return new BrokerRunOutcome($"LIVE_SUBMITTED side={side} vol={volume} txid={txids}", result.TxIds);
+    }
+
+    private async Task<BrokerRunOutcome> RunMakerBuyBrokerAsync(
+        InstrumentMarketState marketState,
+        decimal volume,
+        bool validate,
+        CancellationToken cancellationToken)
+    {
+        if (broker is null)
+        {
+            return BrokerRunOutcome.None;
+        }
+
+        var pairDecimals = marketState.PairRules?.PairDecimals ?? 8;
+        var requestedPrice = TruncateTo(Math.Min(marketState.BestBid, marketState.BestAsk - PriceTick(pairDecimals)), pairDecimals);
+        if (requestedPrice <= 0m || requestedPrice >= marketState.BestAsk)
+        {
+            return BrokerRunOutcome.WithVerdict("SKIPPED: post-only buy price is invalid against best ask");
+        }
+
+        if (validate)
+        {
+            var validation = await broker.AddLimitPostOnlyOrderAsync(marketState.Instrument.KrakenPair, "buy", volume, requestedPrice, validate, cancellationToken);
+            if (!validation.Success)
+            {
+                return BrokerRunOutcome.WithVerdict($"VALIDATE_REJECTED: {validation.Error}");
+            }
+
+            return BrokerRunOutcome.WithVerdict($"VALIDATED_OK side=buy postOnly=true price={requestedPrice} vol={volume}");
+        }
+
+        var started = DateTimeOffset.UtcNow;
+        var deadline = started.AddSeconds(config.Entry.MakerFillTimeoutSec);
+        var repegs = 0;
+        var txids = new List<string>();
+        while (true)
+        {
+            var submittedAt = DateTimeOffset.UtcNow;
+            var result = await broker.AddLimitPostOnlyOrderAsync(marketState.Instrument.KrakenPair, "buy", volume, requestedPrice, validate: false, cancellationToken);
+            if (!result.Success)
+            {
+                return BrokerRunOutcome.WithVerdict($"LIVE_ERROR: post-only maker buy rejected: {result.Error}");
+            }
+
+            var txid = result.TxIds.FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(txid))
+            {
+                return BrokerRunOutcome.WithVerdict("LIVE_ERROR: post-only maker buy accepted without txid");
+            }
+
+            txids.Add(txid);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                var query = await broker.QueryOrderAsync(txid, cancellationToken);
+                if (query is not null
+                    && query.Status.Equals("closed", StringComparison.OrdinalIgnoreCase)
+                    && query.VolumeExecuted > 0m
+                    && query.AveragePrice > 0m)
+                {
+                    var fillMs = (long)(DateTimeOffset.UtcNow - submittedAt).TotalMilliseconds;
+                    Console.WriteLine($"  maker-entry-fill {marketState.Instrument.Pair}: requested={requestedPrice} fill={query.AveragePrice} timeToFillMs={fillMs} repegCount={repegs} filledEur={query.CostQuote:0.####}");
+                    return new BrokerRunOutcome(
+                        $"LIVE_SUBMITTED side=buy postOnly=true price={requestedPrice} vol={volume} txid={txid} makerFilled=true",
+                        txids,
+                        new LiveOrderFill(query.AveragePrice, query.VolumeExecuted, query.CostQuote, query.FeeQuote, repegs, fillMs, requestedPrice));
+                }
+
+                if (query is not null && query.VolumeExecuted > 0m)
+                {
+                    await broker.CancelOrderAsync(txid, cancellationToken);
+                    var final = await broker.QueryOrderAsync(txid, cancellationToken) ?? query;
+                    if (final.VolumeExecuted > 0m && final.AveragePrice > 0m)
+                    {
+                        var fillMs = (long)(DateTimeOffset.UtcNow - submittedAt).TotalMilliseconds;
+                        Console.WriteLine($"  maker-entry-partial {marketState.Instrument.Pair}: requested={requestedPrice} fill={final.AveragePrice} timeToFillMs={fillMs} repegCount={repegs} filledEur={final.CostQuote:0.####}");
+                        return new BrokerRunOutcome(
+                            $"LIVE_SUBMITTED side=buy postOnly=true price={requestedPrice} vol={volume} txid={txid} makerPartial=true",
+                            txids,
+                            new LiveOrderFill(final.AveragePrice, final.VolumeExecuted, final.CostQuote, final.FeeQuote, repegs, fillMs, requestedPrice));
+                    }
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+            }
+
+            var cancel = await broker.CancelOrderAsync(txid, cancellationToken);
+            var finalQuery = await broker.QueryOrderAsync(txid, cancellationToken);
+            if (finalQuery is not null && finalQuery.VolumeExecuted > 0m && finalQuery.AveragePrice > 0m)
+            {
+                var fillMs = (long)(DateTimeOffset.UtcNow - submittedAt).TotalMilliseconds;
+                return new BrokerRunOutcome(
+                    $"LIVE_SUBMITTED side=buy postOnly=true price={requestedPrice} vol={volume} txid={txid} makerPartialAfterCancel=true",
+                    txids,
+                    new LiveOrderFill(finalQuery.AveragePrice, finalQuery.VolumeExecuted, finalQuery.CostQuote, finalQuery.FeeQuote, repegs, fillMs, requestedPrice));
+            }
+
+            if (repegs >= config.Entry.MakerRepegs || DateTimeOffset.UtcNow >= deadline)
+            {
+                return BrokerRunOutcome.WithVerdict($"LIVE_MAKER_MISSED: post-only buy not filled before timeout; cancel={(cancel.Success ? "ok" : cancel.Error ?? "failed")}");
+            }
+
+            repegs++;
+            requestedPrice = TruncateTo(Math.Min(marketState.BestBid, marketState.BestAsk - PriceTick(pairDecimals)), pairDecimals);
+        }
     }
 
     // How long to keep asking the exchange for the fill of a just-submitted market
@@ -1261,6 +1407,17 @@ internal sealed class DecisionWorker(
         }
 
         return Math.Truncate(value * factor) / factor;
+    }
+
+    private static decimal PriceTick(int pairDecimals)
+    {
+        var factor = 1m;
+        for (var i = 0; i < Math.Max(0, pairDecimals); i++)
+        {
+            factor *= 10m;
+        }
+
+        return 1m / factor;
     }
 
     private static void PrintPortfolio(string label, PortfolioState portfolio)

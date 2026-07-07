@@ -23,6 +23,7 @@ public sealed class InstrumentMarketState
     public required IReadOnlyList<Candle> Candles { get; init; }
     public PairRules? PairRules { get; init; }
     public Quote? Quote { get; init; }
+    public OrderBookSnapshot? OrderBook { get; init; }
     public string? DataWarning { get; init; }
 
     public bool IsUsable => Candles.Count >= 30 && string.IsNullOrWhiteSpace(DataWarning);
@@ -75,6 +76,12 @@ public sealed record Quote(
     decimal? FundingRatePercent = null,
     decimal? MarkPrice = null,
     decimal? IndexPrice = null);
+
+public sealed record OrderBookLevel(decimal Price, decimal Volume);
+
+public sealed record OrderBookSnapshot(
+    IReadOnlyList<OrderBookLevel> Bids,
+    IReadOnlyList<OrderBookLevel> Asks);
 
 public sealed record IndicatorSnapshot(
     decimal? FastEma,

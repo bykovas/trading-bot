@@ -85,12 +85,14 @@ public sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOptions 
                 metadata.TryGetValue(instrument.KrakenPair, out var pairMetadata);
                 quotes.TryGetValue(instrument.KrakenPair, out var quote);
                 var candles = await GetClosedCandlesWithRetryAsync(instrument, timeframeMinutes, cancellationToken);
+                var orderBook = await GetOrderBookWithRetryAsync(instrument, cancellationToken);
                 states.Add(new InstrumentMarketState
                 {
                     Instrument = instrument,
                     Candles = candles,
                     PairRules = pairMetadata?.Rules,
                     Quote = quote,
+                    OrderBook = orderBook,
                     DataWarning = candles.Count < 30 ? $"Only {candles.Count} closed candles returned." : null
                 });
             }
@@ -333,6 +335,67 @@ public sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOptions 
         }
     }
 
+    private async Task<OrderBookSnapshot?> GetOrderBookWithRetryAsync(
+        InstrumentOptions instrument,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await GetOrderBookAsync(instrument, cancellationToken);
+            }
+            catch (HttpRequestException ex)
+                when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests && attempt < RateLimitBackoffs.Length)
+            {
+                await Task.Delay(RateLimitBackoffs[attempt], cancellationToken);
+            }
+            catch (Exception ex) when (IsTransient(ex, cancellationToken))
+            {
+                Console.WriteLine($"order-book {instrument.Pair}: unavailable ({ex.Message})");
+                return null;
+            }
+        }
+    }
+
+    private async Task<OrderBookSnapshot?> GetOrderBookAsync(
+        InstrumentOptions instrument,
+        CancellationToken cancellationToken)
+    {
+        var uri = $"{options.BaseUrl.TrimEnd('/')}/0/public/Depth?pair={Uri.EscapeDataString(instrument.KrakenPair)}&count=25";
+        using var response = await httpClient.GetAsync(uri, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        ThrowIfKrakenError(doc.RootElement);
+
+        var result = doc.RootElement.GetProperty("result");
+        var pairProperty = result.EnumerateObject().FirstOrDefault();
+        if (pairProperty.Value.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return new OrderBookSnapshot(
+            ReadDepthSide(pairProperty.Value, "bids"),
+            ReadDepthSide(pairProperty.Value, "asks"));
+    }
+
+    private static IReadOnlyList<OrderBookLevel> ReadDepthSide(JsonElement element, string side)
+    {
+        if (!element.TryGetProperty(side, out var array) || array.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<OrderBookLevel>();
+        }
+
+        return array.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.Array && item.GetArrayLength() >= 2)
+            .Select(item => new OrderBookLevel(ParseKrakenDecimal(item[0]), ParseKrakenDecimal(item[1])))
+            .Where(level => level.Price > 0m && level.Volume > 0m)
+            .ToList();
+    }
+
     private static bool IsTransient(Exception ex, CancellationToken cancellationToken) =>
         ex is HttpRequestException or JsonException or InvalidOperationException
         || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested);
@@ -462,6 +525,7 @@ public sealed class SampleMarketDataSource : IMarketDataSource
                     decimal.Round(candles[^1].Close * 1.0005m, 4),
                     candles[^1].Close,
                     candles[^1].Volume),
+                OrderBook = SampleDepth(candles[^1].Close),
                 PairRules = new PairRules(instrument.Pair, "sample", 0.001m, 0.5m, 8, 2),
                 DataWarning = null
             };
@@ -502,4 +566,8 @@ public sealed class SampleMarketDataSource : IMarketDataSource
 
         return candles;
     }
+
+    private static OrderBookSnapshot SampleDepth(decimal price) => new(
+        [new OrderBookLevel(decimal.Round(price * 0.9995m, 4), 1_000m)],
+        [new OrderBookLevel(decimal.Round(price * 1.0005m, 4), 1_000m)]);
 }

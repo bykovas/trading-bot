@@ -12,6 +12,10 @@ internal sealed class BotConfiguration
     public LoggingOptions Logging { get; set; } = new();
     public TradingOptions Trading { get; set; } = new();
     public RiskOptions Risk { get; set; } = new();
+    public FeeOptions Fees { get; set; } = new();
+    public EntryOptions Entry { get; set; } = new();
+    public FilterOptions Filters { get; set; } = new();
+    public BtcRegimeOptions Regime { get; set; } = new();
     public StrategyOptions Strategy { get; set; } = new();
     public PositionSizingOptions PositionSizing { get; set; } = new();
     public PortfolioOptions Portfolio { get; set; } = new();
@@ -72,6 +76,18 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_STRONG_MOVER_MIN_DAILY_VOLUME_EUR", value => config.Trading.StrongMoverMinDailyVolumeEur = ParseDecimal(value, config.Trading.StrongMoverMinDailyVolumeEur));
         SetIfPresent("TRADINGBOT_STRONG_MOVER_MAX_BACKFILL_PAIRS", value => config.Trading.StrongMoverMaxBackfillPairs = ParseInt(value, config.Trading.StrongMoverMaxBackfillPairs));
         SetIfPresent("TRADINGBOT_MAX_ORDER_EUR", value => config.Risk.MaxOrderEur = ParseDecimal(value, config.Risk.MaxOrderEur));
+        SetIfPresent("TRADINGBOT_RISK_MAX_CONCURRENT_OPEN_RISK_EUR", value => config.Risk.MaxConcurrentOpenRisk = ParseDecimal(value, config.Risk.MaxConcurrentOpenRisk));
+        SetIfPresent("TRADINGBOT_FEES_MAKER_PCT", value => config.Fees.MakerPct = ParseDecimal(value, config.Fees.MakerPct));
+        SetIfPresent("TRADINGBOT_FEES_TAKER_PCT", value => config.Fees.TakerPct = ParseDecimal(value, config.Fees.TakerPct));
+        SetIfPresent("TRADINGBOT_ENTRY_MAKER_FILL_TIMEOUT_SEC", value => config.Entry.MakerFillTimeoutSec = ParseInt(value, config.Entry.MakerFillTimeoutSec));
+        SetIfPresent("TRADINGBOT_ENTRY_MAKER_REPEGS", value => config.Entry.MakerRepegs = ParseInt(value, config.Entry.MakerRepegs));
+        SetIfPresent("TRADINGBOT_FILTERS_MIN_QUOTE_VOLUME_24H", value => config.Filters.MinQuoteVolume24h = ParseDecimal(value, config.Filters.MinQuoteVolume24h));
+        SetIfPresent("TRADINGBOT_FILTERS_MIN_DEPTH_MULTIPLE", value => config.Filters.MinDepthMultiple = ParseDecimal(value, config.Filters.MinDepthMultiple));
+        SetIfPresent("TRADINGBOT_FILTERS_MAX_EXIT_IMPACT_PCT", value => config.Filters.MaxExitImpactPct = ParseDecimal(value, config.Filters.MaxExitImpactPct));
+        SetIfPresent("TRADINGBOT_FILTERS_SLIPPAGE_BUFFER_PCT", value => config.Filters.SlippageBufferPct = ParseDecimal(value, config.Filters.SlippageBufferPct));
+        SetIfPresent("TRADINGBOT_REGIME_BTC_TREND_MA", value => config.Regime.BtcTrendMa = ParseInt(value, config.Regime.BtcTrendMa));
+        SetIfPresent("TRADINGBOT_REGIME_BTC_CRASH_LOOKBACK", value => config.Regime.BtcCrashLookback = ParseInt(value, config.Regime.BtcCrashLookback));
+        SetIfPresent("TRADINGBOT_REGIME_BTC_CRASH_PCT", value => config.Regime.BtcCrashPct = ParseDecimal(value, config.Regime.BtcCrashPct));
         SetIfPresent("TRADINGBOT_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
         SetIfPresent("TRADINGBOT_STARTING_CASH_EUR", value => config.Portfolio.StartingCashEur = ParseDecimal(value, config.Portfolio.StartingCashEur));
         SetIfPresent("TRADINGBOT_DRY_RUN_ENABLED", value => config.DryRun.Enabled = ParseBool(value, config.DryRun.Enabled));
@@ -163,6 +179,18 @@ internal sealed class BotConfiguration
         Risk.MaxDailyLossEur = Risk.MaxDailyLossEur <= 0 ? 10m : Risk.MaxDailyLossEur;
         Risk.MaxOpenPositions = Math.Max(1, Risk.MaxOpenPositions);
         Risk.MaxTotalExposureEur = Math.Max(0m, Risk.MaxTotalExposureEur);
+        Risk.MaxConcurrentOpenRisk = Math.Max(0m, Risk.MaxConcurrentOpenRisk);
+        Fees.MakerPct = Math.Max(0m, Fees.MakerPct);
+        Fees.TakerPct = Math.Max(0m, Fees.TakerPct);
+        Entry.MakerFillTimeoutSec = Math.Clamp(Entry.MakerFillTimeoutSec, 1, Worker.LoopIntervalSeconds);
+        Entry.MakerRepegs = Math.Max(0, Entry.MakerRepegs);
+        Filters.MinQuoteVolume24h = Math.Max(0m, Filters.MinQuoteVolume24h);
+        Filters.MinDepthMultiple = Math.Max(0m, Filters.MinDepthMultiple);
+        Filters.MaxExitImpactPct = Math.Max(0m, Filters.MaxExitImpactPct);
+        Filters.SlippageBufferPct = Math.Max(0m, Filters.SlippageBufferPct);
+        Regime.BtcTrendMa = Math.Max(2, Regime.BtcTrendMa);
+        Regime.BtcCrashLookback = Math.Max(1, Regime.BtcCrashLookback);
+        Regime.BtcCrashPct = Math.Max(0m, Regime.BtcCrashPct);
         Strategy.MinimumEmaGapPercent = Math.Max(0m, Strategy.MinimumEmaGapPercent);
         Strategy.MinimumLongScore = Math.Clamp(Strategy.MinimumLongScore, 0m, 1m);
         // Keep the ideal band inside the hardcoded acceptable band (35..68) so a
@@ -205,12 +233,14 @@ internal sealed class BotConfiguration
         {
             Strategy.ExploratoryEntriesEnabled = false;
         }
-        // The early-entry channel needs its own explicit live opt-in: it is designed
-        // for live use (that is the whole point of entering earlier) but must never
-        // reach real money by accident of a copied config.
-        if (Trading.LiveTradingEnabled && !Strategy.EarlyEntryAllowedInLive)
+        // Early/exploratory channels are diagnostic only in live spot trading. Weak
+        // scores below the firm threshold must never reach real money.
+        if (Trading.LiveTradingEnabled)
         {
             Strategy.EarlyEntryEnabled = false;
+            Strategy.EarlyEntryAllowedInLive = false;
+            Strategy.ExploratoryEntriesEnabled = false;
+            Strategy.ExploratoryAllowedInLive = false;
         }
         // Live entries must never bypass the anti-lag guard via missing history: force
         // the warm-up requirement on whenever live trading is enabled. The ONLY way
@@ -244,6 +274,8 @@ internal sealed class BotConfiguration
         PositionExit.AtrPeriod = Math.Max(1, PositionExit.AtrPeriod);
         PositionExit.StopLossAtrMultiplier = Math.Max(0m, PositionExit.StopLossAtrMultiplier);
         PositionExit.TakeProfitAtrMultiplier = Math.Max(0m, PositionExit.TakeProfitAtrMultiplier);
+        PositionExit.MinStopAtrFloor = Math.Max(0m, PositionExit.MinStopAtrFloor);
+        PositionExit.MinTpVsCostMult = Math.Max(0m, PositionExit.MinTpVsCostMult);
         Strategy.MinTakeProfitToFrictionRatio = Math.Max(0m, Strategy.MinTakeProfitToFrictionRatio);
         PositionExit.FixedStopLossPercent = PositionExit.StopLossPercent is > 0m
             ? PositionExit.StopLossPercent.Value
@@ -309,6 +341,11 @@ internal sealed class BotConfiguration
         if (CandidateUniverse.Count == 0)
         {
             CandidateUniverse = DefaultCandidateUniverse();
+        }
+
+        if (!CandidateUniverse.Any(item => item.Pair.Equals("XBT/EUR", StringComparison.OrdinalIgnoreCase)))
+        {
+            CandidateUniverse.Add(new InstrumentOptions { Pair = "XBT/EUR", KrakenPair = "XBTEUR", Venue = "Kraken", Enabled = true });
         }
     }
 
@@ -376,7 +413,36 @@ internal sealed class RiskOptions
     public decimal MaxDailyLossEur { get; set; } = 10m;
     public int MaxOpenPositions { get; set; } = 1;
     public decimal MaxTotalExposureEur { get; set; } = 0m;
+    public decimal MaxConcurrentOpenRisk { get; set; } = 1.5m;
     public bool KillSwitch { get; set; } = false;
+}
+
+internal sealed class FeeOptions
+{
+    // Percent units: 0.25 = 0.25%.
+    public decimal MakerPct { get; set; } = 0.25m;
+    public decimal TakerPct { get; set; } = 0.40m;
+}
+
+internal sealed class EntryOptions
+{
+    public int MakerFillTimeoutSec { get; set; } = 60;
+    public int MakerRepegs { get; set; } = 1;
+}
+
+internal sealed class FilterOptions
+{
+    public decimal MinQuoteVolume24h { get; set; } = 50_000m;
+    public decimal MinDepthMultiple { get; set; } = 5m;
+    public decimal MaxExitImpactPct { get; set; } = 0.5m;
+    public decimal SlippageBufferPct { get; set; } = 0.10m;
+}
+
+internal sealed class BtcRegimeOptions
+{
+    public int BtcTrendMa { get; set; } = 50;
+    public int BtcCrashLookback { get; set; } = 4;
+    public decimal BtcCrashPct { get; set; } = 2.0m;
 }
 
 internal sealed class PositionSizingOptions
@@ -457,6 +523,8 @@ internal sealed class PositionExitOptions
     public int AtrPeriod { get; set; } = 14;
     public decimal StopLossAtrMultiplier { get; set; } = 2.0m;
     public decimal TakeProfitAtrMultiplier { get; set; } = 3.0m;
+    public decimal MinStopAtrFloor { get; set; } = 1.5m;
+    public decimal MinTpVsCostMult { get; set; } = 3.0m;
     public decimal FixedStopLossPercent { get; set; } = 2.5m;
     public decimal FixedTakeProfitPercent { get; set; } = 2.0m;
 

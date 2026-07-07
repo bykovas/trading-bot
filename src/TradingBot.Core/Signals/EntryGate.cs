@@ -48,6 +48,9 @@ public static class EntryRejection
         "EARLY_ENTRY_RANK" => EarlyEntryRank,
         "MARKET_REGIME" => MarketRegime,
         "FRICTION_BLOCK" => FrictionTooHigh,
+        "ENTRY_INVALID_SPREAD" or "ENTRY_INVALID_REFERENCE_PRICE" or "ENTRY_ATR_MISSING" or "ENTRY_ATR_STALE" or "ENTRY_COST_INVALID" or "ENTRY_EXITS_INVALID" => InvalidMarketData,
+        "ENTRY_VOLUME" or "ENTRY_DEPTH_MISSING" or "ENTRY_DEPTH" or "ENTRY_EXIT_DEPTH" => LowLiquidity,
+        "ENTRY_OPEN_RISK_UNSAFE" or "ENTRY_OPEN_RISK_CAP" => RiskLimits,
         "MAX_POSITIONS" => MaxPositions,
         _ => RiskLimits
     };

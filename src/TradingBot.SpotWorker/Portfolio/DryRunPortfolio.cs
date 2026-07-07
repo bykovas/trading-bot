@@ -11,12 +11,24 @@ internal sealed class DryRunPortfolio(
     IDryRunPortfolioStore? store = null,
     IClock? clock = null,
     StrategyOptions? strategy = null,
-    CorrelationRiskOptions? correlationRisk = null)
+    CorrelationRiskOptions? correlationRisk = null,
+    BotConfiguration? fullConfig = null)
 {
     private readonly IDryRunPortfolioStore _store = store ?? new FileDryRunPortfolioStore(options);
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly StrategyOptions _strategy = strategy ?? new StrategyOptions();
     private readonly CorrelationRiskOptions _correlationRisk = correlationRisk ?? new CorrelationRiskOptions();
+    private readonly bool _strictEntrySafety = fullConfig is not null;
+    private readonly BotConfiguration _fullConfig = fullConfig ?? new BotConfiguration
+    {
+        DryRun = options,
+        Portfolio = initialPortfolio,
+        ExecutionPolicy = executionPolicy,
+        PositionExit = positionExit,
+        PositionSizing = positionSizing,
+        Strategy = strategy ?? new StrategyOptions(),
+        CorrelationRisk = correlationRisk ?? new CorrelationRiskOptions()
+    };
     private readonly IReadOnlyDictionary<string, string> _pairToGroup =
         CorrelationRiskResolver.BuildPairToGroup(correlationRisk ?? new CorrelationRiskOptions());
     private readonly ISet<string> _highBetaGroups =
@@ -274,8 +286,48 @@ internal sealed class DryRunPortfolio(
 
             // Modeled fill is always computed (it is the committed fill in virtual /
             // validate-only mode and the drift baseline next to a REAL live fill).
-            var modeledBuyPrice = CalculateBuyPrice(marketState);
-            var feeRate = FeeRate;
+            var safety = _strictEntrySafety
+                ? EntrySafety.EvaluateNewLong(marketState, state, _fullConfig, proposal.TargetNotionalEur, now)
+                : null;
+            if (safety is null)
+            {
+                var legacyLevels = PositionExitLevelCalculator.Calculate("LONG", marketState.BestBid, marketState.Candles, positionExit);
+                safety = new EntrySafetyResult(
+                    true,
+                    null,
+                    legacyLevels.Reason,
+                    legacyLevels.EntryAtr ?? 0m,
+                    legacyLevels.EntryAtr is { } atr && marketState.BestBid > 0m ? atr / marketState.BestBid * 100m : 0m,
+                    marketState.BestBid,
+                    marketState.Candles.Count > 0 ? marketState.Candles[^1].OpenTime : null,
+                    legacyLevels.StopLossPrice is { } sl ? (marketState.BestBid - sl) / marketState.BestBid * 100m : 0m,
+                    legacyLevels.TakeProfitPrice is { } tp ? (tp - marketState.BestBid) / marketState.BestBid * 100m : 0m,
+                    legacyLevels.StopLossPrice ?? 0m,
+                    legacyLevels.TakeProfitPrice ?? 0m,
+                    0m,
+                    0m,
+                    0m,
+                    0m,
+                    0m,
+                    0m,
+                    0m,
+                    0m);
+            }
+            if (!safety.Approved)
+            {
+                return BuildAction(
+                    "WOULD_BUY_BLOCKED",
+                    safety.Reason,
+                    proposal,
+                    position,
+                    beforeCash,
+                    beforeValue,
+                    state,
+                    holdReasonCode: safety.RejectionCode);
+            }
+
+            var modeledBuyPrice = marketState.BestBid;
+            var feeRate = MakerFeeRate;
             var modeledGross = proposal.TargetNotionalEur / (1m + feeRate);
             var modeledFee = proposal.TargetNotionalEur - modeledGross;
 
@@ -300,31 +352,6 @@ internal sealed class DryRunPortfolio(
                 fillSource = "MODELED";
             }
 
-            var exitLevels = PositionExitLevelCalculator.Calculate("LONG", buyPrice, marketState.Candles, positionExit);
-
-            // Trade-economics gate: friction filters ENTRIES, it never widens the
-            // stop. If the calculated take-profit distance cannot pay for the round
-            // trip several times over, the achievable win is too small for the trade
-            // to have positive expectancy — skip it instead of risking a full stop.
-            if (_strategy.MinTakeProfitToFrictionRatio > 0m && exitLevels.TakeProfitPrice is { } takeProfitPrice)
-            {
-                var frictionPercent = RoundTripFrictionPercent(marketState);
-                var takeProfitDistancePercent = (takeProfitPrice - buyPrice) / buyPrice * 100m;
-                var requiredPercent = _strategy.MinTakeProfitToFrictionRatio * frictionPercent;
-                if (frictionPercent > 0m && takeProfitDistancePercent < requiredPercent)
-                {
-                    return BuildAction(
-                        "WOULD_BUY_BLOCKED",
-                        $"friction gate: take-profit distance {takeProfitDistancePercent:0.###}% is below {_strategy.MinTakeProfitToFrictionRatio:0.##}x round-trip friction {frictionPercent:0.###}% (required {requiredPercent:0.###}%); achievable win cannot pay the costs",
-                        proposal,
-                        position,
-                        beforeCash,
-                        beforeValue,
-                        state,
-                        holdReasonCode: "FRICTION_BLOCK");
-                }
-            }
-
             if (quantity <= 0m)
             {
                 return BuildAction("WOULD_BUY_BLOCKED", "calculated quantity is zero", proposal, position, beforeCash, beforeValue, state);
@@ -342,10 +369,11 @@ internal sealed class DryRunPortfolio(
                 OpenedAtUtc = now,
                 LastActionAtUtc = now,
                 EntryScore = proposal.Score,
-                ExitMode = exitLevels.ExitMode,
-                EntryAtr = exitLevels.EntryAtr,
-                StopLossPrice = exitLevels.StopLossPrice,
-                TakeProfitPrice = exitLevels.TakeProfitPrice
+                ExitMode = PositionExitOptions.ModeAtr,
+                EntryAtr = safety.Atr,
+                StopLossPrice = buyPrice * (1m - safety.StopDistancePercent / 100m),
+                TakeProfitPrice = buyPrice * (1m + safety.TakeProfitDistancePercent / 100m),
+                RoundTripCostEstimatePct = safety.RoundTripCostEstimatePct
             };
 
             if (options.ApplyVirtualFills)
@@ -360,7 +388,7 @@ internal sealed class DryRunPortfolio(
             var fillLabel = fillSource == "REAL" ? "exchange fill" : "fill ask+slippage";
             var buyAction = BuildAction(
                 "WOULD_BUY",
-                $"open long ({fillSource}): gross EUR {grossNotional:0.####}, fee EUR {buyFee:0.####}, {fillLabel} {buyPrice:0.####}; {exitLevels.Reason}; SL {exitLevels.StopLossPrice:0.####}, TP {exitLevels.TakeProfitPrice:0.####}",
+                $"open long ({fillSource}): gross EUR {grossNotional:0.####}, fee EUR {buyFee:0.####}, maker fill {buyPrice:0.####}; {safety.Reason}; stopDistance={safety.StopDistancePercent:0.###}% takeProfitDistance={safety.TakeProfitDistancePercent:0.###}% SL {newPosition.StopLossPrice:0.####}, TP {newPosition.TakeProfitPrice:0.####}",
                 proposal,
                 newPosition,
                 beforeCash,
@@ -373,6 +401,9 @@ internal sealed class DryRunPortfolio(
             buyAction.FillSource = fillSource;
             buyAction.ModeledFillPrice = modeledBuyPrice;
             buyAction.ModeledFeeEur = modeledFee;
+            buyAction.RoundTripCostEstimatePct = safety.RoundTripCostEstimatePct;
+            buyAction.OpenRiskEur = safety.ProjectedOpenRiskEur;
+            buyAction.QueueAheadEur = safety.QueueAheadEur;
             return buyAction;
         }
 
@@ -398,6 +429,7 @@ internal sealed class DryRunPortfolio(
         var ageSeconds = PositionAgeSeconds(position, now);
         var scoreDecay = UpdateScoreDecay(position, proposal);
 
+        var effectiveExit = EffectiveExitOptions(position);
         var evaluation = PositionExitPolicy.EvaluateHeldPosition(
             desiredLong,
             ageSeconds,
@@ -405,7 +437,7 @@ internal sealed class DryRunPortfolio(
             canValue,
             riskOptions.KillSwitch,
             executionPolicy,
-            positionExit,
+            effectiveExit,
             position.PeakPnlPercent,
             ExitHysteresisEnabled,
             scoreDecay,
@@ -433,7 +465,7 @@ internal sealed class DryRunPortfolio(
 
         var modeledSellPrice = CalculateSellPrice(marketState);
         var modeledGrossExit = position.Quantity * modeledSellPrice;
-        var modeledSellFee = modeledGrossExit * FeeRate;
+        var modeledSellFee = modeledGrossExit * TakerFeeRate;
 
         decimal sellPrice, grossExitValue, sellFee;
         string fillSource;
@@ -492,6 +524,39 @@ internal sealed class DryRunPortfolio(
         sellAction.ModeledFillPrice = modeledSellPrice;
         sellAction.ModeledFeeEur = modeledSellFee;
         return sellAction;
+    }
+
+    private PositionExitOptions EffectiveExitOptions(PortfolioPosition position)
+    {
+        if (position.RoundTripCostEstimatePct is not { } cost || cost <= 0m)
+        {
+            return positionExit;
+        }
+
+        return new PositionExitOptions
+        {
+            Mode = positionExit.Mode,
+            AtrPeriod = positionExit.AtrPeriod,
+            StopLossAtrMultiplier = positionExit.StopLossAtrMultiplier,
+            TakeProfitAtrMultiplier = positionExit.TakeProfitAtrMultiplier,
+            MinStopAtrFloor = positionExit.MinStopAtrFloor,
+            MinTpVsCostMult = positionExit.MinTpVsCostMult,
+            FixedStopLossPercent = positionExit.FixedStopLossPercent,
+            FixedTakeProfitPercent = positionExit.FixedTakeProfitPercent,
+            MinProfitToExitOnSignalFlipPercent = positionExit.MinProfitToExitOnSignalFlipPercent,
+            StopLossPercent = positionExit.StopLossPercent,
+            TakeProfitPercent = positionExit.TakeProfitPercent,
+            MaxHoldMinutes = positionExit.MaxHoldMinutes,
+            MaxSignalFlipLossExitPercent = positionExit.MaxSignalFlipLossExitPercent,
+            TrailingActivationPercent = Math.Max(positionExit.TrailingActivationPercent, cost + _fullConfig.Filters.SlippageBufferPct),
+            TrailingDistancePercent = Math.Max(positionExit.TrailingDistancePercent, 2m * cost),
+            ScoreDecayMinEntryScore = positionExit.ScoreDecayMinEntryScore,
+            ScoreDecayDefensiveScore = positionExit.ScoreDecayDefensiveScore,
+            ScoreDecayDefensiveCycles = positionExit.ScoreDecayDefensiveCycles,
+            ScoreDecayImmediateScore = positionExit.ScoreDecayImmediateScore,
+            PostEntryAdverseWindowMinutes = positionExit.PostEntryAdverseWindowMinutes,
+            PostEntryAdverseLossPercent = positionExit.PostEntryAdverseLossPercent
+        };
     }
 
     // Updates the per-position consecutive-low-score counter from this cycle's score
@@ -738,33 +803,22 @@ internal sealed class DryRunPortfolio(
     private static decimal CalculateTotalValue(PortfolioState state) =>
         state.CashEur + state.Positions.Sum(position => position.MarketValueEur);
 
-    private decimal FeeRate => options.TakerFeeBps / 10_000m;
+    private decimal TakerFeeRate => _fullConfig.Fees.TakerPct / 100m;
+
+    private decimal MakerFeeRate => _fullConfig.Fees.MakerPct / 100m;
 
     private decimal SlippageRate => options.SlippageBps / 10_000m;
 
     // Full cost of opening AND closing this position as a percent of price: taker
     // fee both ways, the current bid/ask spread once, and slippage both ways. This
     // is the floor the trade must clear before a single cent of profit exists.
-    private decimal RoundTripFrictionPercent(InstrumentMarketState marketState)
-    {
-        var bid = marketState.BestBid;
-        var ask = marketState.BestAsk;
-        var spreadPercent = bid > 0m && ask >= bid
-            ? (ask - bid) / ((ask + bid) / 2m) * 100m
-            : 0m;
-        return 2m * FeeRate * 100m + spreadPercent + 2m * SlippageRate * 100m;
-    }
-
-    private decimal CalculateBuyPrice(InstrumentMarketState marketState) =>
-        marketState.BestAsk * (1m + SlippageRate);
-
     private decimal CalculateSellPrice(InstrumentMarketState marketState) =>
         marketState.BestBid * (1m - SlippageRate);
 
     private decimal CalculateLiquidationValue(decimal quantity, InstrumentMarketState marketState)
     {
         var grossValue = quantity * CalculateSellPrice(marketState);
-        return grossValue - grossValue * FeeRate;
+        return grossValue - grossValue * TakerFeeRate;
     }
 
     private static DryRunAction BuildAction(
