@@ -668,6 +668,20 @@ internal sealed class DecisionWorker(
                 ? zeur
                 : balances.TryGetValue("EUR", out var eurBalance) ? eurBalance : 0m;
             Console.WriteLine($"broker-balance: EUR {eur:0.####} (auth OK, {balances.Count} assets)");
+
+            // Live cash drift check: the virtual CashEur should track the real EUR
+            // balance. A growing gap means fills/fees diverged from the model (or
+            // external deposits/withdrawals) — surfaced here, never auto-corrected.
+            if (LiveOrdersActive)
+            {
+                var state = dryRunPortfolio.Load();
+                var drift = eur - state.CashEur;
+                if (Math.Abs(drift) > 1m)
+                {
+                    Console.WriteLine(
+                        $"!!! cash-drift warning: Kraken EUR {eur:0.##} vs virtual cash {state.CashEur:0.##} (drift {drift:+0.##;-0.##} EUR) — reconcile against Kraken trade history !!!");
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -925,12 +939,19 @@ internal sealed class DecisionWorker(
             var previewAction = dryRunPortfolio.Apply(portfolio.Clone(), marketState, proposal, risk, config.Risk, newPositionsThisCycle, prepared.PriceAction);
             if (previewAction.Action is "WOULD_BUY" or "WOULD_SELL")
             {
-                brokerVerdict = await RunBrokerAsync(marketState, previewAction, cancellationToken);
+                var brokerOutcome = await RunBrokerAsync(marketState, previewAction, cancellationToken);
+                brokerVerdict = brokerOutcome.Verdict;
                 if (brokerVerdict is null || brokerVerdict.StartsWith("LIVE_SUBMITTED", StringComparison.Ordinal))
                 {
-                    // Exchange accepted (or no broker is wired at all): commit the same
-                    // deterministic action to the real portfolio state.
-                    dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk, newPositionsThisCycle, prepared.PriceAction);
+                    // Exchange accepted (or no broker is wired at all): commit to the
+                    // real portfolio state, preferring the exchange-confirmed fill
+                    // (average price / executed volume / real fee) over the model. A
+                    // failed fill query falls back to the modeled fill so a filled
+                    // order is never dropped; the record then carries fillSource=MODELED.
+                    var liveFill = brokerVerdict is null
+                        ? null
+                        : await TryFetchLiveFillAsync(proposal.Pair, brokerOutcome.TxIds, cancellationToken);
+                    dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk, newPositionsThisCycle, prepared.PriceAction, liveFill);
                 }
                 else
                 {
@@ -948,7 +969,7 @@ internal sealed class DecisionWorker(
         else
         {
             dryRunAction = dryRunPortfolio.Apply(portfolio, marketState, proposal, risk, config.Risk, newPositionsThisCycle, prepared.PriceAction);
-            brokerVerdict = await RunBrokerAsync(marketState, dryRunAction, cancellationToken);
+            brokerVerdict = (await RunBrokerAsync(marketState, dryRunAction, cancellationToken)).Verdict;
         }
 
         Console.WriteLine($"decision {proposal.Pair}:");
@@ -1029,23 +1050,32 @@ internal sealed class DecisionWorker(
         };
     }
 
+    // Verdict string plus the exchange transaction ids of a submitted live order,
+    // so the caller can read back the real fill. TxIds is empty for every
+    // non-LIVE_SUBMITTED outcome.
+    private sealed record BrokerRunOutcome(string? Verdict, IReadOnlyList<string> TxIds)
+    {
+        public static readonly BrokerRunOutcome None = new(null, Array.Empty<string>());
+        public static BrokerRunOutcome WithVerdict(string verdict) => new(verdict, Array.Empty<string>());
+    }
+
     // Sends the order to Kraken for the two actionable outcomes only. The validate
     // flag is derived from the live gate: validate=true (exchange checks the order
     // without executing) unless live trading is explicitly enabled and the kill
     // switch is off, in which case validate=false places a real market order.
-    private async Task<string?> RunBrokerAsync(
+    private async Task<BrokerRunOutcome> RunBrokerAsync(
         InstrumentMarketState marketState,
         DryRunAction action,
         CancellationToken cancellationToken)
     {
         if (broker is null)
         {
-            return null;
+            return BrokerRunOutcome.None;
         }
 
         if (action.Action != "WOULD_BUY" && action.Action != "WOULD_SELL")
         {
-            return null;
+            return BrokerRunOutcome.None;
         }
 
         var lotDecimals = marketState.PairRules?.LotDecimals ?? 8;
@@ -1054,12 +1084,12 @@ internal sealed class DecisionWorker(
 
         if (volume <= 0m)
         {
-            return "SKIPPED: computed volume is zero";
+            return BrokerRunOutcome.WithVerdict("SKIPPED: computed volume is zero");
         }
 
         if (orderMin > 0m && volume < orderMin)
         {
-            return $"SKIPPED: volume {volume} below pair ordermin {orderMin}";
+            return BrokerRunOutcome.WithVerdict($"SKIPPED: volume {volume} below pair ordermin {orderMin}");
         }
 
         var side = action.Action == "WOULD_BUY" ? "buy" : "sell";
@@ -1069,24 +1099,67 @@ internal sealed class DecisionWorker(
         // even though the risk gate already approved it upstream.
         if (!validate && side == "buy" && action.TargetNotionalEur > config.Risk.MaxOrderEur)
         {
-            return $"SKIPPED: live buy notional {action.TargetNotionalEur:0.##} exceeds MaxOrderEur {config.Risk.MaxOrderEur:0.##}";
+            return BrokerRunOutcome.WithVerdict($"SKIPPED: live buy notional {action.TargetNotionalEur:0.##} exceeds MaxOrderEur {config.Risk.MaxOrderEur:0.##}");
         }
 
         var result = await broker.AddOrderAsync(marketState.Instrument.KrakenPair, side, volume, validate, cancellationToken);
 
         if (!result.Success)
         {
-            return validate ? $"VALIDATE_REJECTED: {result.Error}" : $"LIVE_ERROR: {result.Error}";
+            return BrokerRunOutcome.WithVerdict(validate ? $"VALIDATE_REJECTED: {result.Error}" : $"LIVE_ERROR: {result.Error}");
         }
 
         if (validate)
         {
             var descr = string.IsNullOrWhiteSpace(result.Description) ? string.Empty : $" descr=\"{result.Description}\"";
-            return $"VALIDATED_OK side={side} vol={volume}{descr}";
+            return BrokerRunOutcome.WithVerdict($"VALIDATED_OK side={side} vol={volume}{descr}");
         }
 
         var txids = result.TxIds.Count > 0 ? string.Join(",", result.TxIds) : "(none)";
-        return $"LIVE_SUBMITTED side={side} vol={volume} txid={txids}";
+        return new BrokerRunOutcome($"LIVE_SUBMITTED side={side} vol={volume} txid={txids}", result.TxIds);
+    }
+
+    // How long to keep asking the exchange for the fill of a just-submitted market
+    // order. Market orders normally close within a second; the retry only covers
+    // API propagation lag.
+    private const int LiveFillQueryAttempts = 4;
+    private static readonly TimeSpan LiveFillQueryDelay = TimeSpan.FromMilliseconds(750);
+
+    // Reads back the REAL fill of a submitted live order. Returns null when the
+    // fill cannot be confirmed (no txid, order still open, API error) — the caller
+    // then commits the modeled fill and flags the record for manual reconciliation.
+    private async Task<LiveOrderFill?> TryFetchLiveFillAsync(
+        string pair,
+        IReadOnlyList<string> txIds,
+        CancellationToken cancellationToken)
+    {
+        if (broker is null || txIds.Count == 0)
+        {
+            return null;
+        }
+
+        var txid = txIds[0];
+        for (var attempt = 1; attempt <= LiveFillQueryAttempts; attempt++)
+        {
+            var query = await broker.QueryOrderAsync(txid, cancellationToken);
+            if (query is not null
+                && query.Status.Equals("closed", StringComparison.OrdinalIgnoreCase)
+                && query.VolumeExecuted > 0m
+                && query.AveragePrice > 0m)
+            {
+                Console.WriteLine(
+                    $"  live-fill {pair}: txid={txid} vol={query.VolumeExecuted} price={query.AveragePrice} cost={query.CostQuote:0.####} fee={query.FeeQuote:0.####}");
+                return new LiveOrderFill(query.AveragePrice, query.VolumeExecuted, query.CostQuote, query.FeeQuote);
+            }
+
+            if (attempt < LiveFillQueryAttempts)
+            {
+                await Task.Delay(LiveFillQueryDelay, cancellationToken);
+            }
+        }
+
+        Console.WriteLine($"  !!! live-fill {pair}: could not confirm fill for txid={txid} after {LiveFillQueryAttempts} attempts; committing MODELED fill (reconcile against Kraken history)");
+        return null;
     }
 
     private static decimal TruncateTo(decimal value, int decimals)

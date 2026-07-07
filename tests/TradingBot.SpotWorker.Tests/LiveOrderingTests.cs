@@ -58,6 +58,59 @@ public class LiveOrderingTests
         Assert.Equal("AAA/EUR", position.GetProperty("pair").GetString());
     }
 
+    [Fact]
+    public async Task Accepted_live_buy_commits_the_exchange_confirmed_fill()
+    {
+        var outputDirectory = TempDir();
+        var config = LiveConfig(outputDirectory);
+        // AddOrder accepts; QueryOrders reports a REAL fill that differs from the
+        // modeled ask+slippage fill (real price 1.41 vs modeled 1.40, real fee 0.03).
+        var worker = Worker(config, AcceptingBrokerWithFillHandler());
+
+        await worker.RunAsync(CancellationToken.None);
+
+        var cycle = LastCycle(outputDirectory);
+        var decision = cycle.GetProperty("decisions").EnumerateArray()
+            .Single(d => d.GetProperty("pair").GetString() == "AAA/EUR");
+        var action = decision.GetProperty("dryRunAction");
+
+        Assert.Equal("WOULD_BUY", action.GetProperty("action").GetString());
+        Assert.Equal("REAL", action.GetProperty("fillSource").GetString());
+        Assert.Equal(1.41m, action.GetProperty("fillPrice").GetDecimal());
+        Assert.Equal(0.03m, action.GetProperty("feeEur").GetDecimal());
+        // Modeled numbers stay on the record for drift analysis.
+        Assert.True(action.GetProperty("modeledFillPrice").GetDecimal() > 0m);
+
+        var position = Assert.Single(
+            cycle.GetProperty("portfolioAfter").GetProperty("positions").EnumerateArray().ToList());
+        Assert.Equal(1.41m, position.GetProperty("entryPrice").GetDecimal());
+        Assert.Equal(7.09m, position.GetProperty("quantity").GetDecimal());
+        // Cash reduced by the REAL cost + fee (9.9969 + 0.03), not the modeled 10.
+        var cashAfter = cycle.GetProperty("portfolioAfter").GetProperty("cashEur").GetDecimal();
+        var cashBefore = cycle.GetProperty("portfolioBefore").GetProperty("cashEur").GetDecimal();
+        Assert.Equal(10.0269m, cashBefore - cashAfter);
+    }
+
+    [Fact]
+    public async Task Live_buy_falls_back_to_modeled_fill_when_query_orders_fails()
+    {
+        var outputDirectory = TempDir();
+        var config = LiveConfig(outputDirectory);
+        var worker = Worker(config, AcceptingBrokerWithFailingQueryHandler());
+
+        await worker.RunAsync(CancellationToken.None);
+
+        var cycle = LastCycle(outputDirectory);
+        var decision = cycle.GetProperty("decisions").EnumerateArray()
+            .Single(d => d.GetProperty("pair").GetString() == "AAA/EUR");
+        var action = decision.GetProperty("dryRunAction");
+
+        Assert.Equal("WOULD_BUY", action.GetProperty("action").GetString());
+        Assert.Equal("MODELED", action.GetProperty("fillSource").GetString());
+        // Position still committed — a filled order must never be dropped.
+        Assert.Single(cycle.GetProperty("portfolioAfter").GetProperty("positions").EnumerateArray().ToList());
+    }
+
     // ------------------------------------------------------------------ plumbing
 
     private static string TempDir() =>
@@ -138,7 +191,26 @@ public class LiveOrderingTests
     private static HttpMessageHandler AcceptingBrokerHandler() => new StubHandler(path =>
         path.Contains("AddOrder", StringComparison.Ordinal)
             ? """{"error":[],"result":{"txid":["TX-TEST-1"],"descr":{"order":"buy 7.14 AAAEUR @ market"}}}"""
-            : """{"error":[],"result":{"ZEUR":"100.0"}}""");
+            : path.Contains("QueryOrders", StringComparison.Ordinal)
+                ? """{"error":[],"result":{"TX-TEST-1":{"status":"closed","vol_exec":"7.13","price":"1.40","cost":"9.982","fee":"0.026"}}}"""
+                : """{"error":[],"result":{"ZEUR":"100.0"}}""");
+
+    // AddOrder accepts; QueryOrders reports a closed order with a REAL fill that
+    // deliberately differs from the modeled ask+slippage fill.
+    private static HttpMessageHandler AcceptingBrokerWithFillHandler() => new StubHandler(path =>
+        path.Contains("AddOrder", StringComparison.Ordinal)
+            ? """{"error":[],"result":{"txid":["TX-TEST-2"],"descr":{"order":"buy 7.14 AAAEUR @ market"}}}"""
+            : path.Contains("QueryOrders", StringComparison.Ordinal)
+                ? """{"error":[],"result":{"TX-TEST-2":{"status":"closed","vol_exec":"7.09","price":"1.41","cost":"9.9969","fee":"0.03"}}}"""
+                : """{"error":[],"result":{"ZEUR":"100.0"}}""");
+
+    // AddOrder accepts; QueryOrders always errors, forcing the modeled fallback.
+    private static HttpMessageHandler AcceptingBrokerWithFailingQueryHandler() => new StubHandler(path =>
+        path.Contains("AddOrder", StringComparison.Ordinal)
+            ? """{"error":[],"result":{"txid":["TX-TEST-3"],"descr":{"order":"buy 7.14 AAAEUR @ market"}}}"""
+            : path.Contains("QueryOrders", StringComparison.Ordinal)
+                ? """{"error":["EQuery:Unknown order"]}"""
+                : """{"error":[],"result":{"ZEUR":"100.0"}}""");
 
     private sealed class StubHandler(Func<string, string> respond) : HttpMessageHandler
     {

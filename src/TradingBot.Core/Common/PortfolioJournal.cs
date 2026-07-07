@@ -204,6 +204,16 @@ public sealed class DryRunAction
     public decimal PortfolioValueBeforeEur { get; set; }
     public decimal PortfolioValueAfterEur { get; set; }
 
+    // Provenance of the committed fill on WOULD_BUY / WOULD_SELL records:
+    // "REAL"    -> exchange-confirmed fill (QueryOrders) was committed;
+    // "MODELED" -> the ask/bid+slippage simulation was committed (virtual mode,
+    //              validate-only mode, or live fallback when the fill query failed).
+    // Null on non-fill records. ModeledFillPrice/ModeledFeeEur keep the simulated
+    // numbers alongside a REAL fill so model-vs-exchange drift is queryable per trade.
+    public string? FillSource { get; set; }
+    public decimal? ModeledFillPrice { get; set; }
+    public decimal? ModeledFeeEur { get; set; }
+
     // Futures-only fields, nullable so spot rows keep their exact shape. Side is
     // LONG/SHORT exposure, ReduceOnly marks simulated exits that may only shrink
     // a position, ExitTriggerSource records which price stream fired a TP/SL.

@@ -103,6 +103,55 @@ internal sealed class KrakenBroker(HttpClient httpClient, KrakenOptions options)
         }
     }
 
+    public async Task<BrokerOrderQuery?> QueryOrderAsync(string txid, CancellationToken cancellationToken)
+    {
+        JsonDocument doc;
+        try
+        {
+            doc = await PostPrivateAsync(
+                "/0/private/QueryOrders",
+                new Dictionary<string, string> { ["txid"] = txid },
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException)
+        {
+            Console.WriteLine($"broker-query-order: {txid} failed ({ex.Message})");
+            return null;
+        }
+
+        using (doc)
+        {
+            var root = doc.RootElement;
+            var errors = ReadErrors(root);
+            if (errors.Count > 0)
+            {
+                Console.WriteLine($"broker-query-order: {txid} rejected ({string.Join(", ", errors)})");
+                return null;
+            }
+
+            if (!root.TryGetProperty("result", out var result)
+                || result.ValueKind != JsonValueKind.Object
+                || !result.TryGetProperty(txid, out var order)
+                || order.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            return new BrokerOrderQuery(
+                order.TryGetProperty("status", out var status) ? status.GetString() ?? string.Empty : string.Empty,
+                ReadDecimal(order, "vol_exec"),
+                ReadDecimal(order, "price"),
+                ReadDecimal(order, "cost"),
+                ReadDecimal(order, "fee"));
+        }
+    }
+
+    private static decimal ReadDecimal(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value)
+        && decimal.TryParse(value.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : 0m;
+
     private async Task<JsonDocument> PostPrivateAsync(
         string path,
         Dictionary<string, string> fields,
