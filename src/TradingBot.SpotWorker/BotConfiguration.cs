@@ -130,6 +130,9 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_STRATEGY_MAX_ENTRY_EXTENSION_PERCENT", value => config.Strategy.MaxEntryExtensionPercent = ParseDecimal(value, config.Strategy.MaxEntryExtensionPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MAX_ENTRY_RUNUP_PERCENT", value => config.Strategy.MaxEntryRunupPercent = ParseDecimal(value, config.Strategy.MaxEntryRunupPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_NEGATIVE_PRICE_ACTION_PENALTY_THRESHOLD_PERCENT", value => config.Strategy.NegativePriceActionPenaltyThresholdPercent = ParseDecimal(value, config.Strategy.NegativePriceActionPenaltyThresholdPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_REGIME_FILTER_MAX_BTC_DECLINE_PERCENT", value => config.Strategy.RegimeFilterMaxBtcDeclinePercent = ParseDecimal(value, config.Strategy.RegimeFilterMaxBtcDeclinePercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_REGIME_FILTER_MIN_BREADTH_PERCENT", value => config.Strategy.RegimeFilterMinBreadthPercent = ParseDecimal(value, config.Strategy.RegimeFilterMinBreadthPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_REGIME_FILTER_REFERENCE_PAIR", value => config.Strategy.RegimeFilterReferencePair = value);
         SetIfPresent("TRADINGBOT_STRATEGY_REQUIRE_PRICE_ACTION_DATA", value => config.Strategy.RequirePriceActionData = ParseBool(value, config.Strategy.RequirePriceActionData));
         SetIfPresent("TRADINGBOT_STRATEGY_MAX_EXPLORATORY_SPREAD_PERCENT", value => config.Strategy.MaxExploratorySpreadPercent = ParseDecimal(value, config.Strategy.MaxExploratorySpreadPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_PRICE_ACTION_MAX_SAMPLE_AGE_MINUTES", value => config.Strategy.PriceActionMaxSampleAgeMinutes = ParseInt(value, config.Strategy.PriceActionMaxSampleAgeMinutes));
@@ -187,6 +190,9 @@ internal sealed class BotConfiguration
         Strategy.ExploratoryMinPriceActionTrendPercent = Math.Max(0m, Strategy.ExploratoryMinPriceActionTrendPercent);
         Strategy.PriceActionMaxSampleAgeMinutes = Math.Max(0, Strategy.PriceActionMaxSampleAgeMinutes);
         Strategy.PriceActionHydrationMinutes = Math.Max(0, Strategy.PriceActionHydrationMinutes);
+        Strategy.RegimeFilterMaxBtcDeclinePercent = Math.Max(0m, Strategy.RegimeFilterMaxBtcDeclinePercent);
+        Strategy.RegimeFilterMinBreadthPercent = Math.Clamp(Strategy.RegimeFilterMinBreadthPercent, 0m, 100m);
+        Strategy.RegimeFilterReferencePair = string.IsNullOrWhiteSpace(Strategy.RegimeFilterReferencePair) ? "XBT/EUR" : Strategy.RegimeFilterReferencePair.Trim();
         Strategy.EarlyEntryMinScore = Math.Clamp(Strategy.EarlyEntryMinScore, 0m, 1m);
         Strategy.EarlyEntryMinEmaGapPercent = Math.Max(0m, Strategy.EarlyEntryMinEmaGapPercent);
         Strategy.EarlyEntryMaxRank = Math.Max(1, Strategy.EarlyEntryMaxRank);

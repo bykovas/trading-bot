@@ -173,11 +173,30 @@ internal sealed class DecisionWorker(
             entryIndex++;
         }
 
+        // Market-regime gate: a long-only book must not ADD risk into a broadly
+        // falling market. Evaluated once per cycle over the light snapshot; only new
+        // entries are blocked, phase-1 exits already ran above.
+        var regime = EvaluateMarketRegime(lightCandidates, config.Strategy);
+        if (regime.BlockNewEntries)
+        {
+            Console.WriteLine($"market-regime: BLOCKING new entries ({regime.Description})");
+        }
+
         var rankPosition = 0;
         foreach (var ranked in EntryRanking.Rank(buyCandidates.Select(candidate => candidate.Rank)))
         {
             rankPosition++;
             var prepared = buyCandidates.First(candidate => ReferenceEquals(candidate.Rank, ranked)).Prepared;
+
+            if (regime.BlockNewEntries)
+            {
+                decisionRecords.Add(BuildSkippedBuyRecord(
+                    prepared,
+                    workingPortfolio,
+                    "MARKET_REGIME",
+                    $"market-regime block: {regime.Description}"));
+                continue;
+            }
 
             // Exploratory candidates (admitted below the firm score threshold) only
             // trade from a top-N ranking slot; lower slots are recorded and skipped.
@@ -269,6 +288,53 @@ internal sealed class DecisionWorker(
             });
             Console.WriteLine($"dry-run-written state={dryRunPortfolio.GetStatePath()} events={dryRunPortfolio.GetEventsPath()}");
         }
+    }
+
+    internal sealed record MarketRegime(bool BlockNewEntries, string Description);
+
+    // Market-regime evaluation over the light snapshot. The regime is BAD (blocks
+    // new entries) when every ENABLED condition reads bad: reference-pair 24h
+    // decline at/beyond the cap, and positive-change breadth below the minimum.
+    // Pure and static so it can be unit tested on synthetic snapshots.
+    internal static MarketRegime EvaluateMarketRegime(
+        IReadOnlyList<InstrumentMarketState> lightCandidates,
+        StrategyOptions strategy)
+    {
+        var btcKnob = strategy.RegimeFilterMaxBtcDeclinePercent;
+        var breadthKnob = strategy.RegimeFilterMinBreadthPercent;
+        if (btcKnob <= 0m && breadthKnob <= 0m)
+        {
+            return new MarketRegime(false, "regime filter disabled");
+        }
+
+        decimal? referenceChange = lightCandidates
+            .FirstOrDefault(candidate =>
+                candidate.Instrument.Pair.Equals(strategy.RegimeFilterReferencePair, StringComparison.OrdinalIgnoreCase)
+                && candidate.LastPrice > 0m)
+            ?.ChangePercent;
+
+        var usable = lightCandidates
+            .Where(candidate => candidate.LastPrice > 0m && string.IsNullOrWhiteSpace(candidate.DataWarning))
+            .ToList();
+        decimal? breadthPercent = usable.Count > 0
+            ? decimal.Round(usable.Count(candidate => candidate.ChangePercent > 0m) * 100m / usable.Count, 1)
+            : null;
+
+        // A condition with missing data never reads bad: the filter blocks on
+        // evidence, not on ignorance.
+        var btcBad = btcKnob > 0m && referenceChange is { } change && change <= -btcKnob;
+        var breadthBad = breadthKnob > 0m && breadthPercent is { } breadth && breadth < breadthKnob;
+
+        var btcEnabled = btcKnob > 0m && referenceChange is not null;
+        var breadthEnabled = breadthKnob > 0m && breadthPercent is not null;
+        var block = (btcEnabled || breadthEnabled)
+            && (!btcEnabled || btcBad)
+            && (!breadthEnabled || breadthBad);
+
+        var description =
+            $"{strategy.RegimeFilterReferencePair} 24h {(referenceChange is { } c ? $"{c:+0.##;-0.##;0}%" : "n/a")} (cap -{btcKnob:0.##}%), " +
+            $"breadth {(breadthPercent is { } b ? $"{b:0.#}%" : "n/a")} positive (min {breadthKnob:0.##}%)";
+        return new MarketRegime(block, description);
     }
 
     // ---- Per-cycle entry funnel diagnostics ----
@@ -885,6 +951,7 @@ internal sealed class DecisionWorker(
             {
                 "EXPLORATORY_RANK" => EntryRejection.ExploratoryRank,
                 "EARLY_ENTRY_RANK" => EntryRejection.EarlyEntryRank,
+                "MARKET_REGIME" => EntryRejection.MarketRegime,
                 _ => EntryRejection.CyclePositionLimit
             },
             SpreadPercent = decimal.Round(prepared.Proposal.SpreadPercent, 3),

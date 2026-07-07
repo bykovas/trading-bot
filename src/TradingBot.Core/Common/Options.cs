@@ -169,6 +169,19 @@ public sealed class StrategyOptions
     // "any negative trend is penalized" behavior.
     public decimal NegativePriceActionPenaltyThresholdPercent { get; set; } = 0m;
 
+    // ---- Market-regime entry filter ----
+    // A long-only strategy must not open positions into a broadly falling market:
+    // in the forensic window 55 of 60 pairs were down 1.5-5% and every long entry
+    // lost. NEW entries are blocked when ALL enabled conditions read bad:
+    //  - the reference pair's 24h change is at or below -RegimeFilterMaxBtcDeclinePercent;
+    //  - the share of universe pairs with a positive 24h change is below
+    //    RegimeFilterMinBreadthPercent.
+    // A knob at 0 disables its condition; both at 0 disable the filter. Exits and
+    // held-position management are never affected.
+    public decimal RegimeFilterMaxBtcDeclinePercent { get; set; } = 0m;
+    public decimal RegimeFilterMinBreadthPercent { get; set; } = 0m;
+    public string RegimeFilterReferencePair { get; set; } = "XBT/EUR";
+
     // ---- Early-entry channel (forming EMA cross) ----
     // First-class entries taken BEFORE the EMA gap fully confirms: the gap must be
     // at least EarlyEntryMinEmaGapPercent, still WIDENING (gap velocity above
