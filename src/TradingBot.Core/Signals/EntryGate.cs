@@ -99,7 +99,8 @@ public static class EntryGate
         InstrumentMarketState marketState,
         PriceActionAssessment? priceAction,
         StrategyOptions strategy,
-        bool liveMode = false)
+        bool liveMode = false,
+        IndicatorSnapshot? indicators = null)
     {
         var notes = new List<SignalContribution>();
         var spreadPercent = SpreadPercentOf(marketState);
@@ -155,13 +156,24 @@ public static class EntryGate
         // ---- Layer B: quality filters ----
         if (!signal.AllowsLong)
         {
-            if (EarlyStructureExploratoryEligible(signal, priceAction, strategy, spreadPercent, liveMode))
+            // Early-entry channel: a forming (not yet fully confirmed) EMA cross that
+            // is still WIDENING, with RSI in the ideal band and price action no worse
+            // than a mild pullback. This is the deliberate answer to buying late: the
+            // entry happens while the cross develops instead of 30-60 minutes after
+            // the full confirmation stack agrees at the top of the move.
+            if (EarlyEntryEligible(signal, priceAction, indicators, strategy))
             {
+                var earlyExtension = ExtensionRejection(marketState, priceAction, indicators, strategy, notes);
+                if (earlyExtension is not null)
+                {
+                    return earlyExtension;
+                }
+
                 notes.Add(new SignalContribution(
-                    "Exploratory",
+                    "EarlyEntry",
                     0m,
-                    $"early-structure exploratory candidate: score {signal.Score:0.##}, partial bullish EMA gap {signal.BullishEmaGapPercent:0.###}% with {priceAction!.Direction} price action ({priceAction.TrendPercent:0.###}%); requires top-{strategy.ExploratoryMaxRank} rank"));
-                return new EntryGateResult("LONG_MICRO", true, null, spreadPercent, notes);
+                    $"early entry: forming EMA cross gap {signal.BullishEmaGapPercent:0.###}% widening at {signal.EmaGapVelocityPercent:+0.###;-0.###;0}%/bar, RSI {indicators?.Rsi:0.#} in band, price action {priceAction!.TrendPercent:+0.###;-0.###;0}%; requires top-{strategy.EarlyEntryMaxRank} rank"));
+                return new EntryGateResult("LONG_MICRO", false, null, spreadPercent, notes, EarlyEntry: true);
             }
 
             return Reject(EntryRejection.NoBullishSignal, spreadPercent, notes);
@@ -283,48 +295,84 @@ public static class EntryGate
             return Reject(EntryRejection.NegativeRecentPriceAction, spreadPercent, notes);
         }
 
+        // Anti-extension guard: by the time the full confirmation stack agrees, a
+        // price that already ran away from its own fast EMA (or gained several
+        // percent over the snapshot lookback) is a chase, not an entry.
+        var extensionRejection = ExtensionRejection(marketState, priceAction, indicators, strategy, notes);
+        if (extensionRejection is not null)
+        {
+            return extensionRejection;
+        }
+
         return new EntryGateResult("LONG_MICRO", exploratory, null, spreadPercent, notes);
+    }
+
+    // Rejects a would-be LONG entry whose price is already extended: either trading
+    // MaxEntryExtensionPercent above its own fast EMA, or up more than
+    // MaxEntryRunupPercent over the recent snapshot lookback. Returns null when the
+    // entry is not extended (or the guards are disabled / lack data).
+    private static EntryGateResult? ExtensionRejection(
+        InstrumentMarketState marketState,
+        PriceActionAssessment? priceAction,
+        IndicatorSnapshot? indicators,
+        StrategyOptions strategy,
+        List<SignalContribution> notes)
+    {
+        var spreadPercent = SpreadPercentOf(marketState);
+
+        if (strategy.MaxEntryExtensionPercent > 0m
+            && indicators?.FastEma is { } fastEma
+            && fastEma > 0m
+            && marketState.LastPrice > fastEma * (1m + strategy.MaxEntryExtensionPercent / 100m))
+        {
+            var extensionPercent = (marketState.LastPrice - fastEma) / fastEma * 100m;
+            notes.Add(new SignalContribution(
+                "ExtensionGuard",
+                0m,
+                $"entry rejected: price {marketState.LastPrice:0.######} is {extensionPercent:0.###}% above fast EMA {fastEma:0.######}, max extension {strategy.MaxEntryExtensionPercent:0.###}%"));
+            return Reject(EntryRejection.PriceExtended, spreadPercent, notes);
+        }
+
+        if (strategy.MaxEntryRunupPercent > 0m
+            && priceAction is { DataSufficient: true }
+            && priceAction.TrendPercent > strategy.MaxEntryRunupPercent)
+        {
+            notes.Add(new SignalContribution(
+                "ExtensionGuard",
+                0m,
+                $"entry rejected: recent snapshot run-up {priceAction.TrendPercent:0.###}% exceeds max {strategy.MaxEntryRunupPercent:0.###}% (the move already happened)"));
+            return Reject(EntryRejection.PriceExtended, spreadPercent, notes);
+        }
+
+        return null;
+    }
+
+    // Early-entry channel eligibility: a forming bullish EMA cross (gap above the
+    // early floor but below full confirmation) that is still widening, with RSI in
+    // the ideal band and KNOWN price action no worse than a mild pullback.
+    private static bool EarlyEntryEligible(
+        TechnicalSignal signal,
+        PriceActionAssessment? priceAction,
+        IndicatorSnapshot? indicators,
+        StrategyOptions strategy)
+    {
+        return strategy.EarlyEntryEnabled
+            && signal.HasBullishStructure
+            && signal.Score >= strategy.EarlyEntryMinScore
+            && signal.BullishEmaGapPercent is { } gap
+            && gap >= strategy.EarlyEntryMinEmaGapPercent
+            && signal.EmaGapVelocityPercent is { } velocity
+            && velocity > strategy.EarlyEntryMinGapVelocityPercent
+            && indicators?.Rsi is { } rsi
+            && rsi >= strategy.RsiIdealMin
+            && rsi <= strategy.RsiIdealMax
+            && priceAction is { DataSufficient: true }
+            && priceAction.TrendPercent >= strategy.EarlyEntryMinPriceActionTrendPercent;
     }
 
     private static bool HasPositiveContribution(TechnicalSignal signal, string name) =>
         signal.Contributions.Any(contribution =>
             contribution.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && contribution.Value > 0m);
-
-    private static bool EarlyStructureExploratoryEligible(
-        TechnicalSignal signal,
-        PriceActionAssessment? priceAction,
-        StrategyOptions strategy,
-        decimal spreadPercent,
-        bool liveMode)
-    {
-        if (!strategy.ExploratoryEntriesEnabled
-            || !signal.HasBullishStructure
-            || signal.Score < strategy.ExploratoryMinimumLongScore
-            || priceAction is not { IsPositive: true }
-            || priceAction.TrendPercent < strategy.ExploratoryMinPriceActionTrendPercent)
-        {
-            return false;
-        }
-
-        if (signal.BullishEmaGapPercent is not { } gap
-            || gap < strategy.ExploratoryMinBullishEmaGapPercent)
-        {
-            return false;
-        }
-
-        if (signal.EmaGapVelocityPercent is not { } velocity
-            || velocity < strategy.ExploratoryMinEmaGapVelocityPercent)
-        {
-            return false;
-        }
-
-        if (strategy.MaxExploratorySpreadPercent > 0m && spreadPercent > strategy.MaxExploratorySpreadPercent)
-        {
-            return false;
-        }
-
-        return HasPositiveContribution(signal, "Momentum") || signal.VolumeConfirmed;
-    }
 
     private static EntryGateResult Reject(string reason, decimal spreadPercent, List<SignalContribution> notes) =>
         new("NONE", false, reason, spreadPercent, notes);

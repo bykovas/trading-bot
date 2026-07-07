@@ -191,6 +191,19 @@ internal sealed class DecisionWorker(
                 continue;
             }
 
+            // Early entries (forming EMA cross) are capped at their own, stricter
+            // ranking budget: the best candidate per cycle trades, the rest are
+            // recorded and skipped.
+            if (prepared.Proposal.EarlyEntryCandidate && rankPosition > config.Strategy.EarlyEntryMaxRank)
+            {
+                decisionRecords.Add(BuildSkippedBuyRecord(
+                    prepared,
+                    workingPortfolio,
+                    "EARLY_ENTRY_RANK",
+                    $"early-entry candidate skipped: ranked #{rankPosition}, only top {config.Strategy.EarlyEntryMaxRank} early entries may enter"));
+                continue;
+            }
+
             if (config.ExecutionPolicy.MaxNewPositionsPerCycle > 0
                 && newPositionsThisCycle >= config.ExecutionPolicy.MaxNewPositionsPerCycle)
             {
@@ -868,7 +881,12 @@ internal sealed class DecisionWorker(
                 PortfolioValueAfterEur = portfolio.TotalValueEur
             },
             Broker = null,
-            EntryRejectionReason = holdReasonCode == "EXPLORATORY_RANK" ? EntryRejection.ExploratoryRank : EntryRejection.CyclePositionLimit,
+            EntryRejectionReason = holdReasonCode switch
+            {
+                "EXPLORATORY_RANK" => EntryRejection.ExploratoryRank,
+                "EARLY_ENTRY_RANK" => EntryRejection.EarlyEntryRank,
+                _ => EntryRejection.CyclePositionLimit
+            },
             SpreadPercent = decimal.Round(prepared.Proposal.SpreadPercent, 3),
             PriceActionDirection = prepared.PriceAction?.Direction,
             PriceActionTrendPercent = prepared.PriceAction?.TrendPercent,

@@ -53,7 +53,7 @@ internal sealed class TechnicalDecisionEngine
         //   A. hard safety filters (spread, liquidity, tradability),
         //   B. quality filters (score thresholds, anti-lag price-action guard),
         //   C. ranking + portfolio-level gates run downstream in the worker/portfolio.
-        var gate = EntryGate.Evaluate(signal, marketState, priceAction, strategy, trading.LiveTradingEnabled);
+        var gate = EntryGate.Evaluate(signal, marketState, priceAction, strategy, trading.LiveTradingEnabled, indicators);
         contributions.AddRange(gate.Notes);
         var desiredPosition = gate.DesiredPosition;
         var rejectionReason = gate.RejectionReason;
@@ -61,7 +61,7 @@ internal sealed class TechnicalDecisionEngine
 
         if (desiredPosition == "LONG_MICRO")
         {
-            var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur);
+            var size = SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur, gate.EarlyEntry);
             targetNotional = size.TargetNotionalEur;
             contributions.Add(new SignalContribution("PositionSizing", 0m, size.Reason));
             if (targetNotional <= 0m)
@@ -89,7 +89,8 @@ internal sealed class TechnicalDecisionEngine
             signal.Score,
             signal.HasBullishStructure && !signal.AllowsLong
                 ? SelectPositionSize(signal, trading, positionSizing, risk, cashEur, currentExposureEur).TargetNotionalEur
-                : 0m);
+                : 0m,
+            EarlyEntryCandidate: gate.EarlyEntry && desiredPosition == "LONG_MICRO");
     }
 
     // Exit hysteresis for a held position (2.1). Returns the desired position plus a
@@ -219,7 +220,8 @@ internal sealed class TechnicalDecisionEngine
         PositionSizingOptions positionSizing,
         RiskOptions risk,
         decimal cashEur,
-        decimal currentExposureEur)
+        decimal currentExposureEur,
+        bool earlyEntry = false)
     {
         if (!positionSizing.Enabled)
         {
@@ -234,13 +236,18 @@ internal sealed class TechnicalDecisionEngine
             signal.Score >= positionSizing.StrongEmaGapScoreThreshold
             && signal.BullishEmaGapPercent >= positionSizing.StrongEmaGapPercent;
 
-        var target = veryStrongByScore
-            ? positionSizing.VeryStrongOrderEur
-            : strongByScore || strongByEmaGap
-                ? positionSizing.StrongOrderEur
-                : signal.Score >= positionSizing.BaseScoreThreshold
-                    ? positionSizing.BaseOrderEur
-                    : positionSizing.SmallOrderEur;
+        // Early entries take the BASE order regardless of their (by construction
+        // sub-firm) score: the channel's own gates are the qualification, and the
+        // score tiers would otherwise silently demote every early entry to small.
+        var target = earlyEntry
+            ? positionSizing.BaseOrderEur
+            : veryStrongByScore
+                ? positionSizing.VeryStrongOrderEur
+                : strongByScore || strongByEmaGap
+                    ? positionSizing.StrongOrderEur
+                    : signal.Score >= positionSizing.BaseScoreThreshold
+                        ? positionSizing.BaseOrderEur
+                        : positionSizing.SmallOrderEur;
 
         var effectiveMaxOrder = Math.Min(positionSizing.MaxOrderEur, risk.MaxOrderEur);
         target = Math.Min(target, effectiveMaxOrder);

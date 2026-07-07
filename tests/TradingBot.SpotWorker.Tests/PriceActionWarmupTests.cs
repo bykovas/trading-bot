@@ -253,16 +253,63 @@ public class PriceActionWarmupTests
     }
 
     [Fact]
-    public void Early_structure_exploratory_entries_require_configured_gap_velocity_and_trend()
+    public void Extended_price_above_fast_ema_rejects_even_a_firm_entry()
     {
         var strategy = Strategy();
-        strategy.ExploratoryEntriesEnabled = true;
-        strategy.ExploratoryMinimumLongScore = 0.60m;
-        strategy.ExploratoryMinBullishEmaGapPercent = 0.10m;
-        strategy.ExploratoryMinEmaGapVelocityPercent = 0m;
-        strategy.ExploratoryMinPriceActionTrendPercent = 0.50m;
+        strategy.MaxEntryExtensionPercent = 0.6m;
 
-        var strongRise = new PriceActionAssessment("TEST/EUR", 6, true, 1.006m, 0.60m, 1.000m, 0, 4, Now.AddMinutes(-25), Now);
+        // Firm signal, but last price is 1.0% above its own fast EMA — a chase.
+        var extendedIndicators = new IndicatorSnapshot(FastEma: 0.9901m, SlowEma: 0.9850m, Rsi: 55m);
+        var rejected = EntryGate.Evaluate(
+            Signal(0.95m, volumeConfirmed: true),
+            MarketState(bid: 0.9999m, ask: 1.0001m, last: 1.0m),
+            Positive(),
+            strategy,
+            indicators: extendedIndicators);
+        Assert.Equal("NONE", rejected.DesiredPosition);
+        Assert.Equal(EntryRejection.PriceExtended, rejected.RejectionReason);
+
+        // Price close to the fast EMA passes.
+        var closeIndicators = new IndicatorSnapshot(FastEma: 0.998m, SlowEma: 0.9920m, Rsi: 55m);
+        var admitted = EntryGate.Evaluate(
+            Signal(0.95m, volumeConfirmed: true),
+            MarketState(bid: 0.9999m, ask: 1.0001m, last: 1.0m),
+            Positive(),
+            strategy,
+            indicators: closeIndicators);
+        Assert.Equal("LONG_MICRO", admitted.DesiredPosition);
+    }
+
+    [Fact]
+    public void Excessive_recent_runup_rejects_the_entry()
+    {
+        var strategy = Strategy();
+        strategy.MaxEntryRunupPercent = 2.5m;
+
+        // Snapshot series already gained 3% over the lookback: the move happened.
+        var ranUp = new PriceActionAssessment("TEST/EUR", 6, true, 1.03m, 3.0m, 1.012m, 0, 4, Now.AddMinutes(-25), Now);
+        var rejected = EntryGate.Evaluate(
+            Signal(0.95m, volumeConfirmed: true),
+            MarketState(bid: 1.0299m, ask: 1.0301m, last: 1.03m),
+            ranUp,
+            strategy);
+        Assert.Equal("NONE", rejected.DesiredPosition);
+        Assert.Equal(EntryRejection.PriceExtended, rejected.RejectionReason);
+    }
+
+    [Fact]
+    public void Early_entries_require_widening_gap_rsi_band_and_tolerate_mild_pullback()
+    {
+        var strategy = Strategy();
+        strategy.EarlyEntryEnabled = true;
+        strategy.EarlyEntryMinScore = 0.60m;
+        strategy.EarlyEntryMinEmaGapPercent = 0.10m;
+        strategy.EarlyEntryMinGapVelocityPercent = 0m;
+        strategy.EarlyEntryMinPriceActionTrendPercent = -0.2m;
+
+        var indicators = new IndicatorSnapshot(FastEma: 1.0010m, SlowEma: 1.0000m, Rsi: 55m);
+        // Mild pullback (-0.1%) is an entry point for the early channel, not weakness.
+        var mildPullback = new PriceActionAssessment("TEST/EUR", 6, true, 0.999m, -0.10m, 1.000m, 1, 4, Now.AddMinutes(-25), Now);
         var earlySignal = Signal(
             0.60m,
             volumeConfirmed: false,
@@ -270,24 +317,47 @@ public class PriceActionWarmupTests
             allowsLong: false,
             emaFullyConfirmed: false,
             bullishEmaGapPercent: 0.10m,
-            emaGapVelocityPercent: 0m);
+            emaGapVelocityPercent: 0.02m);
 
         var admitted = EntryGate.Evaluate(
             earlySignal,
             MarketState(bid: 0.9999m, ask: 1.0001m, last: 1.0m),
-            strongRise,
-            strategy);
+            mildPullback,
+            strategy,
+            indicators: indicators);
         Assert.Equal("LONG_MICRO", admitted.DesiredPosition);
-        Assert.True(admitted.Exploratory);
+        Assert.True(admitted.EarlyEntry);
+        Assert.False(admitted.Exploratory);
 
+        // A gap that stopped widening (velocity <= threshold) is not an early entry.
         var shrinkingGap = earlySignal with { EmaGapVelocityPercent = -0.01m };
-        var refused = EntryGate.Evaluate(
+        var refusedVelocity = EntryGate.Evaluate(
             shrinkingGap,
             MarketState(bid: 0.9999m, ask: 1.0001m, last: 1.0m),
-            strongRise,
-            strategy);
-        Assert.Equal("NONE", refused.DesiredPosition);
-        Assert.Equal(EntryRejection.NoBullishSignal, refused.RejectionReason);
+            mildPullback,
+            strategy,
+            indicators: indicators);
+        Assert.Equal("NONE", refusedVelocity.DesiredPosition);
+        Assert.Equal(EntryRejection.NoBullishSignal, refusedVelocity.RejectionReason);
+
+        // RSI outside the ideal band blocks the channel.
+        var refusedRsi = EntryGate.Evaluate(
+            earlySignal,
+            MarketState(bid: 0.9999m, ask: 1.0001m, last: 1.0m),
+            mildPullback,
+            strategy,
+            indicators: indicators with { Rsi = 70m });
+        Assert.Equal("NONE", refusedRsi.DesiredPosition);
+
+        // A genuinely falling series (below the -0.2% tolerance) blocks it too.
+        var falling = new PriceActionAssessment("TEST/EUR", 6, true, 0.995m, -0.50m, 1.000m, 3, 4, Now.AddMinutes(-25), Now);
+        var refusedFalling = EntryGate.Evaluate(
+            earlySignal,
+            MarketState(bid: 0.9999m, ask: 1.0001m, last: 1.0m),
+            falling,
+            strategy,
+            indicators: indicators);
+        Assert.Equal("NONE", refusedFalling.DesiredPosition);
     }
 
     [Fact]

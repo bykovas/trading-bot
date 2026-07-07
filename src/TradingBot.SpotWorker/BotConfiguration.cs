@@ -120,6 +120,16 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_STRATEGY_MIN_DAILY_VOLUME_EUR", value => config.Strategy.MinDailyVolumeEur = ParseDecimal(value, config.Strategy.MinDailyVolumeEur));
         SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_MAX_RANK", value => config.Strategy.ExploratoryMaxRank = ParseInt(value, config.Strategy.ExploratoryMaxRank));
         SetIfPresent("TRADINGBOT_STRATEGY_EXPLORATORY_ALLOWED_IN_LIVE", value => config.Strategy.ExploratoryAllowedInLive = ParseBool(value, config.Strategy.ExploratoryAllowedInLive));
+        SetIfPresent("TRADINGBOT_STRATEGY_EARLY_ENTRY_ENABLED", value => config.Strategy.EarlyEntryEnabled = ParseBool(value, config.Strategy.EarlyEntryEnabled));
+        SetIfPresent("TRADINGBOT_STRATEGY_EARLY_ENTRY_ALLOWED_IN_LIVE", value => config.Strategy.EarlyEntryAllowedInLive = ParseBool(value, config.Strategy.EarlyEntryAllowedInLive));
+        SetIfPresent("TRADINGBOT_STRATEGY_EARLY_ENTRY_MIN_SCORE", value => config.Strategy.EarlyEntryMinScore = ParseDecimal(value, config.Strategy.EarlyEntryMinScore));
+        SetIfPresent("TRADINGBOT_STRATEGY_EARLY_ENTRY_MIN_EMA_GAP_PERCENT", value => config.Strategy.EarlyEntryMinEmaGapPercent = ParseDecimal(value, config.Strategy.EarlyEntryMinEmaGapPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_EARLY_ENTRY_MIN_GAP_VELOCITY_PERCENT", value => config.Strategy.EarlyEntryMinGapVelocityPercent = ParseDecimal(value, config.Strategy.EarlyEntryMinGapVelocityPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_EARLY_ENTRY_MIN_PRICE_ACTION_TREND_PERCENT", value => config.Strategy.EarlyEntryMinPriceActionTrendPercent = ParseDecimal(value, config.Strategy.EarlyEntryMinPriceActionTrendPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_EARLY_ENTRY_MAX_RANK", value => config.Strategy.EarlyEntryMaxRank = ParseInt(value, config.Strategy.EarlyEntryMaxRank));
+        SetIfPresent("TRADINGBOT_STRATEGY_MAX_ENTRY_EXTENSION_PERCENT", value => config.Strategy.MaxEntryExtensionPercent = ParseDecimal(value, config.Strategy.MaxEntryExtensionPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_MAX_ENTRY_RUNUP_PERCENT", value => config.Strategy.MaxEntryRunupPercent = ParseDecimal(value, config.Strategy.MaxEntryRunupPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_NEGATIVE_PRICE_ACTION_PENALTY_THRESHOLD_PERCENT", value => config.Strategy.NegativePriceActionPenaltyThresholdPercent = ParseDecimal(value, config.Strategy.NegativePriceActionPenaltyThresholdPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_REQUIRE_PRICE_ACTION_DATA", value => config.Strategy.RequirePriceActionData = ParseBool(value, config.Strategy.RequirePriceActionData));
         SetIfPresent("TRADINGBOT_STRATEGY_MAX_EXPLORATORY_SPREAD_PERCENT", value => config.Strategy.MaxExploratorySpreadPercent = ParseDecimal(value, config.Strategy.MaxExploratorySpreadPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_PRICE_ACTION_MAX_SAMPLE_AGE_MINUTES", value => config.Strategy.PriceActionMaxSampleAgeMinutes = ParseInt(value, config.Strategy.PriceActionMaxSampleAgeMinutes));
@@ -177,11 +187,24 @@ internal sealed class BotConfiguration
         Strategy.ExploratoryMinPriceActionTrendPercent = Math.Max(0m, Strategy.ExploratoryMinPriceActionTrendPercent);
         Strategy.PriceActionMaxSampleAgeMinutes = Math.Max(0, Strategy.PriceActionMaxSampleAgeMinutes);
         Strategy.PriceActionHydrationMinutes = Math.Max(0, Strategy.PriceActionHydrationMinutes);
+        Strategy.EarlyEntryMinScore = Math.Clamp(Strategy.EarlyEntryMinScore, 0m, 1m);
+        Strategy.EarlyEntryMinEmaGapPercent = Math.Max(0m, Strategy.EarlyEntryMinEmaGapPercent);
+        Strategy.EarlyEntryMaxRank = Math.Max(1, Strategy.EarlyEntryMaxRank);
+        Strategy.MaxEntryExtensionPercent = Math.Max(0m, Strategy.MaxEntryExtensionPercent);
+        Strategy.MaxEntryRunupPercent = Math.Max(0m, Strategy.MaxEntryRunupPercent);
+        Strategy.NegativePriceActionPenaltyThresholdPercent = Math.Max(0m, Strategy.NegativePriceActionPenaltyThresholdPercent);
         // Exploratory sampling is a dry-run tool. Live trading keeps the firm
         // threshold unless the operator explicitly opts in.
         if (Trading.LiveTradingEnabled && !Strategy.ExploratoryAllowedInLive)
         {
             Strategy.ExploratoryEntriesEnabled = false;
+        }
+        // The early-entry channel needs its own explicit live opt-in: it is designed
+        // for live use (that is the whole point of entering earlier) but must never
+        // reach real money by accident of a copied config.
+        if (Trading.LiveTradingEnabled && !Strategy.EarlyEntryAllowedInLive)
+        {
+            Strategy.EarlyEntryEnabled = false;
         }
         // Live entries must never bypass the anti-lag guard via missing history: force
         // the warm-up requirement on whenever live trading is enabled. The ONLY way
