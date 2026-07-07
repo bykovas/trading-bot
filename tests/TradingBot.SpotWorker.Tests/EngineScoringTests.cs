@@ -112,11 +112,12 @@ public class EngineScoringTests
     }
 
     [Fact]
-    public void Partial_bullish_ema_structure_can_open_dry_run_exploratory_entry()
+    public void Partial_bullish_ema_structure_can_open_early_entry()
     {
         var strategy = Strategy();
-        strategy.ExploratoryEntriesEnabled = true;
-        strategy.ExploratoryMinimumLongScore = 0.70m;
+        strategy.EarlyEntryEnabled = true;
+        strategy.EarlyEntryMinScore = 0.60m;
+        strategy.EarlyEntryMinEmaGapPercent = 0.10m;
         var indicators = new IndicatorSnapshot(FastEma: 1.003m, SlowEma: 1.000m, Rsi: 55m);
         var rising = new PriceActionAssessment(
             "TEST/EUR",
@@ -130,11 +131,14 @@ public class EngineScoringTests
         var proposal = Decide(MarketState(volumeSpike: true), indicators, strategy, rising);
 
         Assert.Equal("LONG_MICRO", proposal.DesiredPosition);
-        Assert.True(proposal.ExploratoryCandidate);
+        Assert.True(proposal.EarlyEntryCandidate);
+        Assert.False(proposal.ExploratoryCandidate);
         Assert.Null(proposal.EntryRejectionReason);
         Assert.True(proposal.HasBullishStructure);
         Assert.False(proposal.EmaFullyConfirmed);
         Assert.True(proposal.EarlyEntryEligible);
+        // Early entries take the BASE order size, not the small sub-threshold tier.
+        Assert.Equal(10m, proposal.TargetNotionalEur);
     }
 
     [Fact]

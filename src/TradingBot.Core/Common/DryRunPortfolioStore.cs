@@ -486,7 +486,10 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 decision -> 'dryRunAction' ->> 'side' as side,
                 (decision -> 'dryRunAction' ->> 'reduceOnly')::boolean as reduce_only,
                 (decision -> 'dryRunAction' ->> 'leverage')::numeric as leverage,
-                decision -> 'dryRunAction' ->> 'exitTriggerSource' as exit_trigger_source
+                decision -> 'dryRunAction' ->> 'exitTriggerSource' as exit_trigger_source,
+                decision -> 'dryRunAction' ->> 'fillSource' as fill_source,
+                (decision -> 'dryRunAction' ->> 'modeledFillPrice')::numeric as modeled_fill_price,
+                (decision -> 'dryRunAction' ->> 'modeledFeeEur')::numeric as modeled_fee_eur
             from dry_run_cycles cycle
             cross join lateral jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision;
 

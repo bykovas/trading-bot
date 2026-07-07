@@ -58,6 +58,79 @@ public class DryRunPortfolioRiskGuardTests
 
     private static RiskEvaluation ApprovedRisk() => new(true, Array.Empty<string>());
 
+    // Portfolio wired for the friction gate: ATR exit mode plus a quote so the
+    // bid/ask spread contributes to round-trip friction. Candle range controls ATR.
+    private static DryRunPortfolio FrictionPortfolio(decimal minTakeProfitToFrictionRatio) => new(
+        new DryRunOptions
+        {
+            ApplyVirtualFills = true,
+            TakerFeeBps = 26m,
+            SlippageBps = 10m,
+            OutputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"))
+        },
+        new PortfolioOptions { StartingCashEur = 75m },
+        new ExecutionPolicyOptions(),
+        new PositionExitOptions { Mode = PositionExitOptions.ModeAtr, AtrPeriod = 3, StopLossAtrMultiplier = 2m, TakeProfitAtrMultiplier = 3m },
+        new PositionSizingOptions { Enabled = false },
+        strategy: new StrategyOptions { MinTakeProfitToFrictionRatio = minTakeProfitToFrictionRatio });
+
+    private static InstrumentMarketState RangedMarketState(decimal range) => new()
+    {
+        Instrument = new InstrumentOptions { Pair = "NEW/EUR", KrakenPair = "NEWEUR", Venue = "Kraken", Enabled = true },
+        Quote = new Quote(Bid: 99.95m, Ask: 100.05m, Last: 100m, VolumeToday: 1000m),
+        Candles = Enumerable.Range(0, 30)
+            .Select(index => new Candle(
+                DateTimeOffset.UtcNow.AddMinutes(-(30 - index)),
+                Open: 100m,
+                High: 100m + range / 2m,
+                Low: 100m - range / 2m,
+                Close: 100m,
+                Volume: 100m,
+                TradeCount: 10))
+            .ToArray()
+    };
+
+    [Fact]
+    public void Blocks_new_buy_when_take_profit_cannot_pay_the_round_trip_friction()
+    {
+        // Calm candles: ATR = 0.3 -> TP distance 0.9 (0.9%). Friction = 0.52% fees
+        // + 0.1% spread + 0.2% slippage = 0.82%; required 3 x 0.82 = 2.46% > 0.9%.
+        var portfolio = FrictionPortfolio(minTakeProfitToFrictionRatio: 3m);
+        var state = State();
+
+        var action = portfolio.Apply(
+            state,
+            RangedMarketState(range: 0.3m),
+            LongProposal(),
+            ApprovedRisk(),
+            new RiskOptions { MaxOrderEur = 15m, MaxOpenPositions = 6 },
+            newPositionsThisCycle: 0);
+
+        Assert.Equal("WOULD_BUY_BLOCKED", action.Action);
+        Assert.Equal("FRICTION_BLOCK", action.HoldReasonCode);
+        Assert.Contains("friction gate", action.Reason);
+        Assert.Empty(state.Positions);
+    }
+
+    [Fact]
+    public void Allows_new_buy_when_take_profit_clears_the_friction_requirement()
+    {
+        // Volatile candles: ATR = 1.5 -> TP distance 4.5 (4.5%) > 3 x friction 0.82%.
+        var portfolio = FrictionPortfolio(minTakeProfitToFrictionRatio: 3m);
+        var state = State();
+
+        var action = portfolio.Apply(
+            state,
+            RangedMarketState(range: 1.5m),
+            LongProposal(),
+            ApprovedRisk(),
+            new RiskOptions { MaxOrderEur = 15m, MaxOpenPositions = 6 },
+            newPositionsThisCycle: 0);
+
+        Assert.Equal("WOULD_BUY", action.Action);
+        Assert.Single(state.Positions);
+    }
+
     [Fact]
     public void Blocks_new_buy_when_cycle_new_position_limit_is_reached()
     {

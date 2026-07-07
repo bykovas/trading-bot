@@ -184,7 +184,9 @@ public static class SignalScorer
             // the bullish score loses credit so a stale breakout cannot look pristine.
             if (priceAction is { DataSufficient: true })
             {
-                if (priceAction.TrendPercent < 0m && strategy.NegativePriceActionPenalty > 0m)
+                // A mild pullback (trend between -threshold and 0) is a normal entry
+                // point, not weakness; only a genuinely falling series is penalized.
+                if (priceAction.TrendPercent < -strategy.NegativePriceActionPenaltyThresholdPercent && strategy.NegativePriceActionPenalty > 0m)
                 {
                     score -= strategy.NegativePriceActionPenalty;
                     contributions.Add(new SignalContribution(

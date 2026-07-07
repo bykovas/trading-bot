@@ -110,13 +110,14 @@ internal sealed class DryRunPortfolio(
         RiskEvaluation risk,
         RiskOptions riskOptions,
         int newPositionsThisCycle,
-        PriceActionAssessment? priceAction = null)
+        PriceActionAssessment? priceAction = null,
+        LiveOrderFill? liveFill = null)
     {
         // The correlation snapshot is resolved for the pair regardless of the decision
         // so its diagnostics land on every record (even holds and sells). It is used to
         // reject BUYs only; exits and holds are never blocked by the correlation layer.
         var correlation = BuildCorrelationSnapshot(state, proposal.Pair);
-        var action = ApplyCore(state, marketState, proposal, risk, riskOptions, newPositionsThisCycle, correlation, priceAction);
+        var action = ApplyCore(state, marketState, proposal, risk, riskOptions, newPositionsThisCycle, correlation, priceAction, liveFill);
         action.CorrelationGroup = correlation.Group;
         action.CorrelationGroupOpenPositions = correlation.GroupOpenPositions;
         action.CorrelationGroupExposureEur = correlation.GroupExposureEur;
@@ -131,7 +132,8 @@ internal sealed class DryRunPortfolio(
         RiskOptions riskOptions,
         int newPositionsThisCycle,
         CorrelationSnapshot correlation,
-        PriceActionAssessment? priceAction)
+        PriceActionAssessment? priceAction,
+        LiveOrderFill? liveFill)
     {
         var now = _clock.UtcNow;
         var position = state.Positions.FirstOrDefault(item => item.Pair.Equals(proposal.Pair, StringComparison.OrdinalIgnoreCase));
@@ -145,7 +147,7 @@ internal sealed class DryRunPortfolio(
         // blocked by it.
         if (position is not null)
         {
-            return ApplyHeldPosition(state, marketState, proposal, riskOptions, position, beforeCash, beforeValue, now, desiredLong, priceAction);
+            return ApplyHeldPosition(state, marketState, proposal, riskOptions, position, beforeCash, beforeValue, now, desiredLong, priceAction, liveFill);
         }
 
         if (!risk.Approved)
@@ -270,12 +272,59 @@ internal sealed class DryRunPortfolio(
                 return BuildAction("WOULD_BUY_BLOCKED", "last price is zero", proposal, position, beforeCash, beforeValue, state);
             }
 
-            var buyPrice = CalculateBuyPrice(marketState);
-            var exitLevels = PositionExitLevelCalculator.Calculate("LONG", buyPrice, marketState.Candles, positionExit);
+            // Modeled fill is always computed (it is the committed fill in virtual /
+            // validate-only mode and the drift baseline next to a REAL live fill).
+            var modeledBuyPrice = CalculateBuyPrice(marketState);
             var feeRate = FeeRate;
-            var grossNotional = proposal.TargetNotionalEur / (1m + feeRate);
-            var buyFee = proposal.TargetNotionalEur - grossNotional;
-            var quantity = decimal.Round(grossNotional / buyPrice, 10);
+            var modeledGross = proposal.TargetNotionalEur / (1m + feeRate);
+            var modeledFee = proposal.TargetNotionalEur - modeledGross;
+
+            decimal buyPrice, buyFee, grossNotional, totalCostEur, quantity;
+            string fillSource;
+            if (liveFill is not null && liveFill.VolumeExecuted > 0m && liveFill.AveragePrice > 0m)
+            {
+                buyPrice = liveFill.AveragePrice;
+                quantity = liveFill.VolumeExecuted;
+                grossNotional = liveFill.CostEur > 0m ? liveFill.CostEur : quantity * buyPrice;
+                buyFee = liveFill.FeeEur;
+                totalCostEur = grossNotional + buyFee;
+                fillSource = "REAL";
+            }
+            else
+            {
+                buyPrice = modeledBuyPrice;
+                grossNotional = modeledGross;
+                buyFee = modeledFee;
+                totalCostEur = proposal.TargetNotionalEur;
+                quantity = decimal.Round(grossNotional / buyPrice, 10);
+                fillSource = "MODELED";
+            }
+
+            var exitLevels = PositionExitLevelCalculator.Calculate("LONG", buyPrice, marketState.Candles, positionExit);
+
+            // Trade-economics gate: friction filters ENTRIES, it never widens the
+            // stop. If the calculated take-profit distance cannot pay for the round
+            // trip several times over, the achievable win is too small for the trade
+            // to have positive expectancy — skip it instead of risking a full stop.
+            if (_strategy.MinTakeProfitToFrictionRatio > 0m && exitLevels.TakeProfitPrice is { } takeProfitPrice)
+            {
+                var frictionPercent = RoundTripFrictionPercent(marketState);
+                var takeProfitDistancePercent = (takeProfitPrice - buyPrice) / buyPrice * 100m;
+                var requiredPercent = _strategy.MinTakeProfitToFrictionRatio * frictionPercent;
+                if (frictionPercent > 0m && takeProfitDistancePercent < requiredPercent)
+                {
+                    return BuildAction(
+                        "WOULD_BUY_BLOCKED",
+                        $"friction gate: take-profit distance {takeProfitDistancePercent:0.###}% is below {_strategy.MinTakeProfitToFrictionRatio:0.##}x round-trip friction {frictionPercent:0.###}% (required {requiredPercent:0.###}%); achievable win cannot pay the costs",
+                        proposal,
+                        position,
+                        beforeCash,
+                        beforeValue,
+                        state,
+                        holdReasonCode: "FRICTION_BLOCK");
+                }
+            }
+
             if (quantity <= 0m)
             {
                 return BuildAction("WOULD_BUY_BLOCKED", "calculated quantity is zero", proposal, position, beforeCash, beforeValue, state);
@@ -287,7 +336,7 @@ internal sealed class DryRunPortfolio(
                 Side = "LONG",
                 Quantity = quantity,
                 EntryPrice = buyPrice,
-                EntryNotionalEur = proposal.TargetNotionalEur,
+                EntryNotionalEur = totalCostEur,
                 LastPrice = marketState.LastPrice,
                 MarketValueEur = CalculateLiquidationValue(quantity, marketState),
                 OpenedAtUtc = now,
@@ -301,16 +350,17 @@ internal sealed class DryRunPortfolio(
 
             if (options.ApplyVirtualFills)
             {
-                state.CashEur -= proposal.TargetNotionalEur;
+                state.CashEur -= totalCostEur;
                 state.Positions.Add(newPosition);
                 RecordAction(state, proposal.Pair, buy: true, now);
                 state.UpdatedAt = now;
                 MarkToMarket(state, new[] { marketState });
             }
 
-            return BuildAction(
+            var fillLabel = fillSource == "REAL" ? "exchange fill" : "fill ask+slippage";
+            var buyAction = BuildAction(
                 "WOULD_BUY",
-                $"open virtual long: gross EUR {grossNotional:0.####}, fee EUR {buyFee:0.####}, fill ask+slippage {buyPrice:0.####}; {exitLevels.Reason}; SL {exitLevels.StopLossPrice:0.####}, TP {exitLevels.TakeProfitPrice:0.####}",
+                $"open long ({fillSource}): gross EUR {grossNotional:0.####}, fee EUR {buyFee:0.####}, {fillLabel} {buyPrice:0.####}; {exitLevels.Reason}; SL {exitLevels.StopLossPrice:0.####}, TP {exitLevels.TakeProfitPrice:0.####}",
                 proposal,
                 newPosition,
                 beforeCash,
@@ -319,7 +369,11 @@ internal sealed class DryRunPortfolio(
                 buyPrice,
                 buyFee,
                 grossNotional,
-                proposal.TargetNotionalEur);
+                totalCostEur);
+            buyAction.FillSource = fillSource;
+            buyAction.ModeledFillPrice = modeledBuyPrice;
+            buyAction.ModeledFeeEur = modeledFee;
+            return buyAction;
         }
 
         return BuildAction("NO_ORDER", "no current position and desired is none", proposal, position, beforeCash, beforeValue, state);
@@ -335,7 +389,8 @@ internal sealed class DryRunPortfolio(
         decimal beforeValue,
         DateTimeOffset now,
         bool desiredLong,
-        PriceActionAssessment? priceAction)
+        PriceActionAssessment? priceAction,
+        LiveOrderFill? liveFill = null)
     {
         var canValue = marketState.LastPrice > 0m;
         var pnlPercent = ConservativeUnrealizedPnlPercent(position, marketState, canValue);
@@ -376,9 +431,27 @@ internal sealed class DryRunPortfolio(
                 holdReasonCode: evaluation.HoldReasonCode);
         }
 
-        var sellPrice = CalculateSellPrice(marketState);
-        var grossExitValue = position.Quantity * sellPrice;
-        var sellFee = grossExitValue * FeeRate;
+        var modeledSellPrice = CalculateSellPrice(marketState);
+        var modeledGrossExit = position.Quantity * modeledSellPrice;
+        var modeledSellFee = modeledGrossExit * FeeRate;
+
+        decimal sellPrice, grossExitValue, sellFee;
+        string fillSource;
+        if (liveFill is not null && liveFill.AveragePrice > 0m)
+        {
+            sellPrice = liveFill.AveragePrice;
+            grossExitValue = liveFill.CostEur > 0m ? liveFill.CostEur : position.Quantity * sellPrice;
+            sellFee = liveFill.FeeEur;
+            fillSource = "REAL";
+        }
+        else
+        {
+            sellPrice = modeledSellPrice;
+            grossExitValue = modeledGrossExit;
+            sellFee = modeledSellFee;
+            fillSource = "MODELED";
+        }
+
         var exitValue = grossExitValue - sellFee;
         var realizedPnl = exitValue - position.EntryNotionalEur;
         var realizedPnlPercent = position.EntryNotionalEur == 0m ? 0m : realizedPnl / position.EntryNotionalEur * 100m;
@@ -398,10 +471,11 @@ internal sealed class DryRunPortfolio(
             MarkToMarket(state, new[] { marketState });
         }
 
-        var closeDetail = $"close virtual long: gross EUR {grossExitValue:0.####}, fee EUR {sellFee:0.####}, fill bid-slippage {sellPrice:0.####}, realized PnL EUR {realizedPnl:0.####} ({realizedPnlPercent:0.##}%)";
+        var sellFillLabel = fillSource == "REAL" ? "exchange fill" : "fill bid-slippage";
+        var closeDetail = $"close long ({fillSource}): gross EUR {grossExitValue:0.####}, fee EUR {sellFee:0.####}, {sellFillLabel} {sellPrice:0.####}, realized PnL EUR {realizedPnl:0.####} ({realizedPnlPercent:0.##}%)";
         var exitReasonCode = evaluation.ExitReason is { } reason ? PositionExitPolicy.ExitReasonCode(reason) : "SELL_SIGNAL_FLIP";
 
-        return BuildAction(
+        var sellAction = BuildAction(
             "WOULD_SELL",
             $"{evaluation.Reason} | {closeDetail}",
             proposal,
@@ -414,6 +488,10 @@ internal sealed class DryRunPortfolio(
             grossExitValue,
             exitValue,
             exitReasonCode: exitReasonCode);
+        sellAction.FillSource = fillSource;
+        sellAction.ModeledFillPrice = modeledSellPrice;
+        sellAction.ModeledFeeEur = modeledSellFee;
+        return sellAction;
     }
 
     // Updates the per-position consecutive-low-score counter from this cycle's score
@@ -664,6 +742,19 @@ internal sealed class DryRunPortfolio(
 
     private decimal SlippageRate => options.SlippageBps / 10_000m;
 
+    // Full cost of opening AND closing this position as a percent of price: taker
+    // fee both ways, the current bid/ask spread once, and slippage both ways. This
+    // is the floor the trade must clear before a single cent of profit exists.
+    private decimal RoundTripFrictionPercent(InstrumentMarketState marketState)
+    {
+        var bid = marketState.BestBid;
+        var ask = marketState.BestAsk;
+        var spreadPercent = bid > 0m && ask >= bid
+            ? (ask - bid) / ((ask + bid) / 2m) * 100m
+            : 0m;
+        return 2m * FeeRate * 100m + spreadPercent + 2m * SlippageRate * 100m;
+    }
+
     private decimal CalculateBuyPrice(InstrumentMarketState marketState) =>
         marketState.BestAsk * (1m + SlippageRate);
 
@@ -701,9 +792,7 @@ internal sealed class DryRunPortfolio(
             ExitReasonCode = exitReasonCode,
             DesiredPosition = proposal.DesiredPosition,
             TargetNotionalEur = proposal.TargetNotionalEur,
-            Quantity = action == "WOULD_BUY"
-                ? position?.Quantity ?? 0m
-                : position?.Quantity ?? 0m,
+            Quantity = position?.Quantity ?? 0m,
             EntryPrice = position?.EntryPrice ?? 0m,
             LastPrice = position?.LastPrice ?? 0m,
             FillPrice = fillPrice,
