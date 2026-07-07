@@ -81,6 +81,7 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_FEES_TAKER_PCT", value => config.Fees.TakerPct = ParseDecimal(value, config.Fees.TakerPct));
         SetIfPresent("TRADINGBOT_ENTRY_MAKER_FILL_TIMEOUT_SEC", value => config.Entry.MakerFillTimeoutSec = ParseInt(value, config.Entry.MakerFillTimeoutSec));
         SetIfPresent("TRADINGBOT_ENTRY_MAKER_REPEGS", value => config.Entry.MakerRepegs = ParseInt(value, config.Entry.MakerRepegs));
+        SetIfPresent("TRADINGBOT_ENTRY_MAX_BUY_SLIPPAGE_PERCENT", value => config.Entry.MaxBuySlippagePercent = ParseDecimal(value, config.Entry.MaxBuySlippagePercent));
         SetIfPresent("TRADINGBOT_FILTERS_MIN_QUOTE_VOLUME_24H", value => config.Filters.MinQuoteVolume24h = ParseDecimal(value, config.Filters.MinQuoteVolume24h));
         SetIfPresent("TRADINGBOT_FILTERS_MIN_DEPTH_MULTIPLE", value => config.Filters.MinDepthMultiple = ParseDecimal(value, config.Filters.MinDepthMultiple));
         SetIfPresent("TRADINGBOT_FILTERS_MAX_EXIT_IMPACT_PCT", value => config.Filters.MaxExitImpactPct = ParseDecimal(value, config.Filters.MaxExitImpactPct));
@@ -184,6 +185,7 @@ internal sealed class BotConfiguration
         Fees.TakerPct = Math.Max(0m, Fees.TakerPct);
         Entry.MakerFillTimeoutSec = Math.Clamp(Entry.MakerFillTimeoutSec, 1, Worker.LoopIntervalSeconds);
         Entry.MakerRepegs = Math.Max(0, Entry.MakerRepegs);
+        Entry.MaxBuySlippagePercent = Math.Max(0m, Entry.MaxBuySlippagePercent);
         Filters.MinQuoteVolume24h = Math.Max(0m, Filters.MinQuoteVolume24h);
         Filters.MinDepthMultiple = Math.Max(0m, Filters.MinDepthMultiple);
         Filters.MaxExitImpactPct = Math.Max(0m, Filters.MaxExitImpactPct);
@@ -415,8 +417,14 @@ internal sealed class FeeOptions
 
 internal sealed class EntryOptions
 {
-    public int MakerFillTimeoutSec { get; set; } = 60;
+    public int MakerFillTimeoutSec { get; set; } = 25;
     public int MakerRepegs { get; set; } = 1;
+
+    // Taker (IOC) fallback slippage cap for a BUY, in percent units (0.10 = 0.10%).
+    // The fallback IOC is allowed only when the fresh best ask is within
+    // originalMakerBid * (1 + MaxBuySlippagePercent / 100). Never interpreted as a
+    // fraction: 0.10 means ten basis points, not ten percent.
+    public decimal MaxBuySlippagePercent { get; set; } = 0.10m;
 }
 
 internal sealed class FilterOptions

@@ -24,6 +24,18 @@ internal interface ISpotBroker
         bool validate,
         CancellationToken cancellationToken);
 
+    // Immediate-or-cancel limit order: crosses the book up to the given limit price
+    // and cancels any unfilled remainder instead of resting. Used only by the BUY
+    // taker fallback after a maker miss; the price is a hard slippage cap, never a
+    // market order.
+    Task<BrokerOrderResult> AddLimitIocOrderAsync(
+        string krakenPair,
+        string side,
+        decimal volume,
+        decimal price,
+        bool validate,
+        CancellationToken cancellationToken);
+
     Task<BrokerOrderResult> CancelOrderAsync(string txid, CancellationToken cancellationToken);
 
     // Reads back the exchange's view of a submitted order so the portfolio can be

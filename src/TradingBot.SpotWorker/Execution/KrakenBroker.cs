@@ -124,6 +124,27 @@ internal sealed class KrakenBroker(HttpClient httpClient, KrakenOptions options)
         return AddOrderCoreAsync(fields, validate, cancellationToken);
     }
 
+    public Task<BrokerOrderResult> AddLimitIocOrderAsync(
+        string krakenPair,
+        string side,
+        decimal volume,
+        decimal price,
+        bool validate,
+        CancellationToken cancellationToken)
+    {
+        var fields = new Dictionary<string, string>
+        {
+            ["pair"] = krakenPair,
+            ["type"] = side,
+            ["ordertype"] = "limit",
+            ["timeinforce"] = "IOC",
+            ["volume"] = volume.ToString(CultureInfo.InvariantCulture),
+            ["price"] = price.ToString(CultureInfo.InvariantCulture)
+        };
+
+        return AddOrderCoreAsync(fields, validate, cancellationToken);
+    }
+
     public async Task<BrokerOrderResult> CancelOrderAsync(string txid, CancellationToken cancellationToken)
     {
         JsonDocument doc;
