@@ -1,0 +1,989 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BlynAI Capital - What-If Simulation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --font-display: "Space Grotesk", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+      --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+      --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+      --bg: #050505;
+      --panel: #11120f;
+      --line: rgba(246, 218, 160, 0.13);
+      --ink: #f6efe1;
+      --soft: #c8bba6;
+      --muted: #81786b;
+      --gold: #f5b84f;
+      --gold-soft: #ffd987;
+      --cream: #f7e6c1;
+      --green: #41eda0;
+      --red: #ff5367;
+      --blue: #6faeff;
+      --purple: #b9a6f5;
+      --amber: #f0a63a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font-body);
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      background:
+        linear-gradient(120deg, rgba(5, 5, 5, 0.98), rgba(14, 15, 12, 0.96) 52%, rgba(4, 15, 12, 0.94)),
+        radial-gradient(circle at 12% 8%, rgba(245, 184, 79, 0.11), transparent 32%),
+        radial-gradient(circle at 88% 12%, rgba(65, 237, 160, 0.08), transparent 35%),
+        var(--bg);
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 44px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 0 26px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand-lockup {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .bc-mark {
+      position: relative;
+      width: 40px;
+      height: 40px;
+      flex: none;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid rgba(246, 218, 160, 0.24);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 22px rgba(245, 184, 79, 0.18);
+    }
+
+    .brand-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .brand-copy .n {
+      margin: 0;
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 16px;
+      letter-spacing: 0;
+      line-height: 1.05;
+      color: var(--cream);
+      white-space: nowrap;
+    }
+
+    .brand-copy .n .ai { color: var(--gold); }
+
+    .brand-copy .s {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #9b87f5;
+      white-space: nowrap;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 38px;
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .82);
+      color: var(--soft);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .bot-switch {
+      display: inline-grid;
+      grid-template-columns: repeat(2, minmax(64px, 1fr));
+      align-items: center;
+      gap: 3px;
+      min-height: 38px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .82);
+    }
+
+    .bot-switch button {
+      min-height: 30px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .bot-switch button.active {
+      background: rgba(245, 184, 79, .16);
+      color: var(--gold-soft);
+      box-shadow: inset 0 0 0 1px rgba(245, 184, 79, .28);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 14px rgba(111, 174, 255, .5);
+    }
+
+    .dot.ok {
+      background: var(--green);
+      box-shadow: 0 0 14px rgba(65, 237, 160, .5);
+    }
+
+    .dot.bad {
+      background: var(--red);
+      box-shadow: 0 0 14px rgba(255, 83, 103, .5);
+    }
+
+    .dot.warn {
+      background: var(--amber);
+      box-shadow: 0 0 14px rgba(240, 166, 58, .5);
+    }
+
+    .api-links {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    .api-links a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .72);
+      color: var(--gold);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    .api-links a:hover {
+      border-color: rgba(245, 184, 79, .38);
+      background: rgba(245, 184, 79, .08);
+    }
+
+    /* ── Metric cards ── */
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: 24px 0;
+    }
+
+    .metric, .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012)), rgba(17,18,15,.9);
+      box-shadow: 0 22px 60px rgba(0,0,0,.28);
+    }
+
+    .metric {
+      min-height: 106px;
+      padding: 18px;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+
+    .value {
+      margin-top: 13px;
+      font-family: var(--font-mono);
+      font-size: clamp(22px, 2.6vw, 32px);
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+
+    .subvalue {
+      margin-top: 9px;
+      color: var(--soft);
+      font-size: 13px;
+    }
+
+    .positive { color: var(--green); }
+    .negative { color: var(--red); }
+    .gold { color: var(--gold); }
+
+    /* ── Panel ── */
+    .panel {
+      overflow: hidden;
+    }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(23, 24, 18, .75);
+    }
+
+    .panel-title {
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .updated {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+
+    /* ── Tables ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 13px 18px;
+      border-bottom: 1px solid rgba(246, 218, 160, .08);
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      background: rgba(0,0,0,.12);
+    }
+
+    td {
+      color: var(--soft);
+      font-size: 14px;
+    }
+
+    td.num, th.num {
+      text-align: right;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    .empty {
+      padding: 34px 18px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .warning {
+      display: none;
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      border: 1px solid rgba(245, 184, 79, .32);
+      border-radius: 8px;
+      background: rgba(245, 184, 79, .08);
+      color: var(--gold);
+      font-size: 13px;
+    }
+
+    /* ── Simulation form ── */
+    .sim-form {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: 24px 0;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field.wide {
+      grid-column: span 2;
+    }
+
+    .field label {
+      color: var(--cream);
+      font-size: 13px;
+      font-weight: 600;
+      font-family: var(--font-body);
+    }
+
+    .field .hint {
+      color: var(--muted);
+      font-size: 11px;
+      font-style: italic;
+      line-height: 1.35;
+    }
+
+    .field input[type="number"],
+    .field input[type="text"] {
+      width: 100%;
+      min-height: 38px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .82);
+      color: var(--ink);
+      font-family: var(--font-mono);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 150ms;
+    }
+
+    .field input:focus {
+      border-color: rgba(245, 184, 79, .52);
+    }
+
+    .field input::placeholder {
+      color: var(--muted);
+    }
+
+    .field-toggle {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field-toggle label {
+      color: var(--cream);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .field-toggle .hint {
+      color: var(--muted);
+      font-size: 11px;
+      font-style: italic;
+      line-height: 1.35;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 38px;
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      flex: none;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+    }
+
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      border-radius: 11px;
+      background: rgba(130, 121, 109, .3);
+      border: 1px solid var(--line);
+      cursor: pointer;
+      transition: background 200ms, border-color 200ms;
+    }
+
+    .toggle-track::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: transform 200ms, background 200ms;
+    }
+
+    .toggle-switch input:checked + .toggle-track {
+      background: rgba(245, 184, 79, .22);
+      border-color: rgba(245, 184, 79, .38);
+    }
+
+    .toggle-switch input:checked + .toggle-track::after {
+      transform: translateX(18px);
+      background: var(--gold);
+    }
+
+    .toggle-label {
+      color: var(--soft);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    /* ── Run button ── */
+    .actions {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      margin: 0 0 24px;
+    }
+
+    .btn-run {
+      min-height: 42px;
+      padding: 0 28px;
+      border: 1px solid rgba(245, 184, 79, .38);
+      border-radius: 8px;
+      background: rgba(245, 184, 79, .14);
+      color: var(--gold-soft);
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 150ms, border-color 150ms;
+    }
+
+    .btn-run:hover {
+      background: rgba(245, 184, 79, .22);
+      border-color: rgba(245, 184, 79, .52);
+    }
+
+    .btn-run:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+
+    .run-status {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 13px;
+    }
+
+    /* ── Results hidden until run ── */
+    #results {
+      display: none;
+    }
+
+    #results.visible {
+      display: block;
+    }
+
+    .results-gap {
+      margin-top: 18px;
+    }
+
+    @media (max-width: 960px) {
+      header { align-items: flex-start; flex-direction: column; }
+      .sim-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 560px) {
+      main { width: min(100% - 20px, 1180px); padding-top: 18px; }
+      .sim-form { grid-template-columns: 1fr; }
+      .field.wide { grid-column: span 1; }
+      .summary { grid-template-columns: 1fr; }
+      th, td { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <a class="brand-lockup" href="/dash.html" aria-label="BlynAI Capital">
+        <span class="bc-mark">
+          <svg width="30" height="30" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="bcMark" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#FFD987"/>
+                <stop offset="1" stop-color="#F5B84F"/>
+              </linearGradient>
+            </defs>
+            <path d="M16.5 9 L8.5 20 L16.5 31" stroke="url(#bcMark)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <path d="M23.5 9 L31.5 20 L23.5 31" stroke="url(#bcMark)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <circle cx="17" cy="17.5" r="2.1" fill="#FFD987"/>
+            <circle cx="23" cy="17.5" r="2.1" fill="#C8963B"/>
+            <circle cx="17" cy="22.5" r="2.1" fill="#C8963B"/>
+            <circle cx="23" cy="22.5" r="2.1" fill="#FFD987"/>
+          </svg>
+        </span>
+        <span class="brand-copy">
+          <span class="n">Blyn<span class="ai">AI</span> Capital</span>
+          <span class="s">BYKOVAS-FINANCE LAB</span>
+        </span>
+      </a>
+      <div class="status">
+        <span id="status-dot" class="dot"></span>
+        <span id="status-text">Ready</span>
+      </div>
+      <div class="bot-switch" role="group" aria-label="Bot instance">
+        <button type="button" data-bot-instance="spot-live">Spot Live</button>
+        <button type="button" data-bot-instance="futures-live">Futures Live</button>
+      </div>
+    </header>
+
+    <nav class="api-links" aria-label="Navigation links">
+      <a href="/dash.html">Portfolio dashboard</a>
+      <a href="/trades.html">Trades journal</a>
+      <a href="/cycles.html">Cycles table</a>
+      <a href="/market-snapshots.html">Market snapshots</a>
+    </nav>
+
+    <!-- ── Parameter form ── -->
+    <section class="sim-form" aria-label="Simulation parameters">
+      <div class="field">
+        <label for="f-hours">Last hours</label>
+        <input type="number" id="f-hours" value="24" min="1" max="720" step="1">
+        <span class="hint">How many hours back to simulate</span>
+      </div>
+      <div class="field">
+        <label for="f-spread">Spread %</label>
+        <input type="number" id="f-spread" value="0.30" min="0" max="10" step="0.01">
+        <span class="hint">Max spread % to allow an entry</span>
+      </div>
+      <div class="field">
+        <label for="f-score">Min score</label>
+        <input type="number" id="f-score" value="0.90" min="0" max="1" step="0.01">
+        <span class="hint">Min conviction score to enter (0..1)</span>
+      </div>
+      <div class="field">
+        <label for="f-sl">Stop-loss %</label>
+        <input type="number" id="f-sl" value="2.5" min="0.1" max="50" step="0.1">
+        <span class="hint">Stop-loss distance %</span>
+      </div>
+      <div class="field">
+        <label for="f-tp">Take-profit %</label>
+        <input type="number" id="f-tp" value="6" min="0.1" max="100" step="0.1">
+        <span class="hint">Take-profit distance %</span>
+      </div>
+      <div class="field">
+        <label for="f-hourly">Hourly limit</label>
+        <input type="number" id="f-hourly" value="2" min="1" max="50" step="1">
+        <span class="hint">Max entries per rolling 60 min</span>
+      </div>
+      <div class="field">
+        <label for="f-group">Group limit</label>
+        <input type="number" id="f-group" value="1" min="1" max="20" step="1">
+        <span class="hint">Max open positions per correlation group</span>
+      </div>
+      <div class="field">
+        <label for="f-notional">Notional EUR</label>
+        <input type="number" id="f-notional" value="10" min="1" max="10000" step="1">
+        <span class="hint">EUR per position</span>
+      </div>
+      <div class="field">
+        <label for="f-fee">Fee %</label>
+        <input type="number" id="f-fee" value="0.35" min="0" max="5" step="0.01">
+        <span class="hint">Round-trip fee %</span>
+      </div>
+      <div class="field wide">
+        <label for="f-exclude">Exclude pairs</label>
+        <input type="text" id="f-exclude" value="" placeholder="ZEC/EUR, SYN/EUR">
+        <span class="hint">Comma-separated pairs to skip</span>
+      </div>
+      <div class="field-toggle">
+        <label>BTC filter</label>
+        <div class="toggle-row">
+          <span class="toggle-switch">
+            <input type="checkbox" id="f-btc-filter">
+            <span class="toggle-track"></span>
+          </span>
+          <span class="toggle-label" id="btc-filter-label">Off</span>
+        </div>
+        <span class="hint">Block NEW entries while BTC regime = DOWNTREND</span>
+      </div>
+      <div class="field-toggle">
+        <label>Show trades</label>
+        <div class="toggle-row">
+          <span class="toggle-switch">
+            <input type="checkbox" id="f-trades">
+            <span class="toggle-track"></span>
+          </span>
+          <span class="toggle-label" id="trades-label">Off</span>
+        </div>
+        <span class="hint">Also show the full trade list</span>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button class="btn-run" id="btn-run" type="button">Run simulation</button>
+      <span class="run-status" id="run-status"></span>
+    </div>
+
+    <div id="warning" class="warning"></div>
+
+    <!-- ── Results ── -->
+    <div id="results">
+      <section class="summary" aria-label="Simulation results">
+        <div class="metric">
+          <div class="label">Trades</div>
+          <div id="r-trades" class="value gold">--</div>
+          <div id="r-wl" class="subvalue">W/L --</div>
+        </div>
+        <div class="metric">
+          <div class="label">Win rate</div>
+          <div id="r-winrate" class="value">--</div>
+          <div class="subvalue">Of closed trades</div>
+        </div>
+        <div class="metric">
+          <div class="label">Profit factor</div>
+          <div id="r-pf" class="value">--</div>
+          <div class="subvalue">Gross profit / gross loss</div>
+        </div>
+        <div class="metric">
+          <div class="label">Total PnL</div>
+          <div id="r-pnl" class="value">--</div>
+          <div id="r-avg" class="subvalue">avg/trade --</div>
+        </div>
+      </section>
+
+      <div id="r-window" class="updated" style="margin-bottom:18px"></div>
+
+      <!-- PnL by pair -->
+      <section class="panel results-gap">
+        <div class="panel-head">
+          <div class="panel-title">PnL by pair</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Pair</th>
+                <th class="num">Trades</th>
+                <th class="num">Wins</th>
+                <th class="num">PnL</th>
+              </tr>
+            </thead>
+            <tbody id="r-pair-body">
+              <tr><td class="empty" colspan="4">Run simulation first</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- PnL by regime -->
+      <section class="panel results-gap">
+        <div class="panel-head">
+          <div class="panel-title">PnL by BTC regime at entry</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Regime</th>
+                <th class="num">Trades</th>
+                <th class="num">Win rate</th>
+                <th class="num">PnL</th>
+              </tr>
+            </thead>
+            <tbody id="r-regime-body">
+              <tr><td class="empty" colspan="4">Run simulation first</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Full trade list (hidden unless toggled) -->
+      <section class="panel results-gap" id="trades-panel" style="display:none">
+        <div class="panel-head">
+          <div class="panel-title">Trades</div>
+          <div id="r-trade-count" class="updated"></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Pair</th>
+                <th>Entry</th>
+                <th class="num">Price in</th>
+                <th>Exit</th>
+                <th class="num">Price out</th>
+                <th class="num">%</th>
+                <th class="num">EUR</th>
+                <th>Type</th>
+                <th>Regime</th>
+                <th class="num">Score</th>
+              </tr>
+            </thead>
+            <tbody id="r-trades-body">
+              <tr><td class="empty" colspan="10">No trades</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/bot-status.js"></script>
+  <script>
+    // ── Bot instance toggle ──
+    const botButtons = Array.from(document.querySelectorAll("[data-bot-instance]"));
+    let currentBotInstance = "spot-live";
+    const botInstances = ["spot-live", "futures-live"];
+    function normalizeBotInstance(v) { return botInstances.includes(v) ? v : "spot-live"; }
+    function setBotInstance(v, persist) {
+      currentBotInstance = normalizeBotInstance(v);
+      botButtons.forEach(b => {
+        const active = b.dataset.botInstance === currentBotInstance;
+        b.classList.toggle("active", active);
+        b.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      if (persist) localStorage.setItem("tradingBot.simBotInstanceId", currentBotInstance);
+    }
+    (function initBotSelector() {
+      const fromUrl = new URLSearchParams(location.search).get("botInstanceId");
+      const saved = localStorage.getItem("tradingBot.simBotInstanceId");
+      setBotInstance(fromUrl || saved || "spot-live");
+      botButtons.forEach(b => b.addEventListener("click", () => setBotInstance(b.dataset.botInstance, true)));
+    })();
+
+    // ── Toggle labels ──
+    const btcFilterEl = document.getElementById("f-btc-filter");
+    const btcLabel = document.getElementById("btc-filter-label");
+    btcFilterEl.addEventListener("change", () => { btcLabel.textContent = btcFilterEl.checked ? "On" : "Off"; });
+    const tradesEl = document.getElementById("f-trades");
+    const tradesLabel = document.getElementById("trades-label");
+    tradesEl.addEventListener("change", () => { tradesLabel.textContent = tradesEl.checked ? "On" : "Off"; });
+
+    // ── Formatting ──
+    const eurFmt = new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const numFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
+
+    function money(v) { const n = Number(v); return Number.isFinite(n) ? eurFmt.format(n) : "--"; }
+    function signedMoney(v) { const n = Number(v); if (!Number.isFinite(n)) return "--"; return `${n >= 0 ? "+" : ""}${eurFmt.format(n)}`; }
+    function pct(v) { const n = Number(v); if (!Number.isFinite(n)) return "--"; return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`; }
+    function num(v) { const n = Number(v); return Number.isFinite(n) ? numFmt.format(n) : "--"; }
+    function pnlClass(v) { const n = Number(v); if (!Number.isFinite(n) || n === 0) return ""; return n > 0 ? "positive" : "negative"; }
+
+    function escapeHtml(s) {
+      return String(s ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+    }
+
+    function shortTime(iso) {
+      if (!iso) return "--";
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return "--";
+      const p = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/Vilnius", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+      }).formatToParts(d);
+      const b = Object.fromEntries(p.map(x => [x.type, x.value]));
+      return `${b.month}-${b.day} ${b.hour}:${b.minute}`;
+    }
+
+    // ── DOM refs ──
+    const els = {
+      statusDot: document.getElementById("status-dot"),
+      statusText: document.getElementById("status-text"),
+      warning: document.getElementById("warning"),
+      results: document.getElementById("results"),
+      rTrades: document.getElementById("r-trades"),
+      rWl: document.getElementById("r-wl"),
+      rWinrate: document.getElementById("r-winrate"),
+      rPf: document.getElementById("r-pf"),
+      rPnl: document.getElementById("r-pnl"),
+      rAvg: document.getElementById("r-avg"),
+      rWindow: document.getElementById("r-window"),
+      rPairBody: document.getElementById("r-pair-body"),
+      rRegimeBody: document.getElementById("r-regime-body"),
+      rTradesBody: document.getElementById("r-trades-body"),
+      rTradeCount: document.getElementById("r-trade-count"),
+      tradesPanel: document.getElementById("trades-panel"),
+      btnRun: document.getElementById("btn-run"),
+      runStatus: document.getElementById("run-status")
+    };
+
+    function setStatus(kind, text) {
+      els.statusDot.className = `dot ${kind === "ok" ? "ok" : kind === "bad" ? "bad" : kind === "warn" ? "warn" : ""}`;
+      els.statusText.textContent = text;
+    }
+
+    function setWarning(text) {
+      els.warning.style.display = text ? "block" : "none";
+      els.warning.textContent = text || "";
+    }
+
+    // ── Run simulation ──
+    async function runSimulation() {
+      els.btnRun.disabled = true;
+      els.runStatus.textContent = "Running...";
+      setWarning("");
+
+      const params = new URLSearchParams({
+        botInstanceId: currentBotInstance,
+        lastHours: document.getElementById("f-hours").value,
+        spread: document.getElementById("f-spread").value,
+        score: document.getElementById("f-score").value,
+        sl: document.getElementById("f-sl").value,
+        tp: document.getElementById("f-tp").value,
+        hourly: document.getElementById("f-hourly").value,
+        group: document.getElementById("f-group").value,
+        btcFilter: btcFilterEl.checked,
+        notional: document.getElementById("f-notional").value,
+        fee: document.getElementById("f-fee").value,
+        exclude: document.getElementById("f-exclude").value,
+        trades: tradesEl.checked
+      });
+
+      try {
+        const t0 = performance.now();
+        const resp = await fetch(`/api/simulate?${params}`, { cache: "no-store" });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+
+        if (data.warning) {
+          setWarning(data.warning);
+          els.results.classList.remove("visible");
+          els.runStatus.textContent = data.warning;
+          return;
+        }
+
+        renderResults(data, elapsed);
+        setStatus("ok", "Simulation complete");
+      } catch (err) {
+        setStatus("bad", "Simulation failed");
+        setWarning(err.message || "Failed to run simulation");
+        els.runStatus.textContent = "Error";
+      } finally {
+        els.btnRun.disabled = false;
+      }
+    }
+
+    function renderResults(data, elapsed) {
+      els.results.classList.add("visible");
+
+      els.rTrades.textContent = String(data.tradeCount);
+      els.rWl.textContent = `W ${data.wins} / L ${data.losses}`;
+      els.rWinrate.textContent = `${data.winRate.toFixed(0)}%`;
+      els.rWinrate.className = `value ${data.winRate >= 50 ? "positive" : data.winRate > 0 ? "negative" : ""}`;
+
+      const pf = data.profitFactor;
+      els.rPf.textContent = pf >= 9999 ? "∞" : pf.toFixed(2);
+      els.rPf.className = `value ${pf >= 1 ? "positive" : "negative"}`;
+
+      els.rPnl.textContent = signedMoney(data.totalPnl);
+      els.rPnl.className = `value ${pnlClass(data.totalPnl)}`;
+      els.rAvg.textContent = `avg/trade ${signedMoney(data.avgPerTrade)}`;
+
+      const ws = data.windowStart ? shortTime(data.windowStart) : "--";
+      const we = data.windowEnd ? shortTime(data.windowEnd) : "--";
+      els.rWindow.textContent = `${ws} → ${we} LT | ${data.cyclesProcessed} cycles | ${elapsed}s`;
+      els.runStatus.textContent = `${data.tradeCount} trades in ${elapsed}s`;
+
+      // PnL by pair
+      if (data.pnlByPair && data.pnlByPair.length) {
+        els.rPairBody.innerHTML = data.pnlByPair.map(r => `
+          <tr>
+            <td>${escapeHtml(r.pair)}</td>
+            <td class="num">${r.trades}</td>
+            <td class="num">${r.wins}</td>
+            <td class="num ${pnlClass(r.eur)}">${signedMoney(r.eur)}</td>
+          </tr>
+        `).join("");
+      } else {
+        els.rPairBody.innerHTML = '<tr><td class="empty" colspan="4">No trades</td></tr>';
+      }
+
+      // PnL by regime
+      if (data.pnlByRegime && data.pnlByRegime.length) {
+        els.rRegimeBody.innerHTML = data.pnlByRegime.map(r => `
+          <tr>
+            <td>${escapeHtml(r.regime)}</td>
+            <td class="num">${r.trades}</td>
+            <td class="num">${r.trades ? (r.wins / r.trades * 100).toFixed(0) + "%" : "--"}</td>
+            <td class="num ${pnlClass(r.eur)}">${signedMoney(r.eur)}</td>
+          </tr>
+        `).join("");
+      } else {
+        els.rRegimeBody.innerHTML = '<tr><td class="empty" colspan="4">No trades</td></tr>';
+      }
+
+      // Full trade list
+      if (data.trades && data.trades.length) {
+        els.tradesPanel.style.display = "";
+        els.rTradeCount.textContent = `${data.trades.length} trades`;
+        els.rTradesBody.innerHTML = data.trades.map(t => `
+          <tr>
+            <td>${escapeHtml(t.pair)}</td>
+            <td class="num">${shortTime(t.entryTime)}</td>
+            <td class="num">${num(t.entryPrice)}</td>
+            <td class="num">${shortTime(t.exitTime)}</td>
+            <td class="num">${num(t.exitPrice)}</td>
+            <td class="num ${pnlClass(t.pct)}">${pct(t.pct)}</td>
+            <td class="num ${pnlClass(t.eur)}">${signedMoney(t.eur)}</td>
+            <td>${escapeHtml(t.exit)}</td>
+            <td>${escapeHtml(t.regime)}</td>
+            <td class="num">${t.score.toFixed(2)}</td>
+          </tr>
+        `).join("");
+      } else {
+        els.tradesPanel.style.display = "none";
+      }
+    }
+
+    // ── Events ──
+    els.btnRun.addEventListener("click", runSimulation);
+
+    // Ctrl+Enter / Cmd+Enter to run
+    document.addEventListener("keydown", e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        runSimulation();
+      }
+    });
+
+    // Bot status badge
+    (async function() {
+      if (window.BlynaiBotStatus) {
+        await window.BlynaiBotStatus.updateBadge({ botInstanceId: currentBotInstance });
+      }
+    })();
+  </script>
+</body>
+</html>

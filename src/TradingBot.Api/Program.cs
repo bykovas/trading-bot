@@ -267,6 +267,64 @@ app.MapGet("/api/market-snapshots", async (
         items.Count == page.Limit ? page.Offset + page.Limit : null));
 });
 
+app.MapGet("/api/simulate", async (
+    string? botInstanceId,
+    int? lastHours,
+    double? spread,
+    double? score,
+    double? sl,
+    double? tp,
+    int? hourly,
+    int? group,
+    bool? btcFilter,
+    double? notional,
+    double? fee,
+    string? exclude,
+    bool? trades,
+    CancellationToken cancellationToken) =>
+{
+    var connectionString = GetConnectionString(builder.Configuration);
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return Results.Problem("TRADINGBOT_DATABASE_CONNECTION_STRING is not configured.");
+    }
+
+    var sim = new SimulationParams(
+        Clean(botInstanceId) ?? "spot-live",
+        Math.Clamp(lastHours ?? 24, 1, 720),
+        spread ?? 0.30,
+        score ?? 0.9,
+        sl ?? 2.5,
+        tp ?? 6.0,
+        hourly ?? 2,
+        group ?? 1,
+        btcFilter ?? false,
+        notional ?? 10.0,
+        fee ?? 0.35,
+        (exclude ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => s.ToUpperInvariant()).ToHashSet(),
+        trades ?? false);
+
+    try
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await EnsureCycleMetadataColumns(connection, cancellationToken);
+
+        var result = await RunSimulation(connection, sim, cancellationToken);
+        return Results.Ok(result);
+    }
+    catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedObject)
+    {
+        return Results.Ok(new SimulationResult(
+            sim, DateTimeOffset.UtcNow, 0, null, null,
+            Array.Empty<SimTradeSummary>(),
+            Array.Empty<SimPairPnl>(),
+            Array.Empty<SimRegimePnl>(),
+            "No cycle data available yet."));
+    }
+});
+
 app.MapGet("/api/export/cycles-and-snapshots.csv", (IConfiguration configuration, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(configuration);
@@ -1216,3 +1274,373 @@ internal sealed record MarketSnapshotDto(
     decimal Last,
     decimal Volume24h,
     decimal ChangePercent);
+
+// ── Simulation engine ──
+
+internal sealed record SimulationParams(
+    string BotInstanceId,
+    int LastHours,
+    double Spread,
+    double Score,
+    double Sl,
+    double Tp,
+    int Hourly,
+    int Group,
+    bool BtcFilter,
+    double Notional,
+    double Fee,
+    HashSet<string> Exclude,
+    bool ShowTrades);
+
+internal sealed record SimulationResult(
+    SimulationParams Config,
+    DateTimeOffset Utc,
+    int CyclesProcessed,
+    string? WindowStart,
+    string? WindowEnd,
+    IReadOnlyList<SimTradeSummary> Trades,
+    IReadOnlyList<SimPairPnl> PnlByPair,
+    IReadOnlyList<SimRegimePnl> PnlByRegime,
+    string? Warning)
+{
+    public int TradeCount => Trades.Count;
+    public int Wins => Trades.Count(t => t.Eur >= 0);
+    public int Losses => Trades.Count(t => t.Eur < 0);
+    public double WinRate => TradeCount > 0 ? (double)Wins / TradeCount * 100 : 0;
+    public double ProfitFactor
+    {
+        get
+        {
+            var grossProfit = Trades.Where(t => t.Eur >= 0).Sum(t => t.Eur);
+            var grossLoss = Trades.Where(t => t.Eur < 0).Sum(t => -t.Eur);
+            return grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 9999.0 : 0;
+        }
+    }
+    public double TotalPnl => Trades.Sum(t => t.Eur);
+    public double AvgPerTrade => TradeCount > 0 ? TotalPnl / TradeCount : 0;
+}
+
+internal sealed record SimTradeSummary(
+    string Pair,
+    string Exit,
+    double Pct,
+    double Eur,
+    string EntryTime,
+    string ExitTime,
+    string Regime,
+    double Score,
+    double EntryPrice,
+    double ExitPrice);
+
+internal sealed record SimPairPnl(string Pair, double Eur, int Trades, int Wins);
+internal sealed record SimRegimePnl(string Regime, double Eur, int Trades, int Wins);
+
+partial class Program
+{
+    private sealed class SimCycle
+    {
+        public string Utc { get; init; } = "";
+        public long TimestampMs { get; init; }
+        public string Regime { get; init; } = "UNKNOWN";
+        public List<SimDecision> Decisions { get; init; } = new();
+        public Dictionary<string, double> Prices { get; init; } = new();
+    }
+
+    private sealed class SimDecision
+    {
+        public string Pair { get; init; } = "";
+        public double Price { get; init; }
+        public double Score { get; init; }
+        public double SpreadPercent { get; init; }
+        public string? EntryRejectionReason { get; init; }
+        public string? Action { get; init; }
+        public string? Reason { get; init; }
+        public string? CorrelationGroup { get; init; }
+    }
+
+    private sealed class SimPosition
+    {
+        public double Entry { get; init; }
+        public double Sl { get; init; }
+        public double Tp { get; init; }
+        public string Group { get; init; } = "OTHER";
+        public string Regime { get; init; } = "UNKNOWN";
+        public string EntryTime { get; init; } = "";
+        public double Score { get; init; }
+    }
+
+    private static string ParseRegimeState(string? raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return "UNKNOWN";
+        var match = System.Text.RegularExpressions.Regex.Match(raw, @"state=(\w+)");
+        return match.Success ? match.Groups[1].Value : "UNKNOWN";
+    }
+
+    static async Task<SimulationResult> RunSimulation(
+        NpgsqlConnection connection,
+        SimulationParams sim,
+        CancellationToken cancellationToken)
+    {
+        var cutoff = DateTimeOffset.UtcNow.AddHours(-sim.LastHours);
+
+        // Load cycles with decisions
+        var cycles = new List<SimCycle>();
+        await using (var cmd = new NpgsqlCommand(
+            """
+            select utc, record_json::text
+            from dry_run_cycles
+            where bot_instance_id = @bot
+              and utc >= @cutoff
+            order by utc asc
+            """, connection))
+        {
+            cmd.Parameters.AddWithValue("bot", sim.BotInstanceId);
+            cmd.Parameters.Add("cutoff", NpgsqlDbType.TimestampTz).Value = cutoff;
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var utc = DateTime.SpecifyKind(reader.GetDateTime(0), DateTimeKind.Utc);
+                var utcStr = utc.ToString("O", CultureInfo.InvariantCulture);
+                var timestampMs = new DateTimeOffset(utc).ToUnixTimeMilliseconds();
+
+                using var doc = JsonDocument.Parse(reader.GetString(1));
+                var root = doc.RootElement;
+
+                var regime = "UNKNOWN";
+                if (root.TryGetProperty("entryDiagnostics", out var ed) &&
+                    ed.TryGetProperty("btcRegimeState", out var regProp))
+                {
+                    regime = ParseRegimeState(regProp.GetString());
+                }
+
+                var decisions = new List<SimDecision>();
+                var prices = new Dictionary<string, double>();
+
+                if (root.TryGetProperty("decisions", out var decs))
+                {
+                    foreach (var d in decs.EnumerateArray())
+                    {
+                        var pair = d.TryGetProperty("pair", out var pp) ? pp.GetString() ?? "" : "";
+                        var price = d.TryGetProperty("price", out var pr) && pr.TryGetDouble(out var prv) ? prv : 0;
+                        var score = d.TryGetProperty("score", out var sc) && sc.TryGetDouble(out var scv) ? scv : 0;
+                        var spread = d.TryGetProperty("spreadPercent", out var sp) && sp.TryGetDouble(out var spv) ? spv : 99;
+                        var rejReason = d.TryGetProperty("entryRejectionReason", out var rr) ? rr.GetString() : null;
+
+                        string? action = null, reason = null, corrGroup = null;
+                        if (d.TryGetProperty("dryRunAction", out var dra))
+                        {
+                            action = dra.TryGetProperty("action", out var ac) ? ac.GetString() : null;
+                            reason = dra.TryGetProperty("reason", out var rs) ? rs.GetString() : null;
+                            corrGroup = dra.TryGetProperty("correlationGroup", out var cg) ? cg.GetString() : null;
+                        }
+
+                        if (price > 0) prices[pair] = price;
+                        decisions.Add(new SimDecision
+                        {
+                            Pair = pair, Price = price, Score = score, SpreadPercent = spread,
+                            EntryRejectionReason = rejReason, Action = action, Reason = reason,
+                            CorrelationGroup = corrGroup
+                        });
+                    }
+                }
+
+                // Also extract excluded pairs prices from entryDiagnostics
+                if (root.TryGetProperty("entryDiagnostics", out var ed2) &&
+                    ed2.TryGetProperty("excludedPairs", out var exPairs))
+                {
+                    foreach (var ep in exPairs.EnumerateArray())
+                    {
+                        var epPair = ep.TryGetProperty("pair", out var epp) ? epp.GetString() ?? "" : "";
+                        var epLast = ep.TryGetProperty("last", out var epl) && epl.TryGetDouble(out var eplv) ? eplv : 0;
+                        if (epLast > 0 && !prices.ContainsKey(epPair)) prices[epPair] = epLast;
+                    }
+                }
+
+                cycles.Add(new SimCycle
+                {
+                    Utc = utcStr, TimestampMs = timestampMs,
+                    Regime = regime, Decisions = decisions, Prices = prices
+                });
+            }
+        }
+
+        // Build cycle_id -> cycle index mapping for snapshot price matching
+        var cycleIdMap = new Dictionary<string, int>();
+        {
+            int idx = 0;
+            await using var cmd = new NpgsqlCommand(
+                """
+                select cycle_id
+                from dry_run_cycles
+                where bot_instance_id = @bot
+                  and utc >= @cutoff
+                order by utc asc
+                """, connection);
+            cmd.Parameters.AddWithValue("bot", sim.BotInstanceId);
+            cmd.Parameters.Add("cutoff", NpgsqlDbType.TimestampTz).Value = cutoff;
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                cycleIdMap[reader.GetString(0)] = idx++;
+            }
+        }
+
+        // Load snapshot prices per cycle
+        {
+            await using var cmd = new NpgsqlCommand(
+                """
+                select cycle_id, pair, last
+                from market_snapshots
+                where bot_instance_id = @bot
+                  and utc >= @cutoff
+                """, connection);
+            cmd.Parameters.AddWithValue("bot", sim.BotInstanceId);
+            cmd.Parameters.Add("cutoff", NpgsqlDbType.TimestampTz).Value = cutoff;
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var cid = reader.GetString(0);
+                if (cycleIdMap.TryGetValue(cid, out var ci) && ci < cycles.Count)
+                {
+                    var pair = reader.GetString(1);
+                    var last = (double)reader.GetDecimal(2);
+                    if (!cycles[ci].Prices.ContainsKey(pair))
+                        cycles[ci].Prices[pair] = last;
+                }
+            }
+        }
+
+        if (cycles.Count == 0)
+        {
+            return new SimulationResult(sim, DateTimeOffset.UtcNow, 0, null, null,
+                Array.Empty<SimTradeSummary>(), Array.Empty<SimPairPnl>(),
+                Array.Empty<SimRegimePnl>(), "No cycles found in the selected time window.");
+        }
+
+        // Build correlation group map from all decisions
+        var groupMap = new Dictionary<string, string>();
+        foreach (var c in cycles)
+            foreach (var d in c.Decisions)
+                if (!string.IsNullOrEmpty(d.CorrelationGroup))
+                    groupMap[d.Pair] = d.CorrelationGroup;
+
+        // Run simulation
+        var slFrac = sim.Sl / 100.0;
+        var tpFrac = sim.Tp / 100.0;
+        var feeFrac = sim.Fee / 100.0;
+        var open = new Dictionary<string, SimPosition>();
+        var entryStamps = new List<long>();
+        var tradeResults = new List<SimTradeSummary>();
+
+        for (int ci = 0; ci < cycles.Count; ci++)
+        {
+            var cycle = cycles[ci];
+
+            // Check exits
+            foreach (var pair in open.Keys.ToList())
+            {
+                if (!cycle.Prices.TryGetValue(pair, out var p)) continue;
+                var pos = open[pair];
+                string? exitType = null;
+                if (p <= pos.Sl) exitType = "SL";
+                else if (p >= pos.Tp) exitType = "TP";
+                if (exitType != null)
+                {
+                    var pct = (p / pos.Entry - 1 - feeFrac) * 100;
+                    var eur = sim.Notional * pct / 100;
+                    tradeResults.Add(new SimTradeSummary(pair, exitType, Math.Round(pct, 2), Math.Round(eur, 4),
+                        pos.EntryTime, cycle.Utc, pos.Regime, pos.Score, pos.Entry, p));
+                    open.Remove(pair);
+                }
+            }
+
+            // BTC regime gate
+            if (sim.BtcFilter && cycle.Regime == "DOWNTREND") continue;
+
+            // Entry candidates
+            var candidates = new Dictionary<string, SimDecision>();
+            foreach (var d in cycle.Decisions)
+            {
+                if (sim.Exclude.Contains(d.Pair.ToUpperInvariant())) continue;
+
+                var want = false;
+                if (d.EntryRejectionReason == "REJECT_SPREAD_TOO_WIDE" && d.SpreadPercent <= sim.Spread)
+                    want = true;
+                if (d.Action == "WOULD_BUY" || d.Action == "WOULD_OPEN_LONG")
+                    want = true;
+                if (d.Action == "WOULD_BUY_BLOCKED")
+                {
+                    var r = d.Reason ?? "";
+                    if (r.Contains("early-entry", StringComparison.OrdinalIgnoreCase)) want = false;
+                    else if (r.Contains("btc-regime", StringComparison.OrdinalIgnoreCase)) want = false;
+                    else want = true;
+                }
+
+                if (want && d.Score >= sim.Score)
+                {
+                    if (!candidates.ContainsKey(d.Pair) || d.Score > candidates[d.Pair].Score)
+                        candidates[d.Pair] = d;
+                }
+            }
+
+            var sorted = candidates.Values.OrderByDescending(c => c.Score);
+            foreach (var c in sorted)
+            {
+                if (open.ContainsKey(c.Pair)) continue;
+
+                var grp = groupMap.GetValueOrDefault(c.Pair, $"UNGROUPED:{c.Pair}");
+                var grpCount = open.Values.Count(p => p.Group == grp);
+                if (grpCount >= sim.Group) continue;
+
+                var recentEntries = entryStamps.Count(t => cycle.TimestampMs - t < 3_600_000);
+                if (recentEntries >= sim.Hourly) continue;
+
+                if (!cycle.Prices.TryGetValue(c.Pair, out var price) || price <= 0) continue;
+
+                open[c.Pair] = new SimPosition
+                {
+                    Entry = price,
+                    Sl = price * (1 - slFrac),
+                    Tp = price * (1 + tpFrac),
+                    Group = grp,
+                    Regime = cycle.Regime,
+                    EntryTime = cycle.Utc,
+                    Score = c.Score
+                };
+                entryStamps.Add(cycle.TimestampMs);
+            }
+        }
+
+        // Close remaining at last prices
+        var lastPrices = cycles[^1].Prices;
+        foreach (var (pair, pos) in open)
+        {
+            if (!lastPrices.TryGetValue(pair, out var p)) continue;
+            var pct = (p / pos.Entry - 1 - feeFrac) * 100;
+            var eur = sim.Notional * pct / 100;
+            tradeResults.Add(new SimTradeSummary(pair, "END", Math.Round(pct, 2), Math.Round(eur, 4),
+                pos.EntryTime, cycles[^1].Utc, pos.Regime, pos.Score, pos.Entry, p));
+        }
+
+        // Aggregations
+        var pnlByPair = tradeResults
+            .GroupBy(t => t.Pair)
+            .Select(g => new SimPairPnl(g.Key, Math.Round(g.Sum(t => t.Eur), 4), g.Count(), g.Count(t => t.Eur >= 0)))
+            .OrderByDescending(p => p.Eur)
+            .ToList();
+
+        var pnlByRegime = tradeResults
+            .GroupBy(t => t.Regime)
+            .Select(g => new SimRegimePnl(g.Key, Math.Round(g.Sum(t => t.Eur), 4), g.Count(), g.Count(t => t.Eur >= 0)))
+            .OrderByDescending(p => p.Eur)
+            .ToList();
+
+        var returnedTrades = sim.ShowTrades ? tradeResults : Array.Empty<SimTradeSummary>().ToList();
+
+        return new SimulationResult(
+            sim, DateTimeOffset.UtcNow, cycles.Count,
+            cycles[0].Utc, cycles[^1].Utc,
+            returnedTrades, pnlByPair, pnlByRegime, null);
+    }
+}
