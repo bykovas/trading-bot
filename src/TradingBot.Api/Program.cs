@@ -318,6 +318,7 @@ app.MapGet("/api/simulate", async (
     {
         return Results.Ok(new SimulationResult(
             sim, DateTimeOffset.UtcNow, 0, null, null,
+            0, 0, 0, 0, 0, 0, 0,
             Array.Empty<SimTradeSummary>(),
             Array.Empty<SimPairPnl>(),
             Array.Empty<SimRegimePnl>(),
@@ -1298,27 +1299,17 @@ internal sealed record SimulationResult(
     int CyclesProcessed,
     string? WindowStart,
     string? WindowEnd,
+    int TradeCount,
+    int Wins,
+    int Losses,
+    double WinRate,
+    double ProfitFactor,
+    double TotalPnl,
+    double AvgPerTrade,
     IReadOnlyList<SimTradeSummary> Trades,
     IReadOnlyList<SimPairPnl> PnlByPair,
     IReadOnlyList<SimRegimePnl> PnlByRegime,
-    string? Warning)
-{
-    public int TradeCount => Trades.Count;
-    public int Wins => Trades.Count(t => t.Eur >= 0);
-    public int Losses => Trades.Count(t => t.Eur < 0);
-    public double WinRate => TradeCount > 0 ? (double)Wins / TradeCount * 100 : 0;
-    public double ProfitFactor
-    {
-        get
-        {
-            var grossProfit = Trades.Where(t => t.Eur >= 0).Sum(t => t.Eur);
-            var grossLoss = Trades.Where(t => t.Eur < 0).Sum(t => -t.Eur);
-            return grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 9999.0 : 0;
-        }
-    }
-    public double TotalPnl => Trades.Sum(t => t.Eur);
-    public double AvgPerTrade => TradeCount > 0 ? TotalPnl / TradeCount : 0;
-}
+    string? Warning);
 
 internal sealed record SimTradeSummary(
     string Pair,
@@ -1514,6 +1505,7 @@ partial class Program
         if (cycles.Count == 0)
         {
             return new SimulationResult(sim, DateTimeOffset.UtcNow, 0, null, null,
+                0, 0, 0, 0, 0, 0, 0,
                 Array.Empty<SimTradeSummary>(), Array.Empty<SimPairPnl>(),
                 Array.Empty<SimRegimePnl>(), "No cycles found in the selected time window.");
         }
@@ -1638,9 +1630,21 @@ partial class Program
 
         var returnedTrades = sim.ShowTrades ? tradeResults : Array.Empty<SimTradeSummary>().ToList();
 
+        var totalCount = tradeResults.Count;
+        var wins = tradeResults.Count(t => t.Eur >= 0);
+        var losses = totalCount - wins;
+        var grossProfit = tradeResults.Where(t => t.Eur >= 0).Sum(t => t.Eur);
+        var grossLoss = tradeResults.Where(t => t.Eur < 0).Sum(t => -t.Eur);
+        var totalPnl = tradeResults.Sum(t => t.Eur);
+
         return new SimulationResult(
             sim, DateTimeOffset.UtcNow, cycles.Count,
             cycles[0].Utc, cycles[^1].Utc,
+            totalCount, wins, losses,
+            totalCount > 0 ? (double)wins / totalCount * 100 : 0,
+            grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 9999.0 : 0,
+            Math.Round(totalPnl, 4),
+            totalCount > 0 ? Math.Round(totalPnl / totalCount, 4) : 0,
             returnedTrades, pnlByPair, pnlByRegime, null);
     }
 }
