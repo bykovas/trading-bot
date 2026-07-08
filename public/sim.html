@@ -416,9 +416,11 @@
 
     .toggle-switch {
       position: relative;
+      display: inline-block;
       width: 40px;
       height: 22px;
       flex: none;
+      cursor: pointer;
     }
 
     .toggle-switch input {
@@ -496,6 +498,25 @@
     .btn-run:disabled {
       opacity: .5;
       cursor: not-allowed;
+    }
+
+    .btn-reset {
+      min-height: 42px;
+      padding: 0 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .72);
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 150ms, border-color 150ms, color 150ms;
+    }
+
+    .btn-reset:hover {
+      border-color: rgba(246, 218, 160, .28);
+      color: var(--soft);
+      background: rgba(17, 18, 15, .92);
     }
 
     .run-status {
@@ -629,10 +650,10 @@
       <div class="field-toggle">
         <label>BTC filter</label>
         <div class="toggle-row">
-          <span class="toggle-switch">
+          <label class="toggle-switch">
             <input type="checkbox" id="f-btc-filter">
             <span class="toggle-track"></span>
-          </span>
+          </label>
           <span class="toggle-label" id="btc-filter-label">Off</span>
         </div>
         <span class="hint">Block NEW entries while BTC regime = DOWNTREND</span>
@@ -640,10 +661,10 @@
       <div class="field-toggle">
         <label>Show trades</label>
         <div class="toggle-row">
-          <span class="toggle-switch">
+          <label class="toggle-switch">
             <input type="checkbox" id="f-trades">
             <span class="toggle-track"></span>
-          </span>
+          </label>
           <span class="toggle-label" id="trades-label">Off</span>
         </div>
         <span class="hint">Also show the full trade list</span>
@@ -652,6 +673,7 @@
 
     <div class="actions">
       <button class="btn-run" id="btn-run" type="button">Run simulation</button>
+      <button class="btn-reset" id="btn-reset" type="button">Reset defaults</button>
       <span class="run-status" id="run-status"></span>
     </div>
 
@@ -967,8 +989,30 @@
       }
     }
 
+    // ── Reset defaults ──
+    const DEFAULTS = {
+      "f-hours": 24, "f-spread": 0.30, "f-score": 0.90, "f-sl": 2.5,
+      "f-tp": 6, "f-hourly": 2, "f-group": 1, "f-notional": 10,
+      "f-fee": 0.35, "f-exclude": ""
+    };
+
+    function resetDefaults() {
+      for (const [id, val] of Object.entries(DEFAULTS)) {
+        document.getElementById(id).value = val;
+      }
+      btcFilterEl.checked = false;
+      btcLabel.textContent = "Off";
+      tradesEl.checked = false;
+      tradesLabel.textContent = "Off";
+      els.results.classList.remove("visible");
+      els.runStatus.textContent = "";
+      setWarning("");
+      setStatus("ok", "Ready");
+    }
+
     // ── Events ──
     els.btnRun.addEventListener("click", runSimulation);
+    document.getElementById("btn-reset").addEventListener("click", resetDefaults);
 
     // Ctrl+Enter / Cmd+Enter to run
     document.addEventListener("keydown", e => {

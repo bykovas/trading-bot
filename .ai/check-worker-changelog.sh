@@ -4,7 +4,7 @@ set -euo pipefail
 BASE_SHA="${1:-}"
 HEAD_SHA="${2:-HEAD}"
 
-if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
+if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]] || ! git cat-file -e "${BASE_SHA}" 2>/dev/null; then
   BASE_SHA="$(git rev-parse "${HEAD_SHA}^" 2>/dev/null || true)"
 fi
 
