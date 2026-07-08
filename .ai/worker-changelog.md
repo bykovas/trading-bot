@@ -2,6 +2,15 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-08-core-exit-policy-for-simulation
+
+- Extracted public copies of PositionExitPolicy, ExitEvaluation, ScoreDecaySnapshot, PositionExitLevelsSnapshot, ExecutionPolicyOptions, and PositionExitOptions into TradingBot.Core.Risk so the Api simulation engine can use the same tiered exit logic as the real spot bot.
+- SpotWorker retains its own internal types unchanged (different namespace, no behavioral change).
+- Api simulation for spot now runs the full tiered exit policy: stop-loss, take-profit, trailing stop, conditional max-hold, score-decay defensive exits, post-entry adverse guard, and signal-flip exits with min-hold / min-profit guards. Previously only checked fixed SL/TP levels.
+- Api simulation for futures uses frozen SL/TP levels matching TpSlOrchestrator (unchanged behavior, now explicit).
+- Added ProjectReference from TradingBot.Api to TradingBot.Core.
+- No worker runtime behavior changed; this is a code-sharing extraction only.
+
 ## 2026-07-07-spot-ioc-buy-fallback
 
 - Spot live BUY now has a guarded taker fallback after the maker phase. Phase 1 is unchanged in spirit (post-only limit at best bid) but the timeout default drops to `Entry.MakerFillTimeoutSec=25` and the single `Entry.MakerRepegs` now gets a real per-attempt window (the previous code only ever repegged after the whole timeout had already elapsed, so the repeg was effectively dead). Partial maker fills still commit only the exchange-reported filled volume and never fall back for the remainder.
