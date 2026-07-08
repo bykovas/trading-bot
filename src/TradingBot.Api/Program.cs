@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Text;
 using Npgsql;
 using NpgsqlTypes;
+using TradingBot.Core.Common;
+using TradingBot.Core.Risk;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -1352,12 +1354,16 @@ partial class Program
     private sealed class SimPosition
     {
         public double Entry { get; init; }
-        public double Sl { get; init; }
-        public double Tp { get; init; }
         public string Group { get; init; } = "OTHER";
         public string Regime { get; init; } = "UNKNOWN";
         public string EntryTime { get; init; } = "";
+        public long EntryTimestampMs { get; init; }
         public double Score { get; init; }
+        public string Side { get; init; } = "LONG";
+        public decimal PeakPnlPercent { get; set; }
+        public int ConsecutiveLowScoreCycles { get; set; }
+        public decimal? StopLossPrice { get; init; }
+        public decimal? TakeProfitPrice { get; init; }
     }
 
     private static string ParseRegimeState(string? raw)
@@ -1517,10 +1523,16 @@ partial class Program
                 if (!string.IsNullOrEmpty(d.CorrelationGroup))
                     groupMap[d.Pair] = d.CorrelationGroup;
 
-        // Run simulation
-        var slFrac = sim.Sl / 100.0;
-        var tpFrac = sim.Tp / 100.0;
+        var isFutures = sim.BotInstanceId.Contains("futures", StringComparison.OrdinalIgnoreCase);
         var feeFrac = sim.Fee / 100.0;
+
+        var exitOptions = new PositionExitOptions
+        {
+            FixedStopLossPercent = (decimal)sim.Sl,
+            FixedTakeProfitPercent = (decimal)sim.Tp,
+        };
+        var execPolicy = new ExecutionPolicyOptions();
+
         var open = new Dictionary<string, SimPosition>();
         var entryStamps = new List<long>();
         var tradeResults = new List<SimTradeSummary>();
@@ -1529,21 +1541,93 @@ partial class Program
         {
             var cycle = cycles[ci];
 
-            // Check exits
+            // Build per-pair score lookup for this cycle
+            var cycleScores = new Dictionary<string, double>();
+            var cycleDesiredLong = new HashSet<string>();
+            foreach (var d in cycle.Decisions)
+            {
+                cycleScores[d.Pair] = d.Score;
+                if (d.Action is "WOULD_BUY" or "WOULD_OPEN_LONG" or "WOULD_BUY_BLOCKED" or "HOLD")
+                    cycleDesiredLong.Add(d.Pair);
+            }
+
+            // Check exits using real PositionExitPolicy
             foreach (var pair in open.Keys.ToList())
             {
                 if (!cycle.Prices.TryGetValue(pair, out var p)) continue;
                 var pos = open[pair];
-                string? exitType = null;
-                if (p <= pos.Sl) exitType = "SL";
-                else if (p >= pos.Tp) exitType = "TP";
-                if (exitType != null)
+                var currentPrice = (decimal)p;
+                var entryPrice = (decimal)pos.Entry;
+
+                var pnlPct = (currentPrice / entryPrice - 1m) * 100m;
+                if (pnlPct > pos.PeakPnlPercent)
+                    pos.PeakPnlPercent = pnlPct;
+
+                var positionAgeSeconds = (cycle.TimestampMs - pos.EntryTimestampMs) / 1000.0;
+                var currentScore = cycleScores.GetValueOrDefault(pair, pos.Score);
+                var desiredLong = cycleDesiredLong.Contains(pair);
+                var scoreConfirmsEntry = currentScore >= sim.Score;
+
+                if (isFutures)
                 {
-                    var pct = (p / pos.Entry - 1 - feeFrac) * 100;
-                    var eur = sim.Notional * pct / 100;
-                    tradeResults.Add(new SimTradeSummary(pair, exitType, Math.Round(pct, 2), Math.Round(eur, 4),
-                        pos.EntryTime, cycle.Utc, pos.Regime, pos.Score, pos.Entry, p));
-                    open.Remove(pair);
+                    // Futures: frozen SL/TP levels set at entry, checked each cycle
+                    string? exitType = null;
+                    if (pos.StopLossPrice is { } sl && currentPrice <= sl) exitType = "SL";
+                    else if (pos.TakeProfitPrice is { } tp && currentPrice >= tp) exitType = "TP";
+                    if (exitType != null)
+                    {
+                        var pct = (double)((currentPrice / entryPrice - 1m) * 100m) - feeFrac * 100;
+                        var eur = sim.Notional * pct / 100;
+                        tradeResults.Add(new SimTradeSummary(pair, exitType, Math.Round(pct, 2), Math.Round(eur, 4),
+                            pos.EntryTime, cycle.Utc, pos.Regime, pos.Score, pos.Entry, p));
+                        open.Remove(pair);
+                    }
+                }
+                else
+                {
+                    // Spot: full tiered exit policy from real bot
+                    if ((decimal)currentScore <= exitOptions.ScoreDecayDefensiveScore)
+                        pos.ConsecutiveLowScoreCycles++;
+                    else
+                        pos.ConsecutiveLowScoreCycles = 0;
+
+                    var scoreDecay = new ScoreDecaySnapshot(
+                        EntryScore: (decimal)pos.Score,
+                        CurrentScore: (decimal)currentScore,
+                        ConsecutiveLowScoreCycles: pos.ConsecutiveLowScoreCycles,
+                        ScoreConfirmsEntry: scoreConfirmsEntry);
+
+                    var exitLevels = new PositionExitLevelsSnapshot(
+                        pos.Side,
+                        pos.StopLossPrice,
+                        pos.TakeProfitPrice,
+                        currentPrice);
+
+                    var evaluation = PositionExitPolicy.EvaluateHeldPosition(
+                        desiredLong: desiredLong,
+                        positionAgeSeconds: positionAgeSeconds,
+                        conservativeUnrealizedPnlPercent: pnlPct,
+                        canValuePosition: true,
+                        killSwitchActive: false,
+                        executionPolicy: execPolicy,
+                        positionExit: exitOptions,
+                        peakPnlPercent: pos.PeakPnlPercent,
+                        exitHysteresisEnabled: false,
+                        scoreDecay: scoreDecay,
+                        recentPriceActionNegative: pnlPct < -0.5m,
+                        exitLevels: exitLevels);
+
+                    if (evaluation.ShouldSell)
+                    {
+                        var exitCode = evaluation.ExitReason is { } er
+                            ? PositionExitPolicy.ExitReasonCode(er)
+                            : "SELL_SIGNAL_FLIP";
+                        var pct = (double)pnlPct - feeFrac * 100;
+                        var eur = sim.Notional * pct / 100;
+                        tradeResults.Add(new SimTradeSummary(pair, exitCode, Math.Round(pct, 2), Math.Round(eur, 4),
+                            pos.EntryTime, cycle.Utc, pos.Regime, pos.Score, pos.Entry, p));
+                        open.Remove(pair);
+                    }
                 }
             }
 
@@ -1590,15 +1674,21 @@ partial class Program
 
                 if (!cycle.Prices.TryGetValue(c.Pair, out var price) || price <= 0) continue;
 
+                var entryDecimal = (decimal)price;
+                var slPrice = entryDecimal * (1m - (decimal)sim.Sl / 100m);
+                var tpPrice = entryDecimal * (1m + (decimal)sim.Tp / 100m);
+
                 open[c.Pair] = new SimPosition
                 {
                     Entry = price,
-                    Sl = price * (1 - slFrac),
-                    Tp = price * (1 + tpFrac),
                     Group = grp,
                     Regime = cycle.Regime,
                     EntryTime = cycle.Utc,
-                    Score = c.Score
+                    EntryTimestampMs = cycle.TimestampMs,
+                    Score = c.Score,
+                    Side = "LONG",
+                    StopLossPrice = slPrice,
+                    TakeProfitPrice = tpPrice,
                 };
                 entryStamps.Add(cycle.TimestampMs);
             }
