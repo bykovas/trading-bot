@@ -83,7 +83,7 @@ internal sealed class DecisionWorker(
         if (LiveOrdersActive && broker is not null
             && string.Equals(config.Kraken.MarketDataMode, "kraken", StringComparison.OrdinalIgnoreCase))
         {
-            await ReconcileWithKrakenAsync(loadedPortfolio, lightCandidates, cancellationToken);
+            await ReconcileWithKrakenAsync(loadedPortfolio, cancellationToken);
         }
 
         PrintCandidates("candidate-universe light snapshot:", lightCandidates);
@@ -776,7 +776,6 @@ internal sealed class DecisionWorker(
 
     private async Task ReconcileWithKrakenAsync(
         PortfolioState state,
-        IReadOnlyList<InstrumentMarketState> marketStates,
         CancellationToken cancellationToken)
     {
         IReadOnlyDictionary<string, decimal> balances;
@@ -791,74 +790,56 @@ internal sealed class DecisionWorker(
         }
 
         var krakenEur = ResolveKrakenBalance(balances, "EUR", "ZEUR");
-        var priceLookup = marketStates
-            .Where(ms => ms.LastPrice > 0m)
-            .ToDictionary(
-                ms => ms.Instrument.Pair,
-                ms => ms.LastPrice,
-                StringComparer.OrdinalIgnoreCase);
 
-        var botTotalBefore = state.TotalValueEur;
-        var krakenTotal = krakenEur;
-
-        // Value every Kraken asset that maps to a known pair.
-        var krakenAssetValues = new Dictionary<string, (decimal Quantity, decimal ValueEur)>(StringComparer.OrdinalIgnoreCase);
+        // Kraken asset quantities for every pair in the universe. Quantities only —
+        // never a EUR valuation. Valuing Kraken assets at last price while the bot
+        // values positions at conservative liquidation (bid - slippage - fee) would
+        // make any total-vs-total comparison drift with prices and fees.
+        var krakenQuantities = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
         foreach (var instrument in config.CandidateUniverse)
         {
             var baseAsset = instrument.Pair.Split('/')[0];
             var krakenQty = ResolveKrakenBalance(balances, baseAsset, $"X{baseAsset}");
-            if (krakenQty <= 0m)
+            if (krakenQty > 0m)
             {
-                continue;
-            }
-
-            if (priceLookup.TryGetValue(instrument.Pair, out var price) && price > 0m)
-            {
-                var assetValueEur = krakenQty * price;
-                krakenAssetValues[instrument.Pair] = (krakenQty, assetValueEur);
-                krakenTotal += assetValueEur;
+                krakenQuantities[instrument.Pair] = krakenQty;
             }
         }
 
-        // Sync cash.
+        // External P&L = accumulated cash drift. All spot trades are the bot's own
+        // (manual trading happens only on futures), and the bot commits REAL exchange
+        // fills, so its CashEur mirrors Kraken EUR minus external activity: any drift
+        // is a deposit, a withdrawal, or an internal EUR transfer.
         var cashDrift = krakenEur - state.CashEur;
         if (Math.Abs(cashDrift) > 0.01m)
         {
-            Console.WriteLine($"kraken-sync: cash {state.CashEur:0.##} → {krakenEur:0.##} (drift {cashDrift:+0.##;-0.##} EUR)");
+            state.ExternalPnlEur += cashDrift;
+            Console.WriteLine(
+                $"kraken-sync: cash {state.CashEur:0.##} → {krakenEur:0.##} (external {cashDrift:+0.##;-0.##} EUR, cumulative {state.ExternalPnlEur:+0.##;-0.##})");
             state.CashEur = krakenEur;
         }
 
-        // Sync positions: adjust quantities to match Kraken, remove vanished positions.
+        // Sync positions: adjust quantities to match Kraken, remove vanished positions
+        // (a live sell the state file missed, or a failed/partial fill).
         for (var i = state.Positions.Count - 1; i >= 0; i--)
         {
             var position = state.Positions[i];
-            if (!krakenAssetValues.TryGetValue(position.Pair, out var krakenAsset))
+            if (!krakenQuantities.TryGetValue(position.Pair, out var krakenQty))
             {
                 Console.WriteLine($"kraken-sync: position {position.Pair} not found on Kraken (qty was {position.Quantity:0.########}); removing");
                 state.Positions.RemoveAt(i);
                 continue;
             }
 
-            var qtyDrift = krakenAsset.Quantity - position.Quantity;
+            var qtyDrift = krakenQty - position.Quantity;
             if (Math.Abs(qtyDrift) > position.Quantity * 0.001m)
             {
-                Console.WriteLine($"kraken-sync: {position.Pair} qty {position.Quantity:0.########} → {krakenAsset.Quantity:0.########} (drift {qtyDrift:+0.########})");
-                position.Quantity = krakenAsset.Quantity;
+                Console.WriteLine($"kraken-sync: {position.Pair} qty {position.Quantity:0.########} → {krakenQty:0.########} (drift {qtyDrift:+0.########})");
+                position.Quantity = krakenQty;
             }
         }
 
-        // Compute external P&L: difference between Kraken total and bot's tracked total,
-        // minus previously accumulated external P&L (so delta is only NEW external activity).
-        var botTotalAfterSync = state.TotalValueEur;
-        var impliedExternalPnl = krakenTotal - botTotalAfterSync;
-        var externalDelta = impliedExternalPnl - state.ExternalPnlEur;
-        if (Math.Abs(externalDelta) > 0.01m)
-        {
-            state.ExternalPnlEur = impliedExternalPnl;
-            Console.WriteLine($"kraken-sync: externalPnl {state.ExternalPnlEur:+0.##;-0.##} EUR (delta {externalDelta:+0.##;-0.##})");
-        }
-
-        Console.WriteLine($"kraken-sync: krakenTotal={krakenTotal:0.##} botTotal={botTotalAfterSync:0.##} externalPnl={state.ExternalPnlEur:+0.##;-0.##}");
+        Console.WriteLine($"kraken-sync: cash={state.CashEur:0.##} positions={state.Positions.Count} externalPnl={state.ExternalPnlEur:+0.##;-0.##}");
         dryRunPortfolio.Save(state);
     }
 

@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-09-external-pnl-cash-drift-only
+
+- Fixed `ExternalPnlEur` computation: it now accumulates only the EUR cash drift (Kraken EUR balance vs bot's CashEur), not the Kraken-total-vs-bot-total difference. The old formula mixed valuation bases — Kraken assets at last price vs bot positions at conservative liquidation value (bid − slippage − taker fee) — so it reported a phantom "external P&L" (~0.5% of open notional) that drifted with prices even with zero external activity.
+- Rationale: all spot trades are the bot's own (manual trading is futures-only), and live fills are committed with REAL exchange numbers, so any EUR cash drift is a deposit, withdrawal, or internal transfer — exactly what External P&L should capture.
+- Position quantity sync and vanished-position removal are unchanged. Operator note: a previously persisted phantom `externalPnlEur` value should be reset to 0 in the state once this build is deployed.
+
 ## 2026-07-09-kraken-portfolio-sync
 
 - Live mode now reconciles the bot's virtual portfolio with real Kraken balances at the start of each cycle (when `LiveTradingEnabled=true` and `MarketDataMode=kraken`). Cash is synced to the real Kraken EUR balance; position quantities are adjusted to match Kraken's reported asset holdings; positions with zero Kraken balance are removed (manual external sell detected).
