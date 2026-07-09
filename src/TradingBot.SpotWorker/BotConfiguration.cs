@@ -79,6 +79,7 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_RISK_MAX_CONCURRENT_OPEN_RISK_EUR", value => config.Risk.MaxConcurrentOpenRisk = ParseDecimal(value, config.Risk.MaxConcurrentOpenRisk));
         SetIfPresent("TRADINGBOT_FEES_MAKER_PCT", value => config.Fees.MakerPct = ParseDecimal(value, config.Fees.MakerPct));
         SetIfPresent("TRADINGBOT_FEES_TAKER_PCT", value => config.Fees.TakerPct = ParseDecimal(value, config.Fees.TakerPct));
+        SetIfPresent("TRADINGBOT_ENTRY_USE_MARKET_BUY", value => config.Entry.UseMarketBuy = ParseBool(value, config.Entry.UseMarketBuy));
         SetIfPresent("TRADINGBOT_ENTRY_MAKER_FILL_TIMEOUT_SEC", value => config.Entry.MakerFillTimeoutSec = ParseInt(value, config.Entry.MakerFillTimeoutSec));
         SetIfPresent("TRADINGBOT_ENTRY_MAKER_REPEGS", value => config.Entry.MakerRepegs = ParseInt(value, config.Entry.MakerRepegs));
         SetIfPresent("TRADINGBOT_ENTRY_MAX_BUY_SLIPPAGE_PERCENT", value => config.Entry.MaxBuySlippagePercent = ParseDecimal(value, config.Entry.MaxBuySlippagePercent));
@@ -417,6 +418,7 @@ internal sealed class FeeOptions
 
 internal sealed class EntryOptions
 {
+    public bool UseMarketBuy { get; set; }
     public int MakerFillTimeoutSec { get; set; } = 25;
     public int MakerRepegs { get; set; } = 1;
 

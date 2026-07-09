@@ -409,7 +409,7 @@ internal sealed class DecisionWorker(
                 .Take(5)
                 .ToList(),
             ExcludedPairs: excluded,
-            ExecutionMode: "maker-post-only",
+            ExecutionMode: config.Entry.UseMarketBuy ? "market" : "maker-post-only",
             FillRate: makerAttempts == 0 ? 0m : decimal.Round(filledMaker / (decimal)makerAttempts, 4),
             PairsPassedSpread: entryEvaluations.Count(item => item.Proposal.SpreadPercent <= config.Strategy.MaxEntrySpreadPercent),
             PairsPassedVolume: entryEvaluations.Count(item => item.MarketState.Quote is { } quote && quote.VolumeToday * item.MarketState.LastPrice >= config.Filters.MinQuoteVolume24h),
@@ -1245,7 +1245,7 @@ internal sealed class DecisionWorker(
             return BrokerRunOutcome.WithVerdict($"SKIPPED: live buy notional {action.TargetNotionalEur:0.##} exceeds MaxOrderEur {config.Risk.MaxOrderEur:0.##}");
         }
 
-        if (side == "buy")
+        if (side == "buy" && !config.Entry.UseMarketBuy)
         {
             return await RunMakerBuyBrokerAsync(marketState, action, portfolio, volume, validate, cancellationToken);
         }
