@@ -876,6 +876,18 @@ internal sealed class DecisionWorker(
             state.CashEur = krakenEur;
         }
 
+        var staleNegativeExternalPnl = krakenQuantities.Count > 0
+            && Math.Abs(cashDrift) <= 0.01m
+            && state.ExternalPnlEur < -0.01m;
+        if ((importedPositions > 0 || staleNegativeExternalPnl) && Math.Abs(state.ExternalPnlEur) > 0.01m)
+        {
+            var resetReason = importedPositions > 0
+                ? "after importing missing Kraken positions"
+                : "after confirming Kraken positions and zero current cash drift";
+            Console.WriteLine($"kraken-sync: reset stale externalPnl {state.ExternalPnlEur:+0.##;-0.##} EUR {resetReason}");
+            state.ExternalPnlEur = 0m;
+        }
+
         Console.WriteLine($"kraken-sync: cash={state.CashEur:0.##} positions={state.Positions.Count} externalPnl={state.ExternalPnlEur:+0.##;-0.##}");
         dryRunPortfolio.Save(state);
     }

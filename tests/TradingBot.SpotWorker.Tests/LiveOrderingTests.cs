@@ -132,6 +132,7 @@ public class LiveOrderingTests
         var outputDirectory = TempDir();
         var config = LiveConfig(outputDirectory);
         config.Kraken.MarketDataMode = "kraken";
+        config.Portfolio.StartingCashEur = 75m;
         config.CandidateUniverse = new List<InstrumentOptions>
         {
             new() { Pair = "XDG/EUR", KrakenPair = "XDGEUR", Venue = "Kraken", Enabled = true },
@@ -157,10 +158,15 @@ public class LiveOrderingTests
                 return DefaultResponse(path);
             })), config.Kraken));
 
+        Directory.CreateDirectory(outputDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(outputDirectory, "portfolio-state.json"),
+            """{"updatedAt":"2026-07-09T00:00:00Z","cashEur":75,"positions":[],"actionHistory":[],"externalPnlEur":-30.44}""");
+
         await worker.RunAsync(CancellationToken.None);
 
-        var positions = LastCycle(outputDirectory)
-            .GetProperty("portfolioBefore")
+        var portfolioBefore = LastCycle(outputDirectory).GetProperty("portfolioBefore");
+        var positions = portfolioBefore
             .GetProperty("positions")
             .EnumerateArray()
             .ToDictionary(
@@ -171,6 +177,46 @@ public class LiveOrderingTests
         Assert.Equal(313.07m, positions["XDG/EUR"]);
         Assert.Equal(1.47156m, positions["LINK/EUR"]);
         Assert.Equal(0.16761m, positions["HYPE/EUR"]);
+        Assert.Equal(25.86m, portfolioBefore.GetProperty("cashEur").GetDecimal());
+        Assert.Equal(0m, portfolioBefore.GetProperty("externalPnlEur").GetDecimal());
+    }
+
+    [Fact]
+    public async Task Live_kraken_cycle_resets_stale_negative_external_pnl_after_positions_are_already_synced()
+    {
+        var outputDirectory = TempDir();
+        var config = LiveConfig(outputDirectory);
+        config.Kraken.MarketDataMode = "kraken";
+        config.CandidateUniverse = new List<InstrumentOptions>
+        {
+            new() { Pair = "XDG/EUR", KrakenPair = "XDGEUR", Venue = "Kraken", Enabled = true }
+        };
+
+        var worker = new DecisionWorker(
+            config,
+            new FakeMarketDataSource("XDG/EUR"),
+            new FixedAdvisor("XDG/EUR"),
+            new IndicatorEngine(),
+            new TechnicalDecisionEngine(),
+            new RiskManager(),
+            new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit, config.PositionSizing, strategy: config.Strategy),
+            broker: new KrakenBroker(new HttpClient(new BodyAwareStub((path, _) =>
+                path.Contains("Balance", StringComparison.Ordinal)
+                    ? """{"error":[],"result":{"ZEUR":"25.86","XXDG":"313.07"}}"""
+                    : DefaultResponse(path))), config.Kraken));
+
+        Directory.CreateDirectory(outputDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(outputDirectory, "portfolio-state.json"),
+            """
+            {"updatedAt":"2026-07-09T00:00:00Z","cashEur":25.86,"positions":[{"pair":"XDG/EUR","side":"LONG","quantity":313.07,"entryPrice":1.39,"entryNotionalEur":435.1673,"lastPrice":1.39,"marketValueEur":435.1673}],"actionHistory":[],"externalPnlEur":-30.44}
+            """);
+
+        await worker.RunAsync(CancellationToken.None);
+
+        var portfolioBefore = LastCycle(outputDirectory).GetProperty("portfolioBefore");
+        Assert.Equal(0m, portfolioBefore.GetProperty("externalPnlEur").GetDecimal());
+        Assert.Equal(313.07m, portfolioBefore.GetProperty("positions")[0].GetProperty("quantity").GetDecimal());
     }
 
     [Fact]

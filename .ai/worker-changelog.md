@@ -6,7 +6,7 @@ Latest entry must be first. The first `## <id>` heading is used as `worker.chang
 
 - Fixed live Kraken portfolio reconciliation to recognize exchange balance aliases such as `XXDG` for `XDG/EUR`, `XXBT` for `XBT/EUR`, and single- or double-`X` prefixed asset keys.
 - Live `MarketDataMode=kraken` cycles now import missing real Kraken spot balances as bot positions when the state file lacks them, so `portfolioBefore` reflects actual held assets before decisions run.
-- When a cycle imports missing Kraken positions, the accompanying EUR cash drift is synced but not booked as `ExternalPnlEur`, because the drift most likely came from stale/missing bot state rather than an external deposit or withdrawal.
+- When a cycle imports missing Kraken positions, the accompanying EUR cash drift is synced but not booked as `ExternalPnlEur`; stale negative `ExternalPnlEur` is reset to 0 after import or after a later cycle confirms Kraken positions with zero current cash drift.
 
 ## 2026-07-09-market-buy-default-restored
 
