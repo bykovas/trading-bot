@@ -370,7 +370,8 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
             (state_json ->> 'totalValueEur')::numeric as total_value_eur,
             jsonb_array_length(coalesce(state_json -> 'positions', '[]'::jsonb)) as open_positions,
             state_json -> 'dailyRisk' ->> 'dateUtc' as daily_risk_date_utc,
-            (state_json -> 'dailyRisk' ->> 'realizedPnlEur')::numeric as daily_realized_pnl_eur
+            (state_json -> 'dailyRisk' ->> 'realizedPnlEur')::numeric as daily_realized_pnl_eur,
+            coalesce((state_json ->> 'externalPnlEur')::numeric, 0) as external_pnl_eur
         from portfolio_state
         where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
         order by updated_at desc
@@ -398,7 +399,8 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
         reader.GetDecimal(3),
         reader.GetInt32(4),
         todayUtc,
-        dailyRealizedPnl);
+        dailyRealizedPnl,
+        reader.IsDBNull(7) ? 0m : reader.GetDecimal(7));
 }
 
 static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
@@ -1125,7 +1127,8 @@ internal sealed record PortfolioSummaryDto(
     decimal TotalValueEur,
     int OpenPositions,
     string? DailyRiskDateUtc,
-    decimal? DailyRealizedPnlEur);
+    decimal? DailyRealizedPnlEur,
+    decimal ExternalPnlEur);
 
 internal sealed record PortfolioPositionDto(
     string Pair,

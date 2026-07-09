@@ -243,7 +243,7 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 14px;
       margin: 24px 0;
     }
@@ -446,7 +446,7 @@
       <div class="metric">
         <div class="label">Cash</div>
         <div id="cash" class="value">--</div>
-        <div class="subvalue">Available virtual EUR</div>
+        <div class="subvalue">Available EUR</div>
       </div>
       <div class="metric">
         <div class="label">Positions value</div>
@@ -454,9 +454,14 @@
         <div id="open-positions" class="subvalue">-- open positions</div>
       </div>
       <div class="metric">
-        <div class="label">Daily realized PnL</div>
+        <div class="label">Daily bot PnL</div>
         <div id="daily-pnl" class="value">--</div>
         <div id="daily-date" class="subvalue">UTC day</div>
+      </div>
+      <div class="metric">
+        <div class="label">External P&amp;L</div>
+        <div id="external-pnl" class="value">--</div>
+        <div class="subvalue">Manual &amp; other activity</div>
       </div>
     </section>
 
@@ -540,6 +545,7 @@
       openPositions: document.getElementById("open-positions"),
       dailyPnl: document.getElementById("daily-pnl"),
       dailyDate: document.getElementById("daily-date"),
+      externalPnl: document.getElementById("external-pnl"),
       warning: document.getElementById("warning"),
       updated: document.getElementById("updated"),
       positionsBody: document.getElementById("positions-body")
@@ -671,6 +677,7 @@
         els.openPositions.textContent = "0 open positions";
         els.dailyPnl.textContent = "--";
         els.dailyDate.textContent = "risk day";
+        els.externalPnl.textContent = "--";
         els.updated.textContent = "waiting for worker data";
         renderPositions([]);
         refreshBotStatus().catch(() => setStatus("ok", "API connected"));
@@ -684,6 +691,9 @@
       els.dailyPnl.textContent = signedMoney(summary.dailyRealizedPnlEur ?? 0);
       els.dailyPnl.className = `value ${pnlClass(summary.dailyRealizedPnlEur ?? 0)}`;
       els.dailyDate.textContent = summary.dailyRiskDateUtc ? `${summary.dailyRiskDateUtc} risk day` : "risk day";
+      var extPnl = summary.externalPnlEur ?? 0;
+      els.externalPnl.textContent = signedMoney(extPnl);
+      els.externalPnl.className = `value ${pnlClass(extPnl)}`;
       els.updated.textContent = `portfolio updated ${ltDateTime(summary.updatedAt)} LT`;
 
       renderPositions(data.positions || []);

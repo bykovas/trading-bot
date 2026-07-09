@@ -79,6 +79,13 @@ internal sealed class DecisionWorker(
             cancellationToken);
 
         var loadedPortfolio = dryRunPortfolio.Load();
+
+        if (LiveOrdersActive && broker is not null
+            && string.Equals(config.Kraken.MarketDataMode, "kraken", StringComparison.OrdinalIgnoreCase))
+        {
+            await ReconcileWithKrakenAsync(loadedPortfolio, lightCandidates, cancellationToken);
+        }
+
         PrintCandidates("candidate-universe light snapshot:", lightCandidates);
 
         // Persist the light snapshot of every universe pair right after it is fetched:
@@ -760,25 +767,112 @@ internal sealed class DecisionWorker(
                 ? zeur
                 : balances.TryGetValue("EUR", out var eurBalance) ? eurBalance : 0m;
             Console.WriteLine($"broker-balance: EUR {eur:0.####} (auth OK, {balances.Count} assets)");
-
-            // Live cash drift check: the virtual CashEur should track the real EUR
-            // balance. A growing gap means fills/fees diverged from the model (or
-            // external deposits/withdrawals) — surfaced here, never auto-corrected.
-            if (LiveOrdersActive)
-            {
-                var state = dryRunPortfolio.Load();
-                var drift = eur - state.CashEur;
-                if (Math.Abs(drift) > 1m)
-                {
-                    Console.WriteLine(
-                        $"!!! cash-drift warning: Kraken EUR {eur:0.##} vs virtual cash {state.CashEur:0.##} (drift {drift:+0.##;-0.##} EUR) — reconcile against Kraken trade history !!!");
-                }
-            }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"broker-balance: FAILED to fetch ({ex.Message}) — check API key/secret/permissions");
         }
+    }
+
+    private async Task ReconcileWithKrakenAsync(
+        PortfolioState state,
+        IReadOnlyList<InstrumentMarketState> marketStates,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyDictionary<string, decimal> balances;
+        try
+        {
+            balances = await broker!.GetBalanceAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"kraken-sync: FAILED to fetch balances ({ex.Message}); skipping reconciliation");
+            return;
+        }
+
+        var krakenEur = ResolveKrakenBalance(balances, "EUR", "ZEUR");
+        var priceLookup = marketStates
+            .Where(ms => ms.LastPrice > 0m)
+            .ToDictionary(
+                ms => ms.Instrument.Pair,
+                ms => ms.LastPrice,
+                StringComparer.OrdinalIgnoreCase);
+
+        var botTotalBefore = state.TotalValueEur;
+        var krakenTotal = krakenEur;
+
+        // Value every Kraken asset that maps to a known pair.
+        var krakenAssetValues = new Dictionary<string, (decimal Quantity, decimal ValueEur)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var instrument in config.CandidateUniverse)
+        {
+            var baseAsset = instrument.Pair.Split('/')[0];
+            var krakenQty = ResolveKrakenBalance(balances, baseAsset, $"X{baseAsset}");
+            if (krakenQty <= 0m)
+            {
+                continue;
+            }
+
+            if (priceLookup.TryGetValue(instrument.Pair, out var price) && price > 0m)
+            {
+                var assetValueEur = krakenQty * price;
+                krakenAssetValues[instrument.Pair] = (krakenQty, assetValueEur);
+                krakenTotal += assetValueEur;
+            }
+        }
+
+        // Sync cash.
+        var cashDrift = krakenEur - state.CashEur;
+        if (Math.Abs(cashDrift) > 0.01m)
+        {
+            Console.WriteLine($"kraken-sync: cash {state.CashEur:0.##} → {krakenEur:0.##} (drift {cashDrift:+0.##;-0.##} EUR)");
+            state.CashEur = krakenEur;
+        }
+
+        // Sync positions: adjust quantities to match Kraken, remove vanished positions.
+        for (var i = state.Positions.Count - 1; i >= 0; i--)
+        {
+            var position = state.Positions[i];
+            if (!krakenAssetValues.TryGetValue(position.Pair, out var krakenAsset))
+            {
+                Console.WriteLine($"kraken-sync: position {position.Pair} not found on Kraken (qty was {position.Quantity:0.########}); removing");
+                state.Positions.RemoveAt(i);
+                continue;
+            }
+
+            var qtyDrift = krakenAsset.Quantity - position.Quantity;
+            if (Math.Abs(qtyDrift) > position.Quantity * 0.001m)
+            {
+                Console.WriteLine($"kraken-sync: {position.Pair} qty {position.Quantity:0.########} → {krakenAsset.Quantity:0.########} (drift {qtyDrift:+0.########})");
+                position.Quantity = krakenAsset.Quantity;
+            }
+        }
+
+        // Compute external P&L: difference between Kraken total and bot's tracked total,
+        // minus previously accumulated external P&L (so delta is only NEW external activity).
+        var botTotalAfterSync = state.TotalValueEur;
+        var impliedExternalPnl = krakenTotal - botTotalAfterSync;
+        var externalDelta = impliedExternalPnl - state.ExternalPnlEur;
+        if (Math.Abs(externalDelta) > 0.01m)
+        {
+            state.ExternalPnlEur = impliedExternalPnl;
+            Console.WriteLine($"kraken-sync: externalPnl {state.ExternalPnlEur:+0.##;-0.##} EUR (delta {externalDelta:+0.##;-0.##})");
+        }
+
+        Console.WriteLine($"kraken-sync: krakenTotal={krakenTotal:0.##} botTotal={botTotalAfterSync:0.##} externalPnl={state.ExternalPnlEur:+0.##;-0.##}");
+        dryRunPortfolio.Save(state);
+    }
+
+    private static decimal ResolveKrakenBalance(IReadOnlyDictionary<string, decimal> balances, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (balances.TryGetValue(key, out var value) && value > 0m)
+            {
+                return value;
+            }
+        }
+
+        return 0m;
     }
 
     private static void PrintCandidates(string heading, IReadOnlyList<InstrumentMarketState> candidates)

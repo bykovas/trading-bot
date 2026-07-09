@@ -15,6 +15,11 @@ public sealed class PortfolioState
     // loss cap. Null in legacy state files (counts as zero for today).
     public DailyRiskState? DailyRisk { get; set; }
 
+    // Cumulative P&L from activity NOT attributable to the bot: manual trades,
+    // external deposits/withdrawals, or positions the bot doesn't track.
+    // Computed each cycle by comparing Kraken balances to the bot's virtual state.
+    public decimal ExternalPnlEur { get; set; }
+
     public decimal PositionsValueEur => Positions.Sum(position => position.MarketValueEur);
     public decimal TotalValueEur => CashEur + PositionsValueEur;
 
@@ -24,7 +29,8 @@ public sealed class PortfolioState
         CashEur = CashEur,
         Positions = Positions.Select(position => position.Clone()).ToList(),
         ActionHistory = ActionHistory.Select(history => history.Clone()).ToList(),
-        DailyRisk = DailyRisk?.Clone()
+        DailyRisk = DailyRisk?.Clone(),
+        ExternalPnlEur = ExternalPnlEur
     };
 }
 

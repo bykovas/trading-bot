@@ -2,6 +2,13 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-09-kraken-portfolio-sync
+
+- Live mode now reconciles the bot's virtual portfolio with real Kraken balances at the start of each cycle (when `LiveTradingEnabled=true` and `MarketDataMode=kraken`). Cash is synced to the real Kraken EUR balance; position quantities are adjusted to match Kraken's reported asset holdings; positions with zero Kraken balance are removed (manual external sell detected).
+- Added `ExternalPnlEur` to `PortfolioState` (TradingBot.Core): cumulative P&L from activity not attributable to the bot (manual trades, deposits, withdrawals). Computed each cycle as the difference between Kraken's total portfolio value and the bot's tracked total value.
+- Added `ExternalPnlEur` to the `/api/portfolio` response (`PortfolioSummaryDto`) and a fifth "External P&L" metric tile on `dash.html`.
+- Removed the old startup-only cash-drift warning from `PrintBrokerStartupAsync`; reconciliation replaces it with per-cycle sync.
+
 ## 2026-07-09-entry-market-buy-option
 
 - Added `Entry.UseMarketBuy` config option (default `false`, env var `TRADINGBOT_ENTRY_USE_MARKET_BUY`). When `true`, spot BUY entries use a market order via `AddOrderAsync` instead of the maker post-only + IOC fallback flow. SELL execution is unchanged (already market).
