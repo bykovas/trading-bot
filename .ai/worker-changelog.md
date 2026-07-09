@@ -5,6 +5,7 @@ Latest entry must be first. The first `## <id>` heading is used as `worker.chang
 ## 2026-07-09-entry-market-buy-option
 
 - Added `Entry.UseMarketBuy` config option (default `false`, env var `TRADINGBOT_ENTRY_USE_MARKET_BUY`). When `true`, spot BUY entries use a market order via `AddOrderAsync` instead of the maker post-only + IOC fallback flow. SELL execution is unchanged (already market).
+- Added `UseMarketBuy` to `appsettings.json` under `Entry` section (default `false`).
 - No behavioral change with the default setting; existing maker-then-IOC flow is preserved.
 
 ## 2026-07-08-core-exit-policy-for-simulation
