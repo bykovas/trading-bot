@@ -344,6 +344,12 @@
       font-variant-numeric: tabular-nums;
     }
 
+    .net-pnl {
+      font-size: 11px;
+      opacity: .6;
+      margin-top: 2px;
+    }
+
     .empty {
       padding: 34px 18px;
       color: var(--muted);
@@ -441,7 +447,7 @@
       <div class="metric">
         <div class="label">Total value</div>
         <div id="total-value" class="value gold">--</div>
-        <div class="subvalue">Cash + open positions</div>
+        <div id="total-value-net" class="subvalue">Cash + open positions</div>
       </div>
       <div class="metric">
         <div class="label">Cash</div>
@@ -540,6 +546,7 @@
       statusDot: document.getElementById("status-dot"),
       statusText: document.getElementById("status-text"),
       totalValue: document.getElementById("total-value"),
+      totalValueNet: document.getElementById("total-value-net"),
       cash: document.getElementById("cash"),
       positionsValue: document.getElementById("positions-value"),
       openPositions: document.getElementById("open-positions"),
@@ -642,11 +649,15 @@
         const pnl = Number(position.unrealizedPnlEur);
         const pnlPercent = signedPercent(position.unrealizedPnlPercent);
         const cls = pnlClass(pnl);
+        const netPnl = Number(position.netUnrealizedPnlEur);
+        const netLine = Math.abs(netPnl - pnl) > 0.005
+          ? `<div class="net-pnl ${pnlClass(netPnl)}">${signedMoney(netPnl)} ${signedPercent(position.netUnrealizedPnlPercent)} net</div>`
+          : "";
         return `
           <tr>
             <td>${position.pair}</td>
             <td class="num">${ageDuration(position.openedAtUtc)}</td>
-            <td class="num ${cls}">${signedMoney(pnl)} ${pnlPercent}</td>
+            <td class="num ${cls}">${signedMoney(pnl)} ${pnlPercent}${netLine}</td>
             <td>${position.side}</td>
             <td class="num">${number(position.quantity)}</td>
             <td class="num">${money(position.entryPrice)}</td>
@@ -672,6 +683,7 @@
 
       if (!summary) {
         els.totalValue.textContent = "--";
+        els.totalValueNet.textContent = "Cash + open positions";
         els.cash.textContent = "--";
         els.positionsValue.textContent = "--";
         els.openPositions.textContent = "0 open positions";
@@ -685,6 +697,7 @@
       }
 
       els.totalValue.textContent = money(summary.totalValueEur);
+      els.totalValueNet.textContent = `${money(summary.netTotalValueEur)} net after fees`;
       els.cash.textContent = money(summary.cashEur);
       els.positionsValue.textContent = money(summary.positionsValueEur);
       els.openPositions.textContent = `${summary.openPositions} open position${summary.openPositions === 1 ? "" : "s"}`;

@@ -361,17 +361,41 @@ static TradeWindow LocalYesterdayStartUtc()
 
 static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
 {
+    // Positions value / total value are marked to LAST price (exchange parity) rather
+    // than the worker's conservative liquidation value (bid - slippage - fee), so the
+    // dashboard reconciles with what Kraken shows. Spot positions are valued at
+    // quantity * lastPrice; futures positions (leverage set) keep their stored equity
+    // value (initial margin + unrealized PnL). The worker's internal risk/exit logic is
+    // unaffected — it recomputes conservative valuations independently.
     await using var command = new NpgsqlCommand(
         """
         select
             updated_at,
             (state_json ->> 'cashEur')::numeric as cash_eur,
-            (state_json ->> 'positionsValueEur')::numeric as positions_value_eur,
-            (state_json ->> 'totalValueEur')::numeric as total_value_eur,
+            coalesce((
+                select sum(
+                    case
+                        when (pos ->> 'leverage') is null
+                            then (pos ->> 'quantity')::numeric * (pos ->> 'lastPrice')::numeric
+                        else (pos ->> 'marketValueEur')::numeric
+                    end)
+                from jsonb_array_elements(coalesce(state_json -> 'positions', '[]'::jsonb)) as pos
+            ), 0) as positions_value_eur,
+            (state_json ->> 'cashEur')::numeric + coalesce((
+                select sum(
+                    case
+                        when (pos ->> 'leverage') is null
+                            then (pos ->> 'quantity')::numeric * (pos ->> 'lastPrice')::numeric
+                        else (pos ->> 'marketValueEur')::numeric
+                    end)
+                from jsonb_array_elements(coalesce(state_json -> 'positions', '[]'::jsonb)) as pos
+            ), 0) as total_value_eur,
             jsonb_array_length(coalesce(state_json -> 'positions', '[]'::jsonb)) as open_positions,
             state_json -> 'dailyRisk' ->> 'dateUtc' as daily_risk_date_utc,
             (state_json -> 'dailyRisk' ->> 'realizedPnlEur')::numeric as daily_realized_pnl_eur,
-            coalesce((state_json ->> 'externalPnlEur')::numeric, 0) as external_pnl_eur
+            coalesce((state_json ->> 'externalPnlEur')::numeric, 0) as external_pnl_eur,
+            coalesce((state_json ->> 'positionsValueEur')::numeric, 0) as net_positions_value_eur,
+            coalesce((state_json ->> 'totalValueEur')::numeric, 0) as net_total_value_eur
         from portfolio_state
         where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
         order by updated_at desc
@@ -400,7 +424,9 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
         reader.GetInt32(4),
         todayUtc,
         dailyRealizedPnl,
-        reader.IsDBNull(7) ? 0m : reader.GetDecimal(7));
+        reader.IsDBNull(7) ? 0m : reader.GetDecimal(7),
+        reader.IsDBNull(8) ? 0m : reader.GetDecimal(8),
+        reader.IsDBNull(9) ? 0m : reader.GetDecimal(9));
 }
 
 static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
@@ -443,16 +469,33 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
     while (await reader.ReadAsync(cancellationToken))
     {
+        var quantity = reader.GetDecimal(2);
+        var entryPrice = reader.GetDecimal(3);
+        var lastPrice = reader.GetDecimal(5);
+        var storedMarketValue = reader.GetDecimal(6);
+        var storedPnlEur = reader.GetDecimal(7);
+        var storedPnlPercent = reader.GetDecimal(8);
+
+        // Spot positions (no leverage) are marked to LAST price with a fee-free cost
+        // basis for exchange parity, matching what Kraken displays. Futures positions
+        // keep their stored equity valuation.
+        var isSpot = reader.IsDBNull(15) && reader.IsDBNull(16);
+        var marketValue = isSpot ? quantity * lastPrice : storedMarketValue;
+        var pnlEur = isSpot ? (lastPrice - entryPrice) * quantity : storedPnlEur;
+        var pnlPercent = isSpot
+            ? (entryPrice > 0m ? (lastPrice - entryPrice) / entryPrice * 100m : 0m)
+            : storedPnlPercent;
+
         positions.Add(new PortfolioPositionDto(
             reader.GetString(0),
             reader.GetString(1),
-            reader.GetDecimal(2),
-            reader.GetDecimal(3),
+            quantity,
+            entryPrice,
             reader.GetDecimal(4),
-            reader.GetDecimal(5),
-            reader.GetDecimal(6),
-            reader.GetDecimal(7),
-            reader.GetDecimal(8),
+            lastPrice,
+            marketValue,
+            pnlEur,
+            pnlPercent,
             reader.IsDBNull(9) ? null : reader.GetDateTime(9),
             reader.IsDBNull(10) ? null : reader.GetDateTime(10),
             reader.IsDBNull(11) ? null : reader.GetString(11),
@@ -466,7 +509,10 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             GetNullableDecimal(reader, 19),
             GetNullableDecimal(reader, 20),
             reader.IsDBNull(21) ? null : reader.GetString(21),
-            reader.IsDBNull(22) ? null : reader.GetString(22)));
+            reader.IsDBNull(22) ? null : reader.GetString(22),
+            // Stored values are the worker's net-of-fees liquidation figures (spot).
+            storedPnlEur,
+            storedPnlPercent));
     }
 
     return positions;
@@ -1128,7 +1174,12 @@ internal sealed record PortfolioSummaryDto(
     int OpenPositions,
     string? DailyRiskDateUtc,
     decimal? DailyRealizedPnlEur,
-    decimal ExternalPnlEur);
+    decimal ExternalPnlEur,
+    // Net-of-fees valuation (worker's conservative liquidation value): what the
+    // portfolio would actually realize if liquidated now. PositionsValueEur/
+    // TotalValueEur above are the gross market value shown for Kraken parity.
+    decimal NetPositionsValueEur,
+    decimal NetTotalValueEur);
 
 internal sealed record PortfolioPositionDto(
     string Pair,
@@ -1153,7 +1204,12 @@ internal sealed record PortfolioPositionDto(
     decimal? LiquidationDistancePercent,
     decimal? FundingPaidEur,
     string? TpOrderState,
-    string? SlOrderState);
+    string? SlOrderState,
+    // Net-of-fees unrealized PnL (worker's conservative liquidation basis). The
+    // MarketValueEur/UnrealizedPnl* fields above are gross, at last price, for Kraken
+    // parity; these show what the position would net after round-trip costs.
+    decimal NetUnrealizedPnlEur,
+    decimal NetUnrealizedPnlPercent);
 
 internal sealed record PageRequest(int Limit, int Offset)
 {
