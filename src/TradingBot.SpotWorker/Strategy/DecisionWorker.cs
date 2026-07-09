@@ -83,7 +83,7 @@ internal sealed class DecisionWorker(
         if (LiveOrdersActive && broker is not null
             && string.Equals(config.Kraken.MarketDataMode, "kraken", StringComparison.OrdinalIgnoreCase))
         {
-            await ReconcileWithKrakenAsync(loadedPortfolio, cancellationToken);
+            await ReconcileWithKrakenAsync(loadedPortfolio, lightCandidates, utc, cancellationToken);
         }
 
         PrintCandidates("candidate-universe light snapshot:", lightCandidates);
@@ -776,6 +776,8 @@ internal sealed class DecisionWorker(
 
     private async Task ReconcileWithKrakenAsync(
         PortfolioState state,
+        IReadOnlyList<InstrumentMarketState> marketStates,
+        DateTimeOffset utc,
         CancellationToken cancellationToken)
     {
         IReadOnlyDictionary<string, decimal> balances;
@@ -798,25 +800,11 @@ internal sealed class DecisionWorker(
         var krakenQuantities = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
         foreach (var instrument in config.CandidateUniverse)
         {
-            var baseAsset = instrument.Pair.Split('/')[0];
-            var krakenQty = ResolveKrakenBalance(balances, baseAsset, $"X{baseAsset}");
+            var krakenQty = ResolveKrakenBalance(balances, KrakenBalanceKeys(instrument));
             if (krakenQty > 0m)
             {
                 krakenQuantities[instrument.Pair] = krakenQty;
             }
-        }
-
-        // External P&L = accumulated cash drift. All spot trades are the bot's own
-        // (manual trading happens only on futures), and the bot commits REAL exchange
-        // fills, so its CashEur mirrors Kraken EUR minus external activity: any drift
-        // is a deposit, a withdrawal, or an internal EUR transfer.
-        var cashDrift = krakenEur - state.CashEur;
-        if (Math.Abs(cashDrift) > 0.01m)
-        {
-            state.ExternalPnlEur += cashDrift;
-            Console.WriteLine(
-                $"kraken-sync: cash {state.CashEur:0.##} → {krakenEur:0.##} (external {cashDrift:+0.##;-0.##} EUR, cumulative {state.ExternalPnlEur:+0.##;-0.##})");
-            state.CashEur = krakenEur;
         }
 
         // Sync positions: adjust quantities to match Kraken, remove vanished positions
@@ -839,8 +827,84 @@ internal sealed class DecisionWorker(
             }
         }
 
+        var importedPositions = 0;
+        foreach (var (pair, krakenQty) in krakenQuantities)
+        {
+            if (state.Positions.Any(position => position.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var marketState = marketStates.FirstOrDefault(candidate =>
+                candidate.Instrument.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
+            var entryPrice = marketState?.LastPrice > 0m ? marketState.LastPrice : 0m;
+            var notional = entryPrice > 0m ? krakenQty * entryPrice : 0m;
+            state.Positions.Add(new PortfolioPosition
+            {
+                Pair = pair,
+                Side = "LONG",
+                Quantity = krakenQty,
+                EntryPrice = entryPrice,
+                EntryNotionalEur = notional,
+                LastPrice = entryPrice,
+                MarketValueEur = notional,
+                OpenedAtUtc = utc,
+                LastActionAtUtc = utc
+            });
+            importedPositions++;
+            Console.WriteLine($"kraken-sync: imported missing Kraken position {pair} qty={krakenQty:0.########} notional={notional:0.##}");
+        }
+
+        // External P&L = accumulated cash drift. When this cycle had to bootstrap
+        // missing positions from Kraken, the cash gap is probably stale state rather
+        // than a deposit/withdrawal, so sync cash but don't book it as external P&L.
+        var cashDrift = krakenEur - state.CashEur;
+        if (Math.Abs(cashDrift) > 0.01m)
+        {
+            if (importedPositions > 0)
+            {
+                Console.WriteLine(
+                    $"kraken-sync: cash {state.CashEur:0.##} → {krakenEur:0.##} (drift {cashDrift:+0.##;-0.##} EUR ignored for external P&L after importing {importedPositions} missing position(s))");
+            }
+            else
+            {
+                state.ExternalPnlEur += cashDrift;
+                Console.WriteLine(
+                    $"kraken-sync: cash {state.CashEur:0.##} → {krakenEur:0.##} (external {cashDrift:+0.##;-0.##} EUR, cumulative {state.ExternalPnlEur:+0.##;-0.##})");
+            }
+
+            state.CashEur = krakenEur;
+        }
+
         Console.WriteLine($"kraken-sync: cash={state.CashEur:0.##} positions={state.Positions.Count} externalPnl={state.ExternalPnlEur:+0.##;-0.##}");
         dryRunPortfolio.Save(state);
+    }
+
+    private static string[] KrakenBalanceKeys(InstrumentOptions instrument)
+    {
+        var pairParts = instrument.Pair.Split('/');
+        var baseAsset = pairParts[0];
+        var quoteAsset = pairParts.Length > 1 ? pairParts[1] : string.Empty;
+        var krakenBase = instrument.KrakenPair.EndsWith(quoteAsset, StringComparison.OrdinalIgnoreCase)
+            ? instrument.KrakenPair[..^quoteAsset.Length]
+            : baseAsset;
+
+        return new[]
+            {
+                baseAsset,
+                krakenBase,
+                $"X{baseAsset}",
+                $"X{krakenBase}",
+                $"XX{baseAsset}",
+                $"XX{krakenBase}",
+                baseAsset == "XDG" ? "DOGE" : string.Empty,
+                baseAsset == "XDG" ? "XXDG" : string.Empty,
+                baseAsset == "XBT" ? "BTC" : string.Empty,
+                baseAsset == "XBT" ? "XXBT" : string.Empty
+            }
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static decimal ResolveKrakenBalance(IReadOnlyDictionary<string, decimal> balances, params string[] keys)

@@ -2,6 +2,18 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-09-kraken-sync-import-missing-positions
+
+- Fixed live Kraken portfolio reconciliation to recognize exchange balance aliases such as `XXDG` for `XDG/EUR`, `XXBT` for `XBT/EUR`, and single- or double-`X` prefixed asset keys.
+- Live `MarketDataMode=kraken` cycles now import missing real Kraken spot balances as bot positions when the state file lacks them, so `portfolioBefore` reflects actual held assets before decisions run.
+- When a cycle imports missing Kraken positions, the accompanying EUR cash drift is synced but not booked as `ExternalPnlEur`, because the drift most likely came from stale/missing bot state rather than an external deposit or withdrawal.
+
+## 2026-07-09-market-buy-default-restored
+
+- Restored spot BUY entries to market execution by default: `Entry.UseMarketBuy` now defaults to `true` in both code defaults and `appsettings.json`.
+- The old maker post-only plus IOC fallback path remains available by explicitly setting `Entry.UseMarketBuy=false`.
+- Added a live-order regression test that verifies market BUY submits a plain Kraken market order with base-asset volume and no post-only/IOC flags.
+
 ## 2026-07-09-external-pnl-cash-drift-only
 
 - Fixed `ExternalPnlEur` computation: it now accumulates only the EUR cash drift (Kraken EUR balance vs bot's CashEur), not the Kraken-total-vs-bot-total difference. The old formula mixed valuation bases — Kraken assets at last price vs bot positions at conservative liquidation value (bid − slippage − taker fee) — so it reported a phantom "external P&L" (~0.5% of open notional) that drifted with prices even with zero external activity.

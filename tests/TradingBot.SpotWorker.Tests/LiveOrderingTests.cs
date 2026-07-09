@@ -92,6 +92,88 @@ public class LiveOrderingTests
     }
 
     [Fact]
+    public async Task Market_buy_mode_submits_plain_market_buy_with_base_volume()
+    {
+        var outputDirectory = TempDir();
+        var config = LiveConfig(outputDirectory);
+        config.Entry.UseMarketBuy = true;
+        string? addOrderBody = null;
+        var worker = Worker(config, new BodyAwareStub((path, body) =>
+        {
+            if (path.Contains("AddOrder", StringComparison.Ordinal))
+            {
+                addOrderBody = body;
+                return AddResponse("MARKET-1");
+            }
+
+            if (path.Contains("QueryOrders", StringComparison.Ordinal))
+            {
+                return ClosedFill("MARKET-1", vol: "7.13", price: "1.40", cost: "9.982", fee: "0.026");
+            }
+
+            return DefaultResponse(path);
+        }));
+
+        await worker.RunAsync(CancellationToken.None);
+
+        Assert.NotNull(addOrderBody);
+        var fields = FormFields(addOrderBody!);
+        Assert.Equal("AAAEUR", fields["pair"]);
+        Assert.Equal("buy", fields["type"]);
+        Assert.Equal("market", fields["ordertype"]);
+        Assert.False(fields.ContainsKey("oflags"));
+        Assert.False(fields.ContainsKey("timeinforce"));
+        Assert.InRange(decimal.Parse(fields["volume"], System.Globalization.CultureInfo.InvariantCulture), 7.1m, 7.2m);
+    }
+
+    [Fact]
+    public async Task Live_kraken_cycle_imports_missing_positions_from_real_balances()
+    {
+        var outputDirectory = TempDir();
+        var config = LiveConfig(outputDirectory);
+        config.Kraken.MarketDataMode = "kraken";
+        config.CandidateUniverse = new List<InstrumentOptions>
+        {
+            new() { Pair = "XDG/EUR", KrakenPair = "XDGEUR", Venue = "Kraken", Enabled = true },
+            new() { Pair = "LINK/EUR", KrakenPair = "LINKEUR", Venue = "Kraken", Enabled = true },
+            new() { Pair = "HYPE/EUR", KrakenPair = "HYPEEUR", Venue = "Kraken", Enabled = true }
+        };
+
+        var worker = new DecisionWorker(
+            config,
+            new FakeMarketDataSource("XDG/EUR", "LINK/EUR", "HYPE/EUR"),
+            new FixedAdvisor("XDG/EUR"),
+            new IndicatorEngine(),
+            new TechnicalDecisionEngine(),
+            new RiskManager(),
+            new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit, config.PositionSizing, strategy: config.Strategy),
+            broker: new KrakenBroker(new HttpClient(new BodyAwareStub((path, _) =>
+            {
+                if (path.Contains("Balance", StringComparison.Ordinal))
+                {
+                    return """{"error":[],"result":{"ZEUR":"25.86","XXDG":"313.07","LINK":"1.47156","HYPE":"0.16761"}}""";
+                }
+
+                return DefaultResponse(path);
+            })), config.Kraken));
+
+        await worker.RunAsync(CancellationToken.None);
+
+        var positions = LastCycle(outputDirectory)
+            .GetProperty("portfolioBefore")
+            .GetProperty("positions")
+            .EnumerateArray()
+            .ToDictionary(
+                position => position.GetProperty("pair").GetString()!,
+                position => position.GetProperty("quantity").GetDecimal(),
+                StringComparer.OrdinalIgnoreCase);
+
+        Assert.Equal(313.07m, positions["XDG/EUR"]);
+        Assert.Equal(1.47156m, positions["LINK/EUR"]);
+        Assert.Equal(0.16761m, positions["HYPE/EUR"]);
+    }
+
+    [Fact]
     public async Task Live_buy_does_not_create_position_when_maker_fill_is_unconfirmed()
     {
         var outputDirectory = TempDir();
@@ -731,7 +813,7 @@ public class LiveOrderingTests
             EntryBlackoutMinutes = 0,
             MaxNewPositionsPerHour = 0
         },
-        Entry = new EntryOptions { MakerFillTimeoutSec = 1, MakerRepegs = 0 },
+        Entry = new EntryOptions { UseMarketBuy = false, MakerFillTimeoutSec = 1, MakerRepegs = 0 },
         PositionExit = new PositionExitOptions { MinProfitToExitOnSignalFlipPercent = 0m, StopLossPercent = 0m, TakeProfitPercent = 0m, MaxHoldMinutes = 0 },
         CandidateUniverse = new List<InstrumentOptions>
         {
@@ -778,6 +860,14 @@ public class LiveOrderingTests
                 Content = new StringContent(respond(request.RequestUri!.AbsolutePath), Encoding.UTF8, "application/json")
             });
     }
+
+    private static Dictionary<string, string> FormFields(string body) =>
+        body.Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Split('=', 2))
+            .ToDictionary(
+                part => Uri.UnescapeDataString(part[0]),
+                part => part.Length > 1 ? Uri.UnescapeDataString(part[1]) : string.Empty,
+                StringComparer.OrdinalIgnoreCase);
 
     private sealed class FixedAdvisor(params string[] pairs) : IWatchlistAdvisor
     {

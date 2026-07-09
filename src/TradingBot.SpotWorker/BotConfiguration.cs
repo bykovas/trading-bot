@@ -418,7 +418,7 @@ internal sealed class FeeOptions
 
 internal sealed class EntryOptions
 {
-    public bool UseMarketBuy { get; set; }
+    public bool UseMarketBuy { get; set; } = true;
     public int MakerFillTimeoutSec { get; set; } = 25;
     public int MakerRepegs { get; set; } = 1;
 
