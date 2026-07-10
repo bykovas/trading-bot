@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-10-spot-wider-trailing-stop
+
+- Raised spot trailing-stop defaults from activation `0.8%` / distance `0.5%` to activation `1.5%` / distance `1.0%` so live micro-positions do not exit on sub-fee/spread noise immediately after a small favorable move.
+- Based on live `SELL_TRAILING_STOP` diagnostics: recent trailing exits preserved only near-zero realized PnL after real Kraken fills/fees, while one `BCH/EUR` exit sold before a later continuation.
+- Stop-loss, take-profit, max-hold, score-decay, entry logic, and automatic cycle metadata are unchanged.
+
 ## 2026-07-10-spot-light-snapshot-polling
 
 - Added optional spot-worker light market snapshot polling between full decision cycles via `Worker.MarketSnapshotIntervalSeconds`; the default spot config now polls Kraken light ticker snapshots every 30 seconds while keeping full decision/candle/order cycles at 240 seconds.
