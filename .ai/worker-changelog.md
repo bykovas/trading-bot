@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-10-spot-softer-exploratory-price-action
+
+- Lowered the spot exploratory-entry price-action trend default from `0.50%` to `0.25%` so near-threshold candidates with confirmed positive recent movement are not rejected after the 30-second snapshot cadence shortened the effective price-action window.
+- The exploratory path still requires a positive snapshot trend, the stricter exploratory spread cap, a top-`ExploratoryMaxRank` ranking slot, and normal risk/cash/exposure approval before any live order.
+- Firm entry score threshold, early-entry rules, exit logic, order sizing, and automatic cycle metadata are unchanged.
+
 ## 2026-07-10-spot-wider-trailing-stop
 
 - Raised spot trailing-stop defaults from activation `0.8%` / distance `0.5%` to activation `1.5%` / distance `1.0%` so live micro-positions do not exit on sub-fee/spread noise immediately after a small favorable move.
