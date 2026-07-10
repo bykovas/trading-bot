@@ -47,9 +47,36 @@ public class MarketSnapshotPersistenceTests
         Assert.False(config.Risk.KillSwitch);
     }
 
-    private static DecisionWorker Worker(BotConfiguration config, IDryRunPortfolioStore store) => new(
+    [Fact]
+    public async Task Extra_market_snapshot_polling_records_history_without_extra_decision_cycle()
+    {
+        var store = new FakeStore();
+        var config = Config("AAA/EUR", "BBB/EUR");
+        config.Worker = new WorkerOptions
+        {
+            RunOnce = false,
+            LoopIntervalSeconds = 2,
+            MarketSnapshotIntervalSeconds = 1
+        };
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var marketData = new CancellingMarketDataSource(cts, cancelAfterLightCalls: 2);
+        var worker = Worker(config, store, marketData);
+
+        await worker.RunAsync(cts.Token);
+
+        Assert.Equal(1, store.AppendCycleCalls);
+        Assert.Equal(2, store.SnapshotBatches.Count);
+        Assert.All(store.SnapshotBatches, batch => Assert.Equal(2, batch.Count));
+        Assert.Equal(1, marketData.FullCalls);
+    }
+
+    private static DecisionWorker Worker(BotConfiguration config, IDryRunPortfolioStore store) =>
+        Worker(config, store, new FakeMarketDataSource());
+
+    private static DecisionWorker Worker(BotConfiguration config, IDryRunPortfolioStore store, IMarketDataSource marketDataSource) => new(
         config,
-        new FakeMarketDataSource(),
+        marketDataSource,
         new FixedAdvisor("AAA/EUR"),
         new IndicatorEngine(),
         new TechnicalDecisionEngine(),
@@ -128,9 +155,11 @@ public class MarketSnapshotPersistenceTests
                 Array.Empty<string>()));
     }
 
-    private sealed class FakeMarketDataSource : IMarketDataSource
+    private class FakeMarketDataSource : IMarketDataSource
     {
-        public Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
+        public int FullCalls { get; protected set; }
+
+        public virtual Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
             IReadOnlyList<InstrumentOptions> instruments,
             CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<InstrumentMarketState>>(
@@ -140,9 +169,12 @@ public class MarketSnapshotPersistenceTests
             IReadOnlyList<InstrumentOptions> instruments,
             int timeframeMinutes,
             IReadOnlyList<InstrumentMarketState> lightStates,
-            CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<InstrumentMarketState>>(
+            CancellationToken cancellationToken)
+        {
+            FullCalls++;
+            return Task.FromResult<IReadOnlyList<InstrumentMarketState>>(
                 instruments.Select(instrument => State(instrument, includeCandles: true)).ToList());
+        }
 
         private static InstrumentMarketState State(InstrumentOptions instrument, bool includeCandles)
         {
@@ -167,6 +199,26 @@ public class MarketSnapshotPersistenceTests
                 PairRules = new PairRules(instrument.Pair, "online", 0.001m, 0.5m, 8, 2),
                 DataWarning = includeCandles ? null : "ticker-only test data"
             };
+        }
+    }
+
+    private sealed class CancellingMarketDataSource(
+        CancellationTokenSource cancellation,
+        int cancelAfterLightCalls) : FakeMarketDataSource
+    {
+        private int _lightCalls;
+
+        public override Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
+            IReadOnlyList<InstrumentOptions> instruments,
+            CancellationToken cancellationToken)
+        {
+            _lightCalls++;
+            if (_lightCalls >= cancelAfterLightCalls)
+            {
+                cancellation.Cancel();
+            }
+
+            return base.GetLightMarketStatesAsync(instruments, cancellationToken);
         }
     }
 }

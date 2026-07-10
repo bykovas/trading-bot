@@ -23,6 +23,12 @@ public sealed class WorkerOptions
 {
     public bool RunOnce { get; set; } = true;
     public int LoopIntervalSeconds { get; set; } = 300;
+
+    // Optional light-market polling cadence between full decision cycles. When set
+    // below LoopIntervalSeconds, the spot worker persists extra ticker snapshots and
+    // feeds the price-action guard without running full candle/scoring/order logic.
+    // 0 disables the extra polling path.
+    public int MarketSnapshotIntervalSeconds { get; set; } = 0;
 }
 
 public sealed class HttpOptions

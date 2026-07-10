@@ -60,9 +60,63 @@ internal sealed class DecisionWorker(
                 return;
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(config.Worker.LoopIntervalSeconds), cancellationToken);
+            await WaitUntilNextDecisionCycleAsync(cancellationToken);
         }
         while (!cancellationToken.IsCancellationRequested);
+    }
+
+    private async Task WaitUntilNextDecisionCycleAsync(CancellationToken cancellationToken)
+    {
+        var snapshotIntervalSeconds = config.Worker.MarketSnapshotIntervalSeconds;
+        if (snapshotIntervalSeconds <= 0 || snapshotIntervalSeconds >= config.Worker.LoopIntervalSeconds)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(config.Worker.LoopIntervalSeconds), cancellationToken);
+            return;
+        }
+
+        var nextDecisionUtc = DateTimeOffset.UtcNow.AddSeconds(config.Worker.LoopIntervalSeconds);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var delayUntilSnapshot = TimeSpan.FromSeconds(snapshotIntervalSeconds);
+            var remaining = nextDecisionUtc - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            if (remaining <= delayUntilSnapshot)
+            {
+                await Task.Delay(remaining, cancellationToken);
+                return;
+            }
+
+            await Task.Delay(delayUntilSnapshot, cancellationToken);
+            await PollLightMarketSnapshotAsync(cancellationToken);
+        }
+    }
+
+    private async Task PollLightMarketSnapshotAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var utc = DateTimeOffset.UtcNow;
+            var snapshotId = $"{config.BotInstance.Id}-snapshot-{utc:yyyyMMddHHmmss}";
+            var lightStates = await marketDataSource.GetLightMarketStatesAsync(
+                config.CandidateUniverse,
+                cancellationToken);
+
+            PersistMarketSnapshots(snapshotId, utc, lightStates);
+            _priceHistory.Record(utc, lightStates);
+            Console.WriteLine($"market-snapshot-poll: recorded {lightStates.Count} light states at {utc:O}; next full cycle remains on {config.Worker.LoopIntervalSeconds}s cadence");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"market-snapshot-poll: FAILED ({ex.Message}); continuing toward next full cycle");
+        }
     }
 
     private async Task RunCycleAsync(CancellationToken cancellationToken)

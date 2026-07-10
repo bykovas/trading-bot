@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-10-spot-light-snapshot-polling
+
+- Added optional spot-worker light market snapshot polling between full decision cycles via `Worker.MarketSnapshotIntervalSeconds`; the default spot config now polls Kraken light ticker snapshots every 30 seconds while keeping full decision/candle/order cycles at 240 seconds.
+- Extra light polls persist `market_snapshots` and feed the rolling price-action guard only; they do not run watchlist selection, full candle fetches, scoring, ranking, risk checks, or orders, so open-position management and new entries remain on the existing full-cycle cadence.
+- Re-tuned spot price-action defaults for the 30-second snapshot stream: lookback `6 -> 24` snapshots, minimum warm-up `4 -> 12`, and max non-rising snapshots `3 -> 8`, giving the anti-lag/anti-peak guard a faster ~12-minute recent window instead of relying on sparse 4-minute samples.
+
 ## 2026-07-09-kraken-sync-import-missing-positions
 
 - Fixed live Kraken portfolio reconciliation to recognize exchange balance aliases such as `XXDG` for `XDG/EUR`, `XXBT` for `XBT/EUR`, and single- or double-`X` prefixed asset keys.

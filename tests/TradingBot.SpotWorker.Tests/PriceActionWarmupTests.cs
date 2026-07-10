@@ -384,6 +384,32 @@ public class PriceActionWarmupTests
         Assert.False(overridden.Strategy.RequirePriceActionData);
     }
 
+    [Fact]
+    public void Market_snapshot_interval_normalizes_to_optional_sub_cycle_cadence()
+    {
+        var enabled = new BotConfiguration
+        {
+            Worker = new WorkerOptions
+            {
+                LoopIntervalSeconds = 240,
+                MarketSnapshotIntervalSeconds = 30
+            }
+        };
+        InvokeNormalize(enabled);
+        Assert.Equal(30, enabled.Worker.MarketSnapshotIntervalSeconds);
+
+        var redundant = new BotConfiguration
+        {
+            Worker = new WorkerOptions
+            {
+                LoopIntervalSeconds = 240,
+                MarketSnapshotIntervalSeconds = 240
+            }
+        };
+        InvokeNormalize(redundant);
+        Assert.Equal(0, redundant.Worker.MarketSnapshotIntervalSeconds);
+    }
+
     private static void InvokeNormalize(BotConfiguration config) =>
         typeof(BotConfiguration).GetMethod(
             "Normalize",

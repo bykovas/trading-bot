@@ -67,6 +67,7 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_KRAKEN_API_SECRET", value => config.Kraken.ApiSecret = value);
         SetIfPresent("TRADINGBOT_RUN_ONCE", value => config.Worker.RunOnce = ParseBool(value, config.Worker.RunOnce));
         SetIfPresent("TRADINGBOT_LOOP_INTERVAL_SECONDS", value => config.Worker.LoopIntervalSeconds = ParseInt(value, config.Worker.LoopIntervalSeconds));
+        SetIfPresent("TRADINGBOT_MARKET_SNAPSHOT_INTERVAL_SECONDS", value => config.Worker.MarketSnapshotIntervalSeconds = ParseInt(value, config.Worker.MarketSnapshotIntervalSeconds));
         SetIfPresent("TRADINGBOT_TIMEFRAME_MINUTES", value => config.Trading.TimeframeMinutes = ParseInt(value, config.Trading.TimeframeMinutes));
         SetIfPresent("TRADINGBOT_MAX_ACTIVE_INSTRUMENTS", value => config.Trading.MaxActiveInstruments = ParseInt(value, config.Trading.MaxActiveInstruments));
         SetIfPresent("TRADINGBOT_LIVE_TRADING_ENABLED", value => config.Trading.LiveTradingEnabled = ParseBool(value, config.Trading.LiveTradingEnabled));
@@ -167,6 +168,11 @@ internal sealed class BotConfiguration
     private void Normalize()
     {
         Worker.LoopIntervalSeconds = Math.Max(10, Worker.LoopIntervalSeconds);
+        Worker.MarketSnapshotIntervalSeconds = Math.Max(0, Worker.MarketSnapshotIntervalSeconds);
+        if (Worker.MarketSnapshotIntervalSeconds >= Worker.LoopIntervalSeconds)
+        {
+            Worker.MarketSnapshotIntervalSeconds = 0;
+        }
         BotInstance.Id = BotInstanceId.Normalize(BotInstance.Id);
         BotInstance.Name = string.IsNullOrWhiteSpace(BotInstance.Name) ? BotInstance.Id : BotInstance.Name.Trim();
         Http.TimeoutSeconds = Math.Clamp(Http.TimeoutSeconds, 5, 120);
