@@ -706,7 +706,8 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
         ),
         latest_trade_meta as (
             select strategy_version, change_set
-            from trade_cycles
+            from dry_run_cycles
+            where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
             order by utc desc, cycle_id desc
             limit 1
         )
