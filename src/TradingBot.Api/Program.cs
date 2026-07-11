@@ -532,6 +532,34 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
 {
     await using var command = new NpgsqlCommand(
         """
+        with trade_cycles as (
+            select
+                cycle_id,
+                bot_instance_id,
+                utc,
+                worker_version,
+                worker_commit,
+                worker_build_utc,
+                worker_image_tag,
+                strategy_version,
+                change_set,
+                record_json
+            from dry_run_cycles
+            where utc >= @utc_start
+              and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
+              and exists (
+                  select 1
+                  from dry_run_decisions decision
+                  where decision.cycle_id = dry_run_cycles.cycle_id
+                    and decision.action in ('WOULD_BUY', 'WOULD_SELL', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT', 'WOULD_CLOSE')
+              )
+        ),
+        latest_trade_meta as (
+            select strategy_version, change_set
+            from trade_cycles
+            order by utc desc, cycle_id desc
+            limit 1
+        )
         select
             cycle_id,
             bot_instance_id,
@@ -693,47 +721,15 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
             strategy_version,
             change_set,
             record_json::text
-        from dry_run_cycles
-        where utc >= @utc_start
-          and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
-          and (
+        from trade_cycles
+        where (
               @latest_meta = false
-              or (
-                  strategy_version is not distinct from (
-                      select latest.strategy_version
-                      from dry_run_cycles latest
-                      where latest.bot_instance_id = dry_run_cycles.bot_instance_id
-                        and latest.utc >= @utc_start
-                        and exists (
-                            select 1
-                            from dry_run_decisions latest_decision
-                            where latest_decision.cycle_id = latest.cycle_id
-                              and latest_decision.action in ('WOULD_BUY', 'WOULD_SELL', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT', 'WOULD_CLOSE')
-                        )
-                      order by latest.utc desc, latest.cycle_id desc
-                      limit 1
-                  )
-                  and change_set is not distinct from (
-                      select latest.change_set
-                      from dry_run_cycles latest
-                      where latest.bot_instance_id = dry_run_cycles.bot_instance_id
-                        and latest.utc >= @utc_start
-                        and exists (
-                            select 1
-                            from dry_run_decisions latest_decision
-                            where latest_decision.cycle_id = latest.cycle_id
-                              and latest_decision.action in ('WOULD_BUY', 'WOULD_SELL', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT', 'WOULD_CLOSE')
-                        )
-                      order by latest.utc desc, latest.cycle_id desc
-                      limit 1
-                  )
+              or exists (
+                  select 1
+                  from latest_trade_meta latest
+                  where trade_cycles.strategy_version is not distinct from latest.strategy_version
+                    and trade_cycles.change_set is not distinct from latest.change_set
               )
-          )
-          and exists (
-              select 1
-              from dry_run_decisions decision
-              where decision.cycle_id = dry_run_cycles.cycle_id
-                and decision.action in ('WOULD_BUY', 'WOULD_SELL', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT', 'WOULD_CLOSE')
           )
         order by utc desc, cycle_id desc
         limit @limit offset @offset
