@@ -78,6 +78,19 @@ services:
       - /opt/trading-bot/futures/virtual/data:/app/data
       - /opt/trading-bot/futures/virtual/logs:/app/logs
 
+  market-data-worker:
+    container_name: trading-bot-market-data-worker
+    image: ${MARKET_DATA_WORKER_IMAGE_NAME}:${MARKET_DATA_WORKER_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - /opt/trading-bot/market-data/.env
+    depends_on:
+      database:
+        condition: service_healthy
+    volumes:
+      - /opt/trading-bot/market-data/appsettings.json:/app/appsettings.json:ro
+      - /opt/trading-bot/market-data/logs:/app/logs
+
   database:
     container_name: trading-bot-db
     image: postgres:16-alpine

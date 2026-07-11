@@ -1,8 +1,8 @@
 using System.Text.Json;
 
-namespace TradingBot.FuturesWorker;
+namespace TradingBot.Core.MarketData;
 
-internal sealed class KrakenFuturesUniverseProvider(
+public sealed class KrakenSpotUniverseProvider(
     HttpClient httpClient,
     KrakenOptions kraken,
     UniverseDiscoveryOptions options,
@@ -34,7 +34,7 @@ internal sealed class KrakenFuturesUniverseProvider(
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            var fallback = Configured($"futures universe discovery failed: {ex.Message}");
+            var fallback = Configured($"spot universe discovery failed: {ex.Message}");
             _cached ??= fallback;
             _cacheUntilUtc = now.AddMinutes(5);
             return fallback;
@@ -43,39 +43,39 @@ internal sealed class KrakenFuturesUniverseProvider(
 
     private async Task<IReadOnlyList<InstrumentOptions>> DiscoverAsync(CancellationToken cancellationToken)
     {
-        var uri = $"{kraken.BaseUrl.TrimEnd('/')}/derivatives/api/v3/instruments";
+        var uri = $"{kraken.BaseUrl.TrimEnd('/')}/0/public/AssetPairs?assetVersion=1";
         using var response = await httpClient.GetAsync(uri, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        ThrowIfErrorResult(document.RootElement, "instruments");
-
-        if (!document.RootElement.TryGetProperty("instruments", out var instrumentsElement)
-            || instrumentsElement.ValueKind != JsonValueKind.Array)
-        {
-            throw new InvalidOperationException("Kraken Futures instruments response missing instruments array.");
-        }
+        ThrowIfKrakenError(document.RootElement);
 
         var instruments = new List<InstrumentOptions>();
-        foreach (var item in instrumentsElement.EnumerateArray())
+        foreach (var pairProperty in document.RootElement.GetProperty("result").EnumerateObject())
         {
-            var symbol = GetString(item, "symbol");
-            if (string.IsNullOrWhiteSpace(symbol)
-                || !symbol.StartsWith("PF_", StringComparison.OrdinalIgnoreCase)
-                || !symbol.EndsWith("USD", StringComparison.OrdinalIgnoreCase)
-                || !GetBool(item, "tradeable")
-                || GetBool(item, "postOnly"))
+            if (pairProperty.Value.ValueKind != JsonValueKind.Object)
             {
                 continue;
             }
 
-            var pair = GetString(item, "pair");
+            var value = pairProperty.Value;
+            var status = GetString(value, "status");
+            var wsName = GetString(value, "wsname");
+            var altName = GetString(value, "altname") ?? pairProperty.Name;
+            if (!string.Equals(status, "online", StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(wsName)
+                || !wsName.EndsWith("/EUR", StringComparison.OrdinalIgnoreCase)
+                || wsName.Contains(".d", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             instruments.Add(new InstrumentOptions
             {
-                Pair = NormalizePair(symbol, pair),
-                KrakenPair = symbol,
-                Venue = "KrakenFutures",
+                Pair = wsName,
+                KrakenPair = altName,
+                Venue = "Kraken",
                 Enabled = true
             });
         }
@@ -132,7 +132,7 @@ internal sealed class KrakenFuturesUniverseProvider(
         return new UniverseSelection(
             instruments,
             new UniverseSelectionDiagnostics(
-                "kraken-futures-instruments",
+                "kraken-assetpairs",
                 discovered.Count,
                 configured.Count,
                 instruments.Count,
@@ -154,21 +154,6 @@ internal sealed class KrakenFuturesUniverseProvider(
                 warning));
     }
 
-    private static string NormalizePair(string symbol, string? pair)
-    {
-        if (!string.IsNullOrWhiteSpace(pair) && pair.Contains('/'))
-        {
-            return pair;
-        }
-
-        var compact = symbol.StartsWith("PF_", StringComparison.OrdinalIgnoreCase)
-            ? symbol[3..]
-            : symbol;
-        return compact.EndsWith("USD", StringComparison.OrdinalIgnoreCase)
-            ? $"{compact[..^3]}/USD"
-            : compact;
-    }
-
     private static HashSet<string> BuildSet(IEnumerable<string> values) =>
         values.Where(value => !string.IsNullOrWhiteSpace(value))
             .Select(value => value.Trim())
@@ -179,30 +164,13 @@ internal sealed class KrakenFuturesUniverseProvider(
             ? value.GetString()
             : null;
 
-    private static bool GetBool(JsonElement element, string propertyName)
+    private static void ThrowIfKrakenError(JsonElement root)
     {
-        if (!element.TryGetProperty(propertyName, out var value))
+        if (root.TryGetProperty("error", out var errors)
+            && errors.ValueKind == JsonValueKind.Array
+            && errors.GetArrayLength() > 0)
         {
-            return false;
-        }
-
-        return value.ValueKind switch
-        {
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed) && parsed,
-            _ => false
-        };
-    }
-
-    private static void ThrowIfErrorResult(JsonElement root, string endpoint)
-    {
-        if (root.TryGetProperty("result", out var result)
-            && result.ValueKind == JsonValueKind.String
-            && result.GetString()?.Equals("error", StringComparison.OrdinalIgnoreCase) == true)
-        {
-            var message = root.TryGetProperty("error", out var error) ? error.ToString() : "unknown error";
-            throw new InvalidOperationException($"Kraken Futures {endpoint} returned error: {message}");
+            throw new InvalidOperationException(string.Join("; ", errors.EnumerateArray().Select(error => error.GetString())));
         }
     }
 }

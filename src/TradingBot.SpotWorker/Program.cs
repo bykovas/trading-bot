@@ -27,12 +27,14 @@ try
         Timeout = TimeSpan.FromSeconds(config.Http.TimeoutSeconds)
     };
 
-    IMarketDataSource marketDataSource = config.Kraken.MarketDataMode.Equals("kraken", StringComparison.OrdinalIgnoreCase)
-        ? new KrakenMarketDataSource(httpClient, config.Kraken)
-        : new SampleMarketDataSource();
-    IUniverseProvider universeProvider = config.Kraken.MarketDataMode.Equals("kraken", StringComparison.OrdinalIgnoreCase)
-        ? new KrakenSpotUniverseProvider(httpClient, config.Kraken, config.UniverseDiscovery, config.CandidateUniverse)
-        : new ConfiguredUniverseProvider(config.CandidateUniverse);
+    var (marketDataSource, universeProvider) = MarketDataSourceFactory.Create(
+        httpClient,
+        config.Kraken,
+        config.UniverseDiscovery,
+        config.CandidateUniverse,
+        config.Database,
+        config.MarketDataConsumer,
+        config.Trading.TimeframeMinutes);
 
     var fallbackAdvisor = new HeuristicWatchlistAdvisor();
     IWatchlistAdvisor watchlistAdvisor = config.Ai.Provider.Equals("openai-compatible", StringComparison.OrdinalIgnoreCase)
@@ -45,9 +47,7 @@ try
         : fallbackAdvisor;
 
     var krakenBroker = new KrakenBroker(httpClient, config.Kraken);
-    var broker = config.Kraken.MarketDataMode.Equals("kraken", StringComparison.OrdinalIgnoreCase) && krakenBroker.IsConfigured
-        ? krakenBroker
-        : null;
+    var broker = krakenBroker.IsConfigured ? krakenBroker : null;
 
     var portfolioStore = CreatePortfolioStore(config);
     var worker = new DecisionWorker(

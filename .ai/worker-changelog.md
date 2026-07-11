@@ -2,6 +2,13 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-11-centralized-market-data-worker
+
+- Added `TradingBot.MarketDataWorker`: one process polls Kraken spot+futures once, writes shared `instrument_registry`, `market_quotes`, `market_candles`, and `market_orderbooks` to Postgres; candle fetch set is union of top-volume pairs, strong movers, force-include list, and held pairs from all `spot-*` / `futures-*` instances.
+- Spot and futures decision workers now support `MarketDataMode=database` via `DatabaseMarketDataSource` + `DatabaseUniverseProvider`; stale shared data falls back to direct Kraken fetch when `TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true` (default). Deploy defaults all instances to `database` mode and adds the `market-data-worker` compose service.
+- Moved Kraken universe providers and futures public market-data adapter into `TradingBot.Core`; live Kraken reconciliation no longer depends on `MarketDataMode=kraken`.
+- Expected effect: Kraken public API load stays O(1) as instance count grows; live/virtual/futures instances consume the same quote/candle snapshot instead of diverging by poll time.
+
 ## 2026-07-11-futures-dead-man-switch-cycle-refresh
 
 - Fixed futures live dead-man switch refresh so it runs once at the start of every live cycle after Kraken reconciliation, instead of only when `ApplyOrExecuteLiveAsync` reaches an actual entry/exit order; holding positions no longer lets the 90s Kraken timer expire between 120s worker loops.

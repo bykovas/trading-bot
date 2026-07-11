@@ -32,6 +32,7 @@ internal sealed class FuturesBotConfiguration
     public FuturesPortfolioOptions Portfolio { get; set; } = new();
     public DryRunOptions DryRun { get; set; } = new();
     public DatabaseOptions Database { get; set; } = new();
+    public MarketDataConsumerOptions MarketDataConsumer { get; set; } = new() { Venue = MarketDataVenue.Futures };
     public UniverseDiscoveryOptions UniverseDiscovery { get; set; } = new();
     public List<InstrumentOptions> CandidateUniverse { get; set; } = new();
 
@@ -73,6 +74,9 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_LOG_DIRECTORY", value => config.Logging.Directory = value);
         SetIfPresent("TRADINGBOT_DATABASE_ENABLED", value => config.Database.Enabled = ParseBool(value, config.Database.Enabled));
         SetIfPresent("TRADINGBOT_DATABASE_CONNECTION_STRING", value => config.Database.ConnectionString = value);
+        SetIfPresent("TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED", value => config.MarketDataConsumer.FallbackEnabled = ParseBool(value, config.MarketDataConsumer.FallbackEnabled));
+        SetIfPresent("TRADINGBOT_MARKET_DATA_MAX_QUOTE_AGE_SECONDS", value => config.MarketDataConsumer.MaxQuoteAgeSeconds = ParseInt(value, config.MarketDataConsumer.MaxQuoteAgeSeconds));
+        SetIfPresent("TRADINGBOT_MARKET_DATA_MAX_CANDLE_AGE_MINUTES", value => config.MarketDataConsumer.MaxCandleAgeMinutes = ParseInt(value, config.MarketDataConsumer.MaxCandleAgeMinutes));
         SetIfPresent("TRADINGBOT_UNIVERSE_DISCOVERY_ENABLED", value => config.UniverseDiscovery.Enabled = ParseBool(value, config.UniverseDiscovery.Enabled));
         SetIfPresent("TRADINGBOT_UNIVERSE_DISCOVERY_REFRESH_SECONDS", value => config.UniverseDiscovery.RefreshSeconds = ParseInt(value, config.UniverseDiscovery.RefreshSeconds));
         SetIfPresent("TRADINGBOT_UNIVERSE_INCLUDE_CONFIGURED", value => config.UniverseDiscovery.IncludeConfiguredUniverse = ParseBool(value, config.UniverseDiscovery.IncludeConfiguredUniverse));

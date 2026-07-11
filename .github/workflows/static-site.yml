@@ -15,6 +15,7 @@ env:
   API_IMAGE_NAME: ghcr.io/bykovas/trading-bot-api
   SPOT_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-spot-worker
   FUTURES_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-futures-worker
+  MARKET_DATA_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-market-data-worker
 
 jobs:
   build:
@@ -85,6 +86,14 @@ jobs:
             --tag "${FUTURES_WORKER_IMAGE_NAME}:${{ github.sha }}" \
             .
 
+      - name: Build market data worker image
+        run: |
+          docker build \
+            --file src/TradingBot.MarketDataWorker/Dockerfile \
+            --tag "${MARKET_DATA_WORKER_IMAGE_NAME}:latest" \
+            --tag "${MARKET_DATA_WORKER_IMAGE_NAME}:${{ github.sha }}" \
+            .
+
       - name: Build API image
         run: |
           docker build \
@@ -103,6 +112,8 @@ jobs:
           docker push "${SPOT_WORKER_IMAGE_NAME}:${{ github.sha }}"
           docker push "${FUTURES_WORKER_IMAGE_NAME}:latest"
           docker push "${FUTURES_WORKER_IMAGE_NAME}:${{ github.sha }}"
+          docker push "${MARKET_DATA_WORKER_IMAGE_NAME}:latest"
+          docker push "${MARKET_DATA_WORKER_IMAGE_NAME}:${{ github.sha }}"
 
       - name: Upload deploy bundle
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -116,6 +127,7 @@ jobs:
             infra/traefik/trading-bot.yml
             src/TradingBot.SpotWorker/appsettings.json
             src/TradingBot.FuturesWorker/appsettings.json
+            src/TradingBot.MarketDataWorker/appsettings.json
 
   deploy:
     needs: build
@@ -133,6 +145,8 @@ jobs:
       SPOT_WORKER_IMAGE_TAG: ${{ github.sha }}
       FUTURES_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-futures-worker
       FUTURES_WORKER_IMAGE_TAG: ${{ github.sha }}
+      MARKET_DATA_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-market-data-worker
+      MARKET_DATA_WORKER_IMAGE_TAG: ${{ github.sha }}
       GHCR_USERNAME: ${{ github.actor }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TRADINGBOT_DB_PASSWORD: ${{ secrets.TRADINGBOT_DB_PASSWORD }}

@@ -263,6 +263,27 @@ public sealed class DatabaseOptions
     public string ConnectionString { get; set; } = string.Empty;
 }
 
+public sealed class MarketDataConsumerOptions
+{
+    public string Venue { get; set; } = MarketDataVenue.Spot;
+    public bool FallbackEnabled { get; set; } = true;
+    public int MaxQuoteAgeSeconds { get; set; } = 120;
+    public int MaxCandleAgeMinutes { get; set; } = 15;
+    public int MaxCandleBars { get; set; } = 120;
+}
+
+public sealed class MarketDataIngestionOptions
+{
+    public int LightIntervalSeconds { get; set; } = 30;
+    public int CandleIntervalSeconds { get; set; } = 120;
+    public int TimeframeMinutes { get; set; } = 15;
+    public int MaxCandlePairs { get; set; } = 40;
+    public int TopVolumePairs { get; set; } = 30;
+    public decimal StrongMoverPercent { get; set; } = 3m;
+    public List<string> ForceInclude { get; set; } = new();
+    public List<string> Blacklist { get; set; } = new();
+}
+
 public sealed class CorrelationRiskOptions
 {
     // Per-group open-position and exposure caps. Every value uses the 0 = disabled
