@@ -23,6 +23,11 @@ internal sealed class FuturesDecisionWorker(
     private readonly IReadOnlyDictionary<string, string> _pairToCorrelationGroup =
         CorrelationRiskResolver.BuildPairToGroup(config.CorrelationRisk);
 
+    // Rolling per-pair light snapshot history feeding the anti-lag price-action
+    // guard (same mechanism as the spot worker). In-memory; hydrated on startup
+    // from the persisted market snapshots so the guard is not blind after restarts.
+    private readonly SnapshotPriceHistory _priceHistory = new();
+
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         if (IsLiveInstance && !config.Futures.LiveTradingEnabled)
@@ -41,6 +46,7 @@ internal sealed class FuturesDecisionWorker(
             Console.WriteLine("!!! FUTURES LIVE TRADING ENABLED: approved decisions will place REAL Kraken Futures market orders !!!");
         }
         Console.WriteLine($"futures limits: leverage<= {config.Futures.MaxLeverage:0.#}x, positions<= {config.Futures.MaxPositions}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flip=forbidden");
+        HydratePriceHistory();
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -77,6 +83,7 @@ internal sealed class FuturesDecisionWorker(
         var state = portfolio.Load();
         var lightStates = await marketDataSource.GetLightMarketStatesAsync(universe, cancellationToken);
         PersistMarketSnapshots(cycleId, utc, lightStates);
+        _priceHistory.Record(utc, lightStates);
         if (config.Futures.LiveTradingEnabled)
         {
             await ReconcileWithKrakenAsync(state, universe, lightStates, utc, cancellationToken);
@@ -109,7 +116,13 @@ internal sealed class FuturesDecisionWorker(
             var pair = marketState.Instrument.Pair;
             var markPrice = marketState.LastPrice;
             var indicators = indicatorEngine.Calculate(marketState.Candles, config.Strategy);
-            var signal = SignalScorer.Evaluate(marketState, indicators, config.Strategy);
+            var priceAction = _priceHistory.Assess(
+                pair,
+                config.Strategy.PriceActionLookbackSnapshots,
+                config.Strategy.PriceActionMinSnapshots,
+                utc,
+                config.Strategy.PriceActionMaxSampleAgeMinutes);
+            var signal = SignalScorer.Evaluate(marketState, indicators, config.Strategy, priceAction);
             var held = state.Positions.FirstOrDefault(position => position.Pair == pair);
 
             FuturesFillResult fill;
@@ -189,7 +202,13 @@ internal sealed class FuturesDecisionWorker(
                 else
                 {
                     entryPlan = BuildEntryPlan(state, marketState, desired, signal, btcRegime, utc);
-                    var portfolioGate = EvaluatePortfolioEntryGuards(state, pair, desired, utc);
+                    // Market-quality gate first (spread, anti-lag price action,
+                    // warm-up, anti-extension) — the same protections the spot
+                    // worker applies before its portfolio and risk layers.
+                    var qualityGate = FuturesEntryQualityGate.Evaluate(marketState, indicators, desired, priceAction, config.Strategy);
+                    var portfolioGate = qualityGate.Approved
+                        ? EvaluatePortfolioEntryGuards(state, pair, desired, utc)
+                        : qualityGate;
                     var evaluation = portfolioGate.Approved
                         ? riskManager.EvaluateEntry(BuildRiskInputs(state, marketState, desired, signal, entryPlan, btcRegime))
                         : portfolioGate;
@@ -215,7 +234,7 @@ internal sealed class FuturesDecisionWorker(
                             newEntriesThisCycle++;
                         }
 
-                        decisions.Add(BuildDecisionRecord(marketState, indicators, signal, fill, riskApproved, riskReasons));
+                        decisions.Add(BuildDecisionRecord(marketState, indicators, signal, fill, riskApproved, riskReasons, priceAction));
                         continue;
                     }
                 }
@@ -235,7 +254,7 @@ internal sealed class FuturesDecisionWorker(
                 }
             }
 
-            decisions.Add(BuildDecisionRecord(marketState, indicators, signal, fill, riskApproved, riskReasons));
+            decisions.Add(BuildDecisionRecord(marketState, indicators, signal, fill, riskApproved, riskReasons, priceAction));
         }
 
         portfolio.Save(state);
@@ -255,6 +274,31 @@ internal sealed class FuturesDecisionWorker(
             EntryDiagnostics = BuildEntryDiagnostics(lightStates, active, fullStates, decisions, btcRegime)
         });
         Console.WriteLine($"futures cycle done: decisions={decisions.Count} cash={state.CashEur:0.####} total={state.TotalValueEur:0.####} positions={state.Positions.Count}");
+    }
+
+    // Best-effort warm-up hydration from persisted market snapshots, so the
+    // anti-lag guard can judge pairs on the very first cycle after a restart.
+    // A store failure only skips hydration; it never blocks the worker.
+    private void HydratePriceHistory()
+    {
+        if (config.Strategy.PriceActionHydrationMinutes <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var since = _clock.UtcNow.AddMinutes(-config.Strategy.PriceActionHydrationMinutes);
+            var snapshots = portfolio.Store.LoadRecentMarketSnapshots(since);
+            var loaded = _priceHistory.Hydrate(snapshots);
+            Console.WriteLine(loaded > 0
+                ? $"price-action-hydration: loaded {loaded} persisted snapshots from the last {config.Strategy.PriceActionHydrationMinutes} minutes"
+                : "price-action-hydration: no recent persisted snapshots; guard warms up normally");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"price-action-hydration: FAILED ({ex.Message}); guard warms up normally");
+        }
     }
 
     private async Task<UniverseSelection> ResolveUniverseAsync(CancellationToken cancellationToken)
@@ -777,7 +821,8 @@ internal sealed class FuturesDecisionWorker(
         TechnicalSignal signal,
         FuturesFillResult fill,
         bool riskApproved,
-        IReadOnlyList<string> riskReasons) => new()
+        IReadOnlyList<string> riskReasons,
+        PriceActionAssessment? priceAction = null) => new()
     {
         Pair = marketState.Instrument.Pair,
         Price = marketState.LastPrice,
@@ -797,7 +842,9 @@ internal sealed class FuturesDecisionWorker(
         HasBullishStructure = signal.HasBullishStructure,
         EmaFullyConfirmed = signal.EmaFullyConfirmed,
         BullishEmaGapPercent = signal.BullishEmaGapPercent,
-        EmaGapVelocityPercent = signal.EmaGapVelocityPercent
+        EmaGapVelocityPercent = signal.EmaGapVelocityPercent,
+        PriceActionDirection = priceAction?.Direction,
+        PriceActionTrendPercent = priceAction?.TrendPercent
     };
 
     private string ExplainNoEntry(TechnicalSignal signal)
@@ -911,7 +958,13 @@ internal sealed class FuturesDecisionWorker(
             lightStates.Count,
             fullStates.Count,
             entryDecisions.Count,
-            PriceActionReadyCount: 0,
+            PriceActionReadyCount: lightStates.Count(state =>
+                _priceHistory.Assess(
+                    state.Instrument.Pair,
+                    config.Strategy.PriceActionLookbackSnapshots,
+                    config.Strategy.PriceActionMinSnapshots,
+                    _clock.UtcNow,
+                    config.Strategy.PriceActionMaxSampleAgeMinutes) is { DataSufficient: true }),
             ScoreAtLeast075: decisions.Count(decision => decision.Score >= 0.75m),
             ScoreAtLeast080: decisions.Count(decision => decision.Score >= 0.80m),
             ScoreAtLeast085: decisions.Count(decision => decision.Score >= 0.85m),

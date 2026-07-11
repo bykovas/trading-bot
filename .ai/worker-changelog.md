@@ -2,6 +2,13 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-11-futures-entry-quality-parity
+
+- Futures entries now pass the same market-quality protections the spot worker already had, via a new pure `FuturesEntryQualityGate` evaluated BEFORE the portfolio guards and margin risk manager: entry spread limit (`Strategy.MaxEntrySpreadPercent` 0.15%), anti-lag price-action guard (longs reuse the shared `PriceActionGuard`; shorts get the mirror — a tape still rising by `PriceActionMaxDeclinePercent` blocks a short), price-action warm-up (`RequirePriceActionData`, forced on when `Futures.LiveTradingEnabled` like the spot live rule), and anti-extension (entry more than 0.6% beyond the fast EMA in the trade direction, or after a >2.5% lookback run-up/sell-off in the trade direction, is a chase and is rejected).
+- The futures worker now feeds `SnapshotPriceHistory` from every light-state fetch and hydrates it on startup from persisted market snapshots (45 min window), so `SignalScorer` receives the price-action assessment (mild-pullback-tolerant negative-PA penalty included) and cycle diagnostics report a real `PriceActionReadyCount` instead of 0. Decision records now persist `priceActionDirection` / `priceActionTrendPercent` for futures like they do for spot.
+- No change to margin/funding/BTC-regime/slot gates, TP/SL, leverage caps, or the live execution path; the quality gate only refuses entries whose microstructure or recent tape cannot pay the entry costs.
+- Expected effect: futures instances stop opening into wide books, fading tapes, and extended prices; rejects are visible in `risk_reasons` as `entry quality gate: ...` lines.
+
 ## 2026-07-11-futures-auth-signing-path-fix
 
 - Fixed Kraken Futures live private-API signing to use the documented authentication endpoint path (`/api/v3/...`) while still calling the `/derivatives/api/v3/...` URL, allowing live account/position sync and live orders to authenticate correctly.
