@@ -20,6 +20,9 @@ using var httpClient = new HttpClient
 IMarketDataSource marketDataSource = config.Kraken.MarketDataMode.Equals("kraken-futures", StringComparison.OrdinalIgnoreCase)
     ? new KrakenFuturesMarketDataSource(httpClient, config.Kraken)
     : new SampleMarketDataSource();
+IUniverseProvider universeProvider = config.Kraken.MarketDataMode.Equals("kraken-futures", StringComparison.OrdinalIgnoreCase)
+    ? new KrakenFuturesUniverseProvider(httpClient, config.Kraken, config.UniverseDiscovery, config.CandidateUniverse)
+    : new ConfiguredUniverseProvider(config.CandidateUniverse);
 
 var store = CreatePortfolioStore(config);
 Console.WriteLine($"futures persistence: state={store.StateDescription} events={store.EventsDescription}");
@@ -34,7 +37,8 @@ var worker = new FuturesDecisionWorker(
     new MarginRiskManager(config),
     portfolio,
     new TpSlOrchestrator(config),
-    krakenFuturesBroker);
+    krakenFuturesBroker,
+    universeProvider: universeProvider);
 
 await worker.RunAsync(cancellation.Token);
 

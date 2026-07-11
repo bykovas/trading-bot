@@ -227,6 +227,16 @@ Latest entry must be first. The first `## <id>` heading is used as `worker.chang
 - Momentum weakness is diagnostic only for this age guard; it does not by itself trigger a max-hold sell.
 - Expected effect: the bot stops closing neutral/profitable positions "from boredom" while cash and entry slots are available, but still clears stale losing or structurally broken positions.
 
+## 2026-07-11-kraken-auto-universe-discovery
+
+- Spot and futures workers can now auto-discover their tradable universe from Kraken public reference data instead of relying only on the hand-maintained `CandidateUniverse`.
+- Spot discovery reads Kraken `AssetPairs`, includes online EUR spot pairs, keeps configured pairs as force/fallback overrides, and supports blacklist/force-include env overrides.
+- Futures discovery reads Kraken Futures instruments, includes tradeable USD perpetual symbols, keeps configured pairs as force/fallback overrides, and supports blacklist/force-include env overrides.
+- Light snapshots now run against the discovered universe while full candle/scoring evaluation remains capped by existing active-pair logic (`MaxActiveInstruments`, held-position forcing, regime anchors, and spot strong-mover backfill).
+- Kraken spot and futures ticker/reference calls are batched so broad discovered universes do not exceed URL length limits.
+- New env knobs: `TRADINGBOT_UNIVERSE_DISCOVERY_ENABLED`, `TRADINGBOT_UNIVERSE_DISCOVERY_REFRESH_SECONDS`, `TRADINGBOT_UNIVERSE_INCLUDE_CONFIGURED`, `TRADINGBOT_UNIVERSE_FORCE_INCLUDE`, and `TRADINGBOT_UNIVERSE_BLACKLIST`.
+- Expected effect: new Kraken listings and fast movers can enter the snapshot/watchlist funnel automatically without manual JSON edits, while full evaluation and live risk limits remain bounded.
+
 ## 2026-07-05-post-entry-adverse-structure
 
 - Dry-run exit tuning: raised `PositionExit.PostEntryAdverseLossPercent` from 1.2% to 2.0% so the early adverse guard does not behave like a tight stop-loss for volatile altcoins.

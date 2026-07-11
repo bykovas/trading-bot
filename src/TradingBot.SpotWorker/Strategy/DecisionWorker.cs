@@ -9,9 +9,11 @@ internal sealed class DecisionWorker(
     RiskManager riskManager,
     DryRunPortfolio dryRunPortfolio,
     ISpotBroker? broker,
-    WorkerBuildInfo? buildInfo = null)
+    WorkerBuildInfo? buildInfo = null,
+    IUniverseProvider? universeProvider = null)
 {
     private readonly WorkerBuildInfo _buildInfo = buildInfo ?? WorkerBuildInfo.FromEnvironment();
+    private readonly IUniverseProvider _universeProvider = universeProvider ?? new ConfiguredUniverseProvider(config.CandidateUniverse);
 
     // Rolling per-pair history of light ticker snapshots feeding the anti-lag
     // price-action guard. In-memory only: after a restart the guard abstains until
@@ -102,7 +104,7 @@ internal sealed class DecisionWorker(
             var utc = DateTimeOffset.UtcNow;
             var snapshotId = $"{config.BotInstance.Id}-snapshot-{utc:yyyyMMddHHmmss}";
             var lightStates = await marketDataSource.GetLightMarketStatesAsync(
-                config.CandidateUniverse,
+                await ResolveUniverseAsync(cancellationToken),
                 cancellationToken);
 
             PersistMarketSnapshots(snapshotId, utc, lightStates);
@@ -119,6 +121,20 @@ internal sealed class DecisionWorker(
         }
     }
 
+    private async Task<IReadOnlyList<InstrumentOptions>> ResolveUniverseAsync(CancellationToken cancellationToken) =>
+        (await ResolveUniverseWithDiagnosticsAsync(cancellationToken)).Instruments;
+
+    private async Task<UniverseSelection> ResolveUniverseWithDiagnosticsAsync(CancellationToken cancellationToken)
+    {
+        var universe = await _universeProvider.GetUniverseAsync(cancellationToken);
+        var diagnostics = universe.Diagnostics;
+        Console.WriteLine(
+            $"universe source={diagnostics.Source} discovered={diagnostics.DiscoveredCount} configured={diagnostics.ConfiguredCount} " +
+            $"included={diagnostics.IncludedCount} blacklisted={diagnostics.BlacklistedCount}" +
+            (string.IsNullOrWhiteSpace(diagnostics.Warning) ? string.Empty : $" warning={diagnostics.Warning}"));
+        return universe;
+    }
+
     private async Task RunCycleAsync(CancellationToken cancellationToken)
     {
         var utc = DateTimeOffset.UtcNow;
@@ -128,8 +144,9 @@ internal sealed class DecisionWorker(
         Console.WriteLine($"botInstance={config.BotInstance.Id} name={config.BotInstance.Name}");
         Console.WriteLine($"worker-version={_buildInfo.Version} commit={_buildInfo.Commit} strategy={_buildInfo.StrategyVersion} changeSet={_buildInfo.ChangeSet}");
 
+        var universe = await ResolveUniverseWithDiagnosticsAsync(cancellationToken);
         var lightCandidates = await marketDataSource.GetLightMarketStatesAsync(
-            config.CandidateUniverse,
+            universe.Instruments,
             cancellationToken);
 
         var loadedPortfolio = dryRunPortfolio.Load();
@@ -1042,7 +1059,7 @@ internal sealed class DecisionWorker(
             }
         }
 
-        var btcInstrument = config.CandidateUniverse.FirstOrDefault(instrument =>
+        var btcInstrument = candidates.Select(candidate => candidate.Instrument).FirstOrDefault(instrument =>
             instrument.Pair.Equals("XBT/EUR", StringComparison.OrdinalIgnoreCase)
             || instrument.Pair.Equals("BTC/EUR", StringComparison.OrdinalIgnoreCase));
         if (btcInstrument is not null

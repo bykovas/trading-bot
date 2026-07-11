@@ -30,6 +30,9 @@ try
     IMarketDataSource marketDataSource = config.Kraken.MarketDataMode.Equals("kraken", StringComparison.OrdinalIgnoreCase)
         ? new KrakenMarketDataSource(httpClient, config.Kraken)
         : new SampleMarketDataSource();
+    IUniverseProvider universeProvider = config.Kraken.MarketDataMode.Equals("kraken", StringComparison.OrdinalIgnoreCase)
+        ? new KrakenSpotUniverseProvider(httpClient, config.Kraken, config.UniverseDiscovery, config.CandidateUniverse)
+        : new ConfiguredUniverseProvider(config.CandidateUniverse);
 
     var fallbackAdvisor = new HeuristicWatchlistAdvisor();
     IWatchlistAdvisor watchlistAdvisor = config.Ai.Provider.Equals("openai-compatible", StringComparison.OrdinalIgnoreCase)
@@ -55,7 +58,8 @@ try
         new TechnicalDecisionEngine(),
         new RiskManager(),
         new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit, config.PositionSizing, portfolioStore, strategy: config.Strategy, correlationRisk: config.CorrelationRisk, fullConfig: config),
-        broker);
+        broker,
+        universeProvider: universeProvider);
 
     await worker.RunAsync(cancellation.Token);
     return 0;

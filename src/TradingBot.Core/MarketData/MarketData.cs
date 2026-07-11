@@ -205,48 +205,51 @@ public sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOptions 
             return new Dictionary<string, PairMetadata>(StringComparer.OrdinalIgnoreCase);
         }
 
-        var pairs = string.Join(",", instruments.Select(instrument => instrument.KrakenPair));
-        var uri = $"{options.BaseUrl.TrimEnd('/')}/0/public/AssetPairs?assetVersion=1&pair={Uri.EscapeDataString(pairs)}";
-        using var response = await httpClient.GetAsync(uri, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        ThrowIfKrakenError(doc.RootElement);
-
         var metadata = new Dictionary<string, PairMetadata>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pairProperty in doc.RootElement.GetProperty("result").EnumerateObject())
+        foreach (var batch in instruments.Chunk(80))
         {
-            if (pairProperty.Value.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
+            var pairs = string.Join(",", batch.Select(instrument => instrument.KrakenPair));
+            var uri = $"{options.BaseUrl.TrimEnd('/')}/0/public/AssetPairs?assetVersion=1&pair={Uri.EscapeDataString(pairs)}";
+            using var response = await httpClient.GetAsync(uri, cancellationToken);
+            response.EnsureSuccessStatusCode();
 
-            var value = pairProperty.Value;
-            var altName = GetString(value, "altname") ?? pairProperty.Name;
-            var wsName = GetString(value, "wsname") ?? pairProperty.Name;
-            var instrument = instruments.FirstOrDefault(item =>
-                item.KrakenPair.Equals(altName, StringComparison.OrdinalIgnoreCase)
-                || item.Pair.Equals(wsName, StringComparison.OrdinalIgnoreCase));
-            if (instrument is null)
-            {
-                continue;
-            }
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            ThrowIfKrakenError(doc.RootElement);
 
-            // With assetVersion=1 the AssetPairs response PROPERTY NAME (e.g. "BTC/EUR")
-            // is exactly the key the Ticker response uses, even though wsname stays
-            // "XBT/EUR". Storing it as the ticker key is what keeps BTC/DOGE quotes.
-            metadata[instrument.KrakenPair] = new PairMetadata(
-                altName,
-                wsName,
-                pairProperty.Name,
-                new PairRules(
-                    instrument.Pair,
-                    GetString(value, "status") ?? "unknown",
-                    GetDecimal(value, "ordermin"),
-                    GetDecimal(value, "costmin"),
-                    GetInt(value, "lot_decimals"),
-                    GetInt(value, "pair_decimals")));
+            foreach (var pairProperty in doc.RootElement.GetProperty("result").EnumerateObject())
+            {
+                if (pairProperty.Value.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var value = pairProperty.Value;
+                var altName = GetString(value, "altname") ?? pairProperty.Name;
+                var wsName = GetString(value, "wsname") ?? pairProperty.Name;
+                var instrument = batch.FirstOrDefault(item =>
+                    item.KrakenPair.Equals(altName, StringComparison.OrdinalIgnoreCase)
+                    || item.Pair.Equals(wsName, StringComparison.OrdinalIgnoreCase));
+                if (instrument is null)
+                {
+                    continue;
+                }
+
+                // With assetVersion=1 the AssetPairs response PROPERTY NAME (e.g. "BTC/EUR")
+                // is exactly the key the Ticker response uses, even though wsname stays
+                // "XBT/EUR". Storing it as the ticker key is what keeps BTC/DOGE quotes.
+                metadata[instrument.KrakenPair] = new PairMetadata(
+                    altName,
+                    wsName,
+                    pairProperty.Name,
+                    new PairRules(
+                        instrument.Pair,
+                        GetString(value, "status") ?? "unknown",
+                        GetDecimal(value, "ordermin"),
+                        GetDecimal(value, "costmin"),
+                        GetInt(value, "lot_decimals"),
+                        GetInt(value, "pair_decimals")));
+            }
         }
 
         return metadata;
@@ -262,34 +265,37 @@ public sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOptions 
             return new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
         }
 
-        var pairs = string.Join(",", instruments.Select(instrument => instrument.KrakenPair));
-        var uri = $"{options.BaseUrl.TrimEnd('/')}/0/public/Ticker?assetVersion=1&pair={Uri.EscapeDataString(pairs)}";
-        using var response = await httpClient.GetAsync(uri, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        ThrowIfKrakenError(doc.RootElement);
-
         var quotes = new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pairProperty in doc.RootElement.GetProperty("result").EnumerateObject())
+        foreach (var batch in instruments.Chunk(80))
         {
-            var instrument = ResolveQuoteInstrument(instruments, metadata, pairProperty.Name);
-            if (instrument is null || pairProperty.Value.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
+            var pairs = string.Join(",", batch.Select(instrument => instrument.KrakenPair));
+            var uri = $"{options.BaseUrl.TrimEnd('/')}/0/public/Ticker?assetVersion=1&pair={Uri.EscapeDataString(pairs)}";
+            using var response = await httpClient.GetAsync(uri, cancellationToken);
+            response.EnsureSuccessStatusCode();
 
-            var value = pairProperty.Value;
-            var last = ParseKrakenDecimal(value.GetProperty("c")[0]);
-            var open = ParseKrakenDecimal(value.GetProperty("o"));
-            var changePercent = open == 0m ? 0m : decimal.Round((last - open) / open * 100m, 2);
-            quotes[instrument.KrakenPair] = new Quote(
-                ParseKrakenDecimal(value.GetProperty("b")[0]),
-                ParseKrakenDecimal(value.GetProperty("a")[0]),
-                last,
-                ParseKrakenDecimal(value.GetProperty("v")[1]),
-                changePercent);
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            ThrowIfKrakenError(doc.RootElement);
+
+            foreach (var pairProperty in doc.RootElement.GetProperty("result").EnumerateObject())
+            {
+                var instrument = ResolveQuoteInstrument(batch, metadata, pairProperty.Name);
+                if (instrument is null || pairProperty.Value.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var value = pairProperty.Value;
+                var last = ParseKrakenDecimal(value.GetProperty("c")[0]);
+                var open = ParseKrakenDecimal(value.GetProperty("o"));
+                var changePercent = open == 0m ? 0m : decimal.Round((last - open) / open * 100m, 2);
+                quotes[instrument.KrakenPair] = new Quote(
+                    ParseKrakenDecimal(value.GetProperty("b")[0]),
+                    ParseKrakenDecimal(value.GetProperty("a")[0]),
+                    last,
+                    ParseKrakenDecimal(value.GetProperty("v")[1]),
+                    changePercent);
+            }
         }
 
         return quotes;

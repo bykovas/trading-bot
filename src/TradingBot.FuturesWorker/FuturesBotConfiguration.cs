@@ -32,6 +32,7 @@ internal sealed class FuturesBotConfiguration
     public FuturesPortfolioOptions Portfolio { get; set; } = new();
     public DryRunOptions DryRun { get; set; } = new();
     public DatabaseOptions Database { get; set; } = new();
+    public UniverseDiscoveryOptions UniverseDiscovery { get; set; } = new();
     public List<InstrumentOptions> CandidateUniverse { get; set; } = new();
 
     public static FuturesBotConfiguration Load()
@@ -72,6 +73,11 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_LOG_DIRECTORY", value => config.Logging.Directory = value);
         SetIfPresent("TRADINGBOT_DATABASE_ENABLED", value => config.Database.Enabled = ParseBool(value, config.Database.Enabled));
         SetIfPresent("TRADINGBOT_DATABASE_CONNECTION_STRING", value => config.Database.ConnectionString = value);
+        SetIfPresent("TRADINGBOT_UNIVERSE_DISCOVERY_ENABLED", value => config.UniverseDiscovery.Enabled = ParseBool(value, config.UniverseDiscovery.Enabled));
+        SetIfPresent("TRADINGBOT_UNIVERSE_DISCOVERY_REFRESH_SECONDS", value => config.UniverseDiscovery.RefreshSeconds = ParseInt(value, config.UniverseDiscovery.RefreshSeconds));
+        SetIfPresent("TRADINGBOT_UNIVERSE_INCLUDE_CONFIGURED", value => config.UniverseDiscovery.IncludeConfiguredUniverse = ParseBool(value, config.UniverseDiscovery.IncludeConfiguredUniverse));
+        SetIfPresent("TRADINGBOT_UNIVERSE_FORCE_INCLUDE", value => config.UniverseDiscovery.ForceInclude = ParseCsv(value));
+        SetIfPresent("TRADINGBOT_UNIVERSE_BLACKLIST", value => config.UniverseDiscovery.Blacklist = ParseCsv(value));
         SetIfPresent("TRADINGBOT_FUTURES_MAX_LEVERAGE", value => config.Futures.MaxLeverage = ParseDecimal(value, config.Futures.MaxLeverage));
         SetIfPresent("TRADINGBOT_FUTURES_DEFAULT_LEVERAGE", value => config.Futures.DefaultLeverage = ParseDecimal(value, config.Futures.DefaultLeverage));
         SetIfPresent("TRADINGBOT_FUTURES_MAX_POSITIONS", value => config.Futures.MaxPositions = ParseInt(value, config.Futures.MaxPositions));
@@ -146,6 +152,9 @@ internal sealed class FuturesBotConfiguration
         ExecutionPolicy.EntryBlackoutMinutes = Math.Max(0, ExecutionPolicy.EntryBlackoutMinutes);
         CorrelationRisk.MaxOpenPositionsPerGroup = CorrelationRisk.MaxOpenPositionsPerGroup <= 0 ? 1 : CorrelationRisk.MaxOpenPositionsPerGroup;
         CorrelationRisk.MaxExposureEurPerGroup = CorrelationRisk.MaxExposureEurPerGroup <= 0m ? Futures.TargetNotionalEur : CorrelationRisk.MaxExposureEurPerGroup;
+        UniverseDiscovery.RefreshSeconds = Math.Max(60, UniverseDiscovery.RefreshSeconds);
+        UniverseDiscovery.ForceInclude = NormalizeStringList(UniverseDiscovery.ForceInclude);
+        UniverseDiscovery.Blacklist = NormalizeStringList(UniverseDiscovery.Blacklist);
 
         TpSl.Enabled = true;
         TpSl.TakeProfitPercent = Exits.TakeProfitAtrMult;
@@ -170,6 +179,18 @@ internal sealed class FuturesBotConfiguration
 
     private static bool ParseBool(string value, bool fallback) =>
         bool.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static List<string> ParseCsv(string value) =>
+        value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .ToList();
+
+    private static List<string> NormalizeStringList(IEnumerable<string>? values) =>
+        (values ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 }
 
 internal sealed class FuturesPortfolioOptions

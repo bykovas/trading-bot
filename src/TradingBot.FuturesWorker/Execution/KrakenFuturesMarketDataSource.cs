@@ -209,44 +209,48 @@ internal sealed class KrakenFuturesMarketDataSource(HttpClient httpClient, Krake
             return new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
         }
 
-        var query = string.Join("&", symbols.Select(symbol => $"symbol={Uri.EscapeDataString(symbol)}"));
-        var uri = $"{BaseUrl()}/derivatives/api/v3/tickers?{query}";
-        using var response = await httpClient.GetAsync(uri, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        ThrowIfErrorResult(document.RootElement, "tickers");
-
-        if (!document.RootElement.TryGetProperty("tickers", out var tickers)
-            || tickers.ValueKind != JsonValueKind.Array)
-        {
-            throw new InvalidOperationException("Kraken Futures tickers response missing tickers array.");
-        }
-
         var quotes = new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
-        foreach (var item in tickers.EnumerateArray())
+        foreach (var batch in symbols.Chunk(80))
         {
-            var symbol = GetString(item, "symbol");
-            if (string.IsNullOrWhiteSpace(symbol) || !symbols.Contains(symbol, StringComparer.OrdinalIgnoreCase))
+            var batchSymbols = batch.ToList();
+            var query = string.Join("&", batchSymbols.Select(symbol => $"symbol={Uri.EscapeDataString(symbol)}"));
+            var uri = $"{BaseUrl()}/derivatives/api/v3/tickers?{query}";
+            using var response = await httpClient.GetAsync(uri, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            ThrowIfErrorResult(document.RootElement, "tickers");
+
+            if (!document.RootElement.TryGetProperty("tickers", out var tickers)
+                || tickers.ValueKind != JsonValueKind.Array)
             {
-                continue;
+                throw new InvalidOperationException("Kraken Futures tickers response missing tickers array.");
             }
 
-            var mark = GetDecimal(item, "markPrice");
-            var last = GetDecimal(item, "last");
-            var bid = GetDecimal(item, "bid");
-            var ask = GetDecimal(item, "ask");
-            quotes[symbol] = new Quote(
-                bid,
-                ask,
-                mark > 0m ? mark : last,
-                GetDecimal(item, "volumeQuote", fallbackProperty: "vol24h"),
-                GetNullableDecimal(item, "change24h"),
-                GetNullableDecimal(item, "fundingRate"),
-                mark > 0m ? mark : null,
-                GetNullableDecimal(item, "indexPrice"),
-                GetNullableDecimal(item, "bidSize"),
-                GetNullableDecimal(item, "askSize"));
+            foreach (var item in tickers.EnumerateArray())
+            {
+                var symbol = GetString(item, "symbol");
+                if (string.IsNullOrWhiteSpace(symbol) || !batchSymbols.Contains(symbol, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var mark = GetDecimal(item, "markPrice");
+                var last = GetDecimal(item, "last");
+                var bid = GetDecimal(item, "bid");
+                var ask = GetDecimal(item, "ask");
+                quotes[symbol] = new Quote(
+                    bid,
+                    ask,
+                    mark > 0m ? mark : last,
+                    GetDecimal(item, "volumeQuote", fallbackProperty: "vol24h"),
+                    GetNullableDecimal(item, "change24h"),
+                    GetNullableDecimal(item, "fundingRate"),
+                    mark > 0m ? mark : null,
+                    GetNullableDecimal(item, "indexPrice"),
+                    GetNullableDecimal(item, "bidSize"),
+                    GetNullableDecimal(item, "askSize"));
+            }
         }
 
         return quotes;

@@ -14,9 +14,11 @@ internal sealed class FuturesDecisionWorker(
     FuturesVirtualPortfolio portfolio,
     TpSlOrchestrator tpSl,
     IFuturesBroker? broker = null,
-    IClock? clock = null)
+    IClock? clock = null,
+    IUniverseProvider? universeProvider = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
+    private readonly IUniverseProvider _universeProvider = universeProvider ?? new ConfiguredUniverseProvider(config.CandidateUniverse);
     private readonly WorkerBuildInfo _buildInfo = WorkerBuildInfo.FromEnvironment();
     private readonly IReadOnlyDictionary<string, string> _pairToCorrelationGroup =
         CorrelationRiskResolver.BuildPairToGroup(config.CorrelationRisk);
@@ -65,7 +67,8 @@ internal sealed class FuturesDecisionWorker(
         var cycleId = $"{config.BotInstance.Id}-{utc:yyyyMMddHHmmss}";
         Console.WriteLine($"futures cycle={cycleId} utc={utc:O}");
 
-        var universe = config.CandidateUniverse.Where(instrument => instrument.Enabled).ToList();
+        var universeSelection = await ResolveUniverseAsync(cancellationToken);
+        var universe = universeSelection.Instruments.Where(instrument => instrument.Enabled).ToList();
         var state = portfolio.Load();
         var lightStates = await marketDataSource.GetLightMarketStatesAsync(universe, cancellationToken);
         PersistMarketSnapshots(cycleId, utc, lightStates);
@@ -247,6 +250,17 @@ internal sealed class FuturesDecisionWorker(
             EntryDiagnostics = BuildEntryDiagnostics(lightStates, active, fullStates, decisions, btcRegime)
         });
         Console.WriteLine($"futures cycle done: decisions={decisions.Count} cash={state.CashEur:0.####} total={state.TotalValueEur:0.####} positions={state.Positions.Count}");
+    }
+
+    private async Task<UniverseSelection> ResolveUniverseAsync(CancellationToken cancellationToken)
+    {
+        var universe = await _universeProvider.GetUniverseAsync(cancellationToken);
+        var diagnostics = universe.Diagnostics;
+        Console.WriteLine(
+            $"futures universe source={diagnostics.Source} discovered={diagnostics.DiscoveredCount} configured={diagnostics.ConfiguredCount} " +
+            $"included={diagnostics.IncludedCount} blacklisted={diagnostics.BlacklistedCount}" +
+            (string.IsNullOrWhiteSpace(diagnostics.Warning) ? string.Empty : $" warning={diagnostics.Warning}"));
+        return universe;
     }
 
     private async Task<FuturesFillResult> ApplyOrExecuteLiveAsync(

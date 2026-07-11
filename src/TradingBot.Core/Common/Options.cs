@@ -44,6 +44,15 @@ public sealed class KrakenOptions
     public string ApiSecret { get; set; } = string.Empty;
 }
 
+public sealed class UniverseDiscoveryOptions
+{
+    public bool Enabled { get; set; } = false;
+    public int RefreshSeconds { get; set; } = 3600;
+    public bool IncludeConfiguredUniverse { get; set; } = true;
+    public List<string> ForceInclude { get; set; } = new();
+    public List<string> Blacklist { get; set; } = new();
+}
+
 public sealed class AiOptions
 {
     public string Provider { get; set; } = "none";

@@ -21,6 +21,7 @@ internal sealed class BotConfiguration
     public PortfolioOptions Portfolio { get; set; } = new();
     public DryRunOptions DryRun { get; set; } = new();
     public DatabaseOptions Database { get; set; } = new();
+    public UniverseDiscoveryOptions UniverseDiscovery { get; set; } = new();
     public ExecutionPolicyOptions ExecutionPolicy { get; set; } = new();
     public PositionExitOptions PositionExit { get; set; } = new();
     public CorrelationRiskOptions CorrelationRisk { get; set; } = new();
@@ -100,6 +101,11 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_DRY_RUN_SLIPPAGE_BPS", value => config.DryRun.SlippageBps = ParseDecimal(value, config.DryRun.SlippageBps));
         SetIfPresent("TRADINGBOT_DATABASE_ENABLED", value => config.Database.Enabled = ParseBool(value, config.Database.Enabled));
         SetIfPresent("TRADINGBOT_DATABASE_CONNECTION_STRING", value => config.Database.ConnectionString = value);
+        SetIfPresent("TRADINGBOT_UNIVERSE_DISCOVERY_ENABLED", value => config.UniverseDiscovery.Enabled = ParseBool(value, config.UniverseDiscovery.Enabled));
+        SetIfPresent("TRADINGBOT_UNIVERSE_DISCOVERY_REFRESH_SECONDS", value => config.UniverseDiscovery.RefreshSeconds = ParseInt(value, config.UniverseDiscovery.RefreshSeconds));
+        SetIfPresent("TRADINGBOT_UNIVERSE_INCLUDE_CONFIGURED", value => config.UniverseDiscovery.IncludeConfiguredUniverse = ParseBool(value, config.UniverseDiscovery.IncludeConfiguredUniverse));
+        SetIfPresent("TRADINGBOT_UNIVERSE_FORCE_INCLUDE", value => config.UniverseDiscovery.ForceInclude = ParseCsv(value));
+        SetIfPresent("TRADINGBOT_UNIVERSE_BLACKLIST", value => config.UniverseDiscovery.Blacklist = ParseCsv(value));
         SetIfPresent("TRADINGBOT_AI_PROVIDER", value => config.Ai.Provider = value);
         SetIfPresent("TRADINGBOT_AI_BASE_URL", value => config.Ai.BaseUrl = value);
         SetIfPresent("TRADINGBOT_OPENAI_API_KEY", value => config.Ai.ApiKey = value);
@@ -257,6 +263,9 @@ internal sealed class BotConfiguration
         DryRun.TakerFeeBps = Math.Max(0m, DryRun.TakerFeeBps);
         DryRun.SlippageBps = Math.Max(0m, DryRun.SlippageBps);
         Database.ConnectionString = Database.ConnectionString.Trim();
+        UniverseDiscovery.RefreshSeconds = Math.Max(60, UniverseDiscovery.RefreshSeconds);
+        UniverseDiscovery.ForceInclude = NormalizeStringList(UniverseDiscovery.ForceInclude);
+        UniverseDiscovery.Blacklist = NormalizeStringList(UniverseDiscovery.Blacklist);
         ExecutionPolicy.CooldownAfterBuySeconds = Math.Max(0, ExecutionPolicy.CooldownAfterBuySeconds);
         ExecutionPolicy.CooldownAfterSellSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterSellSeconds);
         ExecutionPolicy.MinHoldSeconds = Math.Max(0, ExecutionPolicy.MinHoldSeconds);
@@ -402,6 +411,18 @@ internal sealed class BotConfiguration
 
     private static bool ParseBool(string value, bool fallback) =>
         bool.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static List<string> ParseCsv(string value) =>
+        value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .ToList();
+
+    private static List<string> NormalizeStringList(IEnumerable<string>? values) =>
+        (values ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
 }
 
