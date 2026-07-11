@@ -219,6 +219,10 @@
       box-shadow: inset 0 0 0 1px rgba(245, 184, 79, .28);
     }
 
+    .scope-switch {
+      grid-template-columns: repeat(2, minmax(116px, 1fr));
+    }
+
     button {
       cursor: pointer;
     }
@@ -341,6 +345,10 @@
           <button type="button" data-bot-instance="futures-live">Fut Live</button>
           <button type="button" data-bot-instance="futures-virtual">Fut Virt</button>
         </div>
+        <div class="bot-switch scope-switch" role="group" aria-label="History scope">
+          <button type="button" data-history-scope="current">Current strategy</button>
+          <button type="button" data-history-scope="all">All history</button>
+        </div>
       </nav>
     </header>
 
@@ -388,7 +396,9 @@
     const pairInput = document.getElementById("pair");
     const cycleInput = document.getElementById("cycle");
     const botButtons = Array.from(document.querySelectorAll("[data-bot-instance]"));
+    const scopeButtons = Array.from(document.querySelectorAll("[data-history-scope]"));
     let currentBotInstance = "spot-live";
+    let currentHistoryScope = "current";
     // Back-compat: pre-rename ids persisted in localStorage or shared URLs.
     const botInstances = ["spot-live", "spot-virtual", "futures-live", "futures-virtual"];
     function normalizeBotInstance(value) {
@@ -444,6 +454,7 @@
       if (pairInput.value.trim()) params.set("pair", pairInput.value.trim());
       if (cycleInput.value.trim()) params.set("cycleId", cycleInput.value.trim());
       if (currentBotInstance) params.set("botInstanceId", currentBotInstance);
+      params.set("latestMeta", currentHistoryScope === "current" ? "true" : "false");
       return params.toString();
     }
 
@@ -468,10 +479,30 @@
         load().catch(error => statusEl.textContent = error.message);
       }));
     }
+    function setHistoryScope(value, persist = false) {
+      currentHistoryScope = value === "all" ? "all" : "current";
+      scopeButtons.forEach(button => {
+        const active = button.dataset.historyScope === currentHistoryScope;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      if (persist) localStorage.setItem("tradingBot.historyScope", currentHistoryScope);
+    }
+    function initHistoryScopeSelector() {
+      const fromUrl = new URLSearchParams(location.search).get("historyScope");
+      const saved = localStorage.getItem("tradingBot.historyScope");
+      setHistoryScope(fromUrl || saved || "current");
+      scopeButtons.forEach(button => button.addEventListener("click", () => {
+        setHistoryScope(button.dataset.historyScope, true);
+        offset = 0;
+        load().catch(error => statusEl.textContent = error.message);
+      }));
+    }
 
     function render(data) {
       nextOffset = data.nextOffset;
-      statusEl.textContent = `Showing ${data.items.length} snapshots · offset ${data.offset}`;
+      const scopeLabel = currentHistoryScope === "current" ? "current strategy" : "all history";
+      statusEl.textContent = `Showing ${data.items.length} snapshots · ${scopeLabel} · offset ${data.offset}`;
       prev.disabled = offset === 0;
       next.disabled = nextOffset === null;
 
@@ -518,6 +549,7 @@
     });
 
     initBotSelector();
+    initHistoryScopeSelector();
     refreshBotStatus();
     load().catch(error => statusEl.textContent = error.message);
   </script>

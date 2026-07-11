@@ -157,6 +157,10 @@
       box-shadow: inset 0 0 0 1px rgba(245, 184, 79, .28);
     }
 
+    .scope-switch {
+      grid-template-columns: repeat(2, minmax(116px, 1fr));
+    }
+
     .dot {
       width: 8px;
       height: 8px;
@@ -505,6 +509,10 @@
         <button type="button" data-bot-instance="futures-live">Fut Live</button>
         <button type="button" data-bot-instance="futures-virtual">Fut Virt</button>
       </div>
+      <div class="bot-switch scope-switch" role="group" aria-label="History scope">
+        <button type="button" data-history-scope="current">Current strategy</button>
+        <button type="button" data-history-scope="all">All history</button>
+      </div>
     </header>
 
     <nav class="api-links" aria-label="Navigation links">
@@ -553,7 +561,9 @@
   <script src="/bot-status.js"></script>
   <script>
     const botButtons = Array.from(document.querySelectorAll("[data-bot-instance]"));
+    const scopeButtons = Array.from(document.querySelectorAll("[data-history-scope]"));
     let currentBotInstance = "spot-live";
+    let currentHistoryScope = "current";
     // Back-compat: pre-rename ids persisted in localStorage or shared URLs.
     const botInstances = ["spot-live", "spot-virtual", "futures-live", "futures-virtual"];
     function normalizeBotInstance(value) {
@@ -564,6 +574,9 @@
     function selectedBotParam() {
       const value = currentBotInstance || "";
       return value ? `&botInstanceId=${encodeURIComponent(value)}` : "";
+    }
+    function latestMetaParam() {
+      return currentHistoryScope === "current" ? "&latestMeta=true" : "&latestMeta=false";
     }
     function setBotInstance(value, persist = false) {
       currentBotInstance = normalizeBotInstance(value);
@@ -580,6 +593,24 @@
       setBotInstance(fromUrl || saved || "spot-live");
       botButtons.forEach(button => button.addEventListener("click", () => {
         setBotInstance(button.dataset.botInstance, true);
+        refresh();
+      }));
+    }
+    function setHistoryScope(value, persist = false) {
+      currentHistoryScope = value === "all" ? "all" : "current";
+      scopeButtons.forEach(button => {
+        const active = button.dataset.historyScope === currentHistoryScope;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      if (persist) localStorage.setItem("tradingBot.historyScope", currentHistoryScope);
+    }
+    function initHistoryScopeSelector() {
+      const fromUrl = new URLSearchParams(location.search).get("historyScope");
+      const saved = localStorage.getItem("tradingBot.historyScope");
+      setHistoryScope(fromUrl || saved || "current");
+      scopeButtons.forEach(button => button.addEventListener("click", () => {
+        setHistoryScope(button.dataset.historyScope, true);
         refresh();
       }));
     }
@@ -957,7 +988,7 @@
       let meta = null;
 
       while (offset != null) {
-        const response = await fetch(`/api/trade-cycles?limit=${limit}&offset=${offset}${selectedBotParam()}`, { cache: "no-store" });
+        const response = await fetch(`/api/trade-cycles?limit=${limit}&offset=${offset}${selectedBotParam()}${latestMetaParam()}`, { cache: "no-store" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
         meta = payload;
@@ -976,7 +1007,8 @@
         const since = meta?.sinceLocalDate || meta?.SinceLocalDate;
         const zone = meta?.timeZone || meta?.TimeZone || "Europe/Vilnius";
         if (since) {
-          els.updated.textContent = `${els.updated.textContent} | since ${since} 00:00 ${zone}`;
+          const scopeLabel = currentHistoryScope === "current" ? "current strategy" : "all history";
+          els.updated.textContent = `${els.updated.textContent} | ${scopeLabel} | since ${since} 00:00 ${zone}`;
         }
         setWarning("");
         refreshBotStatus().catch(() => setStatus("ok", "API connected"));
@@ -988,6 +1020,7 @@
     }
 
     initBotSelector();
+    initHistoryScopeSelector();
     refresh();
     setInterval(refresh, 10000);
   </script>

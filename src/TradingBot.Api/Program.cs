@@ -133,6 +133,7 @@ app.MapGet("/api/cycles", async (
     string? changeSet,
     string? botInstanceId,
     bool? latestStrategy,
+    bool? latestMeta,
     CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
@@ -148,7 +149,8 @@ app.MapGet("/api/cycles", async (
         Clean(strategyVersion),
         Clean(changeSet),
         Clean(botInstanceId),
-        latestStrategy == true);
+        latestStrategy == true,
+        latestMeta == true);
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
@@ -178,7 +180,7 @@ app.MapGet("/api/cycles/{cycleId}", async (string cycleId, CancellationToken can
     return cycle is null ? Results.NotFound() : Results.Ok(cycle);
 });
 
-app.MapGet("/api/trade-cycles", async (int? limit, int? offset, string? botInstanceId, CancellationToken cancellationToken) =>
+app.MapGet("/api/trade-cycles", async (int? limit, int? offset, string? botInstanceId, bool? latestMeta, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -193,7 +195,7 @@ app.MapGet("/api/trade-cycles", async (int? limit, int? offset, string? botInsta
     await connection.OpenAsync(cancellationToken);
     await EnsureCycleMetadataColumns(connection, cancellationToken);
 
-    var items = await ReadTradeCycles(connection, window.UtcStart, Clean(botInstanceId), page, cancellationToken);
+    var items = await ReadTradeCycles(connection, window.UtcStart, Clean(botInstanceId), latestMeta == true, page, cancellationToken);
     return Results.Ok(new TradeCyclesResponse(
         items,
         page.Limit,
@@ -203,7 +205,7 @@ app.MapGet("/api/trade-cycles", async (int? limit, int? offset, string? botInsta
         window.LocalTimeZone));
 });
 
-app.MapGet("/api/decisions", async (string? cycleId, string? botInstanceId, int? limit, int? offset, CancellationToken cancellationToken) =>
+app.MapGet("/api/decisions", async (string? cycleId, string? botInstanceId, bool? latestMeta, int? limit, int? offset, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -214,8 +216,9 @@ app.MapGet("/api/decisions", async (string? cycleId, string? botInstanceId, int?
     var page = PageRequest.Create(limit, offset);
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
+    await EnsureCycleMetadataColumns(connection, cancellationToken);
 
-    var items = await ReadDecisions(connection, Clean(cycleId), Clean(botInstanceId), page, cancellationToken);
+    var items = await ReadDecisions(connection, Clean(cycleId), Clean(botInstanceId), latestMeta == true, page, cancellationToken);
     return Results.Ok(new PageResponse<DecisionSummaryDto>(
         items,
         page.Limit,
@@ -223,7 +226,7 @@ app.MapGet("/api/decisions", async (string? cycleId, string? botInstanceId, int?
         items.Count == page.Limit ? page.Offset + page.Limit : null));
 });
 
-app.MapGet("/api/entry-diagnostics", async (string? cycleId, string? botInstanceId, int? limit, int? offset, CancellationToken cancellationToken) =>
+app.MapGet("/api/entry-diagnostics", async (string? cycleId, string? botInstanceId, bool? latestMeta, int? limit, int? offset, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -234,8 +237,9 @@ app.MapGet("/api/entry-diagnostics", async (string? cycleId, string? botInstance
     var page = PageRequest.Create(limit, offset);
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
+    await EnsureCycleMetadataColumns(connection, cancellationToken);
 
-    var items = await ReadEntryDiagnostics(connection, Clean(cycleId), Clean(botInstanceId), page, cancellationToken);
+    var items = await ReadEntryDiagnostics(connection, Clean(cycleId), Clean(botInstanceId), latestMeta == true, page, cancellationToken);
     return Results.Ok(new PageResponse<CycleEntryDiagnosticsDto>(
         items,
         page.Limit,
@@ -247,6 +251,7 @@ app.MapGet("/api/market-snapshots", async (
     string? cycleId,
     string? pair,
     string? botInstanceId,
+    bool? latestMeta,
     int? limit,
     int? offset,
     CancellationToken cancellationToken) =>
@@ -260,8 +265,9 @@ app.MapGet("/api/market-snapshots", async (
     var page = PageRequest.Create(limit, offset);
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
+    await EnsureCycleMetadataColumns(connection, cancellationToken);
 
-    var items = await ReadMarketSnapshots(connection, Clean(cycleId), Clean(pair), Clean(botInstanceId), page, cancellationToken);
+    var items = await ReadMarketSnapshots(connection, Clean(cycleId), Clean(pair), Clean(botInstanceId), latestMeta == true, page, cancellationToken);
     return Results.Ok(new PageResponse<MarketSnapshotDto>(
         items,
         page.Limit,
@@ -553,6 +559,25 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
                   limit 1
               )
           )
+          and (
+              @latest_meta = false
+              or (
+                  strategy_version is not distinct from (
+                      select latest.strategy_version
+                      from dry_run_cycles latest
+                      where latest.bot_instance_id = dry_run_cycles.bot_instance_id
+                      order by latest.utc desc, latest.cycle_id desc
+                      limit 1
+                  )
+                  and change_set is not distinct from (
+                      select latest.change_set
+                      from dry_run_cycles latest
+                      where latest.bot_instance_id = dry_run_cycles.bot_instance_id
+                      order by latest.utc desc, latest.cycle_id desc
+                      limit 1
+                  )
+              )
+          )
         order by utc desc, cycle_id desc
         limit @limit offset @offset
         """,
@@ -565,6 +590,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
     command.Parameters.Add("strategy_version", NpgsqlDbType.Text).Value = (object?)filters.StrategyVersion ?? DBNull.Value;
     command.Parameters.Add("change_set", NpgsqlDbType.Text).Value = (object?)filters.ChangeSet ?? DBNull.Value;
     command.Parameters.Add("latest_strategy", NpgsqlDbType.Boolean).Value = filters.LatestStrategy;
+    command.Parameters.Add("latest_meta", NpgsqlDbType.Boolean).Value = filters.LatestMeta;
 
     var cycles = new List<CycleRawDto>();
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -650,6 +676,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
     NpgsqlConnection connection,
     DateTimeOffset utcStart,
     string? botInstanceId,
+    bool latestMeta,
     PageRequest page,
     CancellationToken cancellationToken)
 {
@@ -669,6 +696,25 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
         from dry_run_cycles
         where utc >= @utc_start
           and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
+          and (
+              @latest_meta = false
+              or (
+                  strategy_version is not distinct from (
+                      select latest.strategy_version
+                      from dry_run_cycles latest
+                      where latest.bot_instance_id = dry_run_cycles.bot_instance_id
+                      order by latest.utc desc, latest.cycle_id desc
+                      limit 1
+                  )
+                  and change_set is not distinct from (
+                      select latest.change_set
+                      from dry_run_cycles latest
+                      where latest.bot_instance_id = dry_run_cycles.bot_instance_id
+                      order by latest.utc desc, latest.cycle_id desc
+                      limit 1
+                  )
+              )
+          )
           and exists (
               select 1
               from dry_run_decisions decision
@@ -681,6 +727,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
         connection);
     command.Parameters.Add("utc_start", NpgsqlDbType.TimestampTz).Value = utcStart;
     command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
+    command.Parameters.Add("latest_meta", NpgsqlDbType.Boolean).Value = latestMeta;
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
 
@@ -709,6 +756,7 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
     NpgsqlConnection connection,
     string? cycleId,
     string? botInstanceId,
+    bool latestMeta,
     PageRequest page,
     CancellationToken cancellationToken)
 {
@@ -756,12 +804,35 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
         from dry_run_decisions
         where (@cycle_id is null or cycle_id = @cycle_id)
           and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
+          and (
+              @latest_meta = false
+              or exists (
+                  select 1
+                  from dry_run_cycles cycle
+                  where cycle.cycle_id = dry_run_decisions.cycle_id
+                    and cycle.strategy_version is not distinct from (
+                        select latest.strategy_version
+                        from dry_run_cycles latest
+                        where latest.bot_instance_id = cycle.bot_instance_id
+                        order by latest.utc desc, latest.cycle_id desc
+                        limit 1
+                    )
+                    and cycle.change_set is not distinct from (
+                        select latest.change_set
+                        from dry_run_cycles latest
+                        where latest.bot_instance_id = cycle.bot_instance_id
+                        order by latest.utc desc, latest.cycle_id desc
+                        limit 1
+                    )
+              )
+          )
         order by utc desc, cycle_id desc, pair
         limit @limit offset @offset
         """,
         connection);
     command.Parameters.Add("cycle_id", NpgsqlDbType.Text).Value = (object?)cycleId ?? DBNull.Value;
     command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
+    command.Parameters.Add("latest_meta", NpgsqlDbType.Boolean).Value = latestMeta;
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
 
@@ -820,6 +891,7 @@ static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
     NpgsqlConnection connection,
     string? cycleId,
     string? botInstanceId,
+    bool latestMeta,
     PageRequest page,
     CancellationToken cancellationToken)
 {
@@ -847,12 +919,35 @@ static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
         from dry_run_cycle_entry_diagnostics
         where (@cycle_id is null or cycle_id = @cycle_id)
           and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
+          and (
+              @latest_meta = false
+              or exists (
+                  select 1
+                  from dry_run_cycles cycle
+                  where cycle.cycle_id = dry_run_cycle_entry_diagnostics.cycle_id
+                    and cycle.strategy_version is not distinct from (
+                        select latest.strategy_version
+                        from dry_run_cycles latest
+                        where latest.bot_instance_id = cycle.bot_instance_id
+                        order by latest.utc desc, latest.cycle_id desc
+                        limit 1
+                    )
+                    and cycle.change_set is not distinct from (
+                        select latest.change_set
+                        from dry_run_cycles latest
+                        where latest.bot_instance_id = cycle.bot_instance_id
+                        order by latest.utc desc, latest.cycle_id desc
+                        limit 1
+                    )
+              )
+          )
         order by utc desc, cycle_id desc
         limit @limit offset @offset
         """,
         connection);
     command.Parameters.Add("cycle_id", NpgsqlDbType.Text).Value = (object?)cycleId ?? DBNull.Value;
     command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
+    command.Parameters.Add("latest_meta", NpgsqlDbType.Boolean).Value = latestMeta;
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
 
@@ -895,6 +990,7 @@ static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
     string? cycleId,
     string? pair,
     string? botInstanceId,
+    bool latestMeta,
     PageRequest page,
     CancellationToken cancellationToken)
 {
@@ -914,6 +1010,28 @@ static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
         where (@cycle_id is null or cycle_id = @cycle_id)
           and (@pair is null or pair = @pair)
           and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
+          and (
+              @latest_meta = false
+              or exists (
+                  select 1
+                  from dry_run_cycles cycle
+                  where cycle.cycle_id = market_snapshots.cycle_id
+                    and cycle.strategy_version is not distinct from (
+                        select latest.strategy_version
+                        from dry_run_cycles latest
+                        where latest.bot_instance_id = cycle.bot_instance_id
+                        order by latest.utc desc, latest.cycle_id desc
+                        limit 1
+                    )
+                    and cycle.change_set is not distinct from (
+                        select latest.change_set
+                        from dry_run_cycles latest
+                        where latest.bot_instance_id = cycle.bot_instance_id
+                        order by latest.utc desc, latest.cycle_id desc
+                        limit 1
+                    )
+              )
+          )
         order by utc desc, cycle_id desc, pair
         limit @limit offset @offset
         """,
@@ -921,6 +1039,7 @@ static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
     command.Parameters.Add("cycle_id", NpgsqlDbType.Text).Value = (object?)cycleId ?? DBNull.Value;
     command.Parameters.Add("pair", NpgsqlDbType.Text).Value = (object?)NormalizePairFilter(pair) ?? DBNull.Value;
     command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
+    command.Parameters.Add("latest_meta", NpgsqlDbType.Boolean).Value = latestMeta;
     command.Parameters.AddWithValue("limit", page.Limit);
     command.Parameters.AddWithValue("offset", page.Offset);
 
@@ -1259,7 +1378,8 @@ internal sealed record CycleQueryFilters(
     string? StrategyVersion,
     string? ChangeSet,
     string? BotInstanceId,
-    bool LatestStrategy);
+    bool LatestStrategy,
+    bool LatestMeta);
 
 internal sealed record CycleDetailDto(
     string CycleId,
