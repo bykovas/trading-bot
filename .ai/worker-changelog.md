@@ -229,11 +229,13 @@ Latest entry must be first. The first `## <id>` heading is used as `worker.chang
 
 ## 2026-07-11-kraken-auto-universe-discovery
 
-- Spot and futures workers can now auto-discover their tradable universe from Kraken public reference data instead of relying only on the hand-maintained `CandidateUniverse`.
+- Spot and futures workers now auto-discover their tradable universe by default from Kraken public reference data instead of relying only on the hand-maintained `CandidateUniverse`.
 - Spot discovery reads Kraken `AssetPairs`, includes online EUR spot pairs, keeps configured pairs as force/fallback overrides, and supports blacklist/force-include env overrides.
 - Futures discovery reads Kraken Futures instruments, includes tradeable USD perpetual symbols, keeps configured pairs as force/fallback overrides, and supports blacklist/force-include env overrides.
 - Light snapshots now run against the discovered universe while full candle/scoring evaluation remains capped by existing active-pair logic (`MaxActiveInstruments`, held-position forcing, regime anchors, and spot strong-mover backfill).
 - Kraken spot and futures ticker/reference calls are batched so broad discovered universes do not exceed URL length limits.
+- `futures-live` now refuses to run with `TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=false` instead of recording virtual fills under a live instance id.
+- Futures live Kraken reconciliation now maps remote positions against the current discovered universe, not only the static fallback list.
 - New env knobs: `TRADINGBOT_UNIVERSE_DISCOVERY_ENABLED`, `TRADINGBOT_UNIVERSE_DISCOVERY_REFRESH_SECONDS`, `TRADINGBOT_UNIVERSE_INCLUDE_CONFIGURED`, `TRADINGBOT_UNIVERSE_FORCE_INCLUDE`, and `TRADINGBOT_UNIVERSE_BLACKLIST`.
 - Expected effect: new Kraken listings and fast movers can enter the snapshot/watchlist funnel automatically without manual JSON edits, while full evaluation and live risk limits remain bounded.
 

@@ -46,7 +46,7 @@ public sealed class KrakenOptions
 
 public sealed class UniverseDiscoveryOptions
 {
-    public bool Enabled { get; set; } = false;
+    public bool Enabled { get; set; } = true;
     public int RefreshSeconds { get; set; } = 3600;
     public bool IncludeConfiguredUniverse { get; set; } = true;
     public List<string> ForceInclude { get; set; } = new();

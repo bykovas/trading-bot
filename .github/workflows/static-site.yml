@@ -142,6 +142,9 @@ jobs:
       # Live trading is controlled from the PROD environment variable, never from
       # code: flipping it requires editing the GitHub environment, not a commit.
       TRADINGBOT_LIVE_TRADING_ENABLED: ${{ vars.TRADINGBOT_LIVE_TRADING_ENABLED }}
+      TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED: ${{ vars.TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED }}
+      TRADINGBOT_KRAKEN_FUTURES_API_KEY: ${{ secrets.TRADINGBOT_KRAKEN_FUTURES_API_KEY }}
+      TRADINGBOT_KRAKEN_FUTURES_API_SECRET: ${{ secrets.TRADINGBOT_KRAKEN_FUTURES_API_SECRET }}
 
     steps:
       - name: Download deploy bundle

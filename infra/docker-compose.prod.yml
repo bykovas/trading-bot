@@ -58,8 +58,7 @@ services:
     depends_on:
       database:
         condition: service_healthy
-    # Futures workers are dry-run only during the scaffold phase; the worker has
-    # no live order path regardless of environment.
+    # Futures live execution is gated by /opt/trading-bot/futures/live/.env.
     volumes:
       - /opt/trading-bot/futures/live/appsettings.json:/app/appsettings.json:ro
       - /opt/trading-bot/futures/live/data:/app/data

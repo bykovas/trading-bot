@@ -25,6 +25,11 @@ internal sealed class FuturesDecisionWorker(
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
+        if (IsLiveInstance && !config.Futures.LiveTradingEnabled)
+        {
+            throw new InvalidOperationException("Bot instance is futures-live but TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED is not true; refusing to create virtual positions under a live instance id.");
+        }
+
         if (config.Futures.LiveTradingEnabled && broker?.IsConfigured != true)
         {
             throw new InvalidOperationException("TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=true but Kraken Futures API keys are missing or broker is not configured.");
@@ -74,7 +79,7 @@ internal sealed class FuturesDecisionWorker(
         PersistMarketSnapshots(cycleId, utc, lightStates);
         if (config.Futures.LiveTradingEnabled)
         {
-            await ReconcileWithKrakenAsync(state, lightStates, utc, cancellationToken);
+            await ReconcileWithKrakenAsync(state, universe, lightStates, utc, cancellationToken);
         }
 
         var portfolioBefore = state.Clone();
@@ -343,6 +348,7 @@ internal sealed class FuturesDecisionWorker(
 
     private async Task ReconcileWithKrakenAsync(
         PortfolioState state,
+        IReadOnlyList<InstrumentOptions> universe,
         IReadOnlyList<InstrumentMarketState> lightStates,
         DateTimeOffset utc,
         CancellationToken cancellationToken)
@@ -354,7 +360,7 @@ internal sealed class FuturesDecisionWorker(
 
         var accounts = await broker.GetAccountsAsync(cancellationToken);
         var positions = await broker.GetOpenPositionsAsync(cancellationToken);
-        var bySymbol = config.CandidateUniverse
+        var bySymbol = universe
             .Where(instrument => !string.IsNullOrWhiteSpace(instrument.KrakenPair))
             .ToDictionary(instrument => instrument.KrakenPair, StringComparer.OrdinalIgnoreCase);
         var markByPair = lightStates.ToDictionary(state => state.Instrument.Pair, state => state.LastPrice, StringComparer.OrdinalIgnoreCase);
@@ -418,6 +424,10 @@ internal sealed class FuturesDecisionWorker(
         state.UpdatedAt = utc;
         Console.WriteLine($"futures-kraken-sync: accounts={accounts.Count} remotePositions={positions.Count} trackedPositions={state.Positions.Count} previousTracked={before} availableMargin={state.CashEur:0.####}");
     }
+
+    private bool IsLiveInstance =>
+        config.BotInstance.Id.Equals("live", StringComparison.OrdinalIgnoreCase)
+        || config.BotInstance.Id.EndsWith("-live", StringComparison.OrdinalIgnoreCase);
 
     private bool IsPastMaxHold(PortfolioPosition position, DateTimeOffset utc) =>
         config.Exits.MaxHoldMinutes > 0
