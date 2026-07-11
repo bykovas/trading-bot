@@ -703,6 +703,13 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
                       select latest.strategy_version
                       from dry_run_cycles latest
                       where latest.bot_instance_id = dry_run_cycles.bot_instance_id
+                        and latest.utc >= @utc_start
+                        and exists (
+                            select 1
+                            from dry_run_decisions latest_decision
+                            where latest_decision.cycle_id = latest.cycle_id
+                              and latest_decision.action in ('WOULD_BUY', 'WOULD_SELL', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT', 'WOULD_CLOSE')
+                        )
                       order by latest.utc desc, latest.cycle_id desc
                       limit 1
                   )
@@ -710,6 +717,13 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
                       select latest.change_set
                       from dry_run_cycles latest
                       where latest.bot_instance_id = dry_run_cycles.bot_instance_id
+                        and latest.utc >= @utc_start
+                        and exists (
+                            select 1
+                            from dry_run_decisions latest_decision
+                            where latest_decision.cycle_id = latest.cycle_id
+                              and latest_decision.action in ('WOULD_BUY', 'WOULD_SELL', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT', 'WOULD_CLOSE')
+                        )
                       order by latest.utc desc, latest.cycle_id desc
                       limit 1
                   )
