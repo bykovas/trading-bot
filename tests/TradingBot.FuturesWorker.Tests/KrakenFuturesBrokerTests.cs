@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using TradingBot.Core.Indicators;
 using TradingBot.Core.MarketData;
@@ -31,11 +32,22 @@ public sealed class KrakenFuturesBrokerTests
         Assert.Contains("APIKey", handler.Request.Headers.Select(header => header.Key));
         Assert.Contains("Authent", handler.Request.Headers.Select(header => header.Key));
         Assert.Contains("Nonce", handler.Request.Headers.Select(header => header.Key));
+        var nonce = Assert.Single(handler.Request.Headers.GetValues("Nonce"));
+        var authent = Assert.Single(handler.Request.Headers.GetValues("Authent"));
+        Assert.Equal(ExpectedAuthent("/api/v3/sendorder", nonce, handler.Body, "secret"), authent);
         Assert.Contains("orderType=mkt", handler.Body);
         Assert.Contains("symbol=PF_XBTUSD", handler.Body);
         Assert.Contains("side=sell", handler.Body);
         Assert.Contains("size=0.01", handler.Body);
         Assert.Contains("reduceOnly=true", handler.Body);
+    }
+
+    private static string ExpectedAuthent(string endpointPath, string nonce, string postData, string secret)
+    {
+        var payload = Encoding.UTF8.GetBytes(postData + nonce + endpointPath);
+        var sha = SHA256.HashData(payload);
+        using var hmac = new HMACSHA512(Encoding.UTF8.GetBytes(secret));
+        return Convert.ToBase64String(hmac.ComputeHash(sha));
     }
 
     [Fact]

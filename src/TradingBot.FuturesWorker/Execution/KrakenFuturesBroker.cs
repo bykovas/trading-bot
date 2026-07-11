@@ -160,7 +160,7 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
         using var request = new HttpRequestMessage(method, uri);
         request.Headers.Add("APIKey", _options.ApiKey);
         request.Headers.Add("Nonce", nonce);
-        request.Headers.Add("Authent", Sign(endpointPath, nonce, postData, _options.ApiSecret));
+        request.Headers.Add("Authent", Sign(SigningPath(endpointPath), nonce, postData, _options.ApiSecret));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Content = content;
 
@@ -186,6 +186,11 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
     private static string BuildPostData(IReadOnlyList<KeyValuePair<string, string>> parameters) =>
         string.Join("&", parameters.Select(parameter =>
             $"{Uri.EscapeDataString(parameter.Key)}={Uri.EscapeDataString(parameter.Value)}"));
+
+    private static string SigningPath(string endpointPath) =>
+        endpointPath.StartsWith("/derivatives", StringComparison.Ordinal)
+            ? endpointPath["/derivatives".Length..]
+            : endpointPath;
 
     private static bool IsSuccess(JsonElement root) =>
         root.TryGetProperty("result", out var result)

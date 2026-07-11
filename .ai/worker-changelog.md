@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-11-futures-auth-signing-path-fix
+
+- Fixed Kraken Futures live private-API signing to use the documented authentication endpoint path (`/api/v3/...`) while still calling the `/derivatives/api/v3/...` URL, allowing live account/position sync and live orders to authenticate correctly.
+- Added a regression test that verifies live futures order requests sign the `/api/v3/sendorder` path and still send reduce-only flags for exits.
+- Position reconciliation behavior is unchanged: live futures imports exchange open positions before decisioning and then manages those positions as bot-owned exposure.
+
 ## 2026-07-11-futures-live-execution-gate
 
 - Added an explicitly gated Kraken Futures live execution path behind `TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=true`; without that flag and configured Futures API keys the futures worker remains fail-closed/dry-run.
