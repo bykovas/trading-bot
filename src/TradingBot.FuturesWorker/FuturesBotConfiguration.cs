@@ -114,6 +114,12 @@ internal sealed class FuturesBotConfiguration
         Futures.AllowFlip = false;
         Futures.TargetNotionalEur = Futures.TargetNotionalEur <= 0m ? 10m : Futures.TargetNotionalEur;
         Futures.DeadManSwitchSeconds = Math.Max(10, Futures.DeadManSwitchSeconds);
+        // DMS must outlive the gap between live-cycle refreshes (loop sleep + cycle work).
+        var minDeadManSwitchSeconds = Worker.LoopIntervalSeconds * 2;
+        if (Futures.DeadManSwitchSeconds < minDeadManSwitchSeconds)
+        {
+            Futures.DeadManSwitchSeconds = minDeadManSwitchSeconds;
+        }
 
         Margin.MaintenanceMarginRatePercent = Math.Clamp(Margin.MaintenanceMarginRatePercent, 0m, 50m);
         Margin.MinLiquidationDistancePercent = Math.Max(0m, Margin.MinLiquidationDistancePercent);

@@ -87,6 +87,7 @@ internal sealed class FuturesDecisionWorker(
         if (config.Futures.LiveTradingEnabled)
         {
             await ReconcileWithKrakenAsync(state, universe, lightStates, utc, cancellationToken);
+            await RefreshDeadManSwitchAsync(cancellationToken);
         }
 
         var portfolioBefore = state.Clone();
@@ -349,8 +350,6 @@ internal sealed class FuturesDecisionWorker(
             return noBroker;
         }
 
-        await broker.CancelAllAfterAsync(config.Futures.DeadManSwitchSeconds, cancellationToken);
-
         if (desired == FuturesDesiredExposure.Flat && held is not null)
         {
             var closeSide = held.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? "buy" : "sell";
@@ -388,6 +387,17 @@ internal sealed class FuturesDecisionWorker(
         opened.Action.FillSource = "REAL";
         opened.Action.Reason = $"live Kraken Futures order accepted id={order.OrderId ?? "-"} status={order.Status}; {opened.Action.Reason}";
         return opened;
+    }
+
+    private async Task RefreshDeadManSwitchAsync(CancellationToken cancellationToken)
+    {
+        if (!config.Futures.LiveTradingEnabled || broker?.IsConfigured != true)
+        {
+            return;
+        }
+
+        await broker.CancelAllAfterAsync(config.Futures.DeadManSwitchSeconds, cancellationToken);
+        Console.WriteLine($"futures dead-man-switch: refreshed timeout={config.Futures.DeadManSwitchSeconds}s");
     }
 
     private async Task ReconcileWithKrakenAsync(

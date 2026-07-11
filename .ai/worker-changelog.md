@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-11-futures-dead-man-switch-cycle-refresh
+
+- Fixed futures live dead-man switch refresh so it runs once at the start of every live cycle after Kraken reconciliation, instead of only when `ApplyOrExecuteLiveAsync` reaches an actual entry/exit order; holding positions no longer lets the 90s Kraken timer expire between 120s worker loops.
+- `Normalize` now clamps `DeadManSwitchSeconds` to at least `2 * LoopIntervalSeconds` so configured timeouts cannot be shorter than the worker cadence; default appsettings raised from 90s to 180s (normalized to 240s with the 120s loop).
+- Expected effect: Kraken `cancelallordersafter` stays armed during normal futures-live hold cycles and no longer mass-cancels resting orders ~30s before the next loop.
+
 ## 2026-07-11-futures-entry-quality-parity
 
 - Futures entries now pass the same market-quality protections the spot worker already had, via a new pure `FuturesEntryQualityGate` evaluated BEFORE the portfolio guards and margin risk manager: entry spread limit (`Strategy.MaxEntrySpreadPercent` 0.15%), anti-lag price-action guard (longs reuse the shared `PriceActionGuard`; shorts get the mirror — a tape still rising by `PriceActionMaxDeclinePercent` blocks a short), price-action warm-up (`RequirePriceActionData`, forced on when `Futures.LiveTradingEnabled` like the spot live rule), and anti-extension (entry more than 0.6% beyond the fast EMA in the trade direction, or after a >2.5% lookback run-up/sell-off in the trade direction, is a chase and is rejected).
