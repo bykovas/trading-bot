@@ -13,6 +13,7 @@ internal sealed class FuturesDecisionWorker(
     MarginRiskManager riskManager,
     FuturesVirtualPortfolio portfolio,
     TpSlOrchestrator tpSl,
+    IFuturesBroker? broker = null,
     IClock? clock = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
@@ -22,7 +23,16 @@ internal sealed class FuturesDecisionWorker(
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        Console.WriteLine($"futures worker start instance={config.BotInstance.Id} marketDataMode={config.Kraken.MarketDataMode} dryRunOnly=true");
+        if (config.Futures.LiveTradingEnabled && broker?.IsConfigured != true)
+        {
+            throw new InvalidOperationException("TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=true but Kraken Futures API keys are missing or broker is not configured.");
+        }
+
+        Console.WriteLine($"futures worker start instance={config.BotInstance.Id} marketDataMode={config.Kraken.MarketDataMode} dryRunOnly={!config.Futures.LiveTradingEnabled}");
+        if (config.Futures.LiveTradingEnabled)
+        {
+            Console.WriteLine("!!! FUTURES LIVE TRADING ENABLED: approved decisions will place REAL Kraken Futures market orders !!!");
+        }
         Console.WriteLine($"futures limits: leverage<= {config.Futures.MaxLeverage:0.#}x, positions<= {config.Futures.MaxPositions}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flip=forbidden");
 
         while (!cancellationToken.IsCancellationRequested)
@@ -57,10 +67,14 @@ internal sealed class FuturesDecisionWorker(
 
         var universe = config.CandidateUniverse.Where(instrument => instrument.Enabled).ToList();
         var state = portfolio.Load();
-        var portfolioBefore = state.Clone();
-
         var lightStates = await marketDataSource.GetLightMarketStatesAsync(universe, cancellationToken);
         PersistMarketSnapshots(cycleId, utc, lightStates);
+        if (config.Futures.LiveTradingEnabled)
+        {
+            await ReconcileWithKrakenAsync(state, lightStates, utc, cancellationToken);
+        }
+
+        var portfolioBefore = state.Clone();
 
         // Held pairs are always evaluated; new-entry candidates come from the
         // configured universe capped by MaxActiveInstruments.
@@ -102,21 +116,27 @@ internal sealed class FuturesDecisionWorker(
                 var trigger = tpSl.Evaluate(held, markPrice, marketState.LastPrice);
                 if (trigger is not null)
                 {
-                    fill = portfolio.Apply(
+                    fill = await ApplyOrExecuteLiveAsync(
                         state, pair, FuturesDesiredExposure.Flat, markPrice,
                         0m, held.Leverage ?? 1m, reduceOnly: true,
                         reason: $"{trigger.Kind} simulated trigger at {trigger.TriggerPrice:0.####}",
-                        exitTriggerSource: trigger.TriggerSource);
+                        exitTriggerSource: trigger.TriggerSource,
+                        instrument: marketState.Instrument,
+                        entryPlan: null,
+                        cancellationToken);
                     fill.Action.ExitReasonCode = trigger.Kind == "STOP_LOSS" ? "SELL_STOP_LOSS" : "SELL_TAKE_PROFIT";
                     riskReasons = new[] { $"hard exit: {trigger.Kind} via {trigger.TriggerSource} price" };
                 }
                 else if (IsPastMaxHold(held, utc))
                 {
-                    fill = portfolio.Apply(
+                    fill = await ApplyOrExecuteLiveAsync(
                         state, pair, FuturesDesiredExposure.Flat, markPrice,
                         0m, held.Leverage ?? 1m, reduceOnly: true,
                         reason: $"MAX_HOLD forced close after {config.Exits.MaxHoldMinutes}m",
-                        exitTriggerSource: config.TpSl.TriggerSource);
+                        exitTriggerSource: config.TpSl.TriggerSource,
+                        instrument: marketState.Instrument,
+                        entryPlan: null,
+                        cancellationToken);
                     fill.Action.ExitReasonCode = "SELL_MAX_HOLD";
                     riskReasons = new[] { $"hard exit: maxHold {config.Exits.MaxHoldMinutes}m elapsed" };
                 }
@@ -128,11 +148,15 @@ internal sealed class FuturesDecisionWorker(
                     {
                         desired = held.Side == "SHORT" ? FuturesDesiredExposure.Short : FuturesDesiredExposure.Long;
                     }
-                    fill = portfolio.Apply(
+                    fill = await ApplyOrExecuteLiveAsync(
                         state, pair, desired, markPrice,
                         0m, held.Leverage ?? 1m,
                         reduceOnly: desired == FuturesDesiredExposure.Flat,
-                        reason: desired == FuturesDesiredExposure.Flat ? "signal reversal close" : minHoldBlocked ? "minimum hold active; reversal ignored" : string.Empty);
+                        reason: desired == FuturesDesiredExposure.Flat ? "signal reversal close" : minHoldBlocked ? "minimum hold active; reversal ignored" : string.Empty,
+                        exitTriggerSource: null,
+                        instrument: marketState.Instrument,
+                        entryPlan: null,
+                        cancellationToken);
                     riskReasons = minHoldBlocked
                         ? new[] { $"minimum hold active: reversal ignored until {config.ExecutionPolicy.MinHoldSeconds}s" }
                         : new[] { "holding existing exposure; TP/SL and reversal rules govern this pair" };
@@ -169,10 +193,15 @@ internal sealed class FuturesDecisionWorker(
                     }
                     else
                     {
-                        fill = portfolio.Apply(
+                        fill = await ApplyOrExecuteLiveAsync(
                             state, pair, desired, markPrice,
                             config.Futures.TargetNotionalEur, config.Futures.DefaultLeverage,
-                            entryPlan: entryPlan);
+                            reduceOnly: false,
+                            reason: string.Empty,
+                            exitTriggerSource: null,
+                            instrument: marketState.Instrument,
+                            entryPlan: entryPlan,
+                            cancellationToken);
                         if (fill.PositionOpened)
                         {
                             newEntriesThisCycle++;
@@ -183,9 +212,15 @@ internal sealed class FuturesDecisionWorker(
                     }
                 }
 
-                fill = portfolio.Apply(
+                fill = await ApplyOrExecuteLiveAsync(
                     state, pair, desired, markPrice,
-                    config.Futures.TargetNotionalEur, config.Futures.DefaultLeverage);
+                    config.Futures.TargetNotionalEur, config.Futures.DefaultLeverage,
+                    reduceOnly: false,
+                    reason: string.Empty,
+                    exitTriggerSource: null,
+                    instrument: marketState.Instrument,
+                    entryPlan: null,
+                    cancellationToken);
                 if (entryPlan is not null)
                 {
                     AttachEntryPlanDiagnostics(fill.Action, entryPlan);
@@ -212,6 +247,162 @@ internal sealed class FuturesDecisionWorker(
             EntryDiagnostics = BuildEntryDiagnostics(lightStates, active, fullStates, decisions, btcRegime)
         });
         Console.WriteLine($"futures cycle done: decisions={decisions.Count} cash={state.CashEur:0.####} total={state.TotalValueEur:0.####} positions={state.Positions.Count}");
+    }
+
+    private async Task<FuturesFillResult> ApplyOrExecuteLiveAsync(
+        PortfolioState state,
+        string pair,
+        FuturesDesiredExposure desired,
+        decimal markPrice,
+        decimal targetNotionalEur,
+        decimal leverage,
+        bool reduceOnly,
+        string reason,
+        string? exitTriggerSource,
+        InstrumentOptions instrument,
+        FuturesEntryPlan? entryPlan,
+        CancellationToken cancellationToken)
+    {
+        if (!config.Futures.LiveTradingEnabled)
+        {
+            return portfolio.Apply(state, pair, desired, markPrice, targetNotionalEur, leverage, reduceOnly, reason, exitTriggerSource, entryPlan);
+        }
+
+        var held = state.Positions.FirstOrDefault(position => position.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
+        if (desired == FuturesDesiredExposure.Flat && held is null)
+        {
+            return portfolio.Apply(state, pair, desired, markPrice, targetNotionalEur, leverage, reduceOnly, reason, exitTriggerSource, entryPlan);
+        }
+
+        if (desired != FuturesDesiredExposure.Flat && held is not null)
+        {
+            return portfolio.Apply(state, pair, desired, markPrice, targetNotionalEur, leverage, reduceOnly, reason, exitTriggerSource, entryPlan);
+        }
+
+        if (broker?.IsConfigured != true)
+        {
+            var noBroker = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage, reason: "live futures broker unavailable; order skipped");
+            noBroker.Action.HoldReasonCode = "LIVE_BROKER_UNAVAILABLE";
+            return noBroker;
+        }
+
+        await broker.CancelAllAfterAsync(config.Futures.DeadManSwitchSeconds, cancellationToken);
+
+        if (desired == FuturesDesiredExposure.Flat && held is not null)
+        {
+            var closeSide = held.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? "buy" : "sell";
+            var close = await broker.SendOrderAsync(instrument.KrakenPair, closeSide, held.Quantity, reduceOnly: true, held.Leverage ?? leverage, cancellationToken);
+            if (!close.Accepted)
+            {
+                var holdDesired = held.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase)
+                    ? FuturesDesiredExposure.Short
+                    : FuturesDesiredExposure.Long;
+                var rejected = portfolio.Apply(state, pair, holdDesired, markPrice, 0m, held.Leverage ?? leverage, reason: $"live reduce-only close rejected: {close.Error ?? close.Status}");
+                rejected.Action.HoldReasonCode = "LIVE_ORDER_REJECTED";
+                rejected.Action.FillSource = "REAL_REJECTED";
+                return rejected;
+            }
+
+            var fill = portfolio.Apply(state, pair, desired, markPrice, targetNotionalEur, leverage, reduceOnly: true, reason, exitTriggerSource, entryPlan);
+            fill.Action.FillSource = "REAL";
+            fill.Action.Reason = $"live Kraken Futures order accepted id={close.OrderId ?? "-"} status={close.Status}; {fill.Action.Reason}";
+            return fill;
+        }
+
+        var filledNotional = entryPlan?.FilledNotionalEur ?? targetNotionalEur;
+        var size = markPrice <= 0m ? 0m : filledNotional / markPrice;
+        var side = desired == FuturesDesiredExposure.Short ? "sell" : "buy";
+        var order = await broker.SendOrderAsync(instrument.KrakenPair, side, size, reduceOnly: false, leverage, cancellationToken);
+        if (!order.Accepted)
+        {
+            var rejected = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage, reason: $"live futures entry rejected: {order.Error ?? order.Status}");
+            rejected.Action.HoldReasonCode = "LIVE_ORDER_REJECTED";
+            rejected.Action.FillSource = "REAL_REJECTED";
+            return rejected;
+        }
+
+        var opened = portfolio.Apply(state, pair, desired, markPrice, targetNotionalEur, leverage, reduceOnly: false, reason, exitTriggerSource, entryPlan);
+        opened.Action.FillSource = "REAL";
+        opened.Action.Reason = $"live Kraken Futures order accepted id={order.OrderId ?? "-"} status={order.Status}; {opened.Action.Reason}";
+        return opened;
+    }
+
+    private async Task ReconcileWithKrakenAsync(
+        PortfolioState state,
+        IReadOnlyList<InstrumentMarketState> lightStates,
+        DateTimeOffset utc,
+        CancellationToken cancellationToken)
+    {
+        if (broker?.IsConfigured != true)
+        {
+            throw new InvalidOperationException("futures live reconciliation requested but broker is not configured.");
+        }
+
+        var accounts = await broker.GetAccountsAsync(cancellationToken);
+        var positions = await broker.GetOpenPositionsAsync(cancellationToken);
+        var bySymbol = config.CandidateUniverse
+            .Where(instrument => !string.IsNullOrWhiteSpace(instrument.KrakenPair))
+            .ToDictionary(instrument => instrument.KrakenPair, StringComparer.OrdinalIgnoreCase);
+        var markByPair = lightStates.ToDictionary(state => state.Instrument.Pair, state => state.LastPrice, StringComparer.OrdinalIgnoreCase);
+
+        var available = accounts.Sum(account => account.AvailableMargin);
+        if (available > 0m)
+        {
+            state.CashEur = available;
+        }
+
+        var imported = new List<PortfolioPosition>();
+        foreach (var remote in positions)
+        {
+            if (!bySymbol.TryGetValue(remote.Symbol, out var instrument))
+            {
+                Console.WriteLine($"futures-kraken-sync: ignoring unmanaged symbol {remote.Symbol} size={remote.Size}");
+                continue;
+            }
+
+            var mark = remote.MarkPrice > 0m
+                ? remote.MarkPrice
+                : markByPair.GetValueOrDefault(instrument.Pair, remote.EntryPrice);
+            var leverage = Math.Clamp(remote.Leverage <= 0m ? config.Futures.DefaultLeverage : remote.Leverage, 1m, config.Futures.MaxLeverage);
+            var notional = remote.EntryPrice * remote.Size;
+            var initialMargin = leverage <= 0m ? notional : notional / leverage;
+            var pnl = FuturesMath.UnrealizedPnlEur(remote.Side, remote.EntryPrice, mark, remote.Size);
+            var existing = state.Positions.FirstOrDefault(position => position.Pair.Equals(instrument.Pair, StringComparison.OrdinalIgnoreCase));
+            imported.Add(new PortfolioPosition
+            {
+                Pair = instrument.Pair,
+                Side = remote.Side,
+                Quantity = remote.Size,
+                EntryPrice = remote.EntryPrice,
+                EntryNotionalEur = notional,
+                LastPrice = mark,
+                MarkPrice = mark,
+                MarketValueEur = initialMargin + pnl,
+                UnrealizedPnlEur = pnl,
+                UnrealizedPnlPercent = notional <= 0m ? 0m : pnl / notional * 100m,
+                OpenedAtUtc = existing?.OpenedAtUtc ?? utc,
+                LastActionAtUtc = existing?.LastActionAtUtc ?? utc,
+                Leverage = leverage,
+                InitialMarginEur = initialMargin,
+                LiquidationPrice = FuturesMath.EstimateLiquidationPrice(remote.Side, remote.EntryPrice, leverage, config.Margin.MaintenanceMarginRatePercent),
+                LiquidationDistancePercent = FuturesMath.LiquidationDistancePercent(mark, FuturesMath.EstimateLiquidationPrice(remote.Side, remote.EntryPrice, leverage, config.Margin.MaintenanceMarginRatePercent)),
+                TpOrderState = existing?.TpOrderState,
+                SlOrderState = existing?.SlOrderState,
+                StopLossPrice = existing?.StopLossPrice,
+                TakeProfitPrice = existing?.TakeProfitPrice,
+                EntryAtr = existing?.EntryAtr,
+                RoundTripCostEstimatePct = existing?.RoundTripCostEstimatePct,
+                ExpectedFundingPct = existing?.ExpectedFundingPct,
+                AtrPct = existing?.AtrPct,
+                StopDistancePct = existing?.StopDistancePct,
+                TakeProfitDistancePct = existing?.TakeProfitDistancePct
+            });
+        }
+
+        var before = state.Positions.Count;
+        state.Positions = imported;
+        state.UpdatedAt = utc;
+        Console.WriteLine($"futures-kraken-sync: accounts={accounts.Count} remotePositions={positions.Count} trackedPositions={state.Positions.Count} previousTracked={before} availableMargin={state.CashEur:0.####}");
     }
 
     private bool IsPastMaxHold(PortfolioPosition position, DateTimeOffset utc) =>

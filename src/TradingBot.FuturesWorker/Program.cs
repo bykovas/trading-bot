@@ -25,6 +25,7 @@ var store = CreatePortfolioStore(config);
 Console.WriteLine($"futures persistence: state={store.StateDescription} events={store.EventsDescription}");
 
 var portfolio = new FuturesVirtualPortfolio(config, store);
+var krakenFuturesBroker = new KrakenFuturesBroker(httpClient, config.Kraken);
 var worker = new FuturesDecisionWorker(
     config,
     marketDataSource,
@@ -32,7 +33,8 @@ var worker = new FuturesDecisionWorker(
     new LongShortStrategy(config),
     new MarginRiskManager(config),
     portfolio,
-    new TpSlOrchestrator(config));
+    new TpSlOrchestrator(config),
+    krakenFuturesBroker);
 
 await worker.RunAsync(cancellation.Token);
 

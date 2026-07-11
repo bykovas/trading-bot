@@ -51,7 +51,7 @@ echo "  api    = ${API_IMAGE_NAME}:${API_IMAGE_TAG}"
 echo "  worker = ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}"
 echo "  live   = trading-bot-spot-worker-live"
 echo "  virtual= trading-bot-spot-worker-virtual"
-echo "  futures= ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG} (dry-run only)"
+echo "  futures= ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG}"
 
 mkdir -p \
   "${DEPLOY_DIR}" \
@@ -101,6 +101,16 @@ if [ "$(printf '%s' "${TRADINGBOT_LIVE_TRADING_ENABLED:-false}" | tr '[:upper:]'
 else
   LIVE_TRADING_FLAG="false"
   echo "Live trading disabled (TRADINGBOT_LIVE_TRADING_ENABLED='${TRADINGBOT_LIVE_TRADING_ENABLED:-}' is not 'true')"
+fi
+
+if [ "$(printf '%s' "${TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+  FUTURES_LIVE_TRADING_FLAG="true"
+  : "${TRADINGBOT_KRAKEN_FUTURES_API_KEY:?TRADINGBOT_KRAKEN_FUTURES_API_KEY is required when futures live trading is enabled}"
+  : "${TRADINGBOT_KRAKEN_FUTURES_API_SECRET:?TRADINGBOT_KRAKEN_FUTURES_API_SECRET is required when futures live trading is enabled}"
+  echo "!!! TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=true from PROD environment: deploying with FUTURES LIVE trading ON !!!"
+else
+  FUTURES_LIVE_TRADING_FLAG="false"
+  echo "Futures live trading disabled (TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED='${TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED:-}' is not 'true')"
 fi
 
 echo "Writing API environment to ${API_ENV_FILE}"
@@ -156,11 +166,29 @@ echo "Writing virtual worker environment to ${VIRTUAL_ENV_FILE}"
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${VIRTUAL_ENV_FILE}"
 
-# Futures workers: dry-run only during the scaffold phase. They use public
-# Kraken Futures market data and have NO live-trading flag - the worker binary
-# has no live order path. Live env is create-once like spot's.
+# Futures live execution is separately gated from spot and remains off unless
+# TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED is explicitly true in the PROD env.
+# The live env is still operator-owned/create-once like spot's, with safe upgrades.
 if [ -f "${FUTURES_LIVE_ENV_FILE}" ]; then
   echo "Keeping existing futures live environment at ${FUTURES_LIVE_ENV_FILE}"
+  if grep -q '^TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=' "${FUTURES_LIVE_ENV_FILE}"; then
+    sed -i "s/^TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=.*/TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=${FUTURES_LIVE_TRADING_FLAG}/" "${FUTURES_LIVE_ENV_FILE}"
+  else
+    printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=%s\n' "${FUTURES_LIVE_TRADING_FLAG}" >> "${FUTURES_LIVE_ENV_FILE}"
+  fi
+  grep -q '^TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR=' "${FUTURES_LIVE_ENV_FILE}" || printf 'TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR=10\n' >> "${FUTURES_LIVE_ENV_FILE}"
+  grep -q '^TRADINGBOT_FUTURES_MAX_LEVERAGE=' "${FUTURES_LIVE_ENV_FILE}" || printf 'TRADINGBOT_FUTURES_MAX_LEVERAGE=2\n' >> "${FUTURES_LIVE_ENV_FILE}"
+  if grep -q '^TRADINGBOT_FUTURES_DEFAULT_LEVERAGE=' "${FUTURES_LIVE_ENV_FILE}"; then
+    sed -i 's/^TRADINGBOT_FUTURES_DEFAULT_LEVERAGE=.*/TRADINGBOT_FUTURES_DEFAULT_LEVERAGE=2/' "${FUTURES_LIVE_ENV_FILE}"
+  else
+    printf 'TRADINGBOT_FUTURES_DEFAULT_LEVERAGE=2\n' >> "${FUTURES_LIVE_ENV_FILE}"
+  fi
+  if ! grep -q '^TRADINGBOT_KRAKEN_FUTURES_API_KEY=' "${FUTURES_LIVE_ENV_FILE}"; then
+    printf 'TRADINGBOT_KRAKEN_FUTURES_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_FUTURES_API_KEY:-}" >> "${FUTURES_LIVE_ENV_FILE}"
+  fi
+  if ! grep -q '^TRADINGBOT_KRAKEN_FUTURES_API_SECRET=' "${FUTURES_LIVE_ENV_FILE}"; then
+    printf 'TRADINGBOT_KRAKEN_FUTURES_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_FUTURES_API_SECRET:-}" >> "${FUTURES_LIVE_ENV_FILE}"
+  fi
 else
   echo "Creating futures live environment at ${FUTURES_LIVE_ENV_FILE}"
   {
@@ -169,6 +197,12 @@ else
     printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
     printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
     printf 'TRADINGBOT_MARKET_DATA_MODE=kraken-futures\n'
+    printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=%s\n' "${FUTURES_LIVE_TRADING_FLAG}"
+    printf 'TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR=10\n'
+    printf 'TRADINGBOT_FUTURES_MAX_LEVERAGE=2\n'
+    printf 'TRADINGBOT_FUTURES_DEFAULT_LEVERAGE=2\n'
+    printf 'TRADINGBOT_KRAKEN_FUTURES_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_FUTURES_API_KEY:-}"
+    printf 'TRADINGBOT_KRAKEN_FUTURES_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_FUTURES_API_SECRET:-}"
     printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
   } > "${FUTURES_LIVE_ENV_FILE}"
 fi
@@ -180,6 +214,10 @@ echo "Writing futures virtual environment to ${FUTURES_VIRTUAL_ENV_FILE}"
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
   printf 'TRADINGBOT_MARKET_DATA_MODE=kraken-futures\n'
+  printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=false\n'
+  printf 'TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR=10\n'
+  printf 'TRADINGBOT_FUTURES_MAX_LEVERAGE=2\n'
+  printf 'TRADINGBOT_FUTURES_DEFAULT_LEVERAGE=2\n'
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${FUTURES_VIRTUAL_ENV_FILE}"
 

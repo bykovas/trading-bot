@@ -30,5 +30,10 @@ internal sealed record FuturesOpenPosition(string Symbol, string Side, decimal S
 
 internal sealed record FuturesOrderResult(string Status, string? OrderId, string? Error)
 {
+    public bool Accepted =>
+        Status.Equals("placed", StringComparison.OrdinalIgnoreCase)
+        || Status.Equals("filled", StringComparison.OrdinalIgnoreCase)
+        || Status.Equals("executed", StringComparison.OrdinalIgnoreCase);
+
     public static FuturesOrderResult Rejected(string error) => new("REJECTED", null, error);
 }

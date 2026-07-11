@@ -77,12 +77,12 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_MAX_POSITIONS", value => config.Futures.MaxPositions = ParseInt(value, config.Futures.MaxPositions));
         SetIfPresent("TRADINGBOT_FUTURES_ALLOW_SHORTS", value => config.Futures.AllowShorts = ParseBool(value, config.Futures.AllowShorts));
         SetIfPresent("TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR", value => config.Futures.TargetNotionalEur = ParseDecimal(value, config.Futures.TargetNotionalEur));
+        SetIfPresent("TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED", value => config.Futures.LiveTradingEnabled = ParseBool(value, config.Futures.LiveTradingEnabled));
+        SetIfPresent("TRADINGBOT_KRAKEN_FUTURES_API_KEY", value => config.Kraken.ApiKey = value);
+        SetIfPresent("TRADINGBOT_KRAKEN_FUTURES_API_SECRET", value => config.Kraken.ApiSecret = value);
         SetIfPresent("TRADINGBOT_FUTURES_MIN_LIQUIDATION_DISTANCE_PERCENT", value => config.Margin.MinLiquidationDistancePercent = ParseDecimal(value, config.Margin.MinLiquidationDistancePercent));
         SetIfPresent("TRADINGBOT_FUTURES_MAX_MARGIN_UTILIZATION_PERCENT", value => config.Margin.MaxAccountMarginUtilizationPercent = ParseDecimal(value, config.Margin.MaxAccountMarginUtilizationPercent));
-
-        // NOTE(futures): there is deliberately NO live-trading override here. Live
-        // futures execution stays impossible until the Kraken Futures adapter ships
-        // with its safety tests (blueprint phase 5).
+        SetIfPresent("TRADINGBOT_FUTURES_DEAD_MAN_SWITCH_SECONDS", value => config.Futures.DeadManSwitchSeconds = ParseInt(value, config.Futures.DeadManSwitchSeconds));
     }
 
     private void Normalize()
@@ -103,6 +103,7 @@ internal sealed class FuturesBotConfiguration
         Futures.MaxPositions = Math.Clamp(Futures.MaxPositions <= 0 ? 3 : Futures.MaxPositions, 1, 3);
         Futures.AllowFlip = false;
         Futures.TargetNotionalEur = Futures.TargetNotionalEur <= 0m ? 10m : Futures.TargetNotionalEur;
+        Futures.DeadManSwitchSeconds = Math.Max(10, Futures.DeadManSwitchSeconds);
 
         Margin.MaintenanceMarginRatePercent = Math.Clamp(Margin.MaintenanceMarginRatePercent, 0m, 50m);
         Margin.MinLiquidationDistancePercent = Math.Max(0m, Margin.MinLiquidationDistancePercent);
@@ -180,7 +181,7 @@ internal sealed class FuturesPortfolioOptions
 internal sealed class FuturesOptions
 {
     public decimal MaxLeverage { get; set; } = 2m;
-    public decimal DefaultLeverage { get; set; } = 1m;
+    public decimal DefaultLeverage { get; set; } = 2m;
     public int MaxPositions { get; set; } = 3;
     public bool AllowShorts { get; set; } = true;
 
@@ -188,6 +189,8 @@ internal sealed class FuturesOptions
     // forces this to false regardless of config.
     public bool AllowFlip { get; set; }
     public decimal TargetNotionalEur { get; set; } = 10m;
+    public bool LiveTradingEnabled { get; set; }
+    public int DeadManSwitchSeconds { get; set; } = 90;
 }
 
 internal sealed class MarginOptions

@@ -2,6 +2,13 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-11-futures-live-execution-gate
+
+- Added an explicitly gated Kraken Futures live execution path behind `TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=true`; without that flag and configured Futures API keys the futures worker remains fail-closed/dry-run.
+- Implemented minimal Kraken Futures private REST support for v3 auth, account/position reads, dead-man switch refresh, and market entry/exit orders; futures exits are sent reduce-only and accepted live orders are marked with `FillSource=REAL`.
+- Futures live cycles now reconcile the local portfolio mirror from Kraken Futures accounts/open positions before decisioning, so live position and available-margin state is refreshed from the exchange similarly to spot reconciliation.
+- Set futures defaults for requested live sizing to `TargetNotionalEur=10`, `MaxLeverage=2`, and `DefaultLeverage=2`; deploy writes separate futures live flags/API keys and keeps virtual futures forced non-live.
+
 ## 2026-07-10-spot-softer-exploratory-price-action
 
 - Lowered the spot exploratory-entry price-action trend default from `0.50%` to `0.25%` so near-threshold candidates with confirmed positive recent movement are not rejected after the 30-second snapshot cadence shortened the effective price-action window.
