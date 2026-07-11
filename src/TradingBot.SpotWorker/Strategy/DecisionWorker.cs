@@ -152,7 +152,7 @@ internal sealed class DecisionWorker(
         var loadedPortfolio = dryRunPortfolio.Load();
 
         if (LiveOrdersActive && broker is not null
-            && string.Equals(config.Kraken.MarketDataMode, "kraken", StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(config.Kraken.MarketDataMode, "sample", StringComparison.OrdinalIgnoreCase))
         {
             await ReconcileWithKrakenAsync(loadedPortfolio, lightCandidates, utc, cancellationToken);
         }

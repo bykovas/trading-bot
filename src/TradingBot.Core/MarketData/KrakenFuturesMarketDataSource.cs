@@ -1,12 +1,12 @@
 using System.Globalization;
 using System.Text.Json;
 
-namespace TradingBot.FuturesWorker;
+namespace TradingBot.Core.MarketData;
 
 // Public Kraken Futures market data adapter. It intentionally implements only
 // read-only endpoints: instruments, tickers, and chart candles. Trading remains
 // impossible until the separate broker adapter is implemented and tested.
-internal sealed class KrakenFuturesMarketDataSource(HttpClient httpClient, KrakenOptions options) : IMarketDataSource
+public sealed class KrakenFuturesMarketDataSource(HttpClient httpClient, KrakenOptions options) : IMarketDataSource
 {
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly Dictionary<string, FuturesInstrumentMetadata> _metadataCache = new(StringComparer.OrdinalIgnoreCase);

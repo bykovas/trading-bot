@@ -21,6 +21,7 @@ internal sealed class BotConfiguration
     public PortfolioOptions Portfolio { get; set; } = new();
     public DryRunOptions DryRun { get; set; } = new();
     public DatabaseOptions Database { get; set; } = new();
+    public MarketDataConsumerOptions MarketDataConsumer { get; set; } = new() { Venue = MarketDataVenue.Spot };
     public UniverseDiscoveryOptions UniverseDiscovery { get; set; } = new();
     public ExecutionPolicyOptions ExecutionPolicy { get; set; } = new();
     public PositionExitOptions PositionExit { get; set; } = new();
@@ -101,6 +102,9 @@ internal sealed class BotConfiguration
         SetIfPresent("TRADINGBOT_DRY_RUN_SLIPPAGE_BPS", value => config.DryRun.SlippageBps = ParseDecimal(value, config.DryRun.SlippageBps));
         SetIfPresent("TRADINGBOT_DATABASE_ENABLED", value => config.Database.Enabled = ParseBool(value, config.Database.Enabled));
         SetIfPresent("TRADINGBOT_DATABASE_CONNECTION_STRING", value => config.Database.ConnectionString = value);
+        SetIfPresent("TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED", value => config.MarketDataConsumer.FallbackEnabled = ParseBool(value, config.MarketDataConsumer.FallbackEnabled));
+        SetIfPresent("TRADINGBOT_MARKET_DATA_MAX_QUOTE_AGE_SECONDS", value => config.MarketDataConsumer.MaxQuoteAgeSeconds = ParseInt(value, config.MarketDataConsumer.MaxQuoteAgeSeconds));
+        SetIfPresent("TRADINGBOT_MARKET_DATA_MAX_CANDLE_AGE_MINUTES", value => config.MarketDataConsumer.MaxCandleAgeMinutes = ParseInt(value, config.MarketDataConsumer.MaxCandleAgeMinutes));
         SetIfPresent("TRADINGBOT_UNIVERSE_DISCOVERY_ENABLED", value => config.UniverseDiscovery.Enabled = ParseBool(value, config.UniverseDiscovery.Enabled));
         SetIfPresent("TRADINGBOT_UNIVERSE_DISCOVERY_REFRESH_SECONDS", value => config.UniverseDiscovery.RefreshSeconds = ParseInt(value, config.UniverseDiscovery.RefreshSeconds));
         SetIfPresent("TRADINGBOT_UNIVERSE_INCLUDE_CONFIGURED", value => config.UniverseDiscovery.IncludeConfiguredUniverse = ParseBool(value, config.UniverseDiscovery.IncludeConfiguredUniverse));

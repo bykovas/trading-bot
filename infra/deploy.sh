@@ -26,12 +26,16 @@ FUTURES_LIVE_ENV_FILE="${FUTURES_LIVE_DIR}/.env"
 FUTURES_VIRTUAL_ENV_FILE="${FUTURES_VIRTUAL_DIR}/.env"
 DATABASE_DIR="${DEPLOY_DIR}/database"
 DATABASE_ENV_DIR="${DEPLOY_DIR}/postgres"
-DATABASE_ENV_FILE="${DATABASE_ENV_DIR}/.env"
+MARKET_DATA_APPSETTINGS_SOURCE="src/TradingBot.MarketDataWorker/appsettings.json"
+MARKET_DATA_DIR="${DEPLOY_DIR}/market-data"
+MARKET_DATA_APPSETTINGS="${MARKET_DATA_DIR}/appsettings.json"
+MARKET_DATA_ENV_FILE="${MARKET_DATA_DIR}/.env"
 
 : "${UI_IMAGE_NAME:?UI_IMAGE_NAME is required}"
 : "${API_IMAGE_NAME:?API_IMAGE_NAME is required}"
 : "${SPOT_WORKER_IMAGE_NAME:?SPOT_WORKER_IMAGE_NAME is required}"
 : "${FUTURES_WORKER_IMAGE_NAME:?FUTURES_WORKER_IMAGE_NAME is required}"
+: "${MARKET_DATA_WORKER_IMAGE_NAME:?MARKET_DATA_WORKER_IMAGE_NAME is required}"
 : "${GHCR_USERNAME:?GHCR_USERNAME is required}"
 : "${GHCR_TOKEN:?GHCR_TOKEN is required}"
 : "${TRADINGBOT_DB_PASSWORD:?TRADINGBOT_DB_PASSWORD is required}"
@@ -43,6 +47,7 @@ UI_IMAGE_TAG="${UI_IMAGE_TAG:-latest}"
 API_IMAGE_TAG="${API_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 SPOT_WORKER_IMAGE_TAG="${SPOT_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 FUTURES_WORKER_IMAGE_TAG="${FUTURES_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
+MARKET_DATA_WORKER_IMAGE_TAG="${MARKET_DATA_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 TRAEFIK_NETWORK="${TRAEFIK_NETWORK:-traefik}"
 
 echo "Deploying stack '${PROJECT_NAME}' to ${DEPLOY_DIR}"
@@ -52,6 +57,7 @@ echo "  worker = ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}"
 echo "  live   = trading-bot-spot-worker-live"
 echo "  virtual= trading-bot-spot-worker-virtual"
 echo "  futures= ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG}"
+echo "  market-data= ${MARKET_DATA_WORKER_IMAGE_NAME}:${MARKET_DATA_WORKER_IMAGE_TAG}"
 
 mkdir -p \
   "${DEPLOY_DIR}" \
@@ -65,6 +71,7 @@ mkdir -p \
   "${FUTURES_LIVE_DIR}/logs" \
   "${FUTURES_VIRTUAL_DIR}/data" \
   "${FUTURES_VIRTUAL_DIR}/logs" \
+  "${MARKET_DATA_DIR}/logs" \
   "${DATABASE_DIR}" \
   "${DATABASE_ENV_DIR}"
 cp infra/docker-compose.prod.yml "${COMPOSE_FILE}"
@@ -91,6 +98,8 @@ else
 fi
 echo "Updating futures virtual appsettings from repository config"
 cp "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_VIRTUAL_APPSETTINGS}"
+echo "Updating market data worker appsettings from repository config"
+cp "${MARKET_DATA_APPSETTINGS_SOURCE}" "${MARKET_DATA_APPSETTINGS}"
 
 # Live trading comes from the GitHub PROD environment variable
 # TRADINGBOT_LIVE_TRADING_ENABLED. Anything but an explicit "true" (any case)
@@ -142,7 +151,8 @@ else
     printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
     printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
     printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
-    printf 'TRADINGBOT_MARKET_DATA_MODE=kraken\n'
+    printf 'TRADINGBOT_MARKET_DATA_MODE=database\n'
+    printf 'TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true\n'
     printf 'TRADINGBOT_KRAKEN_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_API_KEY:-}"
     printf 'TRADINGBOT_KRAKEN_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_API_SECRET:-}"
     printf 'TRADINGBOT_OPENAI_API_KEY=%s\n' "${TRADINGBOT_OPENAI_API_KEY:-}"
@@ -158,7 +168,8 @@ echo "Writing virtual worker environment to ${VIRTUAL_ENV_FILE}"
   printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
-  printf 'TRADINGBOT_MARKET_DATA_MODE=kraken\n'
+  printf 'TRADINGBOT_MARKET_DATA_MODE=database\n'
+  printf 'TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true\n'
   printf 'TRADINGBOT_KRAKEN_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_API_KEY:-}"
   printf 'TRADINGBOT_KRAKEN_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_API_SECRET:-}"
   printf 'TRADINGBOT_OPENAI_API_KEY=%s\n' "${TRADINGBOT_OPENAI_API_KEY:-}"
@@ -196,7 +207,8 @@ else
     printf 'TRADINGBOT_BOT_INSTANCE_NAME=Live futures worker\n'
     printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
     printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
-    printf 'TRADINGBOT_MARKET_DATA_MODE=kraken-futures\n'
+    printf 'TRADINGBOT_MARKET_DATA_MODE=database\n'
+    printf 'TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true\n'
     printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=%s\n' "${FUTURES_LIVE_TRADING_FLAG}"
     printf 'TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR=10\n'
     printf 'TRADINGBOT_FUTURES_MAX_LEVERAGE=2\n'
@@ -213,13 +225,25 @@ echo "Writing futures virtual environment to ${FUTURES_VIRTUAL_ENV_FILE}"
   printf 'TRADINGBOT_BOT_INSTANCE_NAME=Virtual futures worker\n'
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
-  printf 'TRADINGBOT_MARKET_DATA_MODE=kraken-futures\n'
+  printf 'TRADINGBOT_MARKET_DATA_MODE=database\n'
+  printf 'TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true\n'
   printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=false\n'
   printf 'TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR=10\n'
   printf 'TRADINGBOT_FUTURES_MAX_LEVERAGE=2\n'
   printf 'TRADINGBOT_FUTURES_DEFAULT_LEVERAGE=2\n'
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${FUTURES_VIRTUAL_ENV_FILE}"
+
+echo "Writing market data worker environment to ${MARKET_DATA_ENV_FILE}"
+{
+  printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
+  printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  printf 'TRADINGBOT_MARKET_DATA_LIGHT_INTERVAL_SECONDS=30\n'
+  printf 'TRADINGBOT_MARKET_DATA_CANDLE_INTERVAL_SECONDS=120\n'
+  printf 'TRADINGBOT_TIMEFRAME_MINUTES=15\n'
+  printf 'TRADINGBOT_MARKET_DATA_MAX_CANDLE_PAIRS=40\n'
+  printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
+} > "${MARKET_DATA_ENV_FILE}"
 
 echo "${GHCR_TOKEN}" | docker login ghcr.io \
   --username "${GHCR_USERNAME}" \
@@ -233,6 +257,8 @@ export SPOT_WORKER_IMAGE_NAME
 export SPOT_WORKER_IMAGE_TAG
 export FUTURES_WORKER_IMAGE_NAME
 export FUTURES_WORKER_IMAGE_TAG
+export MARKET_DATA_WORKER_IMAGE_NAME
+export MARKET_DATA_WORKER_IMAGE_TAG
 export TRAEFIK_NETWORK
 
 docker compose \

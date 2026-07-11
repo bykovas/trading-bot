@@ -15,14 +15,14 @@ using var httpClient = new HttpClient
     Timeout = TimeSpan.FromSeconds(config.Http.TimeoutSeconds)
 };
 
-// Only "kraken-futures" selects the public venue source; anything else runs on
-// deterministic sample data so the dry-run loop works end-to-end without network.
-IMarketDataSource marketDataSource = config.Kraken.MarketDataMode.Equals("kraken-futures", StringComparison.OrdinalIgnoreCase)
-    ? new KrakenFuturesMarketDataSource(httpClient, config.Kraken)
-    : new SampleMarketDataSource();
-IUniverseProvider universeProvider = config.Kraken.MarketDataMode.Equals("kraken-futures", StringComparison.OrdinalIgnoreCase)
-    ? new KrakenFuturesUniverseProvider(httpClient, config.Kraken, config.UniverseDiscovery, config.CandidateUniverse)
-    : new ConfiguredUniverseProvider(config.CandidateUniverse);
+var (marketDataSource, universeProvider) = MarketDataSourceFactory.Create(
+    httpClient,
+    config.Kraken,
+    config.UniverseDiscovery,
+    config.CandidateUniverse,
+    config.Database,
+    config.MarketDataConsumer,
+    config.Trading.TimeframeMinutes);
 
 var store = CreatePortfolioStore(config);
 Console.WriteLine($"futures persistence: state={store.StateDescription} events={store.EventsDescription}");
