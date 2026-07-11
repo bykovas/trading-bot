@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-11-futures-live-reject-diagnostics
+
+- Fixed futures live rejected-entry diagnostics so a Kraken Futures order rejection preserves `live futures entry rejected: ...` in the persisted dry-run action instead of being overwritten by the generic flat/no-position message.
+- Futures live now logs rejected entry attempts with pair, Kraken symbol, side, size, leverage, and rejection reason, making exchange-side failures distinguishable from strategy `NO_ORDER` decisions.
+- No strategy threshold, sizing, risk, TP/SL, or Kraken order acceptance behavior changed; this only makes rejected real order attempts observable and auditable.
+
 ## 2026-07-11-centralized-market-data-worker
 
 - Added `TradingBot.MarketDataWorker`: one process polls Kraken spot+futures once, writes shared `instrument_registry`, `market_quotes`, `market_candles`, and `market_orderbooks` to Postgres; candle fetch set is union of top-volume pairs, strong movers, force-include list, and held pairs from all `spot-*` / `futures-*` instances.

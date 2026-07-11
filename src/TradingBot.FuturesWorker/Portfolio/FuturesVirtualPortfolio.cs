@@ -62,7 +62,7 @@ internal sealed class FuturesVirtualPortfolio(
         if (desired == FuturesDesiredExposure.Flat)
         {
             return position is null
-                ? NoOrder(state, pair, null, "no position and desired exposure is flat")
+                ? NoOrder(state, pair, null, string.IsNullOrEmpty(reason) ? "no position and desired exposure is flat" : reason)
                 : Close(state, position, markPrice, reason: string.IsNullOrEmpty(reason) ? "desired exposure flipped to flat" : reason, exitTriggerSource);
         }
 

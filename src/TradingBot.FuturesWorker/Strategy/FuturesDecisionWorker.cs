@@ -377,7 +377,9 @@ internal sealed class FuturesDecisionWorker(
         var order = await broker.SendOrderAsync(instrument.KrakenPair, side, size, reduceOnly: false, leverage, cancellationToken);
         if (!order.Accepted)
         {
-            var rejected = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage, reason: $"live futures entry rejected: {order.Error ?? order.Status}");
+            var rejectReason = $"live futures entry rejected: {order.Error ?? order.Status}";
+            Console.WriteLine($"futures-live-order-rejected: pair={pair} krakenPair={instrument.KrakenPair} side={side} size={size:0.########} leverage={leverage:0.#}x reason={rejectReason}");
+            var rejected = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage, reason: rejectReason);
             rejected.Action.HoldReasonCode = "LIVE_ORDER_REJECTED";
             rejected.Action.FillSource = "REAL_REJECTED";
             return rejected;
