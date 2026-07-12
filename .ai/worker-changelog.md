@@ -2,6 +2,13 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-12-futures-fast-exit-check
+
+- Futures workers now run a fast held-position exit check between full decision cycles. The full futures decision loop remains at `Worker.LoopIntervalSeconds=120`, but open positions are checked every `Futures.FastExitCheckSeconds=10` seconds for TP/SL and max-hold exits.
+- The fast path is reduce-only: it loads current portfolio state, fetches light/mark quotes only for held instruments, reconciles live Kraken Futures positions when live trading is enabled, and can only close existing exposure. It never evaluates new entries or strategy reversals.
+- Deploy writes `TRADINGBOT_FUTURES_FAST_EXIT_CHECK_SECONDS=10` for futures live and virtual envs so preserved operator-owned live env files do not keep the old full-cycle-only exit cadence.
+- Not changed: entry scoring, active universe selection, leverage, sizing, margin/funding/risk gates, and full-cycle signal reversal handling.
+
 ## 2026-07-11-futures-leverage-ceiling-10x
 
 - Raised the futures leverage ceiling from 2x to 10x. `FuturesBotConfiguration.Normalize` previously hard-clamped `MaxLeverage` to [1, 2] (blueprint safety default), so any configured value above 2 was silently ignored; the clamp ceiling is now 10. Values above 10 still clamp to 10 (treated as a typo), and the per-symbol Kraken leverage preference plus the liquidation-distance gate still apply on top.

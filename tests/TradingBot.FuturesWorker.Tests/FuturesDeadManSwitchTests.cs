@@ -72,6 +72,79 @@ public sealed class FuturesDeadManSwitchTests
     }
 
     [Fact]
+    public async Task Fast_exit_check_closes_open_position_on_stop_loss_without_full_cycle()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
+        var config = new FuturesBotConfiguration
+        {
+            BotInstance = new BotInstanceOptions { Id = "futures-virtual", Name = "test" },
+            Futures = new FuturesOptions
+            {
+                DefaultLeverage = 10m,
+                MaxLeverage = 10m,
+                FastExitCheckSeconds = 10
+            },
+            Worker = new WorkerOptions { LoopIntervalSeconds = 120 },
+            Kraken = new KrakenOptions { MarketDataMode = "sample" },
+            DryRun = new DryRunOptions { OutputDirectory = outputDirectory },
+            CandidateUniverse =
+            [
+                new InstrumentOptions
+                {
+                    Pair = "SNX/USD",
+                    KrakenPair = "PF_SNXUSD",
+                    Enabled = true
+                }
+            ]
+        };
+        InvokeNormalize(config);
+
+        var store = new FileDryRunPortfolioStore(config.DryRun);
+        store.Save(new PortfolioState
+        {
+            CashEur = 99m,
+            Positions =
+            [
+                new PortfolioPosition
+                {
+                    Pair = "SNX/USD",
+                    Side = "LONG",
+                    Quantity = 10m,
+                    EntryPrice = 1m,
+                    EntryNotionalEur = 10m,
+                    InitialMarginEur = 1m,
+                    LastPrice = 1m,
+                    MarkPrice = 1m,
+                    Leverage = 10m,
+                    StopLossPrice = 0.98m,
+                    TakeProfitPrice = 1.03m,
+                    SlOrderState = "SIMULATED_OPEN",
+                    TpOrderState = "SIMULATED_OPEN",
+                    OpenedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5)
+                }
+            ]
+        });
+
+        var worker = new FuturesDecisionWorker(
+            config,
+            new FixedLightMarketDataSource(0.97m),
+            new IndicatorEngine(),
+            new LongShortStrategy(config),
+            new MarginRiskManager(config),
+            new FuturesVirtualPortfolio(config, store),
+            new TpSlOrchestrator(config));
+
+        await worker.RunFastExitCheckAsync(CancellationToken.None);
+
+        var saved = store.Load();
+        Assert.NotNull(saved);
+        Assert.Empty(saved.Positions);
+        var action = Assert.Single(saved.ActionHistory);
+        Assert.NotNull(action.LastSellAtUtc);
+        Assert.NotNull(action.LastStopLossAtUtc);
+    }
+
+    [Fact]
     public void Normalize_allows_leverage_up_to_ten_and_clamps_above()
     {
         var tenX = new FuturesBotConfiguration { Futures = new FuturesOptions { MaxLeverage = 10m, DefaultLeverage = 10m } };
@@ -131,5 +204,30 @@ public sealed class FuturesDeadManSwitchTests
             LastDeadManSwitchSeconds = timeoutSeconds;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class FixedLightMarketDataSource(decimal markPrice) : IMarketDataSource
+    {
+        public Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
+            IReadOnlyList<InstrumentOptions> instruments,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<InstrumentMarketState>>(instruments.Select(instrument => new InstrumentMarketState
+            {
+                Instrument = instrument,
+                Candles = Array.Empty<Candle>(),
+                Quote = new Quote(
+                    Bid: markPrice,
+                    Ask: markPrice,
+                    Last: markPrice,
+                    VolumeToday: 100_000m,
+                    MarkPrice: markPrice)
+            }).ToList());
+
+        public Task<IReadOnlyList<InstrumentMarketState>> GetFullMarketStatesAsync(
+            IReadOnlyList<InstrumentOptions> instruments,
+            int timeframeMinutes,
+            IReadOnlyList<InstrumentMarketState> lightStates,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(lightStates);
     }
 }

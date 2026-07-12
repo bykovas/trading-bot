@@ -89,6 +89,7 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_MAX_POSITIONS", value => config.Futures.MaxPositions = ParseInt(value, config.Futures.MaxPositions));
         SetIfPresent("TRADINGBOT_FUTURES_ALLOW_SHORTS", value => config.Futures.AllowShorts = ParseBool(value, config.Futures.AllowShorts));
         SetIfPresent("TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR", value => config.Futures.TargetNotionalEur = ParseDecimal(value, config.Futures.TargetNotionalEur));
+        SetIfPresent("TRADINGBOT_FUTURES_FAST_EXIT_CHECK_SECONDS", value => config.Futures.FastExitCheckSeconds = ParseInt(value, config.Futures.FastExitCheckSeconds));
         SetIfPresent("TRADINGBOT_STRATEGY_MAX_ENTRY_SPREAD_PERCENT", value => config.Strategy.MaxEntrySpreadPercent = ParseDecimal(value, config.Strategy.MaxEntrySpreadPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MAX_ENTRY_EXTENSION_PERCENT", value => config.Strategy.MaxEntryExtensionPercent = ParseDecimal(value, config.Strategy.MaxEntryExtensionPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MAX_ENTRY_RUNUP_PERCENT", value => config.Strategy.MaxEntryRunupPercent = ParseDecimal(value, config.Strategy.MaxEntryRunupPercent));
@@ -123,6 +124,7 @@ internal sealed class FuturesBotConfiguration
         Futures.MaxPositions = Math.Clamp(Futures.MaxPositions <= 0 ? 3 : Futures.MaxPositions, 1, 3);
         Futures.AllowFlip = false;
         Futures.TargetNotionalEur = Futures.TargetNotionalEur <= 0m ? 10m : Futures.TargetNotionalEur;
+        Futures.FastExitCheckSeconds = Math.Clamp(Futures.FastExitCheckSeconds <= 0 ? 10 : Futures.FastExitCheckSeconds, 5, Worker.LoopIntervalSeconds);
         Futures.DeadManSwitchSeconds = Math.Max(10, Futures.DeadManSwitchSeconds);
         // DMS must outlive the gap between live-cycle refreshes (loop sleep + cycle work).
         var minDeadManSwitchSeconds = Worker.LoopIntervalSeconds * 2;
@@ -250,6 +252,7 @@ internal sealed class FuturesOptions
     // forces this to false regardless of config.
     public bool AllowFlip { get; set; }
     public decimal TargetNotionalEur { get; set; } = 10m;
+    public int FastExitCheckSeconds { get; set; } = 10;
     public bool LiveTradingEnabled { get; set; }
     public int DeadManSwitchSeconds { get; set; } = 90;
 }

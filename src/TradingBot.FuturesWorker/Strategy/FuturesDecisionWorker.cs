@@ -46,6 +46,7 @@ internal sealed class FuturesDecisionWorker(
             Console.WriteLine("!!! FUTURES LIVE TRADING ENABLED: approved decisions will place REAL Kraken Futures market orders !!!");
         }
         Console.WriteLine($"futures limits: leverage<= {config.Futures.MaxLeverage:0.#}x, positions<= {config.Futures.MaxPositions}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flip=forbidden");
+        Console.WriteLine($"futures exit checks: fastExit={config.Futures.FastExitCheckSeconds}s fullCycle={config.Worker.LoopIntervalSeconds}s");
         HydratePriceHistory();
 
         while (!cancellationToken.IsCancellationRequested)
@@ -68,7 +69,41 @@ internal sealed class FuturesDecisionWorker(
                 break;
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(config.Worker.LoopIntervalSeconds), cancellationToken);
+            await WaitUntilNextDecisionCycleAsync(cancellationToken);
+        }
+    }
+
+    private async Task WaitUntilNextDecisionCycleAsync(CancellationToken cancellationToken)
+    {
+        var nextDecisionUtc = DateTimeOffset.UtcNow.AddSeconds(config.Worker.LoopIntervalSeconds);
+        var fastExitInterval = TimeSpan.FromSeconds(config.Futures.FastExitCheckSeconds);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var remaining = nextDecisionUtc - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            if (remaining <= fastExitInterval)
+            {
+                await Task.Delay(remaining, cancellationToken);
+                return;
+            }
+
+            await Task.Delay(fastExitInterval, cancellationToken);
+            try
+            {
+                await RunFastExitCheckAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"futures fast-exit-check FAILED: {ex.Message}");
+            }
         }
     }
 
@@ -280,6 +315,104 @@ internal sealed class FuturesDecisionWorker(
         });
         Console.WriteLine($"futures cycle done: decisions={decisions.Count} cash={state.CashEur:0.####} total={state.TotalValueEur:0.####} positions={state.Positions.Count}");
     }
+
+    public async Task RunFastExitCheckAsync(CancellationToken cancellationToken)
+    {
+        var utc = _clock.UtcNow;
+        var state = portfolio.Load();
+        if (state.Positions.Count == 0 && !config.Futures.LiveTradingEnabled)
+        {
+            return;
+        }
+
+        var universeSelection = await ResolveUniverseAsync(cancellationToken);
+        var universe = universeSelection.Instruments.Where(instrument => instrument.Enabled).ToList();
+        if (config.Futures.LiveTradingEnabled)
+        {
+            await ReconcileWithKrakenAsync(state, universe, Array.Empty<InstrumentMarketState>(), utc, cancellationToken);
+            if (state.Positions.Count == 0)
+            {
+                portfolio.Save(state);
+                return;
+            }
+        }
+
+        var heldPairs = state.Positions.Select(position => position.Pair).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var heldInstruments = universe
+            .Where(instrument => heldPairs.Contains(instrument.Pair))
+            .ToList();
+        if (heldInstruments.Count == 0)
+        {
+            Console.WriteLine($"futures fast-exit-check: no managed instruments found for {state.Positions.Count} held positions");
+            portfolio.Save(state);
+            return;
+        }
+
+        var lightStates = await marketDataSource.GetLightMarketStatesAsync(heldInstruments, cancellationToken);
+        _priceHistory.Record(utc, lightStates);
+
+        var stateByPair = lightStates.ToDictionary(item => item.Instrument.Pair, StringComparer.OrdinalIgnoreCase);
+        var closed = 0;
+        foreach (var held in state.Positions.ToList())
+        {
+            if (!stateByPair.TryGetValue(held.Pair, out var marketState))
+            {
+                Console.WriteLine($"futures fast-exit-check: no light quote for held pair {held.Pair}; skipping");
+                continue;
+            }
+
+            var markPrice = FastExitMarkPrice(marketState);
+            if (markPrice <= 0m)
+            {
+                Console.WriteLine($"futures fast-exit-check: invalid mark price for {held.Pair}; skipping");
+                continue;
+            }
+
+            portfolio.MarkToMarket(state, held.Pair, markPrice);
+            var trigger = tpSl.Evaluate(held, markPrice, marketState.Quote?.Last ?? marketState.LastPrice);
+            FuturesFillResult? fill = null;
+            if (trigger is not null)
+            {
+                fill = await ApplyOrExecuteLiveAsync(
+                    state, held.Pair, FuturesDesiredExposure.Flat, markPrice,
+                    0m, held.Leverage ?? 1m, reduceOnly: true,
+                    reason: $"{trigger.Kind} fast trigger at {trigger.TriggerPrice:0.####}",
+                    exitTriggerSource: trigger.TriggerSource,
+                    instrument: marketState.Instrument,
+                    entryPlan: null,
+                    cancellationToken);
+                fill.Action.ExitReasonCode = trigger.Kind == "STOP_LOSS" ? "SELL_STOP_LOSS" : "SELL_TAKE_PROFIT";
+            }
+            else if (IsPastMaxHold(held, utc))
+            {
+                fill = await ApplyOrExecuteLiveAsync(
+                    state, held.Pair, FuturesDesiredExposure.Flat, markPrice,
+                    0m, held.Leverage ?? 1m, reduceOnly: true,
+                    reason: $"MAX_HOLD fast close after {config.Exits.MaxHoldMinutes}m",
+                    exitTriggerSource: config.TpSl.TriggerSource,
+                    instrument: marketState.Instrument,
+                    entryPlan: null,
+                    cancellationToken);
+                fill.Action.ExitReasonCode = "SELL_MAX_HOLD";
+            }
+
+            if (fill?.PositionClosed == true)
+            {
+                closed++;
+                Console.WriteLine($"futures fast-exit-check: closed {held.Pair} reason={fill.Action.ExitReasonCode ?? fill.Action.Reason}");
+            }
+        }
+
+        portfolio.Save(state);
+        if (closed > 0)
+        {
+            Console.WriteLine($"futures fast-exit-check: closed={closed} remainingPositions={state.Positions.Count}");
+        }
+    }
+
+    private static decimal FastExitMarkPrice(InstrumentMarketState marketState) =>
+        marketState.Quote?.MarkPrice
+        ?? marketState.LastPrice;
 
     private bool IsStrongMoverActiveCandidate(InstrumentMarketState state)
     {
