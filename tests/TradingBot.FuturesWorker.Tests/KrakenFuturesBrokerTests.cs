@@ -42,6 +42,29 @@ public sealed class KrakenFuturesBrokerTests
         Assert.Contains("reduceOnly=true", handler.Body);
     }
 
+    [Fact]
+    public async Task Set_leverage_preference_puts_symbol_and_max_leverage()
+    {
+        var handler = new CapturingHandler("""
+            {"result":"success"}
+            """);
+        using var client = new HttpClient(handler);
+        var broker = new KrakenFuturesBroker(client, new KrakenOptions
+        {
+            BaseUrl = "https://futures.kraken.test",
+            ApiKey = "public",
+            ApiSecret = Convert.ToBase64String(Encoding.UTF8.GetBytes("secret"))
+        });
+
+        var ok = await broker.SetLeveragePreferenceAsync("PF_XBTUSD", 2m, CancellationToken.None);
+
+        Assert.True(ok);
+        Assert.Equal(HttpMethod.Put, handler.Request!.Method);
+        Assert.Equal("https://futures.kraken.test/derivatives/api/v3/leveragepreferences", handler.Request.RequestUri!.ToString());
+        Assert.Contains("symbol=PF_XBTUSD", handler.Body);
+        Assert.Contains("maxLeverage=2", handler.Body);
+    }
+
     private static string ExpectedAuthent(string endpointPath, string nonce, string postData, string secret)
     {
         var payload = Encoding.UTF8.GetBytes(postData + nonce + endpointPath);

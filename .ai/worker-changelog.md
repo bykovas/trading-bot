@@ -2,6 +2,14 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-11-futures-live-leverage-and-size-fix
+
+- Fixed live futures leverage: Kraken Futures leverage is a per-symbol margin preference, not an order field, and the worker never set it — so a live position inherited the exchange/account default (e.g. 10x on DYDX) and posted a fraction of the intended margin (observed: 4.94 USD notional at 0.494 USD margin = 10x instead of the configured 2x). `KrakenFuturesBroker.SetLeveragePreferenceAsync` now PUTs `/derivatives/api/v3/leveragepreferences` (symbol + maxLeverage) and the worker calls it, clamped to `Futures.MaxLeverage`, BEFORE every live entry; if it fails the entry is refused (`LIVE_LEVERAGE_SET_FAILED`) rather than opened at an unknown leverage.
+- Fixed live futures order size: live entries were sized from `entryPlan.FilledNotionalEur`, which is the dry-run maker-fill SIMULATION (it returns exactly half the target when the simulated queue is in the partial band). A live `mkt` order is a taker that fills in full, so it is now sized from the real `Futures.TargetNotionalEur`. Combined with the leverage fix, a 10-notional / 2x config now opens ~10 USD notional at 2x margin instead of ~5 USD at 10x.
+- The virtual ledger for a live entry now records the ACTUAL filled notional and the leverage set on the exchange, so virtual state mirrors the real position.
+- Known/accepted: the target notional is still treated as USD for USD-quoted perps (no EUR->USD conversion) — deliberately left as-is per operator decision; a "10 EUR" target opens ~10 USD.
+- Not changed: dry-run maker-fill simulation for virtual instances, margin/funding/BTC-regime/slot gates, TP/SL, dead-man switch.
+
 ## 2026-07-12-spot-live-discovered-balance-sync
 
 - Spot live Kraken reconciliation now imports balances using the current discovered market universe from the cycle snapshot instead of only the static configured `CandidateUniverse`, so newly discovered holdings such as `BILL/EUR` are treated as existing bot-managed positions after portfolio sync.

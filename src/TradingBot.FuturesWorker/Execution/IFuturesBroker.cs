@@ -20,6 +20,13 @@ internal interface IFuturesBroker
         decimal leverage,
         CancellationToken cancellationToken);
 
+    // Sets the per-symbol max leverage (Kraken margin preference). Kraken Futures
+    // leverage is NOT an order field, so this MUST be set before an entry order or
+    // the position inherits the exchange/account default (often 10x+), posting a
+    // fraction of the intended margin. Returns false on failure so the caller can
+    // refuse to open at an unknown/wrong leverage.
+    Task<bool> SetLeveragePreferenceAsync(string symbol, decimal maxLeverage, CancellationToken cancellationToken);
+
     // Dead man's switch: cancel all orders if not refreshed within timeoutSeconds.
     Task CancelAllAfterAsync(int timeoutSeconds, CancellationToken cancellationToken);
 }

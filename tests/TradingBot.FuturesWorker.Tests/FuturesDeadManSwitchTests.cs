@@ -83,6 +83,8 @@ public sealed class FuturesDeadManSwitchTests
         public bool IsConfigured => true;
         public int CancelAllAfterCallCount { get; private set; }
         public int? LastDeadManSwitchSeconds { get; private set; }
+        public decimal? LastLeverageSet { get; private set; }
+        public string? LastLeverageSymbol { get; private set; }
 
         public Task<IReadOnlyList<FuturesAccountBalance>> GetAccountsAsync(CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<FuturesAccountBalance>>(
@@ -101,6 +103,13 @@ public sealed class FuturesDeadManSwitchTests
             decimal leverage,
             CancellationToken cancellationToken) =>
             Task.FromResult(new FuturesOrderResult("placed", "order-1", null));
+
+        public Task<bool> SetLeveragePreferenceAsync(string symbol, decimal maxLeverage, CancellationToken cancellationToken)
+        {
+            LastLeverageSymbol = symbol;
+            LastLeverageSet = maxLeverage;
+            return Task.FromResult(true);
+        }
 
         public Task CancelAllAfterAsync(int timeoutSeconds, CancellationToken cancellationToken)
         {

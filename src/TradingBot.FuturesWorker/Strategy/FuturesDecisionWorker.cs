@@ -382,8 +382,11 @@ internal sealed class FuturesDecisionWorker(
             return fill;
         }
 
-        var filledNotional = entryPlan?.FilledNotionalEur ?? targetNotionalEur;
-        var rawSize = markPrice <= 0m ? 0m : filledNotional / markPrice;
+        // Live market orders fill in full and immediately, so they are sized from
+        // the REAL target notional — never from entryPlan.FilledNotionalEur, which
+        // is the dry-run maker-fill simulation (it models partial passive fills,
+        // e.g. exactly half, that do not apply to a taker `mkt` order).
+        var rawSize = markPrice <= 0m ? 0m : targetNotionalEur / markPrice;
         var quantityDecimals = instrument.QuantityDecimals ?? 8;
         var size = TruncateToDecimals(rawSize, quantityDecimals);
         if (size <= 0m)
@@ -399,18 +402,35 @@ internal sealed class FuturesDecisionWorker(
             ? null
             : entryPlan with { FilledNotionalEur = adjustedNotional };
         var side = desired == FuturesDesiredExposure.Short ? "sell" : "buy";
-        var order = await broker.SendOrderAsync(instrument.KrakenPair, side, size, reduceOnly: false, leverage, cancellationToken);
+
+        // Kraken Futures leverage is a per-symbol margin preference, not an order
+        // field. Set it (clamped to MaxLeverage) BEFORE the entry and refuse to
+        // open if it cannot be set — otherwise the position inherits the exchange
+        // default (10x+) and posts a fraction of the intended margin.
+        var entryLeverage = Math.Clamp(leverage, 1m, config.Futures.MaxLeverage);
+        if (!await broker.SetLeveragePreferenceAsync(instrument.KrakenPair, entryLeverage, cancellationToken))
+        {
+            var leverageReason = $"live futures entry skipped: could not set {entryLeverage:0.#}x leverage preference for {instrument.KrakenPair}; refusing to open at exchange-default leverage";
+            Console.WriteLine($"futures-live-order-skipped: pair={pair} krakenPair={instrument.KrakenPair} reason={leverageReason}");
+            var skipped = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, entryLeverage, reason: leverageReason);
+            skipped.Action.HoldReasonCode = "LIVE_LEVERAGE_SET_FAILED";
+            return skipped;
+        }
+
+        var order = await broker.SendOrderAsync(instrument.KrakenPair, side, size, reduceOnly: false, entryLeverage, cancellationToken);
         if (!order.Accepted)
         {
             var rejectReason = $"live futures entry rejected: {order.Error ?? order.Status}";
-            Console.WriteLine($"futures-live-order-rejected: pair={pair} krakenPair={instrument.KrakenPair} side={side} rawSize={rawSize:0.########} size={size:0.########} quantityDecimals={quantityDecimals} leverage={leverage:0.#}x reason={rejectReason}");
-            var rejected = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage, reason: rejectReason);
+            Console.WriteLine($"futures-live-order-rejected: pair={pair} krakenPair={instrument.KrakenPair} side={side} rawSize={rawSize:0.########} size={size:0.########} quantityDecimals={quantityDecimals} leverage={entryLeverage:0.#}x reason={rejectReason}");
+            var rejected = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, entryLeverage, reason: rejectReason);
             rejected.Action.HoldReasonCode = "LIVE_ORDER_REJECTED";
             rejected.Action.FillSource = "REAL_REJECTED";
             return rejected;
         }
 
-        var opened = portfolio.Apply(state, pair, desired, markPrice, adjustedPlan is null ? adjustedNotional : targetNotionalEur, leverage, reduceOnly: false, reason, exitTriggerSource, adjustedPlan);
+        // Record the virtual ledger against the ACTUAL filled notional and the
+        // leverage we set on the exchange, so virtual state mirrors the real fill.
+        var opened = portfolio.Apply(state, pair, desired, markPrice, adjustedNotional, entryLeverage, reduceOnly: false, reason, exitTriggerSource, adjustedPlan);
         opened.Action.FillSource = "REAL";
         opened.Action.Reason = $"live Kraken Futures order accepted id={order.OrderId ?? "-"} status={order.Status}; {opened.Action.Reason}";
         return opened;

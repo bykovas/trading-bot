@@ -120,6 +120,31 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
         return new FuturesOrderResult(status, orderId, null);
     }
 
+    public async Task<bool> SetLeveragePreferenceAsync(string symbol, decimal maxLeverage, CancellationToken cancellationToken)
+    {
+        if (maxLeverage <= 0m)
+        {
+            return false;
+        }
+
+        var parameters = new[]
+        {
+            new KeyValuePair<string, string>("symbol", symbol),
+            new KeyValuePair<string, string>("maxLeverage", FormatDecimal(maxLeverage))
+        };
+
+        try
+        {
+            using var doc = await SendPrivateAsync(HttpMethod.Put, "/derivatives/api/v3/leveragepreferences", parameters, cancellationToken);
+            return IsSuccess(doc.RootElement);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException)
+        {
+            Console.WriteLine($"futures-leverage-preference: FAILED to set {symbol} maxLeverage={FormatDecimal(maxLeverage)}: {ex.Message}");
+            return false;
+        }
+    }
+
     public async Task CancelAllAfterAsync(int timeoutSeconds, CancellationToken cancellationToken)
     {
         var parameters = new[]
