@@ -6,6 +6,7 @@ Latest entry must be first. The first `## <id>` heading is used as `worker.chang
 
 - Raised the futures leverage ceiling from 2x to 10x. `FuturesBotConfiguration.Normalize` previously hard-clamped `MaxLeverage` to [1, 2] (blueprint safety default), so any configured value above 2 was silently ignored; the clamp ceiling is now 10. Values above 10 still clamp to 10 (treated as a typo), and the per-symbol Kraken leverage preference plus the liquidation-distance gate still apply on top.
 - appsettings now runs futures at 10x: `Futures.MaxLeverage=10`, `Futures.DefaultLeverage=10`, `TargetNotionalEur=10` (≈10 USD notional per the accepted USD-as-EUR behavior → ~1 USD margin at 10x).
+- Deploy upgrades the operator-owned futures live env to `TRADINGBOT_FUTURES_MAX_LEVERAGE=10` and `TRADINGBOT_FUTURES_DEFAULT_LEVERAGE=10`, so existing live servers do not stay pinned to the old 2x env.
 - Lowered `Margin.MinLiquidationDistancePercent` from 15 to 8. At 10x the liquidation distance is ~9.5% (1/leverage minus maintenance), so the old 15% floor would have rejected every 10x entry with `liquidation distance below minimum`; 8% leaves the gate active while permitting 10x.
 - Risk note: at 10x the liquidation is ~9.5% from entry, so the 2xATR stop must clear before liquidation — high-ATR pairs are dangerous at this leverage, and a worker outage between cycles has only ~9.5% of adverse room. Margin-utilization cap (50%) and all other gates are unchanged.
 

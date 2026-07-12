@@ -118,7 +118,7 @@ internal sealed class FuturesBotConfiguration
         // risk envelope. The hard leverage ceiling is 10x — a value above that is a
         // typo, not an intent; the per-symbol margin preference set on Kraken and the
         // liquidation-distance gate still apply on top of this cap.
-        Futures.MaxLeverage = Math.Clamp(Futures.MaxLeverage <= 0m ? 2m : Futures.MaxLeverage, 1m, 10m);
+        Futures.MaxLeverage = Math.Clamp(Futures.MaxLeverage <= 0m ? 10m : Futures.MaxLeverage, 1m, 10m);
         Futures.DefaultLeverage = Math.Clamp(Futures.DefaultLeverage <= 0m ? 1m : Futures.DefaultLeverage, 1m, Futures.MaxLeverage);
         Futures.MaxPositions = Math.Clamp(Futures.MaxPositions <= 0 ? 3 : Futures.MaxPositions, 1, 3);
         Futures.AllowFlip = false;
@@ -241,8 +241,8 @@ internal sealed class FuturesPortfolioOptions
 
 internal sealed class FuturesOptions
 {
-    public decimal MaxLeverage { get; set; } = 2m;
-    public decimal DefaultLeverage { get; set; } = 2m;
+    public decimal MaxLeverage { get; set; } = 10m;
+    public decimal DefaultLeverage { get; set; } = 10m;
     public int MaxPositions { get; set; } = 3;
     public bool AllowShorts { get; set; } = true;
 
