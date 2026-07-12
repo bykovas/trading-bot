@@ -113,10 +113,12 @@ internal sealed class FuturesBotConfiguration
         Trading.StrongMoverMinDailyVolumeEur = Math.Max(0m, Trading.StrongMoverMinDailyVolumeEur);
         Portfolio.StartingCashEur = Portfolio.StartingCashEur <= 0m ? 100m : Portfolio.StartingCashEur;
 
-        // Blueprint safety defaults: dry-run only, small leverage, no flip, and a
-        // small portfolio cap. Normalize clamps rather than trusts config so a typo
-        // cannot widen the risk envelope.
-        Futures.MaxLeverage = Math.Clamp(Futures.MaxLeverage <= 0m ? 2m : Futures.MaxLeverage, 1m, 2m);
+        // Blueprint safety defaults: dry-run only, no flip, and a small portfolio
+        // cap. Normalize clamps rather than trusts config so a typo cannot widen the
+        // risk envelope. The hard leverage ceiling is 10x — a value above that is a
+        // typo, not an intent; the per-symbol margin preference set on Kraken and the
+        // liquidation-distance gate still apply on top of this cap.
+        Futures.MaxLeverage = Math.Clamp(Futures.MaxLeverage <= 0m ? 2m : Futures.MaxLeverage, 1m, 10m);
         Futures.DefaultLeverage = Math.Clamp(Futures.DefaultLeverage <= 0m ? 1m : Futures.DefaultLeverage, 1m, Futures.MaxLeverage);
         Futures.MaxPositions = Math.Clamp(Futures.MaxPositions <= 0 ? 3 : Futures.MaxPositions, 1, 3);
         Futures.AllowFlip = false;

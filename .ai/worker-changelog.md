@@ -2,6 +2,13 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-11-futures-leverage-ceiling-10x
+
+- Raised the futures leverage ceiling from 2x to 10x. `FuturesBotConfiguration.Normalize` previously hard-clamped `MaxLeverage` to [1, 2] (blueprint safety default), so any configured value above 2 was silently ignored; the clamp ceiling is now 10. Values above 10 still clamp to 10 (treated as a typo), and the per-symbol Kraken leverage preference plus the liquidation-distance gate still apply on top.
+- appsettings now runs futures at 10x: `Futures.MaxLeverage=10`, `Futures.DefaultLeverage=10`, `TargetNotionalEur=10` (≈10 USD notional per the accepted USD-as-EUR behavior → ~1 USD margin at 10x).
+- Lowered `Margin.MinLiquidationDistancePercent` from 15 to 8. At 10x the liquidation distance is ~9.5% (1/leverage minus maintenance), so the old 15% floor would have rejected every 10x entry with `liquidation distance below minimum`; 8% leaves the gate active while permitting 10x.
+- Risk note: at 10x the liquidation is ~9.5% from entry, so the 2xATR stop must clear before liquidation — high-ATR pairs are dangerous at this leverage, and a worker outage between cycles has only ~9.5% of adverse room. Margin-utilization cap (50%) and all other gates are unchanged.
+
 ## 2026-07-11-futures-live-leverage-and-size-fix
 
 - Fixed live futures leverage: Kraken Futures leverage is a per-symbol margin preference, not an order field, and the worker never set it — so a live position inherited the exchange/account default (e.g. 10x on DYDX) and posted a fraction of the intended margin (observed: 4.94 USD notional at 0.494 USD margin = 10x instead of the configured 2x). `KrakenFuturesBroker.SetLeveragePreferenceAsync` now PUTs `/derivatives/api/v3/leveragepreferences` (symbol + maxLeverage) and the worker calls it, clamped to `Futures.MaxLeverage`, BEFORE every live entry; if it fails the entry is refused (`LIVE_LEVERAGE_SET_FAILED`) rather than opened at an unknown leverage.

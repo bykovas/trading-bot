@@ -71,6 +71,20 @@ public sealed class FuturesDeadManSwitchTests
         Assert.Equal(240, broker.LastDeadManSwitchSeconds);
     }
 
+    [Fact]
+    public void Normalize_allows_leverage_up_to_ten_and_clamps_above()
+    {
+        var tenX = new FuturesBotConfiguration { Futures = new FuturesOptions { MaxLeverage = 10m, DefaultLeverage = 10m } };
+        InvokeNormalize(tenX);
+        Assert.Equal(10m, tenX.Futures.MaxLeverage);
+        Assert.Equal(10m, tenX.Futures.DefaultLeverage);
+
+        var tooHigh = new FuturesBotConfiguration { Futures = new FuturesOptions { MaxLeverage = 20m, DefaultLeverage = 20m } };
+        InvokeNormalize(tooHigh);
+        Assert.Equal(10m, tooHigh.Futures.MaxLeverage);
+        Assert.Equal(10m, tooHigh.Futures.DefaultLeverage);
+    }
+
     private static void InvokeNormalize(FuturesBotConfiguration config)
     {
         var method = typeof(FuturesBotConfiguration).GetMethod("Normalize", BindingFlags.Instance | BindingFlags.NonPublic);
