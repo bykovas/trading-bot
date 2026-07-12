@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-12-spot-live-balance-drift-cost-basis
+
+- Fixed spot live Kraken reconciliation when an existing tracked position's exchange quantity changes outside the bot or after missed/partial live fills. Previously the worker updated `Quantity` to Kraken balance but left the old `EntryNotionalEur`, so a larger synced balance could later be sold against a too-small cost basis and show impossible realized P&L (observed `BILL/EUR` +393%).
+- Quantity drift now rebases cost basis: increases add the extra quantity at the current market basis price, decreases reduce cost basis proportionally, and average `EntryPrice` is recomputed from the synced quantity/notional.
+- Saved ATR exit levels, peak P&L, and round-trip cost estimate are cleared after a quantity rebasis so old TP/SL/trailing state from the pre-sync position cannot trigger exits for a materially different exchange balance. Fixed-percent exits still apply.
+
 ## 2026-07-12-futures-fast-exit-check
 
 - Futures workers now run a fast held-position exit check between full decision cycles. The full futures decision loop remains at `Worker.LoopIntervalSeconds=120`, but open positions are checked every `Futures.FastExitCheckSeconds=10` seconds for TP/SL and max-hold exits.

@@ -54,6 +54,35 @@ public class DecisionWorkerMarketDataFlowTests
         Assert.DoesNotContain("\"pair\":\"AAA/EUR\"", eventsJson);
     }
 
+    [Fact]
+    public void Kraken_quantity_increase_rebases_cost_basis_for_external_balance_drift()
+    {
+        var position = new PortfolioPosition
+        {
+            Pair = "BILL/EUR",
+            Side = "LONG",
+            Quantity = 118.1320m,
+            EntryPrice = 0.04312m,
+            EntryNotionalEur = 5.09425184m,
+            LastPrice = 0.04312m,
+            PeakPnlPercent = 393.09m,
+            ExitMode = PositionExitOptions.ModeAtr,
+            StopLossPrice = 0.041m,
+            TakeProfitPrice = 0.044m,
+            RoundTripCostEstimatePct = 0.4m
+        };
+
+        DecisionWorker.RebaseSyncedPosition(position, 562.9619m, 0.0449m);
+
+        Assert.Equal(562.9619m, position.Quantity);
+        Assert.InRange(position.EntryNotionalEur, 25.06m, 25.07m);
+        Assert.InRange(position.EntryPrice, 0.0445m, 0.0446m);
+        Assert.Null(position.PeakPnlPercent);
+        Assert.Null(position.StopLossPrice);
+        Assert.Null(position.TakeProfitPrice);
+        Assert.Null(position.RoundTripCostEstimatePct);
+    }
+
     private static DecisionWorker Worker(
         BotConfiguration config,
         IMarketDataSource marketData,

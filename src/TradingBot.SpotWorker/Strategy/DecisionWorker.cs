@@ -897,8 +897,20 @@ internal sealed class DecisionWorker(
             var qtyDrift = krakenQty - position.Quantity;
             if (Math.Abs(qtyDrift) > position.Quantity * 0.001m)
             {
-                Console.WriteLine($"kraken-sync: {position.Pair} qty {position.Quantity:0.########} → {krakenQty:0.########} (drift {qtyDrift:+0.########})");
+                var marketState = marketStates.FirstOrDefault(candidate =>
+                    candidate.Instrument.Pair.Equals(position.Pair, StringComparison.OrdinalIgnoreCase));
+                var basisPrice = marketState?.LastPrice > 0m
+                    ? marketState.LastPrice
+                    : position.EntryPrice > 0m
+                        ? position.EntryPrice
+                        : position.LastPrice;
+                var previousQuantity = position.Quantity;
+                var previousNotional = position.EntryNotionalEur;
+                RebaseSyncedPosition(position, krakenQty, basisPrice);
                 position.Quantity = krakenQty;
+                Console.WriteLine(
+                    $"kraken-sync: {position.Pair} qty {previousQuantity:0.########} → {krakenQty:0.########} " +
+                    $"(drift {qtyDrift:+0.########}); entryNotional {previousNotional:0.####} → {position.EntryNotionalEur:0.####} at basis {basisPrice:0.########}");
             }
         }
 
@@ -965,6 +977,50 @@ internal sealed class DecisionWorker(
 
         Console.WriteLine($"kraken-sync: cash={state.CashEur:0.##} positions={state.Positions.Count} externalPnl={state.ExternalPnlEur:+0.##;-0.##}");
         dryRunPortfolio.Save(state);
+    }
+
+    internal static void RebaseSyncedPosition(PortfolioPosition position, decimal krakenQuantity, decimal basisPrice)
+    {
+        if (krakenQuantity <= 0m)
+        {
+            return;
+        }
+
+        var previousQuantity = position.Quantity;
+        if (previousQuantity <= 0m)
+        {
+            var notional = Math.Max(0m, krakenQuantity * Math.Max(0m, basisPrice));
+            position.Quantity = krakenQuantity;
+            position.EntryNotionalEur = notional;
+            position.EntryPrice = krakenQuantity > 0m ? notional / krakenQuantity : 0m;
+            ResetSyncedExitLevels(position);
+            return;
+        }
+
+        if (krakenQuantity > previousQuantity)
+        {
+            var addedQuantity = krakenQuantity - previousQuantity;
+            var addedNotional = addedQuantity * Math.Max(0m, basisPrice);
+            position.EntryNotionalEur += addedNotional;
+        }
+        else
+        {
+            position.EntryNotionalEur *= krakenQuantity / previousQuantity;
+        }
+
+        position.EntryPrice = position.EntryNotionalEur > 0m ? position.EntryNotionalEur / krakenQuantity : 0m;
+        position.Quantity = krakenQuantity;
+        ResetSyncedExitLevels(position);
+    }
+
+    private static void ResetSyncedExitLevels(PortfolioPosition position)
+    {
+        position.PeakPnlPercent = null;
+        position.ExitMode = null;
+        position.EntryAtr = null;
+        position.StopLossPrice = null;
+        position.TakeProfitPrice = null;
+        position.RoundTripCostEstimatePct = null;
     }
 
     private static string[] KrakenBalanceKeys(InstrumentOptions instrument)
