@@ -277,8 +277,8 @@ public sealed class MarketDataIngestionOptions
     public int LightIntervalSeconds { get; set; } = 30;
     public int CandleIntervalSeconds { get; set; } = 120;
     public int TimeframeMinutes { get; set; } = 15;
-    public int MaxCandlePairs { get; set; } = 40;
-    public int TopVolumePairs { get; set; } = 30;
+    public int MaxCandlePairs { get; set; } = 100;
+    public int TopVolumePairs { get; set; } = 40;
     public int TopMoverPairs { get; set; } = 40;
     public decimal StrongMoverPercent { get; set; } = 3m;
     public List<string> ForceInclude { get; set; } = new();
