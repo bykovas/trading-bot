@@ -182,6 +182,56 @@ public class LiveOrderingTests
     }
 
     [Fact]
+    public async Task Live_kraken_cycle_imports_balances_from_discovered_universe()
+    {
+        var outputDirectory = TempDir();
+        var config = LiveConfig(outputDirectory);
+        config.Kraken.MarketDataMode = "database";
+        config.Portfolio.StartingCashEur = 75m;
+        config.CandidateUniverse = new List<InstrumentOptions>
+        {
+            new() { Pair = "AAA/EUR", KrakenPair = "AAAEUR", Venue = "Kraken", Enabled = true }
+        };
+        var discovered = new List<InstrumentOptions>
+        {
+            new() { Pair = "AAA/EUR", KrakenPair = "AAAEUR", Venue = "Kraken", Enabled = true },
+            new() { Pair = "BILL/EUR", KrakenPair = "BILLEUR", Venue = "Kraken", Enabled = true }
+        };
+
+        var worker = new DecisionWorker(
+            config,
+            new FakeMarketDataSource("AAA/EUR", "BILL/EUR"),
+            new FixedAdvisor("AAA/EUR"),
+            new IndicatorEngine(),
+            new TechnicalDecisionEngine(),
+            new RiskManager(),
+            new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit, config.PositionSizing, strategy: config.Strategy),
+            broker: new KrakenBroker(new HttpClient(new BodyAwareStub((path, _) =>
+            {
+                if (path.Contains("Balance", StringComparison.Ordinal))
+                {
+                    return """{"error":[],"result":{"ZEUR":"57.92","BILL":"268.29"}}""";
+                }
+
+                return DefaultResponse(path);
+            })), config.Kraken),
+            universeProvider: new StaticUniverseProvider(discovered));
+
+        Directory.CreateDirectory(outputDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(outputDirectory, "portfolio-state.json"),
+            """{"updatedAt":"2026-07-09T00:00:00Z","cashEur":75,"positions":[],"actionHistory":[]}""");
+
+        await worker.RunAsync(CancellationToken.None);
+
+        var portfolioBefore = LastCycle(outputDirectory).GetProperty("portfolioBefore");
+        var position = Assert.Single(portfolioBefore.GetProperty("positions").EnumerateArray());
+        Assert.Equal("BILL/EUR", position.GetProperty("pair").GetString());
+        Assert.Equal(268.29m, position.GetProperty("quantity").GetDecimal());
+        Assert.Equal(57.92m, portfolioBefore.GetProperty("cashEur").GetDecimal());
+    }
+
+    [Fact]
     public async Task Live_kraken_cycle_resets_stale_negative_external_pnl_after_positions_are_already_synced()
     {
         var outputDirectory = TempDir();
@@ -929,6 +979,19 @@ public class LiveOrderingTests
                     .ToList(),
                 Array.Empty<string>()));
         }
+    }
+
+    private sealed class StaticUniverseProvider(IReadOnlyList<InstrumentOptions> instruments) : IUniverseProvider
+    {
+        public Task<UniverseSelection> GetUniverseAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new UniverseSelection(
+                instruments,
+                new UniverseSelectionDiagnostics(
+                    "test",
+                    DiscoveredCount: instruments.Count,
+                    ConfiguredCount: 1,
+                    IncludedCount: instruments.Count,
+                    BlacklistedCount: 0)));
     }
 
     private sealed class FakeMarketDataSource(params string[] pairs) : IMarketDataSource

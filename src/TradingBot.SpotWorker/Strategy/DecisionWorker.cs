@@ -869,7 +869,11 @@ internal sealed class DecisionWorker(
         // values positions at conservative liquidation (bid - slippage - fee) would
         // make any total-vs-total comparison drift with prices and fees.
         var krakenQuantities = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-        foreach (var instrument in config.CandidateUniverse)
+        var syncInstruments = marketStates
+            .Select(state => state.Instrument)
+            .Where(instrument => instrument.Enabled)
+            .DistinctBy(instrument => instrument.Pair, StringComparer.OrdinalIgnoreCase);
+        foreach (var instrument in syncInstruments)
         {
             var krakenQty = ResolveKrakenBalance(balances, KrakenBalanceKeys(instrument));
             if (krakenQty > 0m)

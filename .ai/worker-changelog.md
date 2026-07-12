@@ -2,6 +2,11 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-12-spot-live-discovered-balance-sync
+
+- Spot live Kraken reconciliation now imports balances using the current discovered market universe from the cycle snapshot instead of only the static configured `CandidateUniverse`, so newly discovered holdings such as `BILL/EUR` are treated as existing bot-managed positions after portfolio sync.
+- UI remains database-backed: Kraken is read by live workers only, then persisted to `portfolio_state`; portfolio/cycle/trade views continue to read the synced state from Postgres.
+
 ## 2026-07-12-futures-mover-coverage
 
 - Market-data candle selection now has a separate `TopMoverPairs` quota and ranks strong 24h movers ahead of pure-volume leaders before applying `MaxCandlePairs`, so low-volume futures runners can receive candles/orderbooks instead of being crowded out by BTC/ETH-sized markets.
