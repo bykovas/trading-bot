@@ -49,7 +49,10 @@ public static class CandlePairSelector
             selected[state.Instrument.Pair] = state.Instrument;
         }
 
-        foreach (var state in lightStates)
+        foreach (var state in lightStates
+                     .Where(candidate => candidate.Quote is not null)
+                     .OrderByDescending(candidate => Math.Abs(candidate.Quote!.ChangePercent ?? 0m))
+                     .Take(Math.Max(0, options.TopMoverPairs)))
         {
             if (state.Quote?.ChangePercent is not { } change
                 || Math.Abs(change) < options.StrongMoverPercent
@@ -63,9 +66,21 @@ public static class CandlePairSelector
 
         return selected.Values
             .OrderByDescending(instrument => heldPairs.Contains(instrument.Pair, StringComparer.OrdinalIgnoreCase))
+            .ThenByDescending(instrument => IsStrongMover(lightStates, instrument.Pair, options.StrongMoverPercent))
+            .ThenByDescending(instrument => AbsChange(lightStates, instrument.Pair))
             .ThenByDescending(instrument => QuoteVolume(lightStates, instrument.Pair))
             .Take(Math.Max(1, options.MaxCandlePairs))
             .ToList();
+    }
+
+    private static bool IsStrongMover(IReadOnlyList<InstrumentMarketState> lightStates, string pair, decimal threshold) =>
+        AbsChange(lightStates, pair) >= threshold;
+
+    private static decimal AbsChange(IReadOnlyList<InstrumentMarketState> lightStates, string pair)
+    {
+        var state = lightStates.FirstOrDefault(candidate =>
+            candidate.Instrument.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
+        return state?.Quote is null ? 0m : Math.Abs(state.Quote.ChangePercent ?? 0m);
     }
 
     private static decimal QuoteVolume(IReadOnlyList<InstrumentMarketState> lightStates, string pair)

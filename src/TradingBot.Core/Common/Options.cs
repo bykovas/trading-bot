@@ -279,6 +279,7 @@ public sealed class MarketDataIngestionOptions
     public int TimeframeMinutes { get; set; } = 15;
     public int MaxCandlePairs { get; set; } = 40;
     public int TopVolumePairs { get; set; } = 30;
+    public int TopMoverPairs { get; set; } = 40;
     public decimal StrongMoverPercent { get; set; } = 3m;
     public List<string> ForceInclude { get; set; } = new();
     public List<string> Blacklist { get; set; } = new();

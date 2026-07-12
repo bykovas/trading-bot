@@ -93,10 +93,14 @@ internal sealed class FuturesDecisionWorker(
         var portfolioBefore = state.Clone();
 
         // Held pairs are always evaluated; new-entry candidates come from the
-        // configured universe capped by MaxActiveInstruments.
+        // discovered universe capped by MaxActiveInstruments. Strong movers are
+        // ranked ahead of pure-volume leaders so fresh futures runners are not
+        // hidden behind BTC/ETH-sized books.
         var heldPairs = state.Positions.Select(position => position.Pair).ToHashSet();
         var active = lightStates
             .OrderByDescending(candidate => heldPairs.Contains(candidate.Instrument.Pair))
+            .ThenByDescending(IsStrongMoverActiveCandidate)
+            .ThenByDescending(candidate => Math.Abs(candidate.ChangePercent))
             .ThenByDescending(candidate => candidate.LastVolume * candidate.LastPrice)
             .Take(Math.Max(config.Trading.MaxActiveInstruments, heldPairs.Count))
             .Select(candidate => candidate.Instrument)
@@ -275,6 +279,13 @@ internal sealed class FuturesDecisionWorker(
             EntryDiagnostics = BuildEntryDiagnostics(lightStates, active, fullStates, decisions, btcRegime)
         });
         Console.WriteLine($"futures cycle done: decisions={decisions.Count} cash={state.CashEur:0.####} total={state.TotalValueEur:0.####} positions={state.Positions.Count}");
+    }
+
+    private bool IsStrongMoverActiveCandidate(InstrumentMarketState state)
+    {
+        var notionalVolume = state.LastVolume * state.LastPrice;
+        return Math.Abs(state.ChangePercent) >= config.Trading.StrongMoverMinChangePercent
+            && notionalVolume >= config.Trading.StrongMoverMinDailyVolumeEur;
     }
 
     // Best-effort warm-up hydration from persisted market snapshots, so the

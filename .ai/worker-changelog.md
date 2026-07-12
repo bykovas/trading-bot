@@ -2,6 +2,13 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-12-futures-mover-coverage
+
+- Market-data candle selection now has a separate `TopMoverPairs` quota and ranks strong 24h movers ahead of pure-volume leaders before applying `MaxCandlePairs`, so low-volume futures runners can receive candles/orderbooks instead of being crowded out by BTC/ETH-sized markets.
+- Raised market-data defaults to `MaxCandlePairs=100`, `TopVolumePairs=40`, `TopMoverPairs=40`, with normalization allowing up to 120 candle pairs per venue.
+- Futures decision active selection now ranks held positions first, then strong movers with sufficient notional volume, then pure volume; futures default `MaxActiveInstruments` is raised from 20 to 50 while keeping score, spread, BTC-regime, margin, and live-size gates unchanged.
+- Deploy upgrades the operator-owned futures live env with `TRADINGBOT_MAX_ACTIVE_INSTRUMENTS=50` and the strong-mover thresholds so the live worker receives the broadened active scan even though live appsettings are preserved across deploys.
+
 ## 2026-07-12-futures-live-size-precision
 
 - Futures universe discovery now preserves Kraken Futures `contractValueTradePrecision` as instrument quantity precision in the shared `instrument_registry`; the market-data schema migrates with a nullable `quantity_decimals` column and database-backed workers receive it with their universe.

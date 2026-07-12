@@ -49,6 +49,7 @@ internal sealed class MarketDataWorkerConfiguration
         SetIfPresent("TRADINGBOT_TIMEFRAME_MINUTES", value => config.Ingestion.TimeframeMinutes = ParseInt(value, config.Ingestion.TimeframeMinutes));
         SetIfPresent("TRADINGBOT_MARKET_DATA_MAX_CANDLE_PAIRS", value => config.Ingestion.MaxCandlePairs = ParseInt(value, config.Ingestion.MaxCandlePairs));
         SetIfPresent("TRADINGBOT_MARKET_DATA_TOP_VOLUME_PAIRS", value => config.Ingestion.TopVolumePairs = ParseInt(value, config.Ingestion.TopVolumePairs));
+        SetIfPresent("TRADINGBOT_MARKET_DATA_TOP_MOVER_PAIRS", value => config.Ingestion.TopMoverPairs = ParseInt(value, config.Ingestion.TopMoverPairs));
         SetIfPresent("TRADINGBOT_MARKET_DATA_STRONG_MOVER_PERCENT", value => config.Ingestion.StrongMoverPercent = ParseDecimal(value, config.Ingestion.StrongMoverPercent));
         SetIfPresent("TRADINGBOT_MARKET_DATA_FORCE_INCLUDE", value => config.Ingestion.ForceInclude = ParseCsv(value));
         SetIfPresent("TRADINGBOT_MARKET_DATA_BLACKLIST", value => config.Ingestion.Blacklist = ParseCsv(value));
@@ -61,8 +62,9 @@ internal sealed class MarketDataWorkerConfiguration
         Ingestion.LightIntervalSeconds = Math.Max(10, Ingestion.LightIntervalSeconds);
         Ingestion.CandleIntervalSeconds = Math.Max(Ingestion.LightIntervalSeconds, Ingestion.CandleIntervalSeconds);
         Ingestion.TimeframeMinutes = Ingestion.TimeframeMinutes <= 0 ? 15 : Ingestion.TimeframeMinutes;
-        Ingestion.MaxCandlePairs = Math.Clamp(Ingestion.MaxCandlePairs <= 0 ? 40 : Ingestion.MaxCandlePairs, 1, 80);
+        Ingestion.MaxCandlePairs = Math.Clamp(Ingestion.MaxCandlePairs <= 0 ? 100 : Ingestion.MaxCandlePairs, 1, 120);
         Ingestion.TopVolumePairs = Math.Clamp(Ingestion.TopVolumePairs <= 0 ? 30 : Ingestion.TopVolumePairs, 1, Ingestion.MaxCandlePairs);
+        Ingestion.TopMoverPairs = Math.Clamp(Ingestion.TopMoverPairs <= 0 ? 40 : Ingestion.TopMoverPairs, 0, Ingestion.MaxCandlePairs);
         SpotKraken.MarketDataMode = "kraken";
         FuturesKraken.MarketDataMode = "kraken-futures";
     }

@@ -47,6 +47,38 @@ public sealed class CandlePairSelectorTests
         Assert.Equal("MOVE/EUR", Assert.Single(selected).Pair);
     }
 
+    [Fact]
+    public void Select_prioritizes_strong_movers_before_pure_volume_when_capped()
+    {
+        var universe = new[]
+        {
+            Instrument("VOLUME/EUR", "VOLUMEEUR"),
+            Instrument("MOVE/EUR", "MOVEEUR"),
+            Instrument("OTHER/EUR", "OTHEREUR")
+        };
+        var lightStates = new[]
+        {
+            Light("VOLUME/EUR", volume: 1_000_000m, last: 10m, change: 0.5m),
+            Light("MOVE/EUR", volume: 10_000m, last: 1m, change: 12m),
+            Light("OTHER/EUR", volume: 9_000m, last: 1m, change: 8m)
+        };
+
+        var selected = CandlePairSelector.Select(
+            MarketDataVenue.Futures,
+            universe,
+            lightStates,
+            [],
+            new MarketDataIngestionOptions
+            {
+                TopVolumePairs = 1,
+                TopMoverPairs = 2,
+                StrongMoverPercent = 3m,
+                MaxCandlePairs = 2
+            });
+
+        Assert.Equal(["MOVE/EUR", "OTHER/EUR"], selected.Select(instrument => instrument.Pair).ToArray());
+    }
+
     private static InstrumentOptions Instrument(string pair, string krakenPair) => new()
     {
         Pair = pair,
