@@ -5,7 +5,8 @@ public sealed record InstrumentRegistryRecord(
     string Pair,
     string KrakenSymbol,
     bool Enabled,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    int? QuantityDecimals = null);
 
 public sealed record SharedMarketQuoteRecord(
     string Venue,

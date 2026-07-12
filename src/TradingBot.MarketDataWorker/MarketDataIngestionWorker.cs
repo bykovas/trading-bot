@@ -73,7 +73,8 @@ internal sealed class MarketDataIngestionWorker(
             instrument.Pair,
             instrument.KrakenPair,
             instrument.Enabled,
-            utc)).ToList());
+            utc,
+            instrument.QuantityDecimals)).ToList());
 
         var lightStates = await marketDataSource.GetLightMarketStatesAsync(instruments, cancellationToken);
         var quotes = lightStates

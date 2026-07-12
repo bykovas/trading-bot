@@ -372,23 +372,49 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var filledNotional = entryPlan?.FilledNotionalEur ?? targetNotionalEur;
-        var size = markPrice <= 0m ? 0m : filledNotional / markPrice;
+        var rawSize = markPrice <= 0m ? 0m : filledNotional / markPrice;
+        var quantityDecimals = instrument.QuantityDecimals ?? 8;
+        var size = TruncateToDecimals(rawSize, quantityDecimals);
+        if (size <= 0m)
+        {
+            var skipReason = $"live futures entry skipped: raw size {rawSize:0.########} rounds to zero at Kraken quantity precision {quantityDecimals}";
+            var skipped = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage, reason: skipReason);
+            skipped.Action.HoldReasonCode = "LIVE_ORDER_SIZE_TOO_SMALL";
+            return skipped;
+        }
+
+        var adjustedNotional = size * markPrice;
+        var adjustedPlan = entryPlan is null
+            ? null
+            : entryPlan with { FilledNotionalEur = adjustedNotional };
         var side = desired == FuturesDesiredExposure.Short ? "sell" : "buy";
         var order = await broker.SendOrderAsync(instrument.KrakenPair, side, size, reduceOnly: false, leverage, cancellationToken);
         if (!order.Accepted)
         {
             var rejectReason = $"live futures entry rejected: {order.Error ?? order.Status}";
-            Console.WriteLine($"futures-live-order-rejected: pair={pair} krakenPair={instrument.KrakenPair} side={side} size={size:0.########} leverage={leverage:0.#}x reason={rejectReason}");
+            Console.WriteLine($"futures-live-order-rejected: pair={pair} krakenPair={instrument.KrakenPair} side={side} rawSize={rawSize:0.########} size={size:0.########} quantityDecimals={quantityDecimals} leverage={leverage:0.#}x reason={rejectReason}");
             var rejected = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage, reason: rejectReason);
             rejected.Action.HoldReasonCode = "LIVE_ORDER_REJECTED";
             rejected.Action.FillSource = "REAL_REJECTED";
             return rejected;
         }
 
-        var opened = portfolio.Apply(state, pair, desired, markPrice, targetNotionalEur, leverage, reduceOnly: false, reason, exitTriggerSource, entryPlan);
+        var opened = portfolio.Apply(state, pair, desired, markPrice, adjustedPlan is null ? adjustedNotional : targetNotionalEur, leverage, reduceOnly: false, reason, exitTriggerSource, adjustedPlan);
         opened.Action.FillSource = "REAL";
         opened.Action.Reason = $"live Kraken Futures order accepted id={order.OrderId ?? "-"} status={order.Status}; {opened.Action.Reason}";
         return opened;
+    }
+
+    private static decimal TruncateToDecimals(decimal value, int decimals)
+    {
+        decimals = Math.Clamp(decimals, 0, 8);
+        var factor = 1m;
+        for (var i = 0; i < decimals; i++)
+        {
+            factor *= 10m;
+        }
+
+        return Math.Truncate(value * factor) / factor;
     }
 
     private async Task RefreshDeadManSwitchAsync(CancellationToken cancellationToken)

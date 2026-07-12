@@ -309,4 +309,5 @@ public sealed class InstrumentOptions
     public string KrakenPair { get; set; } = string.Empty;
     public string Venue { get; set; } = "Kraken";
     public bool Enabled { get; set; } = true;
+    public int? QuantityDecimals { get; set; }
 }

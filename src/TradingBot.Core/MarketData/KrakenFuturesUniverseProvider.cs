@@ -76,7 +76,8 @@ public sealed class KrakenFuturesUniverseProvider(
                 Pair = NormalizePair(symbol, pair),
                 KrakenPair = symbol,
                 Venue = "KrakenFutures",
-                Enabled = true
+                Enabled = true,
+                QuantityDecimals = GetInt(item, "contractValueTradePrecision")
             });
         }
 
@@ -99,7 +100,19 @@ public sealed class KrakenFuturesUniverseProvider(
         {
             foreach (var instrument in configured.Where(instrument => instrument.Enabled))
             {
-                result[instrument.Pair] = instrument;
+                result.TryGetValue(instrument.Pair, out var discoveredInstrument);
+                result[instrument.Pair] = new InstrumentOptions
+                {
+                    Pair = instrument.Pair,
+                    KrakenPair = string.IsNullOrWhiteSpace(instrument.KrakenPair)
+                        ? discoveredInstrument?.KrakenPair ?? instrument.KrakenPair
+                        : instrument.KrakenPair,
+                    Venue = string.IsNullOrWhiteSpace(instrument.Venue)
+                        ? discoveredInstrument?.Venue ?? instrument.Venue
+                        : instrument.Venue,
+                    Enabled = true,
+                    QuantityDecimals = instrument.QuantityDecimals ?? discoveredInstrument?.QuantityDecimals
+                };
             }
         }
 
@@ -121,7 +134,8 @@ public sealed class KrakenFuturesUniverseProvider(
                     Pair = configuredInstrument.Pair,
                     KrakenPair = configuredInstrument.KrakenPair,
                     Venue = configuredInstrument.Venue,
-                    Enabled = true
+                    Enabled = true,
+                    QuantityDecimals = configuredInstrument.QuantityDecimals
                 };
             }
         }
@@ -192,6 +206,21 @@ public sealed class KrakenFuturesUniverseProvider(
             JsonValueKind.False => false,
             JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed) && parsed,
             _ => false
+        };
+    }
+
+    private static int? GetInt(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number when value.TryGetInt32(out var number) => number,
+            JsonValueKind.String when int.TryParse(value.GetString(), out var number) => number,
+            _ => null
         };
     }
 

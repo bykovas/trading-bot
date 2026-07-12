@@ -13,6 +13,31 @@ public sealed class KrakenFuturesMarketDataSourceTests
     };
 
     [Fact]
+    public async Task Universe_provider_preserves_contract_value_trade_precision()
+    {
+        var handler = new StubHandler(request => Json("""
+            {
+              "result": "success",
+              "instruments": [
+                { "symbol": "PF_APEUSD", "pair": "APE:USD", "tradeable": true, "postOnly": false, "contractValueTradePrecision": 0 },
+                { "symbol": "PF_AAVEUSD", "pair": "AAVE:USD", "tradeable": true, "postOnly": false, "contractValueTradePrecision": 2 }
+              ]
+            }
+            """));
+        using var client = new HttpClient(handler);
+        var provider = new KrakenFuturesUniverseProvider(
+            client,
+            new KrakenOptions { BaseUrl = "https://futures.kraken.test" },
+            new UniverseDiscoveryOptions { Enabled = true },
+            Array.Empty<InstrumentOptions>());
+
+        var universe = await provider.GetUniverseAsync(CancellationToken.None);
+
+        Assert.Equal(0, universe.Instruments.Single(instrument => instrument.Pair == "APE/USD").QuantityDecimals);
+        Assert.Equal(2, universe.Instruments.Single(instrument => instrument.Pair == "AAVE/USD").QuantityDecimals);
+    }
+
+    [Fact]
     public async Task Light_state_parses_instruments_and_tickers()
     {
         var handler = new StubHandler(request =>

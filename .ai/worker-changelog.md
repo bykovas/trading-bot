@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-12-futures-live-size-precision
+
+- Futures universe discovery now preserves Kraken Futures `contractValueTradePrecision` as instrument quantity precision in the shared `instrument_registry`; the market-data schema migrates with a nullable `quantity_decimals` column and database-backed workers receive it with their universe.
+- Futures live entry execution now truncates order size down to Kraken's allowed quantity precision before `sendorder`, logs raw and adjusted size on rejects, and records the adjusted notional in the local margin ledger when an order is accepted.
+- Entries whose requested EUR notional rounds to zero at the venue precision are skipped locally with `LIVE_ORDER_SIZE_TOO_SMALL` instead of repeatedly sending invalid live orders.
+
 ## 2026-07-11-futures-live-reject-diagnostics
 
 - Fixed futures live rejected-entry diagnostics so a Kraken Futures order rejection preserves `live futures entry rejected: ...` in the persisted dry-run action instead of being overwritten by the generic flat/no-position message.
