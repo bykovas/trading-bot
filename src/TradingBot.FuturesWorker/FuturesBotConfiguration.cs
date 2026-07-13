@@ -88,7 +88,10 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_DEFAULT_LEVERAGE", value => config.Futures.DefaultLeverage = ParseDecimal(value, config.Futures.DefaultLeverage));
         SetIfPresent("TRADINGBOT_FUTURES_MAX_POSITIONS", value => config.Futures.MaxPositions = ParseInt(value, config.Futures.MaxPositions));
         SetIfPresent("TRADINGBOT_FUTURES_ALLOW_SHORTS", value => config.Futures.AllowShorts = ParseBool(value, config.Futures.AllowShorts));
-        SetIfPresent("TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR", value => config.Futures.TargetNotionalEur = ParseDecimal(value, config.Futures.TargetNotionalEur));
+        SetIfPresent("TRADINGBOT_FUTURES_TARGET_MARGIN_EUR", value => config.Futures.TargetMarginEur = ParseDecimal(value, config.Futures.TargetMarginEur));
+        // Deprecated alias: sets the legacy notional field, migrated in Normalize.
+        SetIfPresent("TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR", value => config.Futures.TargetNotionalEur = ParseDecimal(value, config.Futures.TargetNotionalEur ?? 0m));
+        SetIfPresent("TRADINGBOT_FUTURES_USD_PER_EUR", value => config.Futures.UsdPerEur = ParseDecimal(value, config.Futures.UsdPerEur));
         SetIfPresent("TRADINGBOT_FUTURES_FAST_EXIT_CHECK_SECONDS", value => config.Futures.FastExitCheckSeconds = ParseInt(value, config.Futures.FastExitCheckSeconds));
         SetIfPresent("TRADINGBOT_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
@@ -130,7 +133,20 @@ internal sealed class FuturesBotConfiguration
         Futures.DefaultLeverage = Math.Clamp(Futures.DefaultLeverage <= 0m ? 1m : Futures.DefaultLeverage, 1m, Futures.MaxLeverage);
         Futures.MaxPositions = Math.Clamp(Futures.MaxPositions <= 0 ? 3 : Futures.MaxPositions, 1, 3);
         Futures.AllowFlip = false;
-        Futures.TargetNotionalEur = Futures.TargetNotionalEur <= 0m ? 10m : Futures.TargetNotionalEur;
+
+        // Sizing migration: the old TargetNotionalEur meant NOTIONAL; the new
+        // TargetMarginEur means MARGIN. If only the legacy value is set, derive the
+        // margin that PRESERVES the old notional exposure (notional / leverage) and
+        // warn — never silently 10x the position by reinterpreting the number.
+        if (Futures.TargetMarginEur <= 0m && Futures.TargetNotionalEur is { } legacyNotional && legacyNotional > 0m)
+        {
+            Futures.TargetMarginEur = legacyNotional / Math.Max(1m, Futures.DefaultLeverage);
+            Console.WriteLine(
+                $"config-migration: Futures.TargetNotionalEur={legacyNotional:0.####} is deprecated; interpreted as legacy NOTIONAL and migrated to TargetMarginEur={Futures.TargetMarginEur:0.####} (notional/leverage) to preserve exposure. Set TargetMarginEur explicitly.");
+        }
+        Futures.TargetMarginEur = Futures.TargetMarginEur <= 0m ? 10m : Futures.TargetMarginEur;
+        Futures.TargetNotionalEur = null;
+        Futures.UsdPerEur = Futures.UsdPerEur <= 0m ? 1m : Futures.UsdPerEur;
         Futures.FastExitCheckSeconds = Math.Clamp(Futures.FastExitCheckSeconds <= 0 ? 10 : Futures.FastExitCheckSeconds, 5, Worker.LoopIntervalSeconds);
         Futures.DeadManSwitchSeconds = Math.Max(10, Futures.DeadManSwitchSeconds);
         // DMS must outlive the gap between live-cycle refreshes (loop sleep + cycle work).
@@ -173,7 +189,17 @@ internal sealed class FuturesBotConfiguration
         Regime.LongOverrideMinScore = Math.Clamp(Regime.LongOverrideMinScore <= 0m ? 0.85m : Regime.LongOverrideMinScore, 0m, 1m);
         Shorts.MaxChaseDrawdownPct = Shorts.MaxChaseDrawdownPct <= 0m ? 3m : Shorts.MaxChaseDrawdownPct;
         Shorts.MinShortScore = Shorts.MinShortScore <= 0m ? 0.90m : Shorts.MinShortScore;
-        Risk.MaxConcurrentOpenRisk = Risk.MaxConcurrentOpenRisk <= 0m ? 1.5m : Risk.MaxConcurrentOpenRisk;
+        // Open-risk cap must follow the NOTIONAL semantics, not the old margin-sized
+        // number. A stop-out loses ~notional * stopPct; the default lets all
+        // MaxPositions sit open at once. A too-small legacy value (sized for the old
+        // ~10 EUR notional) would otherwise block every 100 EUR entry, so it is
+        // recomputed when below one position's stop-out loss.
+        var stopLossPercentForRisk = TpSl.StopLossPercent <= 0m ? 2m : TpSl.StopLossPercent;
+        var perPositionOpenRisk = Futures.DerivedNotionalEur(Futures.DefaultLeverage) * stopLossPercentForRisk / 100m;
+        if (Risk.MaxConcurrentOpenRisk < perPositionOpenRisk)
+        {
+            Risk.MaxConcurrentOpenRisk = decimal.Round(perPositionOpenRisk * Futures.MaxPositions, 4);
+        }
         Risk.EstimatedEmergencyExitCostPct = Math.Max(0m, Risk.EstimatedEmergencyExitCostPct);
         ExecutionPolicy.CooldownAfterCloseSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterCloseSeconds);
         ExecutionPolicy.CooldownAfterStopLossSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterStopLossSeconds);
@@ -181,7 +207,9 @@ internal sealed class FuturesBotConfiguration
         ExecutionPolicy.EntryBlackoutUtcFromHour = Math.Clamp(ExecutionPolicy.EntryBlackoutUtcFromHour, 0, 23);
         ExecutionPolicy.EntryBlackoutMinutes = Math.Max(0, ExecutionPolicy.EntryBlackoutMinutes);
         CorrelationRisk.MaxOpenPositionsPerGroup = CorrelationRisk.MaxOpenPositionsPerGroup <= 0 ? 1 : CorrelationRisk.MaxOpenPositionsPerGroup;
-        CorrelationRisk.MaxExposureEurPerGroup = CorrelationRisk.MaxExposureEurPerGroup <= 0m ? Futures.TargetNotionalEur : CorrelationRisk.MaxExposureEurPerGroup;
+        // Per-group exposure is NOTIONAL exposure, so it defaults to one derived
+        // position notional (margin * leverage), not the margin figure.
+        CorrelationRisk.MaxExposureEurPerGroup = CorrelationRisk.MaxExposureEurPerGroup <= 0m ? Futures.DerivedNotionalEur(Futures.DefaultLeverage) : CorrelationRisk.MaxExposureEurPerGroup;
         UniverseDiscovery.RefreshSeconds = Math.Max(60, UniverseDiscovery.RefreshSeconds);
         UniverseDiscovery.ForceInclude = NormalizeStringList(UniverseDiscovery.ForceInclude);
         UniverseDiscovery.Blacklist = NormalizeStringList(UniverseDiscovery.Blacklist);
@@ -261,10 +289,33 @@ internal sealed class FuturesOptions
     // Flips (long -> short in one step) are forbidden by the blueprint; Normalize
     // forces this to false regardless of config.
     public bool AllowFlip { get; set; }
-    public decimal TargetNotionalEur { get; set; } = 10m;
+
+    // Business sizing parameter: the initial margin (collateral) committed per
+    // position, in EUR. The position NOTIONAL is derived once as
+    // TargetMarginEur * leverage, so TargetMarginEur=10 at 10x opens ~100 EUR
+    // notional and posts ~10 EUR margin. This is the ONLY sizing input; nothing
+    // else multiplies by leverage a second time.
+    public decimal TargetMarginEur { get; set; } = 10m;
+
+    // Legacy alias (deprecated): previously this value was the position NOTIONAL.
+    // Kept only so old appsettings/env do not silently change the risk envelope on
+    // upgrade — Normalize migrates it to TargetMarginEur = legacyNotional / leverage
+    // (preserving the old exposure) and logs a one-time warning. Null when unset.
+    public decimal? TargetNotionalEur { get; set; }
+
+    // FX factor to convert an EUR notional into the instrument's USD quote currency
+    // when computing contract quantity for USD-quoted perps. Static and configurable
+    // (appsettings ships 1.08); wire to a live EUR/USD feed later. Code default is 1.0
+    // (EUR treated as quote currency) so it never silently changes sizing. Only
+    // affects quantity, never the EUR margin/notional books.
+    public decimal UsdPerEur { get; set; } = 1m;
+
     public int FastExitCheckSeconds { get; set; } = 10;
     public bool LiveTradingEnabled { get; set; }
     public int DeadManSwitchSeconds { get; set; } = 90;
+
+    // Derived position notional in EUR for a new entry at the given leverage.
+    public decimal DerivedNotionalEur(decimal leverage) => TargetMarginEur * Math.Max(1m, leverage);
 }
 
 internal sealed class MarginOptions

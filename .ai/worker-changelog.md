@@ -2,6 +2,15 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-13-futures-margin-based-sizing
+
+- Fixed futures position sizing to be margin-based. Previously `Futures.TargetNotionalEur=10` was treated as the position NOTIONAL, so at 10x leverage the bot posted only ~1 EUR margin (observed RIVER: 2.8 units, ~9.83 USD notional, ~0.98 USD margin). The business input is now `Futures.TargetMarginEur` (initial margin), and the position notional is derived ONCE as `TargetMarginEur * leverage` via `FuturesOptions.DerivedNotionalEur`. At `TargetMarginEur=10`, `DefaultLeverage=10` the bot now opens ~100 EUR notional and posts ~10 EUR margin; RIVER quantity becomes ~30.8 (≈11x the old 2.8). Nothing multiplies by leverage a second time.
+- Added `Futures.UsdPerEur` (appsettings 1.08, code default 1.0) to convert the EUR notional into the instrument's USD quote currency for the contract quantity only; the EUR margin/notional books are unchanged by FX. Quantity = notionalEur * UsdPerEur / markPrice.
+- Migration: the legacy `TargetNotionalEur` name (and `TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR`) is deprecated. When only the legacy value is set, Normalize migrates it to `TargetMarginEur = legacyNotional / leverage`, PRESERVING the old exposure (not silently 10x-ing it) and logging a one-time warning. New name/env: `TargetMarginEur` / `TRADINGBOT_FUTURES_TARGET_MARGIN_EUR`; FX env `TRADINGBOT_FUTURES_USD_PER_EUR`.
+- Risk-limit semantics realigned to the notional (not the margin figure): per-group correlation exposure now defaults to one derived notional (margin*leverage), and `Risk.MaxConcurrentOpenRisk` is recomputed when a legacy value would block a normal entry (a stop-out loses ~notional*stopPct; the default now covers MaxPositions positions). These were recomputed, not arbitrarily changed.
+- Decision records now carry `RequestedMarginEur`, `RequestedLeverage`, `RequestedNotionalEur`, `ActualInitialMarginEur`, `ActualEffectiveLeverage` alongside quantity/fill, and a structured `POSITION_SIZING` log line captures target margin, leverage, derived notional, FX, quantity, estimated margin and available collateral.
+- Not changed in this commit: entry-freshness guard and execution price control / real-fill reconciliation (follow-up commits). Scoring, TP/SL, leverage cap, margin/funding/regime gates and the dead-man switch are unchanged.
+
 ## 2026-07-13-futures-btc-regime-long-override
 
 - Futures BTC regime still blocks ordinary longs while BTC is below its trend filter or crashing, but high-confidence long candidates can now override that block when `signal.Score >= Regime.LongOverrideMinScore` (default 0.85). The override is recorded in the BTC regime diagnostic text passed into the risk/journal path.

@@ -246,6 +246,14 @@ public sealed class DryRunAction
     public decimal? RequestedNotionalEur { get; set; }
     public decimal? FilledNotionalEur { get; set; }
 
+    // Margin-based sizing telemetry (futures). RequestedMarginEur is the configured
+    // initial margin; the notional is RequestedMarginEur * RequestedLeverage. Actuals
+    // are read back from the opened position so requested-vs-actual drift is queryable.
+    public decimal? RequestedMarginEur { get; set; }
+    public decimal? RequestedLeverage { get; set; }
+    public decimal? ActualInitialMarginEur { get; set; }
+    public decimal? ActualEffectiveLeverage { get; set; }
+
     // Futures-only fields, nullable so spot rows keep their exact shape. Side is
     // LONG/SHORT exposure, ReduceOnly marks simulated exits that may only shrink
     // a position, ExitTriggerSource records which price stream fired a TP/SL.

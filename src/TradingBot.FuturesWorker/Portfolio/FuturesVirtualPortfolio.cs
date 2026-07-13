@@ -115,7 +115,10 @@ internal sealed class FuturesVirtualPortfolio(
 
         leverage = Math.Clamp(leverage <= 0m ? 1m : leverage, 1m, config.Futures.MaxLeverage);
         var fillPrice = markPrice;
-        var quantity = fillPrice <= 0m ? 0m : notionalEur / fillPrice;
+        // Quantity uses the FX-converted (USD) notional over the USD mark price; the
+        // EUR books (notional, margin) stay in EUR so margin = notional / leverage.
+        var usdPerEur = config.Futures.UsdPerEur <= 0m ? 1m : config.Futures.UsdPerEur;
+        var quantity = fillPrice <= 0m ? 0m : notionalEur * usdPerEur / fillPrice;
         var fee = notionalEur * config.Fees.MakerPct / 100m;
         var initialMargin = leverage <= 0m ? notionalEur : notionalEur / leverage;
 
@@ -172,6 +175,10 @@ internal sealed class FuturesVirtualPortfolio(
         action.TargetNotionalEur = notionalEur;
         action.RequestedNotionalEur = requestedNotionalEur;
         action.FilledNotionalEur = notionalEur;
+        action.RequestedMarginEur = config.Futures.TargetMarginEur;
+        action.RequestedLeverage = config.Futures.DefaultLeverage;
+        action.ActualInitialMarginEur = initialMargin;
+        action.ActualEffectiveLeverage = initialMargin <= 0m ? null : decimal.Round(notionalEur / initialMargin, 4);
         action.Quantity = quantity;
         action.EntryPrice = fillPrice;
         action.FillPrice = fillPrice;
@@ -179,6 +186,8 @@ internal sealed class FuturesVirtualPortfolio(
         action.FeeEur = fee;
         action.GrossNotionalEur = notionalEur;
         action.FillSource = "MODELED_MAKER";
+        Console.WriteLine(
+            $"POSITION_SIZING pair={pair} side={side} targetMarginEur={config.Futures.TargetMarginEur:0.####} leverage={leverage:0.#}x targetNotionalEur={requestedNotionalEur:0.####} usdPerEur={usdPerEur:0.####} quantity={quantity:0.########} fill={fillPrice:0.####} estMarginEur={initialMargin:0.####} availableCollateralEur={state.CashEur + initialMargin + fee:0.####}");
         if (entryPlan is not null)
         {
             action.RoundTripCostEstimatePct = entryPlan.RoundTripCostEstimatePct;

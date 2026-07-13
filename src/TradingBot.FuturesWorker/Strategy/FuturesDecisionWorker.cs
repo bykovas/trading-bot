@@ -262,7 +262,7 @@ internal sealed class FuturesDecisionWorker(
                     {
                         fill = await ApplyOrExecuteLiveAsync(
                             state, pair, desired, markPrice,
-                            config.Futures.TargetNotionalEur, config.Futures.DefaultLeverage,
+                            config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage), config.Futures.DefaultLeverage,
                             reduceOnly: false,
                             reason: string.Empty,
                             exitTriggerSource: null,
@@ -281,7 +281,7 @@ internal sealed class FuturesDecisionWorker(
 
                 fill = await ApplyOrExecuteLiveAsync(
                     state, pair, desired, markPrice,
-                    config.Futures.TargetNotionalEur, config.Futures.DefaultLeverage,
+                    config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage), config.Futures.DefaultLeverage,
                     reduceOnly: false,
                     reason: string.Empty,
                     exitTriggerSource: null,
@@ -534,10 +534,13 @@ internal sealed class FuturesDecisionWorker(
         }
 
         // Live market orders fill in full and immediately, so they are sized from
-        // the REAL target notional — never from entryPlan.FilledNotionalEur, which
-        // is the dry-run maker-fill simulation (it models partial passive fills,
-        // e.g. exactly half, that do not apply to a taker `mkt` order).
-        var rawSize = markPrice <= 0m ? 0m : targetNotionalEur / markPrice;
+        // the REAL target notional (margin * leverage) — never from
+        // entryPlan.FilledNotionalEur, which is the dry-run maker-fill simulation
+        // (it models partial passive fills, e.g. exactly half, that do not apply to
+        // a taker order). The EUR notional is converted to the instrument's USD
+        // quote currency via UsdPerEur before dividing by the USD mark price.
+        var notionalQuote = targetNotionalEur * config.Futures.UsdPerEur;
+        var rawSize = markPrice <= 0m ? 0m : notionalQuote / markPrice;
         var quantityDecimals = instrument.QuantityDecimals ?? 8;
         var size = TruncateToDecimals(rawSize, quantityDecimals);
         if (size <= 0m)
@@ -548,7 +551,9 @@ internal sealed class FuturesDecisionWorker(
             return skipped;
         }
 
-        var adjustedNotional = size * markPrice;
+        // EUR notional actually opened, backed out of the FX-converted USD size so the
+        // EUR ledger (margin = notional / leverage) stays coherent with the position.
+        var adjustedNotional = config.Futures.UsdPerEur <= 0m ? size * markPrice : size * markPrice / config.Futures.UsdPerEur;
         var adjustedPlan = entryPlan is null
             ? null
             : entryPlan with { FilledNotionalEur = adjustedNotional };
@@ -751,9 +756,9 @@ internal sealed class FuturesDecisionWorker(
 
         var groupExposure = groupPositions.Sum(position => position.EntryNotionalEur);
         if (config.CorrelationRisk.MaxExposureEurPerGroup > 0m
-            && groupExposure + config.Futures.TargetNotionalEur > config.CorrelationRisk.MaxExposureEurPerGroup)
+            && groupExposure + config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage) > config.CorrelationRisk.MaxExposureEurPerGroup)
         {
-            return new RiskEvaluation(false, new[] { $"correlation group {group} exposure EUR {groupExposure + config.Futures.TargetNotionalEur:0.####} exceeds cap EUR {config.CorrelationRisk.MaxExposureEurPerGroup:0.####}" });
+            return new RiskEvaluation(false, new[] { $"correlation group {group} exposure EUR {groupExposure + config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage):0.####} exceeds cap EUR {config.CorrelationRisk.MaxExposureEurPerGroup:0.####}" });
         }
 
         return new RiskEvaluation(true, new[] { $"portfolio entry guards passed for group {group}" });
@@ -792,12 +797,12 @@ internal sealed class FuturesDecisionWorker(
             ? config.TpSl.TakeProfitPercent
             : Math.Max(config.Exits.TakeProfitAtrMult * atrPct, config.Exits.MinTpVsCostMult * roundTripCost);
         var queueAhead = QueueAheadEur(marketState, desired);
-        var makerFilled = SimulatedMakerFillEur(queueAhead, config.Futures.TargetNotionalEur);
+        var makerFilled = SimulatedMakerFillEur(queueAhead, config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage));
         var openRisk = ProjectedOpenRiskEur(state, desired, markPrice, makerFilled, stopDistancePct, roundTripCost);
         var shortGate = EvaluateShortGate(desired, signal, btcRegime);
 
         return new FuturesEntryPlan(
-            RequestedNotionalEur: config.Futures.TargetNotionalEur,
+            RequestedNotionalEur: config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage),
             FilledNotionalEur: makerFilled,
             AtrPct: decimal.Round(atrPct, 6),
             StopDistancePct: decimal.Round(stopDistancePct, 6),
@@ -805,7 +810,7 @@ internal sealed class FuturesDecisionWorker(
             RoundTripCostEstimatePct: decimal.Round(roundTripCost, 6),
             ExpectedFundingPct: decimal.Round(expectedFundingPct, 6),
             QueueAheadEur: decimal.Round(queueAhead, 6),
-            MakerFillRate: config.Futures.TargetNotionalEur <= 0m ? 0m : decimal.Round(makerFilled / config.Futures.TargetNotionalEur, 6),
+            MakerFillRate: config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage) <= 0m ? 0m : decimal.Round(makerFilled / config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage), 6),
             TimeToFillMs: makerFilled > 0m ? Math.Min(config.Entry.MakerFillTimeoutSec * 1000L, 1000L) : config.Entry.MakerFillTimeoutSec * 1000L,
             RepegCount: makerFilled > 0m && config.Entry.MakerRepegs > 0 ? 1 : 0,
             OpenRiskEur: openRisk,
@@ -837,7 +842,7 @@ internal sealed class FuturesDecisionWorker(
             state,
             desired,
             marketState.Quote?.MarkPrice ?? marketState.LastPrice,
-            config.Futures.TargetNotionalEur,
+            config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage),
             plan.FilledNotionalEur,
             config.Futures.DefaultLeverage,
             portfolio.UsedMarginEur(state),
@@ -1241,10 +1246,10 @@ internal sealed class FuturesDecisionWorker(
                 ? 0m
                 : decimal.Round(entryDecisions.Count(decision => (decision.DryRunAction.MakerFillRate ?? 0m) > 0m) / (decimal)entryDecisions.Count, 4),
             PairsPassedVolume: fullStates.Count(state => (state.Quote?.VolumeToday ?? 0m) >= config.Filters.MinQuoteVolume24h),
-            PairsPassedDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.Futures.TargetNotionalEur * config.Filters.MinExitDepthMultiple),
+            PairsPassedDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage) * config.Filters.MinExitDepthMultiple),
             OpenRiskEur: stateOpenRisk(decisions),
             BtcRegimeState: btcRegime.Description,
-            PairsPassedExitDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.Futures.TargetNotionalEur * config.Filters.MinExitDepthMultiple),
+            PairsPassedExitDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage) * config.Filters.MinExitDepthMultiple),
             FundingState: string.Join("; ", decisions.Select(decision => decision.DryRunAction.FundingState).Where(value => !string.IsNullOrWhiteSpace(value)).Take(3)));
     }
 
