@@ -90,10 +90,16 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_ALLOW_SHORTS", value => config.Futures.AllowShorts = ParseBool(value, config.Futures.AllowShorts));
         SetIfPresent("TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR", value => config.Futures.TargetNotionalEur = ParseDecimal(value, config.Futures.TargetNotionalEur));
         SetIfPresent("TRADINGBOT_FUTURES_FAST_EXIT_CHECK_SECONDS", value => config.Futures.FastExitCheckSeconds = ParseInt(value, config.Futures.FastExitCheckSeconds));
+        SetIfPresent("TRADINGBOT_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
+        SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_LONG_SCORE", value => config.Strategy.MinimumLongScore = ParseDecimal(value, config.Strategy.MinimumLongScore));
         SetIfPresent("TRADINGBOT_STRATEGY_MAX_ENTRY_SPREAD_PERCENT", value => config.Strategy.MaxEntrySpreadPercent = ParseDecimal(value, config.Strategy.MaxEntrySpreadPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MAX_ENTRY_EXTENSION_PERCENT", value => config.Strategy.MaxEntryExtensionPercent = ParseDecimal(value, config.Strategy.MaxEntryExtensionPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MAX_ENTRY_RUNUP_PERCENT", value => config.Strategy.MaxEntryRunupPercent = ParseDecimal(value, config.Strategy.MaxEntryRunupPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_REQUIRE_PRICE_ACTION_DATA", value => config.Strategy.RequirePriceActionData = ParseBool(value, config.Strategy.RequirePriceActionData));
+        SetIfPresent("TRADINGBOT_FUTURES_MIN_SHORT_SCORE", value => config.Shorts.MinShortScore = ParseDecimal(value, config.Shorts.MinShortScore));
+        SetIfPresent("TRADINGBOT_TPSL_TAKE_PROFIT_PERCENT", value => config.TpSl.TakeProfitPercent = ParseDecimal(value, config.TpSl.TakeProfitPercent));
+        SetIfPresent("TRADINGBOT_TPSL_STOP_LOSS_PERCENT", value => config.TpSl.StopLossPercent = ParseDecimal(value, config.TpSl.StopLossPercent));
         SetIfPresent("TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED", value => config.Futures.LiveTradingEnabled = ParseBool(value, config.Futures.LiveTradingEnabled));
         SetIfPresent("TRADINGBOT_KRAKEN_FUTURES_API_KEY", value => config.Kraken.ApiKey = value);
         SetIfPresent("TRADINGBOT_KRAKEN_FUTURES_API_SECRET", value => config.Kraken.ApiSecret = value);
@@ -180,6 +186,8 @@ internal sealed class FuturesBotConfiguration
 
         // Entry market-quality gate (spot parity): spread limit, anti-lag price
         // action, anti-extension. Same clamps as the spot worker.
+        Strategy.MinimumEmaGapPercent = Math.Max(0m, Strategy.MinimumEmaGapPercent);
+        Strategy.MinimumLongScore = Math.Clamp(Strategy.MinimumLongScore, 0m, 1m);
         Strategy.MaxEntrySpreadPercent = Math.Max(0m, Strategy.MaxEntrySpreadPercent);
         Strategy.MaxEntryExtensionPercent = Math.Max(0m, Strategy.MaxEntryExtensionPercent);
         Strategy.MaxEntryRunupPercent = Math.Max(0m, Strategy.MaxEntryRunupPercent);
@@ -199,8 +207,8 @@ internal sealed class FuturesBotConfiguration
         }
 
         TpSl.Enabled = true;
-        TpSl.TakeProfitPercent = Exits.TakeProfitAtrMult;
-        TpSl.StopLossPercent = Exits.StopAtrMult;
+        TpSl.TakeProfitPercent = TpSl.TakeProfitPercent <= 0m ? 3m : TpSl.TakeProfitPercent;
+        TpSl.StopLossPercent = TpSl.StopLossPercent <= 0m ? 2m : TpSl.StopLossPercent;
         TpSl.TriggerSource = string.IsNullOrWhiteSpace(TpSl.TriggerSource) ? "mark" : TpSl.TriggerSource;
     }
 

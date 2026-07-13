@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-13-futures-entry-tuning-fixed-tpsl
+
+- Tuned futures entry gates from live snapshot replay: `Strategy.MinimumLongScore` 0.85 -> 0.80, `Strategy.MinimumEmaGapPercent` 0.30 -> 0.20, `Strategy.MaxEntrySpreadPercent` 0.15 -> 0.25, `Strategy.MaxEntryExtensionPercent` 0.6 -> 1.0, and `Shorts.MinShortScore` 0.90 -> 0.85. Position size, leverage, max positions, and universe discovery are unchanged.
+- Futures fixed TP/SL settings are now preserved as the execution source when `TpSl.Enabled=true`: `TpSl.TakeProfitPercent=3.0` and `TpSl.StopLossPercent=2.0` are no longer overwritten by ATR exit multipliers during config normalization, and entry plans use those fixed percentages for stop/take-profit distances.
+- Added futures env overrides for the tuned strategy thresholds, short score, and fixed TP/SL percentages so operator-owned live appsettings/env files can be updated without replacing secrets or local-only server settings.
+
 ## 2026-07-13-futures-fast-exit-journal
 
 - Futures fast-exit closes now persist a dedicated dry-run cycle event with the close decision, `WOULD_CLOSE` action, exit reason, ledger before/after, and worker metadata. Previously fast-exit updated `portfolio_state` and logs only, so UI/API trade journals could show the live entry without the matching close even though Kraken and portfolio sync were already flat.

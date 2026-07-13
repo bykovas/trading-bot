@@ -783,10 +783,14 @@ internal sealed class FuturesDecisionWorker(
         var markPrice = marketState.Quote?.MarkPrice ?? marketState.LastPrice;
         var atr = AtrIndicator.CalculateLatestClosedAtr(marketState.Candles, 14);
         var atrPct = atr is > 0m && markPrice > 0m ? atr.Value / markPrice * 100m : 0m;
-        var stopDistancePct = Math.Max(config.Exits.StopAtrMult, config.Exits.MinStopAtrFloor) * atrPct;
+        var stopDistancePct = config.TpSl.Enabled
+            ? config.TpSl.StopLossPercent
+            : Math.Max(config.Exits.StopAtrMult, config.Exits.MinStopAtrFloor) * atrPct;
         var expectedFundingPct = ExpectedFundingPct(desired, marketState.Quote?.FundingRatePercent);
         var roundTripCost = 2m * config.Fees.TakerPct + config.Exits.SlippageBufferPct + expectedFundingPct;
-        var takeProfitDistancePct = Math.Max(config.Exits.TakeProfitAtrMult * atrPct, config.Exits.MinTpVsCostMult * roundTripCost);
+        var takeProfitDistancePct = config.TpSl.Enabled
+            ? config.TpSl.TakeProfitPercent
+            : Math.Max(config.Exits.TakeProfitAtrMult * atrPct, config.Exits.MinTpVsCostMult * roundTripCost);
         var queueAhead = QueueAheadEur(marketState, desired);
         var makerFilled = SimulatedMakerFillEur(queueAhead, config.Futures.TargetNotionalEur);
         var openRisk = ProjectedOpenRiskEur(state, desired, markPrice, makerFilled, stopDistancePct, roundTripCost);

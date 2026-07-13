@@ -168,6 +168,21 @@ public sealed class FuturesDeadManSwitchTests
         Assert.Equal(10m, tooHigh.Futures.DefaultLeverage);
     }
 
+    [Fact]
+    public void Normalize_preserves_fixed_tpsl_percentages()
+    {
+        var config = new FuturesBotConfiguration
+        {
+            Exits = new FuturesExitOptions { TakeProfitAtrMult = 9m, StopAtrMult = 8m },
+            TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 3m, StopLossPercent = 2m }
+        };
+
+        InvokeNormalize(config);
+
+        Assert.Equal(3m, config.TpSl.TakeProfitPercent);
+        Assert.Equal(2m, config.TpSl.StopLossPercent);
+    }
+
     private static void InvokeNormalize(FuturesBotConfiguration config)
     {
         var method = typeof(FuturesBotConfiguration).GetMethod("Normalize", BindingFlags.Instance | BindingFlags.NonPublic);

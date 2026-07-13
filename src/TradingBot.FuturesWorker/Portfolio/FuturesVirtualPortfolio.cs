@@ -133,8 +133,8 @@ internal sealed class FuturesVirtualPortfolio(
         state.CashEur -= initialMargin + fee;
 
         var liquidationPrice = FuturesMath.EstimateLiquidationPrice(side, fillPrice, leverage, config.Margin.MaintenanceMarginRatePercent);
-        var tpDistancePct = entryPlan?.TakeProfitDistancePct ?? config.Exits.TakeProfitAtrMult;
-        var slDistancePct = entryPlan?.StopDistancePct ?? config.Exits.StopAtrMult;
+        var tpDistancePct = entryPlan?.TakeProfitDistancePct ?? config.TpSl.TakeProfitPercent;
+        var slDistancePct = entryPlan?.StopDistancePct ?? config.TpSl.StopLossPercent;
         var tpDistance = fillPrice * tpDistancePct / 100m;
         var slDistance = fillPrice * slDistancePct / 100m;
         state.Positions.Add(new PortfolioPosition

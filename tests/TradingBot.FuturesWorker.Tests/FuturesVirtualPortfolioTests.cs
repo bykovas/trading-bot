@@ -88,6 +88,23 @@ public sealed class FuturesVirtualPortfolioTests
     }
 
     [Fact]
+    public void Entry_without_plan_uses_fixed_tpsl_not_atr_multipliers()
+    {
+        var config = Config();
+        config.Exits.TakeProfitAtrMult = 9m;
+        config.Exits.StopAtrMult = 8m;
+        var portfolio = new FuturesVirtualPortfolio(config, new NullStore());
+        var state = portfolio.Load();
+
+        var fill = portfolio.Apply(state, "XBT/EUR", FuturesDesiredExposure.Long, 100m, 20m, 2m);
+
+        Assert.True(fill.PositionOpened);
+        var position = Assert.Single(state.Positions);
+        Assert.Equal(98m, position.StopLossPrice);
+        Assert.Equal(103m, position.TakeProfitPrice);
+    }
+
+    [Fact]
     public void Short_entry_opens_only_when_shorts_allowed()
     {
         var (allowed, allowedState) = Setup(allowShorts: true);
