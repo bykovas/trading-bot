@@ -33,6 +33,8 @@ public static class EntryRejection
     public const string EarlyEntryRank = "REJECT_EARLY_ENTRY_RANK";
     public const string MarketRegime = "REJECT_MARKET_REGIME";
     public const string FrictionTooHigh = "REJECT_FRICTION_TOO_HIGH";
+    public const string EntryStaleNearHigh = "REJECT_ENTRY_STALE_NEAR_HIGH";
+    public const string EntryPriceDeviation = "REJECT_ENTRY_PRICE_DEVIATION";
 
     // Maps a DryRunPortfolio hold-reason code (a portfolio-level buy block) onto the
     // compact rejection vocabulary for cycle diagnostics.
@@ -48,6 +50,9 @@ public static class EntryRejection
         "EARLY_ENTRY_RANK" => EarlyEntryRank,
         "MARKET_REGIME" => MarketRegime,
         "FRICTION_BLOCK" => FrictionTooHigh,
+        "ENTRY_STALE_NEAR_HIGH" => EntryStaleNearHigh,
+        "LIVE_ENTRY_PRICE_DEVIATION" => EntryPriceDeviation,
+        "FILL_RECONCILIATION_PENDING" => EntryPriceDeviation,
         "ENTRY_INVALID_SPREAD" or "ENTRY_INVALID_REFERENCE_PRICE" or "ENTRY_ATR_MISSING" or "ENTRY_ATR_STALE" or "ENTRY_COST_INVALID" or "ENTRY_EXITS_INVALID" => InvalidMarketData,
         "ENTRY_VOLUME" or "ENTRY_DEPTH_MISSING" or "ENTRY_DEPTH" or "ENTRY_EXIT_DEPTH" => LowLiquidity,
         "ENTRY_OPEN_RISK_UNSAFE" or "ENTRY_OPEN_RISK_CAP" => RiskLimits,

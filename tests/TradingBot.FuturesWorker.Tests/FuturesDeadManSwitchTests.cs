@@ -207,6 +207,9 @@ public sealed class FuturesDeadManSwitchTests
         public Task<IReadOnlyList<FuturesOpenPosition>> GetOpenPositionsAsync(CancellationToken cancellationToken) =>
             Task.FromResult(positions);
 
+        public Task<FuturesTickerQuote?> GetTickerAsync(string symbol, CancellationToken cancellationToken) =>
+            Task.FromResult<FuturesTickerQuote?>(new FuturesTickerQuote(symbol, 100m, 100.1m, 100m, 100m, DateTimeOffset.UtcNow));
+
         public Task<FuturesOrderResult> SendOrderAsync(
             string symbol,
             string side,
@@ -215,6 +218,15 @@ public sealed class FuturesDeadManSwitchTests
             decimal leverage,
             CancellationToken cancellationToken) =>
             Task.FromResult(new FuturesOrderResult("placed", "order-1", null));
+
+        public Task<FuturesOrderResult> SendIocLimitOrderAsync(
+            string symbol,
+            string side,
+            decimal size,
+            decimal limitPrice,
+            bool reduceOnly,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new FuturesOrderResult("filled", "order-1", null, new FuturesOrderFill(size, limitPrice, null, DateTimeOffset.UtcNow)));
 
         public Task<bool> SetLeveragePreferenceAsync(string symbol, decimal maxLeverage, CancellationToken cancellationToken)
         {

@@ -82,6 +82,47 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
         return positions;
     }
 
+    public async Task<FuturesTickerQuote?> GetTickerAsync(string symbol, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.GetAsync(
+            $"{_options.BaseUrl.TrimEnd('/')}/derivatives/api/v3/tickers/{Uri.EscapeDataString(symbol)}",
+            cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Kraken Futures ticker HTTP {(int)response.StatusCode}: {Trim(body)}");
+        }
+
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+        if (!IsSuccess(root))
+        {
+            return null;
+        }
+
+        var ticker = root.TryGetProperty("ticker", out var tickerElement)
+            ? tickerElement
+            : root.TryGetProperty("tickers", out var tickersElement) && tickersElement.ValueKind == JsonValueKind.Array
+                ? tickersElement.EnumerateArray().FirstOrDefault(item =>
+                    (GetString(item, "symbol") ?? string.Empty).Equals(symbol, StringComparison.OrdinalIgnoreCase))
+                : default;
+        if (ticker.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        var bid = GetDecimal(ticker, "bid") ?? GetDecimal(ticker, "bestBid") ?? 0m;
+        var ask = GetDecimal(ticker, "ask") ?? GetDecimal(ticker, "bestAsk") ?? 0m;
+        var last = GetDecimal(ticker, "last") ?? GetDecimal(ticker, "lastPrice") ?? GetDecimal(ticker, "markPrice") ?? 0m;
+        var mark = GetDecimal(ticker, "markPrice");
+        if (bid <= 0m || ask <= 0m || last <= 0m || ask < bid)
+        {
+            return null;
+        }
+
+        return new FuturesTickerQuote(symbol, bid, ask, last, mark, DateTimeOffset.UtcNow);
+    }
+
     public async Task<FuturesOrderResult> SendOrderAsync(
         string symbol,
         string side,
@@ -112,12 +153,46 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
             return FuturesOrderResult.Rejected(ErrorText(root, "sendorder failed"));
         }
 
-        var sendStatus = root.TryGetProperty("sendStatus", out var statusElement)
-            ? statusElement
-            : root;
-        var status = GetString(sendStatus, "status") ?? "unknown";
-        var orderId = GetString(sendStatus, "order_id") ?? GetString(sendStatus, "orderId");
-        return new FuturesOrderResult(status, orderId, null);
+        return ParseOrderResult(root);
+    }
+
+    public async Task<FuturesOrderResult> SendIocLimitOrderAsync(
+        string symbol,
+        string side,
+        decimal size,
+        decimal limitPrice,
+        bool reduceOnly,
+        CancellationToken cancellationToken)
+    {
+        if (size <= 0m)
+        {
+            return FuturesOrderResult.Rejected("size must be positive");
+        }
+
+        if (limitPrice <= 0m)
+        {
+            return FuturesOrderResult.Rejected("limit price must be positive");
+        }
+
+        var parameters = new List<KeyValuePair<string, string>>
+        {
+            new("orderType", "ioc"),
+            new("symbol", symbol),
+            new("side", side.Equals("sell", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy"),
+            new("size", FormatDecimal(size)),
+            new("limitPrice", FormatDecimal(limitPrice)),
+            new("reduceOnly", reduceOnly ? "true" : "false"),
+            new("cliOrdId", $"tb-{Guid.NewGuid():N}")
+        };
+
+        using var doc = await SendPrivateAsync(HttpMethod.Post, "/derivatives/api/v3/sendorder", parameters, cancellationToken);
+        var root = doc.RootElement;
+        if (!IsSuccess(root))
+        {
+            return FuturesOrderResult.Rejected(ErrorText(root, "sendorder failed"));
+        }
+
+        return ParseOrderResult(root);
     }
 
     public async Task<bool> SetLeveragePreferenceAsync(string symbol, decimal maxLeverage, CancellationToken cancellationToken)
@@ -220,6 +295,66 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
     private static bool IsSuccess(JsonElement root) =>
         root.TryGetProperty("result", out var result)
         && result.GetString()?.Equals("success", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static FuturesOrderResult ParseOrderResult(JsonElement root)
+    {
+        var sendStatus = root.TryGetProperty("sendStatus", out var statusElement)
+            ? statusElement
+            : root;
+        var status = GetString(sendStatus, "status") ?? "unknown";
+        var orderId = GetString(sendStatus, "order_id") ?? GetString(sendStatus, "orderId");
+        return new FuturesOrderResult(status, orderId, null, ParseFill(sendStatus));
+    }
+
+    private static FuturesOrderFill? ParseFill(JsonElement sendStatus)
+    {
+        if (!sendStatus.TryGetProperty("orderEvents", out var events) || events.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        decimal quantity = 0m;
+        decimal notional = 0m;
+        decimal fee = 0m;
+        DateTimeOffset? timestamp = null;
+        foreach (var item in events.EnumerateArray())
+        {
+            var eventType = GetString(item, "type") ?? GetString(item, "eventType") ?? string.Empty;
+            if (!eventType.Contains("EXECUTION", StringComparison.OrdinalIgnoreCase)
+                && !eventType.Contains("TRADE", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var amount = Math.Abs(GetDecimal(item, "amount") ?? GetDecimal(item, "quantity") ?? GetDecimal(item, "size") ?? 0m);
+            var price = GetDecimal(item, "price") ?? GetDecimal(item, "fillPrice") ?? 0m;
+            if (amount <= 0m || price <= 0m)
+            {
+                continue;
+            }
+
+            quantity += amount;
+            notional += amount * price;
+            fee += Math.Abs(GetDecimal(item, "fee") ?? 0m);
+            timestamp ??= ParseTimestamp(GetString(item, "timestamp") ?? GetString(item, "time"));
+        }
+
+        return quantity <= 0m || notional <= 0m
+            ? null
+            : new FuturesOrderFill(quantity, notional / quantity, fee <= 0m ? null : fee, timestamp);
+    }
+
+    private static DateTimeOffset? ParseTimestamp(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
+            ? parsed.ToUniversalTime()
+            : null;
+    }
 
     private static void EnsureSuccess(JsonElement root, string operation)
     {

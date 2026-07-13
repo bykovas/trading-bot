@@ -11,6 +11,8 @@ internal interface IFuturesBroker
 
     Task<IReadOnlyList<FuturesOpenPosition>> GetOpenPositionsAsync(CancellationToken cancellationToken);
 
+    Task<FuturesTickerQuote?> GetTickerAsync(string symbol, CancellationToken cancellationToken);
+
     // reduceOnly MUST be true for every exit order; leverage applies to entries.
     Task<FuturesOrderResult> SendOrderAsync(
         string symbol,
@@ -18,6 +20,14 @@ internal interface IFuturesBroker
         decimal size,
         bool reduceOnly,
         decimal leverage,
+        CancellationToken cancellationToken);
+
+    Task<FuturesOrderResult> SendIocLimitOrderAsync(
+        string symbol,
+        string side,
+        decimal size,
+        decimal limitPrice,
+        bool reduceOnly,
         CancellationToken cancellationToken);
 
     // Sets the per-symbol max leverage (Kraken margin preference). Kraken Futures
@@ -35,12 +45,18 @@ internal sealed record FuturesAccountBalance(string Currency, decimal MarginBala
 
 internal sealed record FuturesOpenPosition(string Symbol, string Side, decimal Size, decimal EntryPrice, decimal MarkPrice, decimal Leverage);
 
-internal sealed record FuturesOrderResult(string Status, string? OrderId, string? Error)
+internal sealed record FuturesTickerQuote(string Symbol, decimal Bid, decimal Ask, decimal Last, decimal? MarkPrice, DateTimeOffset TimestampUtc);
+
+internal sealed record FuturesOrderFill(decimal Quantity, decimal AveragePrice, decimal? Fee, DateTimeOffset? TimestampUtc);
+
+internal sealed record FuturesOrderResult(string Status, string? OrderId, string? Error, FuturesOrderFill? Fill = null)
 {
     public bool Accepted =>
         Status.Equals("placed", StringComparison.OrdinalIgnoreCase)
         || Status.Equals("filled", StringComparison.OrdinalIgnoreCase)
         || Status.Equals("executed", StringComparison.OrdinalIgnoreCase);
+
+    public bool FillKnown => Fill is { Quantity: > 0m, AveragePrice: > 0m };
 
     public static FuturesOrderResult Rejected(string error) => new("REJECTED", null, error);
 }

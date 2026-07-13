@@ -91,6 +91,18 @@ public sealed class SnapshotPriceHistory
         }
     }
 
+    public IReadOnlyList<PriceObservation> RecentObservations(string pair, int count)
+    {
+        if (count <= 0 || !_history.TryGetValue(pair, out var observations) || observations.Count == 0)
+        {
+            return Array.Empty<PriceObservation>();
+        }
+
+        return observations
+            .TakeLast(Math.Min(count, observations.Count))
+            .ToList();
+    }
+
     // Bootstraps the rolling history from snapshots persisted before a restart, so
     // the anti-lag guard is not blind for PriceActionMinSnapshots cycles after every
     // deploy. Records are replayed in utc order per pair; the caller is responsible

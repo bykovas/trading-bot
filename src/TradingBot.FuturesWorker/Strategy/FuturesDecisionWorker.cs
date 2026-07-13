@@ -227,6 +227,7 @@ internal sealed class FuturesDecisionWorker(
             {
                 var desired = strategy.DecideEntry(signal);
                 FuturesEntryPlan? entryPlan = null;
+                EntryFreshnessResult? freshness = null;
                 var remainingSlots = Math.Max(0, config.Futures.MaxPositions - state.Positions.Count);
                 if (desired == FuturesDesiredExposure.Flat)
                 {
@@ -246,9 +247,25 @@ internal sealed class FuturesDecisionWorker(
                     // warm-up, anti-extension) — the same protections the spot
                     // worker applies before its portfolio and risk layers.
                     var qualityGate = FuturesEntryQualityGate.Evaluate(marketState, indicators, desired, priceAction, config.Strategy);
-                    var portfolioGate = qualityGate.Approved
-                        ? EvaluatePortfolioEntryGuards(state, pair, desired, utc)
+                    freshness = qualityGate.Approved
+                        ? FuturesEntryFreshnessGuard.Evaluate(
+                            marketState,
+                            _priceHistory.RecentObservations(pair, config.Freshness.FreshTapeSnapshotCount),
+                            desired,
+                            config.Freshness)
+                        : null;
+                    if (freshness is not null)
+                    {
+                        Console.WriteLine(
+                            $"ENTRY_FRESHNESS pair={pair} desired={desired} nearHigh={freshness.IsNearHigh} freshTape={freshness.HasFreshUpwardTape} breakout={freshness.HasFreshBreakout} blocked={freshness.Blocked} pos24={freshness.PositionIn24hRangePct:0.###} distHigh={freshness.DistanceFromRecentHighPct:0.###} lastStep={freshness.LastSnapshotStepPct:0.###} slope={freshness.ShortSnapshotSlopePct:0.###}");
+                    }
+
+                    var freshnessGate = qualityGate.Approved && freshness is { Blocked: true }
+                        ? new RiskEvaluation(false, new[] { freshness.BlockReason ?? "entry stale near high" })
                         : qualityGate;
+                    var portfolioGate = freshnessGate.Approved
+                        ? EvaluatePortfolioEntryGuards(state, pair, desired, utc)
+                        : freshnessGate;
                     var evaluation = portfolioGate.Approved
                         ? riskManager.EvaluateEntry(BuildRiskInputs(state, marketState, desired, signal, entryPlan, btcRegime))
                         : portfolioGate;
@@ -268,7 +285,13 @@ internal sealed class FuturesDecisionWorker(
                             exitTriggerSource: null,
                             instrument: marketState.Instrument,
                             entryPlan: entryPlan,
-                            cancellationToken);
+                            cancellationToken,
+                            signalPrice: marketState.LastPrice);
+                        if (freshness is not null)
+                        {
+                            AttachEntryFreshnessDiagnostics(fill.Action, freshness);
+                        }
+
                         if (fill.PositionOpened)
                         {
                             newEntriesThisCycle++;
@@ -291,6 +314,15 @@ internal sealed class FuturesDecisionWorker(
                 if (entryPlan is not null)
                 {
                     AttachEntryPlanDiagnostics(fill.Action, entryPlan);
+                }
+
+                if (freshness is not null)
+                {
+                    AttachEntryFreshnessDiagnostics(fill.Action, freshness);
+                    if (freshness.Blocked)
+                    {
+                        fill.Action.HoldReasonCode = FuturesEntryFreshnessGuard.HoldReasonCode;
+                    }
                 }
             }
 
@@ -487,7 +519,8 @@ internal sealed class FuturesDecisionWorker(
         string? exitTriggerSource,
         InstrumentOptions instrument,
         FuturesEntryPlan? entryPlan,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        decimal? signalPrice = null)
     {
         if (!config.Futures.LiveTradingEnabled)
         {
@@ -551,13 +584,35 @@ internal sealed class FuturesDecisionWorker(
             return skipped;
         }
 
-        // EUR notional actually opened, backed out of the FX-converted USD size so the
-        // EUR ledger (margin = notional / leverage) stays coherent with the position.
-        var adjustedNotional = config.Futures.UsdPerEur <= 0m ? size * markPrice : size * markPrice / config.Futures.UsdPerEur;
-        var adjustedPlan = entryPlan is null
-            ? null
-            : entryPlan with { FilledNotionalEur = adjustedNotional };
         var side = desired == FuturesDesiredExposure.Short ? "sell" : "buy";
+        var preSubmit = await broker.GetTickerAsync(instrument.KrakenPair, cancellationToken);
+        if (preSubmit is null)
+        {
+            var skipReason = $"live futures entry skipped: fresh pre-submit ticker unavailable for {instrument.KrakenPair}";
+            var skipped = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage, reason: skipReason);
+            skipped.Action.HoldReasonCode = "ENTRY_INVALID_REFERENCE_PRICE";
+            return skipped;
+        }
+
+        var referencePrice = signalPrice is > 0m ? signalPrice.Value : markPrice;
+        var maxDeviation = config.Entry.MaxEntryPriceDeviationPct;
+        var limitPrice = desired == FuturesDesiredExposure.Short
+            ? referencePrice * (1m - maxDeviation / 100m)
+            : referencePrice * (1m + maxDeviation / 100m);
+        var quoteAlreadyWorse = desired == FuturesDesiredExposure.Short
+            ? preSubmit.Bid < limitPrice
+            : preSubmit.Ask > limitPrice;
+        if (quoteAlreadyWorse)
+        {
+            var rejectReason = desired == FuturesDesiredExposure.Short
+                ? $"live futures entry skipped: refreshed bid {preSubmit.Bid:0.########} is below min allowed {limitPrice:0.########} from signal {referencePrice:0.########} ({maxDeviation:0.###}% max deviation)"
+                : $"live futures entry skipped: refreshed ask {preSubmit.Ask:0.########} exceeds max allowed {limitPrice:0.########} from signal {referencePrice:0.########} ({maxDeviation:0.###}% max deviation)";
+            Console.WriteLine($"EXECUTION pair={pair} symbol={instrument.KrakenPair} side={side} rejected=PRICE_DEVIATION signal={referencePrice:0.########} bid={preSubmit.Bid:0.########} ask={preSubmit.Ask:0.########} limit={limitPrice:0.########}");
+            var rejected = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage, reason: rejectReason);
+            rejected.Action.HoldReasonCode = "LIVE_ENTRY_PRICE_DEVIATION";
+            AttachExecutionDiagnostics(rejected.Action, referencePrice, preSubmit, limitPrice, size, null, null);
+            return rejected;
+        }
 
         // Kraken Futures leverage is a per-symbol margin preference, not an order
         // field. Set it (clamped to MaxLeverage) BEFORE the entry and refuse to
@@ -573,22 +628,54 @@ internal sealed class FuturesDecisionWorker(
             return skipped;
         }
 
-        var order = await broker.SendOrderAsync(instrument.KrakenPair, side, size, reduceOnly: false, entryLeverage, cancellationToken);
+        var order = await broker.SendIocLimitOrderAsync(instrument.KrakenPair, side, size, limitPrice, reduceOnly: false, cancellationToken);
         if (!order.Accepted)
         {
             var rejectReason = $"live futures entry rejected: {order.Error ?? order.Status}";
-            Console.WriteLine($"futures-live-order-rejected: pair={pair} krakenPair={instrument.KrakenPair} side={side} rawSize={rawSize:0.########} size={size:0.########} quantityDecimals={quantityDecimals} leverage={entryLeverage:0.#}x reason={rejectReason}");
+            Console.WriteLine($"futures-live-order-rejected: pair={pair} krakenPair={instrument.KrakenPair} side={side} rawSize={rawSize:0.########} size={size:0.########} limit={limitPrice:0.########} quantityDecimals={quantityDecimals} leverage={entryLeverage:0.#}x reason={rejectReason}");
             var rejected = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, entryLeverage, reason: rejectReason);
             rejected.Action.HoldReasonCode = "LIVE_ORDER_REJECTED";
             rejected.Action.FillSource = "REAL_REJECTED";
+            AttachExecutionDiagnostics(rejected.Action, referencePrice, preSubmit, limitPrice, size, order, null);
             return rejected;
         }
 
-        // Record the virtual ledger against the ACTUAL filled notional and the
-        // leverage we set on the exchange, so virtual state mirrors the real fill.
-        var opened = portfolio.Apply(state, pair, desired, markPrice, adjustedNotional, entryLeverage, reduceOnly: false, reason, exitTriggerSource, adjustedPlan);
+        if (!order.FillKnown)
+        {
+            var pendingReason = $"live Kraken Futures order accepted id={order.OrderId ?? "-"} status={order.Status} but fill details were not returned; reconciliation pending";
+            Console.WriteLine($"EXECUTION pair={pair} symbol={instrument.KrakenPair} side={side} status=FILL_RECONCILIATION_PENDING orderId={order.OrderId ?? "-"} requestedQty={size:0.########} limit={limitPrice:0.########}");
+            state.PendingFuturesOrders.RemoveAll(order => order.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
+            state.PendingFuturesOrders.Add(new PendingFuturesOrder
+            {
+                Pair = pair,
+                ExchangeOrderId = order.OrderId,
+                CreatedAtUtc = _clock.UtcNow,
+                RequestedQuantity = size,
+                SubmittedLimitPrice = limitPrice
+            });
+            var pending = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, entryLeverage, reason: pendingReason);
+            pending.Action.HoldReasonCode = "FILL_RECONCILIATION_PENDING";
+            pending.Action.FillSource = "FILL_RECONCILIATION_PENDING";
+            AttachExecutionDiagnostics(pending.Action, referencePrice, preSubmit, limitPrice, size, order, null);
+            return pending;
+        }
+
+        var fillDetails = order.Fill!;
+        var filledNotionalEur = config.Futures.UsdPerEur <= 0m
+            ? fillDetails.Quantity * fillDetails.AveragePrice
+            : fillDetails.Quantity * fillDetails.AveragePrice / config.Futures.UsdPerEur;
+        var adjustedPlan = entryPlan is null
+            ? null
+            : entryPlan with { FilledNotionalEur = filledNotionalEur };
+
+        // Record the virtual ledger against the exchange average fill and filled
+        // quantity. Partial IOC fills commit only the filled part; unfilled remainder
+        // is canceled by the exchange.
+        var opened = portfolio.Apply(state, pair, desired, fillDetails.AveragePrice, filledNotionalEur, entryLeverage, reduceOnly: false, reason, exitTriggerSource, adjustedPlan);
         opened.Action.FillSource = "REAL";
-        opened.Action.Reason = $"live Kraken Futures order accepted id={order.OrderId ?? "-"} status={order.Status}; {opened.Action.Reason}";
+        opened.Action.Reason = $"live Kraken Futures IOC accepted id={order.OrderId ?? "-"} status={order.Status}; {opened.Action.Reason}";
+        AttachExecutionDiagnostics(opened.Action, referencePrice, preSubmit, limitPrice, size, order, fillDetails);
+        Console.WriteLine($"EXECUTION pair={pair} symbol={instrument.KrakenPair} side={side} status={order.Status} orderId={order.OrderId ?? "-"} requestedQty={size:0.########} filledQty={fillDetails.Quantity:0.########} avgFill={fillDetails.AveragePrice:0.########} limit={limitPrice:0.########}");
         return opened;
     }
 
@@ -690,6 +777,8 @@ internal sealed class FuturesDecisionWorker(
 
         var before = state.Positions.Count;
         state.Positions = imported;
+        state.PendingFuturesOrders.RemoveAll(order =>
+            imported.Any(position => position.Pair.Equals(order.Pair, StringComparison.OrdinalIgnoreCase)));
         state.UpdatedAt = utc;
         Console.WriteLine($"futures-kraken-sync: accounts={accounts.Count} remotePositions={positions.Count} trackedPositions={state.Positions.Count} previousTracked={before} availableMargin={state.CashEur:0.####}");
     }
@@ -717,6 +806,11 @@ internal sealed class FuturesDecisionWorker(
         if (desired == FuturesDesiredExposure.Flat)
         {
             return new RiskEvaluation(true, new[] { "no exposure requested" });
+        }
+
+        if (state.PendingFuturesOrders.Any(order => order.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase)))
+        {
+            return new RiskEvaluation(false, new[] { "fill reconciliation pending for this pair; duplicate entry blocked" });
         }
 
         if (IsInEntryBlackout(utc))
@@ -878,6 +972,49 @@ internal sealed class FuturesDecisionWorker(
         action.BtcRegimeState = plan.BtcRegimeState;
         action.ShortAllowed = plan.ShortAllowed;
     }
+
+    private static void AttachEntryFreshnessDiagnostics(DryRunAction action, EntryFreshnessResult freshness)
+    {
+        action.EntryFreshnessPositionIn24hRangePct = freshness.PositionIn24hRangePct;
+        action.EntryFreshnessDistanceFromRecentHighPct = freshness.DistanceFromRecentHighPct;
+        action.EntryFreshnessLastSnapshotStepPct = freshness.LastSnapshotStepPct;
+        action.EntryFreshnessShortSnapshotSlopePct = freshness.ShortSnapshotSlopePct;
+        action.EntryFreshnessPositiveStepsInLast3 = freshness.PositiveStepsInLast3;
+        action.EntryFreshnessIsNearHigh = freshness.IsNearHigh;
+        action.EntryFreshnessHasFreshUpwardTape = freshness.HasFreshUpwardTape;
+        action.EntryFreshnessHasFreshBreakout = freshness.HasFreshBreakout;
+        action.EntryFreshnessBlockReason = freshness.BlockReason;
+    }
+
+    private static void AttachExecutionDiagnostics(
+        DryRunAction action,
+        decimal signalPrice,
+        FuturesTickerQuote preSubmit,
+        decimal submittedLimitPrice,
+        decimal requestedQuantity,
+        FuturesOrderResult? order,
+        FuturesOrderFill? fill)
+    {
+        action.SignalPrice = signalPrice;
+        action.PreSubmitBid = preSubmit.Bid;
+        action.PreSubmitAsk = preSubmit.Ask;
+        action.SubmittedLimitPrice = submittedLimitPrice;
+        action.RequestedQuantity = requestedQuantity;
+        action.ExchangeOrderId = order?.OrderId;
+        if (fill is null)
+        {
+            return;
+        }
+
+        action.FilledQuantity = fill.Quantity;
+        action.AverageFillPrice = fill.AveragePrice;
+        action.ExchangeFillTimestamp = fill.TimestampUtc;
+        action.EntryDeviationFromSignalPct = PercentDiff(fill.AveragePrice, signalPrice);
+        action.EntryDeviationFromAskPct = PercentDiff(fill.AveragePrice, preSubmit.Ask);
+    }
+
+    private static decimal? PercentDiff(decimal value, decimal reference) =>
+        reference <= 0m ? null : decimal.Round((value - reference) / reference * 100m, 6);
 
     private decimal ExpectedFundingPct(FuturesDesiredExposure desired, decimal? fundingRatePercent)
     {
@@ -1076,7 +1213,9 @@ internal sealed class FuturesDecisionWorker(
         Contributions = signal.Contributions,
         DryRunAction = fill.Action,
         EntryRejectionReason = fill.Action.Action == "NO_ORDER"
-            ? (riskApproved ? "REJECT_NO_FUTURES_SIGNAL" : "REJECT_FUTURES_RISK")
+            ? (riskApproved
+                ? "REJECT_NO_FUTURES_SIGNAL"
+                : EntryRejection.FromHoldReasonCode(fill.Action.HoldReasonCode) ?? "REJECT_FUTURES_RISK")
             : null,
         SpreadPercent = SpreadPercentOf(marketState),
         HasBullishStructure = signal.HasBullishStructure,

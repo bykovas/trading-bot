@@ -2,6 +2,15 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-13-futures-entry-freshness-ioc-fill-control
+
+- Added a futures-only entry freshness guard before portfolio/risk/BTC-regime override checks. LONG entries near the recent high are now blocked when the 24h range position and recent-high distance show a late entry and the short live tape does not confirm fresh upside. The defaults (`NearHighMin24hRangePositionPct=88`, `NearHighMaxDistanceFromRecentHighPct=0.5`, 12-candle high lookback, 3-snapshot tape, `FreshTapeMinSlopePct=0.05`) are chosen from the RIVER-block / JUP-pass forensic cases and should be re-tuned on more live history.
+- Added `SnapshotPriceHistory.RecentObservations` and persisted freshness diagnostics on decision actions: 24h range position, distance from recent high, latest snapshot step, short tape slope, positive steps, near-high/fresh-tape/breakout flags, and block reason. Freshness rejections map to `REJECT_ENTRY_STALE_NEAR_HIGH`.
+- Live futures entries now refresh the Kraken Futures ticker immediately before submit and reject entries whose refreshed quote already exceeds `Entry.MaxEntryPriceDeviationPct` (default 0.35%) from the signal reference. Accepted entries are submitted as IOC marketable-limit orders at the allowed limit instead of uncontrolled market orders; reduce-only exits remain market orders.
+- Kraken Futures order results now parse execution events into filled quantity, average fill price, fee when present, and fill timestamp. The local ledger commits only exchange-confirmed filled quantity at the real average fill price; missing fill readback becomes `FILL_RECONCILIATION_PENDING` and blocks duplicate same-symbol entries until Kraken reconciliation imports the position.
+- Decision records now include execution telemetry (`SignalPrice`, `PreSubmitBid/Ask`, `SubmittedLimitPrice`, requested/filled quantity, average fill, deviation from signal/ask, exchange order id/fill timestamp). The SQL decisions view exposes the new freshness and execution fields.
+- Not changed: margin-based sizing semantics from `TargetMarginEur * leverage`, TP/SL percentages, max leverage, funding/depth/margin gates, short scoring, market-data universe discovery, and reduce-only exit behavior.
+
 ## 2026-07-13-futures-margin-based-sizing
 
 - Fixed futures position sizing to be margin-based. Previously `Futures.TargetNotionalEur=10` was treated as the position NOTIONAL, so at 10x leverage the bot posted only ~1 EUR margin (observed RIVER: 2.8 units, ~9.83 USD notional, ~0.98 USD margin). The business input is now `Futures.TargetMarginEur` (initial margin), and the position notional is derived ONCE as `TargetMarginEur * leverage` via `FuturesOptions.DerivedNotionalEur`. At `TargetMarginEur=10`, `DefaultLeverage=10` the bot now opens ~100 EUR notional and posts ~10 EUR margin; RIVER quantity becomes ~30.8 (≈11x the old 2.8). Nothing multiplies by leverage a second time.

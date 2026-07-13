@@ -489,7 +489,27 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 decision -> 'dryRunAction' ->> 'exitTriggerSource' as exit_trigger_source,
                 decision -> 'dryRunAction' ->> 'fillSource' as fill_source,
                 (decision -> 'dryRunAction' ->> 'modeledFillPrice')::numeric as modeled_fill_price,
-                (decision -> 'dryRunAction' ->> 'modeledFeeEur')::numeric as modeled_fee_eur
+                (decision -> 'dryRunAction' ->> 'modeledFeeEur')::numeric as modeled_fee_eur,
+                (decision -> 'dryRunAction' ->> 'entryFreshnessPositionIn24hRangePct')::numeric as entry_freshness_position_in_24h_range_pct,
+                (decision -> 'dryRunAction' ->> 'entryFreshnessDistanceFromRecentHighPct')::numeric as entry_freshness_distance_from_recent_high_pct,
+                (decision -> 'dryRunAction' ->> 'entryFreshnessLastSnapshotStepPct')::numeric as entry_freshness_last_snapshot_step_pct,
+                (decision -> 'dryRunAction' ->> 'entryFreshnessShortSnapshotSlopePct')::numeric as entry_freshness_short_snapshot_slope_pct,
+                (decision -> 'dryRunAction' ->> 'entryFreshnessPositiveStepsInLast3')::int as entry_freshness_positive_steps_in_last_3,
+                (decision -> 'dryRunAction' ->> 'entryFreshnessIsNearHigh')::boolean as entry_freshness_is_near_high,
+                (decision -> 'dryRunAction' ->> 'entryFreshnessHasFreshUpwardTape')::boolean as entry_freshness_has_fresh_upward_tape,
+                (decision -> 'dryRunAction' ->> 'entryFreshnessHasFreshBreakout')::boolean as entry_freshness_has_fresh_breakout,
+                decision -> 'dryRunAction' ->> 'entryFreshnessBlockReason' as entry_freshness_block_reason,
+                (decision -> 'dryRunAction' ->> 'signalPrice')::numeric as signal_price,
+                (decision -> 'dryRunAction' ->> 'preSubmitBid')::numeric as pre_submit_bid,
+                (decision -> 'dryRunAction' ->> 'preSubmitAsk')::numeric as pre_submit_ask,
+                (decision -> 'dryRunAction' ->> 'submittedLimitPrice')::numeric as submitted_limit_price,
+                (decision -> 'dryRunAction' ->> 'requestedQuantity')::numeric as requested_quantity,
+                (decision -> 'dryRunAction' ->> 'filledQuantity')::numeric as filled_quantity,
+                (decision -> 'dryRunAction' ->> 'averageFillPrice')::numeric as average_fill_price,
+                (decision -> 'dryRunAction' ->> 'entryDeviationFromSignalPct')::numeric as entry_deviation_from_signal_pct,
+                (decision -> 'dryRunAction' ->> 'entryDeviationFromAskPct')::numeric as entry_deviation_from_ask_pct,
+                decision -> 'dryRunAction' ->> 'exchangeOrderId' as exchange_order_id,
+                (decision -> 'dryRunAction' ->> 'exchangeFillTimestamp')::timestamptz as exchange_fill_timestamp
             from dry_run_cycles cycle
             cross join lateral jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision;
 

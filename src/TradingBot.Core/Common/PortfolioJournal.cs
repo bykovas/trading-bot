@@ -10,6 +10,7 @@ public sealed class PortfolioState
     // cooldowns. Old state files that predate this field deserialize to an empty
     // list, so loading legacy state stays safe.
     public List<PairActionHistory> ActionHistory { get; set; } = new();
+    public List<PendingFuturesOrder> PendingFuturesOrders { get; set; } = new();
 
     // Realized PnL accumulated in the current UTC day, used to enforce the daily
     // loss cap. Null in legacy state files (counts as zero for today).
@@ -29,8 +30,27 @@ public sealed class PortfolioState
         CashEur = CashEur,
         Positions = Positions.Select(position => position.Clone()).ToList(),
         ActionHistory = ActionHistory.Select(history => history.Clone()).ToList(),
+        PendingFuturesOrders = PendingFuturesOrders.Select(order => order.Clone()).ToList(),
         DailyRisk = DailyRisk?.Clone(),
         ExternalPnlEur = ExternalPnlEur
+    };
+}
+
+public sealed class PendingFuturesOrder
+{
+    public string Pair { get; set; } = string.Empty;
+    public string? ExchangeOrderId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public decimal? RequestedQuantity { get; set; }
+    public decimal? SubmittedLimitPrice { get; set; }
+
+    public PendingFuturesOrder Clone() => new()
+    {
+        Pair = Pair,
+        ExchangeOrderId = ExchangeOrderId,
+        CreatedAtUtc = CreatedAtUtc,
+        RequestedQuantity = RequestedQuantity,
+        SubmittedLimitPrice = SubmittedLimitPrice
     };
 }
 
@@ -245,6 +265,26 @@ public sealed class DryRunAction
     public string? ShortAllowed { get; set; }
     public decimal? RequestedNotionalEur { get; set; }
     public decimal? FilledNotionalEur { get; set; }
+    public decimal? EntryFreshnessPositionIn24hRangePct { get; set; }
+    public decimal? EntryFreshnessDistanceFromRecentHighPct { get; set; }
+    public decimal? EntryFreshnessLastSnapshotStepPct { get; set; }
+    public decimal? EntryFreshnessShortSnapshotSlopePct { get; set; }
+    public int? EntryFreshnessPositiveStepsInLast3 { get; set; }
+    public bool? EntryFreshnessIsNearHigh { get; set; }
+    public bool? EntryFreshnessHasFreshUpwardTape { get; set; }
+    public bool? EntryFreshnessHasFreshBreakout { get; set; }
+    public string? EntryFreshnessBlockReason { get; set; }
+    public decimal? SignalPrice { get; set; }
+    public decimal? PreSubmitBid { get; set; }
+    public decimal? PreSubmitAsk { get; set; }
+    public decimal? SubmittedLimitPrice { get; set; }
+    public decimal? RequestedQuantity { get; set; }
+    public decimal? FilledQuantity { get; set; }
+    public decimal? AverageFillPrice { get; set; }
+    public decimal? EntryDeviationFromSignalPct { get; set; }
+    public decimal? EntryDeviationFromAskPct { get; set; }
+    public string? ExchangeOrderId { get; set; }
+    public DateTimeOffset? ExchangeFillTimestamp { get; set; }
 
     // Margin-based sizing telemetry (futures). RequestedMarginEur is the configured
     // initial margin; the notional is RequestedMarginEur * RequestedLeverage. Actuals

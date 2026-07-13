@@ -21,6 +21,7 @@ internal sealed class FuturesBotConfiguration
     public FuturesFeesOptions Fees { get; set; } = new();
     public FundingOptions Funding { get; set; } = new();
     public FuturesEntryOptions Entry { get; set; } = new();
+    public FuturesFreshnessOptions Freshness { get; set; } = new();
     public FuturesFilterOptions Filters { get; set; } = new();
     public FuturesExitOptions Exits { get; set; } = new();
     public FuturesRegimeOptions Regime { get; set; } = new();
@@ -93,6 +94,14 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR", value => config.Futures.TargetNotionalEur = ParseDecimal(value, config.Futures.TargetNotionalEur ?? 0m));
         SetIfPresent("TRADINGBOT_FUTURES_USD_PER_EUR", value => config.Futures.UsdPerEur = ParseDecimal(value, config.Futures.UsdPerEur));
         SetIfPresent("TRADINGBOT_FUTURES_FAST_EXIT_CHECK_SECONDS", value => config.Futures.FastExitCheckSeconds = ParseInt(value, config.Futures.FastExitCheckSeconds));
+        SetIfPresent("TRADINGBOT_FUTURES_ENTRY_MAX_PRICE_DEVIATION_PERCENT", value => config.Entry.MaxEntryPriceDeviationPct = ParseDecimal(value, config.Entry.MaxEntryPriceDeviationPct));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_NEAR_HIGH_MIN_24H_RANGE_POSITION_PERCENT", value => config.Freshness.NearHighMin24hRangePositionPct = ParseDecimal(value, config.Freshness.NearHighMin24hRangePositionPct));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_NEAR_HIGH_MAX_DISTANCE_FROM_RECENT_HIGH_PERCENT", value => config.Freshness.NearHighMaxDistanceFromRecentHighPct = ParseDecimal(value, config.Freshness.NearHighMaxDistanceFromRecentHighPct));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_RECENT_HIGH_LOOKBACK_CANDLES", value => config.Freshness.RecentHighLookbackCandles = ParseInt(value, config.Freshness.RecentHighLookbackCandles));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_FRESH_TAPE_SNAPSHOT_COUNT", value => config.Freshness.FreshTapeSnapshotCount = ParseInt(value, config.Freshness.FreshTapeSnapshotCount));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_FRESH_TAPE_MIN_SLOPE_PERCENT", value => config.Freshness.FreshTapeMinSlopePct = ParseDecimal(value, config.Freshness.FreshTapeMinSlopePct));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_FRESH_TAPE_MIN_POSITIVE_STEPS", value => config.Freshness.FreshTapeMinPositiveSteps = ParseInt(value, config.Freshness.FreshTapeMinPositiveSteps));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_BREAKOUT_MIN_ABOVE_RECENT_HIGH_PERCENT", value => config.Freshness.BreakoutMinAboveRecentHighPct = ParseDecimal(value, config.Freshness.BreakoutMinAboveRecentHighPct));
         SetIfPresent("TRADINGBOT_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_LONG_SCORE", value => config.Strategy.MinimumLongScore = ParseDecimal(value, config.Strategy.MinimumLongScore));
@@ -172,6 +181,16 @@ internal sealed class FuturesBotConfiguration
         Entry.MakerFillTimeoutSec = Math.Max(1, Entry.MakerFillTimeoutSec);
         Entry.MakerRepegs = Math.Max(0, Entry.MakerRepegs);
         Entry.MaxQueueAheadMultiple = Entry.MaxQueueAheadMultiple <= 0m ? 5m : Entry.MaxQueueAheadMultiple;
+        Entry.MaxEntryPriceDeviationPct = Entry.MaxEntryPriceDeviationPct <= 0m
+            ? 0.35m
+            : Math.Clamp(Entry.MaxEntryPriceDeviationPct, 0.05m, 2m);
+        Freshness.NearHighMin24hRangePositionPct = Math.Clamp(Freshness.NearHighMin24hRangePositionPct <= 0m ? 88m : Freshness.NearHighMin24hRangePositionPct, 50m, 100m);
+        Freshness.NearHighMaxDistanceFromRecentHighPct = Math.Clamp(Freshness.NearHighMaxDistanceFromRecentHighPct <= 0m ? 0.5m : Freshness.NearHighMaxDistanceFromRecentHighPct, 0m, 10m);
+        Freshness.RecentHighLookbackCandles = Math.Clamp(Freshness.RecentHighLookbackCandles <= 0 ? 12 : Freshness.RecentHighLookbackCandles, 2, 96);
+        Freshness.FreshTapeSnapshotCount = Math.Clamp(Freshness.FreshTapeSnapshotCount <= 0 ? 3 : Freshness.FreshTapeSnapshotCount, 2, 10);
+        Freshness.FreshTapeMinSlopePct = Math.Clamp(Freshness.FreshTapeMinSlopePct <= 0m ? 0.05m : Freshness.FreshTapeMinSlopePct, 0m, 5m);
+        Freshness.FreshTapeMinPositiveSteps = Math.Clamp(Freshness.FreshTapeMinPositiveSteps <= 0 ? 2 : Freshness.FreshTapeMinPositiveSteps, 1, Freshness.FreshTapeSnapshotCount - 1);
+        Freshness.BreakoutMinAboveRecentHighPct = Math.Clamp(Freshness.BreakoutMinAboveRecentHighPct <= 0m ? 0.05m : Freshness.BreakoutMinAboveRecentHighPct, 0m, 5m);
         Filters.MinQuoteVolume24h = Filters.MinQuoteVolume24h <= 0m ? 50_000m : Filters.MinQuoteVolume24h;
         Filters.MinExitDepthMultiple = Filters.MinExitDepthMultiple <= 0m ? 5m : Filters.MinExitDepthMultiple;
         Filters.MaxExitImpactPct = Filters.MaxExitImpactPct <= 0m ? 0.5m : Filters.MaxExitImpactPct;
@@ -344,6 +363,18 @@ internal sealed class FuturesEntryOptions
     public int MakerFillTimeoutSec { get; set; } = 60;
     public int MakerRepegs { get; set; } = 1;
     public decimal MaxQueueAheadMultiple { get; set; } = 5m;
+    public decimal MaxEntryPriceDeviationPct { get; set; } = 0.35m;
+}
+
+internal sealed class FuturesFreshnessOptions
+{
+    public decimal NearHighMin24hRangePositionPct { get; set; } = 88m;
+    public decimal NearHighMaxDistanceFromRecentHighPct { get; set; } = 0.5m;
+    public int RecentHighLookbackCandles { get; set; } = 12;
+    public int FreshTapeSnapshotCount { get; set; } = 3;
+    public decimal FreshTapeMinSlopePct { get; set; } = 0.05m;
+    public int FreshTapeMinPositiveSteps { get; set; } = 2;
+    public decimal BreakoutMinAboveRecentHighPct { get; set; } = 0.05m;
 }
 
 internal sealed class FuturesFilterOptions
