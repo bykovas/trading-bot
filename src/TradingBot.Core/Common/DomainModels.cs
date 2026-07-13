@@ -104,7 +104,8 @@ public sealed record TechnicalSignal(
     bool VolumeConfirmed = false,
     bool AllowsShort = false,
     bool HasBearishStructure = false,
-    decimal? BearishEmaGapPercent = null);
+    decimal? BearishEmaGapPercent = null,
+    decimal ShortScore = 0m);
 
 public sealed record SignalContribution(
     string Name,

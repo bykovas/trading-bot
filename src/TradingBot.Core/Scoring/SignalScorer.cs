@@ -289,7 +289,8 @@ public static class SignalScorer
             volumeConfirmed,
             allowsShort,
             hasBearishStructure,
-            bearishEmaGapPercent);
+            bearishEmaGapPercent,
+            roundedShortScore);
     }
 
     private static bool HasEarlyBullishStructure(decimal emaGapPercent, decimal minimumEmaGapPercent)

@@ -1018,9 +1018,9 @@ internal sealed class FuturesDecisionWorker(
             return (false, "pair bearish signal not confirmed");
         }
 
-        if (signal.Score < config.Shorts.MinShortScore)
+        if (signal.ShortScore < config.Shorts.MinShortScore)
         {
-            return (false, $"short score {signal.Score:0.##} below {config.Shorts.MinShortScore:0.##}");
+            return (false, $"short score {signal.ShortScore:0.##} below {config.Shorts.MinShortScore:0.##}");
         }
 
         return (true, "short gates passed");
@@ -1122,7 +1122,7 @@ internal sealed class FuturesDecisionWorker(
 
         if (signal.HasBearishStructure && !signal.AllowsShort)
         {
-            return $"no futures short: bearish EMA structure present but downside confirmation did not clear the short gate; long score {signal.Score:0.##}";
+            return $"no futures short: bearish EMA structure present but downside confirmation did not clear the short gate; short score {signal.ShortScore:0.##}, long score {signal.Score:0.##}";
         }
 
         return $"no futures signal: score {signal.Score:0.##}, long threshold {config.Strategy.MinimumLongScore:0.##}, EMA gap requirement {config.Strategy.MinimumEmaGapPercent:0.###}%";

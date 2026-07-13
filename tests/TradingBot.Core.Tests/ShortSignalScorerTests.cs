@@ -32,6 +32,7 @@ public sealed class ShortSignalScorerTests
 
         Assert.True(signal.AllowsShort);
         Assert.True(signal.HasBearishStructure);
+        Assert.True(signal.ShortScore >= strategy.MinimumLongScore);
         Assert.Equal(SignalIntent.ShortCandidate, SignalScorer.IntentOf(signal, strategy));
         Assert.Contains(signal.Contributions, contribution => contribution.Name == "ShortMomentum" && contribution.Value > 0m);
     }
@@ -63,6 +64,7 @@ public sealed class ShortSignalScorerTests
         var signal = SignalScorer.Evaluate(state, indicators, strategy);
 
         Assert.False(signal.AllowsShort);
+        Assert.True(signal.ShortScore > signal.Score);
         Assert.Equal(SignalIntent.None, SignalScorer.IntentOf(signal, strategy));
     }
 

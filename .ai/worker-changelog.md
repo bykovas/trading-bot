@@ -2,6 +2,11 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-13-futures-short-score-gate
+
+- Futures short entries now gate on the scorer's dedicated bearish `ShortScore` instead of the regular long-biased `Score`. Previously the diagnostics could show a valid short diagnostic score while `EvaluateShortGate` rejected the trade as `short score < threshold` using the unrelated long score, effectively suppressing legitimate short candidates.
+- No change to long entries, leverage, sizing, TP/SL, BTC regime, spread/extension gates, or live Kraken execution. Shorts still require bearish EMA structure, downside confirmation, BTC short regime, and `Shorts.MinShortScore`.
+
 ## 2026-07-13-futures-entry-tuning-fixed-tpsl
 
 - Tuned futures entry gates from live snapshot replay: `Strategy.MinimumLongScore` 0.85 -> 0.80, `Strategy.MinimumEmaGapPercent` 0.30 -> 0.20, `Strategy.MaxEntrySpreadPercent` 0.15 -> 0.25, `Strategy.MaxEntryExtensionPercent` 0.6 -> 1.0, and `Shorts.MinShortScore` 0.90 -> 0.85. Position size, leverage, max positions, and universe discovery are unchanged.
