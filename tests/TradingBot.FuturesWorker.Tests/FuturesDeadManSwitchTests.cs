@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using TradingBot.Core.Indicators;
 using TradingBot.Core.MarketData;
 using Xunit;
@@ -142,6 +143,15 @@ public sealed class FuturesDeadManSwitchTests
         var action = Assert.Single(saved.ActionHistory);
         Assert.NotNull(action.LastSellAtUtc);
         Assert.NotNull(action.LastStopLossAtUtc);
+
+        var eventsPath = Path.Combine(outputDirectory, config.DryRun.EventsFile);
+        var closeCycle = Assert.Single(File.ReadAllLines(eventsPath));
+        using var doc = JsonDocument.Parse(closeCycle);
+        var decision = Assert.Single(doc.RootElement.GetProperty("decisions").EnumerateArray());
+        var closeAction = decision.GetProperty("dryRunAction");
+        Assert.Equal("WOULD_CLOSE", closeAction.GetProperty("action").GetString());
+        Assert.Equal("SELL_STOP_LOSS", closeAction.GetProperty("exitReasonCode").GetString());
+        Assert.Equal("SNX/USD", closeAction.GetProperty("pair").GetString());
     }
 
     [Fact]

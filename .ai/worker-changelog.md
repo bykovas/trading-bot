@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-13-futures-fast-exit-journal
+
+- Futures fast-exit closes now persist a dedicated dry-run cycle event with the close decision, `WOULD_CLOSE` action, exit reason, ledger before/after, and worker metadata. Previously fast-exit updated `portfolio_state` and logs only, so UI/API trade journals could show the live entry without the matching close even though Kraken and portfolio sync were already flat.
+- The dry-run cycle summary view now counts `WOULD_CLOSE` as a sell alongside spot-style `WOULD_SELL`, so futures close activity is included in sell aggregates.
+- Not changed: entry scoring, order execution, TP/SL thresholds, sizing, leverage, Kraken reconciliation, or the fast-exit 10-second cadence.
+
 ## 2026-07-12-spot-live-balance-drift-cost-basis
 
 - Fixed spot live Kraken reconciliation when an existing tracked position's exchange quantity changes outside the bot or after missed/partial live fills. Previously the worker updated `Quantity` to Kraken balance but left the old `EntryNotionalEur`, so a larger synced balance could later be sold against a too-small cost basis and show impossible realized P&L (observed `BILL/EUR` +393%).

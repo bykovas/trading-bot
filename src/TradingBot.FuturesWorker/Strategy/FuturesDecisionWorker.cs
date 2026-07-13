@@ -352,6 +352,8 @@ internal sealed class FuturesDecisionWorker(
         _priceHistory.Record(utc, lightStates);
 
         var stateByPair = lightStates.ToDictionary(item => item.Instrument.Pair, StringComparer.OrdinalIgnoreCase);
+        var portfolioBefore = state.Clone();
+        var decisions = new List<DryRunDecisionRecord>();
         var closed = 0;
         foreach (var held in state.Positions.ToList())
         {
@@ -399,6 +401,7 @@ internal sealed class FuturesDecisionWorker(
             if (fill?.PositionClosed == true)
             {
                 closed++;
+                decisions.Add(BuildFastExitDecisionRecord(marketState, fill));
                 Console.WriteLine($"futures fast-exit-check: closed {held.Pair} reason={fill.Action.ExitReasonCode ?? fill.Action.Reason}");
             }
         }
@@ -406,6 +409,21 @@ internal sealed class FuturesDecisionWorker(
         portfolio.Save(state);
         if (closed > 0)
         {
+            portfolio.Store.AppendCycle(new DryRunCycleRecord
+            {
+                CycleId = $"{config.BotInstance.Id}-{utc:yyyyMMddHHmmss}-fast-exit",
+                BotInstanceId = config.BotInstance.Id,
+                BotInstanceName = config.BotInstance.Name,
+                Utc = utc,
+                MarketDataMode = config.Kraken.MarketDataMode,
+                AiProvider = "none",
+                Worker = _buildInfo,
+                ActivePairs = heldInstruments.Select(instrument => instrument.Pair).ToList(),
+                Decisions = decisions,
+                PortfolioBefore = portfolioBefore,
+                PortfolioAfter = state.Clone(),
+                EntryDiagnostics = null
+            });
             Console.WriteLine($"futures fast-exit-check: closed={closed} remainingPositions={state.Positions.Count}");
         }
     }
@@ -1047,6 +1065,31 @@ internal sealed class FuturesDecisionWorker(
         EmaGapVelocityPercent = signal.EmaGapVelocityPercent,
         PriceActionDirection = priceAction?.Direction,
         PriceActionTrendPercent = priceAction?.TrendPercent
+    };
+
+    private static DryRunDecisionRecord BuildFastExitDecisionRecord(
+        InstrumentMarketState marketState,
+        FuturesFillResult fill) => new()
+    {
+        Pair = marketState.Instrument.Pair,
+        Price = marketState.LastPrice,
+        FastEma = null,
+        SlowEma = null,
+        Rsi = null,
+        DesiredPosition = "FLAT",
+        Score = 0m,
+        RiskApproved = true,
+        RiskReasons = new[] { "fast held-position exit check" },
+        Contributions = Array.Empty<SignalContribution>(),
+        DryRunAction = fill.Action,
+        EntryRejectionReason = null,
+        SpreadPercent = SpreadPercentOf(marketState),
+        HasBullishStructure = false,
+        EmaFullyConfirmed = false,
+        BullishEmaGapPercent = null,
+        EmaGapVelocityPercent = null,
+        PriceActionDirection = null,
+        PriceActionTrendPercent = null
     };
 
     private string ExplainNoEntry(TechnicalSignal signal)

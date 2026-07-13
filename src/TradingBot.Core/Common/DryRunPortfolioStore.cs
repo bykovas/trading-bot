@@ -436,7 +436,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 (
                     select count(*)
                     from jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision
-                    where decision -> 'dryRunAction' ->> 'action' = 'WOULD_SELL'
+                    where decision -> 'dryRunAction' ->> 'action' in ('WOULD_SELL', 'WOULD_CLOSE')
                 ) as would_sell_count,
                 (
                     select count(*)
