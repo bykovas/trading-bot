@@ -33,6 +33,7 @@ internal sealed record FuturesEntryPlan(
 internal sealed record BtcRegimeState(
     bool AllowsLongs,
     bool AllowsShorts,
+    bool BlocksLongsDueToRegime,
     string Description);
 
 internal static class FuturesMath

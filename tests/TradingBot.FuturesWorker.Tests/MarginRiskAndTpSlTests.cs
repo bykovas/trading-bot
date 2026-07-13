@@ -190,6 +190,20 @@ public sealed class MarginRiskAndTpSlTests
     }
 
     [Fact]
+    public void Btc_override_flag_allows_long_entry()
+    {
+        var config = Config();
+        var risk = new MarginRiskManager(config);
+
+        var evaluation = risk.EvaluateEntry(Inputs(
+            config,
+            btcAllowsLongs: true,
+            projectedOpenRiskEur: 0.5m));
+
+        Assert.True(evaluation.Approved);
+    }
+
+    [Fact]
     public void TpSl_triggers_are_reduce_only_and_cancel_the_sibling_order()
     {
         var orchestrator = new TpSlOrchestrator(Config());

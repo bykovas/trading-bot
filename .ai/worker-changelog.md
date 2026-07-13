@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-13-futures-btc-regime-long-override
+
+- Futures BTC regime still blocks ordinary longs while BTC is below its trend filter or crashing, but high-confidence long candidates can now override that block when `signal.Score >= Regime.LongOverrideMinScore` (default 0.85). The override is recorded in the BTC regime diagnostic text passed into the risk/journal path.
+- Added `Regime.LongOverrideMinScore` plus `TRADINGBOT_FUTURES_BTC_REGIME_LONG_OVERRIDE_MIN_SCORE` for live tuning without replacing operator-owned appsettings or secrets.
+- Not changed: short regime, short score gate, spread/extension/price-action quality gates, funding/margin/depth gates, leverage, sizing, TP/SL, or Kraken execution.
+
 ## 2026-07-13-futures-short-score-gate
 
 - Futures short entries now gate on the scorer's dedicated bearish `ShortScore` instead of the regular long-biased `Score`. Previously the diagnostics could show a valid short diagnostic score while `EvaluateShortGate` rejected the trade as `short score < threshold` using the unrelated long score, effectively suppressing legitimate short candidates.

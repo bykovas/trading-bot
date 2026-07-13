@@ -823,6 +823,16 @@ internal sealed class FuturesDecisionWorker(
         BtcRegimeState btcRegime)
     {
         var shortGate = EvaluateShortGate(desired, signal, btcRegime);
+        var btcAllowsLong = btcRegime.AllowsLongs
+            || (desired == FuturesDesiredExposure.Long
+                && btcRegime.BlocksLongsDueToRegime
+                && signal.Score >= config.Regime.LongOverrideMinScore);
+        var btcRegimeState = btcRegime.Description;
+        if (btcAllowsLong && !btcRegime.AllowsLongs)
+        {
+            btcRegimeState = $"{btcRegime.Description}; long override: score {signal.Score:0.##} >= {config.Regime.LongOverrideMinScore:0.##}";
+        }
+
         return new FuturesEntryRiskInputs(
             state,
             desired,
@@ -838,8 +848,8 @@ internal sealed class FuturesDecisionWorker(
             marketState.Quote?.VolumeToday,
             ExitDepthEur(marketState, desired),
             plan.OpenRiskEur,
-            btcRegime.AllowsLongs,
-            btcRegime.Description,
+            btcAllowsLong,
+            btcRegimeState,
             shortGate.Allowed,
             shortGate.Reason);
     }
@@ -977,7 +987,7 @@ internal sealed class FuturesDecisionWorker(
         var btc = states.FirstOrDefault(state => state.Instrument.Pair.Equals(config.Regime.BtcPair, StringComparison.OrdinalIgnoreCase));
         if (btc is null || btc.Candles.Count < config.Regime.BtcTrendMa + config.Regime.BtcSlopeLookback + 1)
         {
-            return new BtcRegimeState(false, false, "BTC regime unavailable/stale");
+            return new BtcRegimeState(false, false, true, "BTC regime unavailable/stale");
         }
 
         var closes = btc.Candles.Select(candle => candle.Close).ToList();
@@ -998,6 +1008,7 @@ internal sealed class FuturesDecisionWorker(
         return new BtcRegimeState(
             allowsLongs,
             allowsShortRegime,
+            !allowsLongs,
             $"close={close:0.####} ma{config.Regime.BtcTrendMa}={ma:0.####} slope={slope:0.####} drawdown{config.Regime.BtcCrashLookback}={drawdown:0.###}% allowsLongs={allowsLongs} allowsShorts={allowsShortRegime}");
     }
 
