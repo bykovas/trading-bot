@@ -2,6 +2,11 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-14-market-snapshot-query-indexes
+
+- Added schema-managed indexes for high-volume history lookups: `market_snapshots(bot_instance_id, pair, utc desc, cycle_id desc)` and `dry_run_cycles(bot_instance_id, utc desc, cycle_id desc)`. Live `market_snapshots` has millions of rows; pair-specific UI/API reads previously scanned recent rows for all pairs before filtering.
+- Not changed: trading decisions, scoring, risk, sizing, entry/exit behavior, live execution, portfolio reconciliation, or strategy metadata.
+
 ## 2026-07-14-futures-short-btc-regime-override
 
 - Added a futures short BTC-regime override mirroring the existing long override. Strong confirmed short candidates can now pass when BTC itself is not in the bearish short regime if `ShortScore >= Regime.ShortOverrideMinScore` (default 0.85); weak shorts remain blocked by pair bearish confirmation, `Shorts.MinShortScore`, and the existing BTC gate.
