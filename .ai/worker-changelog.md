@@ -2,6 +2,11 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-14-futures-correlation-cap-100-notional
+
+- Raised the futures default per-correlation-group exposure cap from EUR 10 to EUR 100 so the risk layer matches the current `TargetMarginEur=10` at `DefaultLeverage=10` sizing. With the old explicit cap, a normal 100 EUR notional entry was rejected as `correlation group ... exposure EUR 100 exceeds cap EUR 10`, blocking otherwise eligible live candidates before execution.
+- Not changed: one open position per correlation group, leverage, target margin, TP/SL, entry freshness, spread/price-action quality gates, BTC regime, IOC execution, and Kraken reconciliation.
+
 ## 2026-07-13-futures-entry-freshness-ioc-fill-control
 
 - Added a futures-only entry freshness guard before portfolio/risk/BTC-regime override checks. LONG entries near the recent high are now blocked when the 24h range position and recent-high distance show a late entry and the short live tape does not confirm fresh upside. The defaults (`NearHighMin24hRangePositionPct=88`, `NearHighMaxDistanceFromRecentHighPct=0.5`, 12-candle high lookback, 3-snapshot tape, `FreshTapeMinSlopePct=0.05`) are chosen from the RIVER-block / JUP-pass forensic cases and should be re-tuned on more live history.
