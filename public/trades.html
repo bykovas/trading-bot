@@ -754,8 +754,37 @@
       return "info";
     }
 
-    function reasonIncludes(reason, text) {
-      return String(reason || "").toLowerCase().includes(text);
+    function normalizedReason(reason) {
+      return String(reason || "")
+        .toLowerCase()
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function inferExitCode(code, reason) {
+      if (code) return code;
+      const normalized = normalizedReason(reason);
+      if (normalized.includes("take profit")) return "SELL_TAKE_PROFIT";
+      if (normalized.includes("stop loss")) return "SELL_STOP_LOSS";
+      if (normalized.includes("score decay")) return "SELL_SCORE_DECAY";
+      if (normalized.includes("post entry adverse")) return "SELL_POST_ENTRY_ADVERSE";
+      if (normalized.includes("conditional max hold") || normalized.includes("max hold")) return "SELL_MAX_HOLD";
+      if (normalized.includes("trailing stop")) return "SELL_TRAILING_STOP";
+      if (normalized.includes("kill switch")) return "SELL_KILL_SWITCH";
+      if (normalized.includes("emergency risk")) return "SELL_EMERGENCY_RISK";
+      if (normalized.includes("broker safety")) return "SELL_BROKER_SAFETY";
+      if (
+        normalized.includes("signal flip") ||
+        normalized.includes("signal reversal close") ||
+        normalized.includes("desired exposure flipped to flat") ||
+        normalized.includes("confirmed bearish flip") ||
+        normalized.includes("strategy no longer wanted") ||
+        normalized.includes("strategy no longer wants")
+      ) {
+        return "SELL_SIGNAL_FLIP";
+      }
+      return null;
     }
 
     function exitLabel(code, reason) {
@@ -771,11 +800,8 @@
         SELL_EMERGENCY_RISK: "emergency",
         SELL_BROKER_SAFETY: "broker safety"
       };
-      if (code && labels[code]) return labels[code];
-      if (reasonIncludes(reason, "take-profit")) return labels.SELL_TAKE_PROFIT;
-      if (reasonIncludes(reason, "stop-loss")) return labels.SELL_STOP_LOSS;
-      if (reasonIncludes(reason, "conditional max-hold")) return labels.SELL_MAX_HOLD;
-      if (reasonIncludes(reason, "max-hold")) return labels.SELL_MAX_HOLD;
+      const inferred = inferExitCode(code, reason);
+      if (inferred && labels[inferred]) return labels[inferred];
       return "exit";
     }
 
@@ -792,15 +818,8 @@
         SELL_EMERGENCY_RISK: "Продал из-за emergency risk rule.",
         SELL_BROKER_SAFETY: "Продал из-за broker/account safety rule."
       };
-      if (code && map[code]) return map[code];
-      if (reasonIncludes(reason, "conditional max-hold exit")) return map.SELL_MAX_HOLD;
-      if (reasonIncludes(reason, "max-hold exit")) return map.SELL_MAX_HOLD;
-      if (reasonIncludes(reason, "take-profit")) return map.SELL_TAKE_PROFIT;
-      if (reasonIncludes(reason, "stop-loss")) return map.SELL_STOP_LOSS;
-      if (reasonIncludes(reason, "score-decay")) return map.SELL_SCORE_DECAY;
-      if (reasonIncludes(reason, "post-entry adverse")) return map.SELL_POST_ENTRY_ADVERSE;
-      if (reasonIncludes(reason, "trailing-stop")) return map.SELL_TRAILING_STOP;
-      if (reasonIncludes(reason, "signal-flip") || reasonIncludes(reason, "confirmed bearish flip")) return map.SELL_SIGNAL_FLIP;
+      const inferred = inferExitCode(code, reason);
+      if (inferred && map[inferred]) return map[inferred];
       return "Продал по exit rule. Точный технический текст ниже.";
     }
 
