@@ -7,6 +7,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>@title — Blynai Capital</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="~/css/blynai.tokens.css" asp-append-version="true" />
   <link rel="stylesheet" href="~/css/blynai.layout.css" asp-append-version="true" />
   <link rel="stylesheet" href="~/css/blynai.components.css" asp-append-version="true" />
@@ -14,7 +17,20 @@
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <a class="brand" asp-controller="Dashboard" asp-action="Index"><span class="coin">BC</span><span><b>Blynai Capital</b><small>Bykovas-Finance Lab</small></span></a>
+      <a class="brand" asp-controller="Dashboard" asp-action="Index" aria-label="Blynai Capital">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 40 40" fill="none" focusable="false">
+            <defs><linearGradient id="g3d" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD987"/><stop offset="1" stop-color="#F5B84F"/></linearGradient></defs>
+            <path d="M16.5 9 L8.5 20 L16.5 31" stroke="url(#g3d)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <path d="M23.5 9 L31.5 20 L23.5 31" stroke="url(#g3d)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <circle cx="17" cy="17.5" r="2.1" fill="#FFD987"/>
+            <circle cx="23" cy="17.5" r="2.1" fill="#C8963B"/>
+            <circle cx="17" cy="22.5" r="2.1" fill="#C8963B"/>
+            <circle cx="23" cy="22.5" r="2.1" fill="#FFD987"/>
+          </svg>
+        </span>
+        <span><b class="brand-name">Blyn<span>AI</span> Capital</b><small>Bykovas-Finance Lab</small></span>
+      </a>
       <nav class="desktop-nav" aria-label="Primary">
         <a href="~/dashboard">Portfolio</a><a href="~/trades">Trades</a><a href="~/cycles">Cycles</a><a href="~/market-snapshots">Market</a><a href="~/simulation">Sim</a><a href="~/decision">Decision</a>
       </nav>
