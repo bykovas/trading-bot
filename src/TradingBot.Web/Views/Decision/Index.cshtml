@@ -1,0 +1,5 @@
+@model PageViewModel<CycleListItemViewModel>
+@{ ViewData["Title"] = "Decision"; ViewData["PageTitle"] = "Decision explanation"; var latest = Model.Items.FirstOrDefault(); }
+<main class="page">@await Html.PartialAsync("_ShellHeader", Model.Shell)
+<section class="hero decision"><div><p class="eyebrow">Latest replayable verdict</p><h1>@(latest?.Action ?? "NO DATA")</h1><p class="muted">@(latest?.Pair ?? "No cycle available") · score <span class="num">@(latest?.Score?.ToString("0.000") ?? "—")</span></p></div><div class="seal">BC</div></section>
+<section class="panel"><h2>Next step</h2><p class="muted">This MVC screen establishes the shared Decision layout. Rich score waterfall, risk timeline, and execution trace can be bound from cycle detail data next.</p></section></main>

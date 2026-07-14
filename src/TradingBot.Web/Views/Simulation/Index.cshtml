@@ -1,0 +1,5 @@
+@model SimulationViewModel
+@{ ViewData["Title"] = "Simulation"; ViewData["PageTitle"] = "What-if simulation"; }
+<main class="page">@await Html.PartialAsync("_ShellHeader", Model.Shell) @await Html.PartialAsync("_Notice", Model.Notice ?? "")
+<section class="panel"><form method="get" class="sim-form"><input type="hidden" name="botInstanceId" value="@Model.Shell.BotInstanceId" /><label>Hours<input name="lastHours" value="@Model.Input.LastHours" /></label><label>Spread<input name="spread" value="@Model.Input.Spread" /></label><label>Score<input name="score" value="@Model.Input.Score" /></label><label>SL<input name="sl" value="@Model.Input.StopLoss" /></label><label>TP<input name="tp" value="@Model.Input.TakeProfit" /></label><button>Run</button></form></section>
+<section class="metric-grid"><article class="metric"><span>Candidates</span><b class="num">@(Model.Result?.Candidates.ToString() ?? "—")</b></article><article class="metric"><span>Trades</span><b class="num">@(Model.Result?.Trades.ToString() ?? "—")</b></article><article class="metric"><span>Net PnL</span><b class="num">€@(Model.Result?.NetPnl.ToString("0.00") ?? "—")</b></article></section></main>

@@ -6,6 +6,22 @@ services:
     networks:
       - traefik
 
+
+  web:
+    container_name: trading-bot-web
+    image: ${WEB_IMAGE_NAME}:${WEB_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_PATHBASE: /web
+    env_file:
+      - /opt/trading-bot/web/.env
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - default
+      - traefik
+
   api:
     container_name: trading-bot-api
     image: ${API_IMAGE_NAME}:${API_IMAGE_TAG:-latest}

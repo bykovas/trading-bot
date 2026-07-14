@@ -1,0 +1,22 @@
+@model DashboardViewModel
+@{ ViewData["Title"] = "Portfolio"; ViewData["PageTitle"] = "Portfolio"; }
+<main class="page">
+  @await Html.PartialAsync("_ShellHeader", Model.Shell)
+  @await Html.PartialAsync("_Notice", Model.Notice ?? "")
+  <section class="metric-grid">
+    <article class="metric"><span>Cash</span><b class="num">€@(Model.Summary?.CashEur.ToString("0.00") ?? "—")</b></article>
+    <article class="metric"><span>Positions</span><b class="num">€@(Model.Summary?.PositionsValueEur.ToString("0.00") ?? "—")</b></article>
+    <article class="metric"><span>Total</span><b class="num">€@(Model.Summary?.TotalValueEur.ToString("0.00") ?? "—")</b></article>
+    <article class="metric"><span>Open</span><b class="num">@(Model.Summary?.OpenPositions.ToString() ?? "—")</b></article>
+  </section>
+  <section class="panel"><div class="panel-head"><h2>Open positions</h2><a class="ghost" href="~/export/cycles-and-snapshots.csv">Export CSV</a></div>
+    <div class="positions-list">
+      <div class="positions-head" aria-hidden="true"><span>Symbol</span><span>Qty</span><span>Last</span><span>uPnL</span></div>
+    @foreach (var p in Model.Positions)
+    {
+      <article class="row-card position-row"><div><b>@p.Pair</b><small><span class="side-badge @(p.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? "short" : "long")">@p.Side</span> @((p.Leverage is null) ? "spot" : $"{p.Leverage:0.#}x")</small></div><div><span class="num qty">@p.Quantity</span><small>qty</small></div><div><span class="num price">€@p.LastPrice.ToString("0.####")</span><small>last</small></div><div><span class="num pnl @(p.UnrealizedPnlEur >= 0 ? "pos" : "neg")">€@p.UnrealizedPnlEur.ToString("0.00")</span><small>uPnL</small></div></article>
+    }
+    @if (!Model.Positions.Any()) { <p class="empty">No open positions for this bot instance.</p> }
+    </div>
+  </section>
+</main>
