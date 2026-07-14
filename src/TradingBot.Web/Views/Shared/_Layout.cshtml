@@ -1,0 +1,28 @@
+@{
+    var title = ViewData["Title"] as string ?? "Blynai Capital";
+}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>@title — Blynai Capital</title>
+  <link rel="stylesheet" href="~/css/blynai.tokens.css" asp-append-version="true" />
+  <link rel="stylesheet" href="~/css/blynai.layout.css" asp-append-version="true" />
+  <link rel="stylesheet" href="~/css/blynai.components.css" asp-append-version="true" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" asp-controller="Dashboard" asp-action="Index"><span class="coin">BC</span><span><b>Blynai Capital</b><small>Bykovas-Finance Lab</small></span></a>
+      <nav class="desktop-nav" aria-label="Primary">
+        <a href="~/dashboard">Portfolio</a><a href="~/trades">Trades</a><a href="~/cycles">Cycles</a><a href="~/market-snapshots">Market</a><a href="~/simulation">Sim</a><a href="~/decision">Decision</a>
+      </nav>
+    </header>
+    @RenderBody()
+    <nav class="bottom-nav" aria-label="Mobile primary">
+      <a href="~/dashboard">Portfolio</a><a href="~/trades">Trades</a><a href="~/cycles">Cycles</a><a href="~/market-snapshots">Market</a><a href="~/simulation">Sim</a>
+    </nav>
+  </div>
+</body>
+</html>
