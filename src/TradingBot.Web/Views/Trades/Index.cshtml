@@ -1,0 +1,6 @@
+@model PageViewModel<CycleListItemViewModel>
+@{ ViewData["Title"] = "Trades"; ViewData["PageTitle"] = "Trades journal"; }
+<main class="page">@await Html.PartialAsync("_ShellHeader", Model.Shell) @await Html.PartialAsync("_Notice", Model.Notice ?? "")
+<section class="panel"><div class="panel-head"><h2>Trade cycles</h2><span class="muted">entry/exit actions</span></div><div class="card-list">
+@foreach (var c in Model.Items) { <a class="row-card link" href="~/cycles/@c.CycleId?botInstanceId=@Model.Shell.BotInstanceId"><div><b>@c.Pair</b><small>@c.BotInstanceId</small></div><div><span class="num">@c.Action</span><small>@c.Utc.ToString("MM-dd HH:mm")</small></div><div><span class="num">@(c.Score?.ToString("0.000") ?? "—")</span><small>score</small></div></a> }
+@if (!Model.Items.Any()) { <p class="empty">No trade cycles in the current window.</p> }</div></section></main>

@@ -1,0 +1,26 @@
+@model ShellViewModel
+<section class="hero compact">
+  <div>
+    <p class="eyebrow">Server-rendered cockpit</p>
+    <h1>@ViewData["PageTitle"]</h1>
+    <p class="muted">Mobile-first MVC preview at <span class="num">/web</span>. Existing API and static UI remain online.</p>
+  </div>
+  <form class="bot-switch" method="get">
+    <label for="botInstanceId">Bot instance</label>
+    <select id="botInstanceId" name="botInstanceId" onchange="this.form.submit()">
+      @if (!Model.BotInstances.Any())
+      {
+        <option selected="selected" value="@Model.BotInstanceId">@Model.BotInstanceId</option>
+      }
+      @foreach (var instance in Model.BotInstances)
+      {
+        <option value="@instance" selected="@(instance == Model.BotInstanceId)">@instance</option>
+      }
+    </select>
+  </form>
+</section>
+<section class="status-strip">
+  <span class="pill @Model.Status.Tone"><span class="dot"></span>@Model.Status.Label</span>
+  <span class="pill">mode <b>@Model.Status.MarketDataMode</b></span>
+  <span class="pill">utc <b>@Model.Status.Utc.ToString("HH:mm:ss")</b></span>
+</section>

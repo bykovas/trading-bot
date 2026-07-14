@@ -1,0 +1,13 @@
+@model PageViewModel<CycleListItemViewModel>
+@{ ViewData["Title"] = "Cycles"; ViewData["PageTitle"] = "Cycles"; }
+<main class="page">
+@await Html.PartialAsync("_ShellHeader", Model.Shell)
+@await Html.PartialAsync("_Notice", Model.Notice ?? "")
+<section class="panel"><div class="panel-head"><h2>Recent cycles</h2><span class="muted">@Model.Items.Count rows</span></div>
+<div class="card-list">
+@foreach (var c in Model.Items) { <a class="row-card link" href="~/cycles/@c.CycleId?botInstanceId=@Model.Shell.BotInstanceId"><div><b>@c.Pair</b><small>@c.CycleId</small></div><div><span class="num">@c.Action</span><small>@c.Utc.ToString("MM-dd HH:mm")</small></div><div><span class="num">@(c.Score?.ToString("0.000") ?? "—")</span><small>score</small></div><div><span class="num">@(c.ChangeSet ?? c.WorkerVersion ?? "—")</span><small>meta</small></div></a> }
+@if (!Model.Items.Any()) { <p class="empty">No cycles yet.</p> }
+</div>
+<div class="pager">@if (Model.Offset > 0) { <a href="?botInstanceId=@Model.Shell.BotInstanceId&offset=@Math.Max(0, Model.Offset - Model.Limit)&limit=@Model.Limit">Previous</a> } @if (Model.NextOffset is not null) { <a href="?botInstanceId=@Model.Shell.BotInstanceId&offset=@Model.NextOffset&limit=@Model.Limit">Next</a> }</div>
+</section>
+</main>

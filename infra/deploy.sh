@@ -9,6 +9,8 @@ TRAEFIK_DYNAMIC_FILE="${TRAEFIK_DYNAMIC_DIR}/trading-bot.yml"
 WORKER_APPSETTINGS_SOURCE="src/TradingBot.SpotWorker/appsettings.json"
 API_DIR="${DEPLOY_DIR}/api"
 API_ENV_FILE="${API_DIR}/.env"
+WEB_DIR="${DEPLOY_DIR}/web"
+WEB_ENV_FILE="${WEB_DIR}/.env"
 SPOT_DIR="${DEPLOY_DIR}/spot"
 LIVE_DIR="${SPOT_DIR}/live"
 VIRTUAL_DIR="${SPOT_DIR}/virtual"
@@ -34,6 +36,7 @@ MARKET_DATA_ENV_FILE="${MARKET_DATA_DIR}/.env"
 
 : "${UI_IMAGE_NAME:?UI_IMAGE_NAME is required}"
 : "${API_IMAGE_NAME:?API_IMAGE_NAME is required}"
+: "${WEB_IMAGE_NAME:?WEB_IMAGE_NAME is required}"
 : "${SPOT_WORKER_IMAGE_NAME:?SPOT_WORKER_IMAGE_NAME is required}"
 : "${FUTURES_WORKER_IMAGE_NAME:?FUTURES_WORKER_IMAGE_NAME is required}"
 : "${MARKET_DATA_WORKER_IMAGE_NAME:?MARKET_DATA_WORKER_IMAGE_NAME is required}"
@@ -46,6 +49,7 @@ MARKET_DATA_ENV_FILE="${MARKET_DATA_DIR}/.env"
 
 UI_IMAGE_TAG="${UI_IMAGE_TAG:-latest}"
 API_IMAGE_TAG="${API_IMAGE_TAG:-${UI_IMAGE_TAG}}"
+WEB_IMAGE_TAG="${WEB_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 SPOT_WORKER_IMAGE_TAG="${SPOT_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 FUTURES_WORKER_IMAGE_TAG="${FUTURES_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 MARKET_DATA_WORKER_IMAGE_TAG="${MARKET_DATA_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
@@ -54,6 +58,7 @@ TRAEFIK_NETWORK="${TRAEFIK_NETWORK:-traefik}"
 echo "Deploying stack '${PROJECT_NAME}' to ${DEPLOY_DIR}"
 echo "  ui     = ${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
 echo "  api    = ${API_IMAGE_NAME}:${API_IMAGE_TAG}"
+echo "  web    = ${WEB_IMAGE_NAME}:${WEB_IMAGE_TAG}"
 echo "  worker = ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}"
 echo "  live   = trading-bot-spot-worker-live"
 echo "  virtual= trading-bot-spot-worker-virtual"
@@ -64,6 +69,7 @@ mkdir -p \
   "${DEPLOY_DIR}" \
   "${TRAEFIK_DYNAMIC_DIR}" \
   "${API_DIR}" \
+  "${WEB_DIR}" \
   "${LIVE_DIR}/data" \
   "${LIVE_DIR}/logs" \
   "${VIRTUAL_DIR}/data" \
@@ -129,6 +135,13 @@ umask 077
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
 } > "${API_ENV_FILE}"
+
+echo "Writing web environment to ${WEB_ENV_FILE}"
+{
+  printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
+  printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  printf 'ASPNETCORE_PATHBASE=/web\n'
+} > "${WEB_ENV_FILE}"
 
 echo "Writing database environment to ${DATABASE_ENV_FILE}"
 {
@@ -285,6 +298,8 @@ export UI_IMAGE_NAME
 export UI_IMAGE_TAG
 export API_IMAGE_NAME
 export API_IMAGE_TAG
+export WEB_IMAGE_NAME
+export WEB_IMAGE_TAG
 export SPOT_WORKER_IMAGE_NAME
 export SPOT_WORKER_IMAGE_TAG
 export FUTURES_WORKER_IMAGE_NAME
@@ -344,6 +359,13 @@ run_healthcheck_with_retries "trading-bot-ui container" 30 2 \
     -p "${PROJECT_NAME}" \
     -f "${COMPOSE_FILE}" \
     exec -T ui wget -q -O /tmp/trading-bot-ui-healthcheck.html http://127.0.0.1/
+
+# Web health: MVC preview must answer inside the compose network.
+run_healthcheck_with_retries "trading-bot-web container" 30 2 \
+  docker compose \
+    -p "${PROJECT_NAME}" \
+    -f "${COMPOSE_FILE}" \
+    exec -T ui wget -q -O - http://trading-bot-web:8080/web/
 
 # API health: read-only HTTP API must answer inside the compose network.
 run_healthcheck_with_retries "trading-bot-api container" 30 2 \
