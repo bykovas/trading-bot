@@ -633,7 +633,9 @@ static async Task EnsureCycleMetadataColumns(NpgsqlConnection connection, Cancel
             add column if not exists bot_instance_id text not null default 'default';
 
         create index if not exists ix_dry_run_cycles_bot_instance_utc on dry_run_cycles (bot_instance_id, utc desc);
+        create index if not exists ix_dry_run_cycles_bot_instance_utc_cycle on dry_run_cycles (bot_instance_id, utc desc, cycle_id desc);
         create index if not exists ix_market_snapshots_bot_instance_utc on market_snapshots (bot_instance_id, utc desc);
+        create index if not exists ix_market_snapshots_bot_pair_utc on market_snapshots (bot_instance_id, pair, utc desc, cycle_id desc);
         create index if not exists ix_dry_run_cycles_worker_commit on dry_run_cycles (worker_commit, utc desc);
         create index if not exists ix_dry_run_cycles_strategy_version on dry_run_cycles (strategy_version, utc desc);
         create index if not exists ix_dry_run_cycles_change_set on dry_run_cycles (change_set, utc desc);
