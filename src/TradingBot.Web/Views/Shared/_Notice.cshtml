@@ -1,0 +1,5 @@
+@model string
+@if (!string.IsNullOrWhiteSpace(Model))
+{
+  <div class="notice">@Model</div>
+}

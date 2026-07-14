@@ -1,0 +1,8 @@
+@model CycleDetailViewModel
+@{ ViewData["Title"] = "Cycle detail"; ViewData["PageTitle"] = "Cycle detail"; }
+<main class="page">
+@await Html.PartialAsync("_ShellHeader", Model.Shell)
+<section class="panel"><div class="panel-head"><h2>@Model.CycleId</h2><span class="muted">@Model.Utc.ToString("O")</span></div>
+<div class="card-list">@foreach (var d in Model.Decisions) { <article class="row-card"><div><b>@d.Pair</b><small>@d.Desired</small></div><div><span class="num">@d.Action</span><small>action</small></div><div><span class="num">@(d.Score?.ToString("0.000") ?? "—")</span><small>score</small></div><div><span>@d.RiskReason</span><small>@d.Reason</small></div></article> }</div>
+<pre class="json">@Model.RawJson</pre></section>
+</main>
