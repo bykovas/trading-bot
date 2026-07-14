@@ -2,6 +2,11 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-14-futures-short-btc-regime-override
+
+- Added a futures short BTC-regime override mirroring the existing long override. Strong confirmed short candidates can now pass when BTC itself is not in the bearish short regime if `ShortScore >= Regime.ShortOverrideMinScore` (default 0.85); weak shorts remain blocked by pair bearish confirmation, `Shorts.MinShortScore`, and the existing BTC gate.
+- Added env override `TRADINGBOT_FUTURES_BTC_REGIME_SHORT_OVERRIDE_MIN_SCORE` and default appsettings value `Regime.ShortOverrideMinScore=0.85` for live tuning. Spread, maker-fill, price-action, freshness, funding, margin, TP/SL, and IOC execution gates are unchanged.
+
 ## 2026-07-14-futures-correlation-cap-100-notional
 
 - Raised the futures default per-correlation-group exposure cap from EUR 10 to EUR 100 so the risk layer matches the current `TargetMarginEur=10` at `DefaultLeverage=10` sizing. With the old explicit cap, a normal 100 EUR notional entry was rejected as `correlation group ... exposure EUR 100 exceeds cap EUR 10`, blocking otherwise eligible live candidates before execution.

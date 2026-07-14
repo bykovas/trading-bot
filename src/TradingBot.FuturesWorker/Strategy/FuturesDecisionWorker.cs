@@ -1161,11 +1161,6 @@ internal sealed class FuturesDecisionWorker(
             return (true, null);
         }
 
-        if (!btcRegime.AllowsShorts)
-        {
-            return (false, btcRegime.Description);
-        }
-
         if (!signal.HasBearishStructure || !signal.AllowsShort)
         {
             return (false, "pair bearish signal not confirmed");
@@ -1174,6 +1169,16 @@ internal sealed class FuturesDecisionWorker(
         if (signal.ShortScore < config.Shorts.MinShortScore)
         {
             return (false, $"short score {signal.ShortScore:0.##} below {config.Shorts.MinShortScore:0.##}");
+        }
+
+        if (!btcRegime.AllowsShorts)
+        {
+            if (signal.ShortScore >= config.Regime.ShortOverrideMinScore)
+            {
+                return (true, $"short override: score {signal.ShortScore:0.##} >= {config.Regime.ShortOverrideMinScore:0.##}; {btcRegime.Description}");
+            }
+
+            return (false, btcRegime.Description);
         }
 
         return (true, "short gates passed");

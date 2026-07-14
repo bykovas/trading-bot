@@ -111,6 +111,7 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_STRATEGY_REQUIRE_PRICE_ACTION_DATA", value => config.Strategy.RequirePriceActionData = ParseBool(value, config.Strategy.RequirePriceActionData));
         SetIfPresent("TRADINGBOT_FUTURES_MIN_SHORT_SCORE", value => config.Shorts.MinShortScore = ParseDecimal(value, config.Shorts.MinShortScore));
         SetIfPresent("TRADINGBOT_FUTURES_BTC_REGIME_LONG_OVERRIDE_MIN_SCORE", value => config.Regime.LongOverrideMinScore = ParseDecimal(value, config.Regime.LongOverrideMinScore));
+        SetIfPresent("TRADINGBOT_FUTURES_BTC_REGIME_SHORT_OVERRIDE_MIN_SCORE", value => config.Regime.ShortOverrideMinScore = ParseDecimal(value, config.Regime.ShortOverrideMinScore));
         SetIfPresent("TRADINGBOT_TPSL_TAKE_PROFIT_PERCENT", value => config.TpSl.TakeProfitPercent = ParseDecimal(value, config.TpSl.TakeProfitPercent));
         SetIfPresent("TRADINGBOT_TPSL_STOP_LOSS_PERCENT", value => config.TpSl.StopLossPercent = ParseDecimal(value, config.TpSl.StopLossPercent));
         SetIfPresent("TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED", value => config.Futures.LiveTradingEnabled = ParseBool(value, config.Futures.LiveTradingEnabled));
@@ -206,6 +207,7 @@ internal sealed class FuturesBotConfiguration
         Regime.BtcCrashLookback = Regime.BtcCrashLookback <= 0 ? 4 : Regime.BtcCrashLookback;
         Regime.BtcCrashPct = Regime.BtcCrashPct <= 0m ? 2m : Regime.BtcCrashPct;
         Regime.LongOverrideMinScore = Math.Clamp(Regime.LongOverrideMinScore <= 0m ? 0.85m : Regime.LongOverrideMinScore, 0m, 1m);
+        Regime.ShortOverrideMinScore = Math.Clamp(Regime.ShortOverrideMinScore <= 0m ? 0.85m : Regime.ShortOverrideMinScore, 0m, 1m);
         Shorts.MaxChaseDrawdownPct = Shorts.MaxChaseDrawdownPct <= 0m ? 3m : Shorts.MaxChaseDrawdownPct;
         Shorts.MinShortScore = Shorts.MinShortScore <= 0m ? 0.90m : Shorts.MinShortScore;
         // Open-risk cap must follow the NOTIONAL semantics, not the old margin-sized
@@ -404,6 +406,7 @@ internal sealed class FuturesRegimeOptions
     public int BtcCrashLookback { get; set; } = 4;
     public decimal BtcCrashPct { get; set; } = 2.0m;
     public decimal LongOverrideMinScore { get; set; } = 0.85m;
+    public decimal ShortOverrideMinScore { get; set; } = 0.85m;
 }
 
 internal sealed class FuturesShortOptions
