@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-14-futures-long-continuation-freshness
+
+- Futures LONG entry freshness is now stricter above the lower half of the 24h range: once `FreshContinuationMin24hRangePositionPct` is reached (default 50%), bullish EMA/RSI structure is not enough by itself. A LONG must have either fresh upward tape or a valid breakout; otherwise it is rejected as `entry stale continuation`.
+- Added env override `TRADINGBOT_FUTURES_FRESHNESS_FRESH_CONTINUATION_MIN_24H_RANGE_POSITION_PERCENT` and appsettings default `Freshness.FreshContinuationMin24hRangePositionPct=50` for live tuning. The existing near-high stale-entry guard remains in place for the stricter high-zone explanation.
+- Not changed: scoring weights, volume cap, spread/funding/margin/BTC-regime gates, sizing/leverage, TP/SL, IOC execution, or Kraken reconciliation.
+
 ## 2026-07-14-futures-live-price-precision-imported-tpsl
 
 - Futures live entries now round IOC limit prices to the instrument's Kraken Futures price precision before submit. The shared instrument registry stores `price_decimals` from Kraken `tickSize`; entries fall back to quote-derived precision when the registry has not been refreshed yet. This prevents marketable-limit orders such as `0.085044216800700` from being rejected by Kraken as `invalidPrice`.

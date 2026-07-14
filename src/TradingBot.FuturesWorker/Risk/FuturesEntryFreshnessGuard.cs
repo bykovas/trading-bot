@@ -51,9 +51,15 @@ internal static class FuturesEntryFreshnessGuard
             && breakout >= thresholds.BreakoutMinAboveRecentHighPct
             && spreadOk
             && tape.HasFreshUpwardTape;
-        var blocked = isNearHigh && !tape.HasFreshUpwardTape && !freshBreakout;
+        var continuationZone =
+            range.PositionIn24hRangePct is { } continuationPosition
+            && continuationPosition >= thresholds.FreshContinuationMin24hRangePositionPct;
+        var staleContinuation = continuationZone && !tape.HasFreshUpwardTape && !freshBreakout;
+        var blocked = staleContinuation || (isNearHigh && !tape.HasFreshUpwardTape && !freshBreakout);
         var reason = blocked
-            ? $"entry stale near high: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.NearHighMin24hRangePositionPct:0.###}%, distance from recent high {distanceFromRecentHighPct:0.###}% <= {thresholds.NearHighMaxDistanceFromRecentHighPct:0.###}%, short tape slope {tape.ShortSnapshotSlopePct:0.###}% is not fresh"
+            ? isNearHigh
+                ? $"entry stale near high: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.NearHighMin24hRangePositionPct:0.###}%, distance from recent high {distanceFromRecentHighPct:0.###}% <= {thresholds.NearHighMaxDistanceFromRecentHighPct:0.###}%, short tape slope {tape.ShortSnapshotSlopePct:0.###}% is not fresh"
+                : $"entry stale continuation: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.FreshContinuationMin24hRangePositionPct:0.###}%, but no fresh upward tape and no valid breakout"
             : null;
 
         return new EntryFreshnessResult(

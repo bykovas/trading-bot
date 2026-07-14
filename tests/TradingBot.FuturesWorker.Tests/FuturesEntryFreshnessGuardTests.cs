@@ -25,7 +25,7 @@ public sealed class FuturesEntryFreshnessGuardTests
     }
 
     [Fact]
-    public void Jup_fixture_passes_because_it_is_not_in_the_near_high_zone()
+    public void Mid_range_long_without_fresh_tape_or_breakout_is_blocked()
     {
         var result = FuturesEntryFreshnessGuard.Evaluate(
             Market(0.21000247245m, recentHigh: 0.21243989865m, low24: 0.196145m, quoteLast: 0.21035227177m),
@@ -33,8 +33,25 @@ public sealed class FuturesEntryFreshnessGuardTests
             FuturesDesiredExposure.Long,
             Thresholds());
 
-        Assert.False(result.Blocked);
         Assert.False(result.IsNearHigh);
+        Assert.False(result.HasFreshUpwardTape);
+        Assert.False(result.HasFreshBreakout);
+        Assert.True(result.Blocked);
+        Assert.Contains("stale continuation", result.BlockReason);
+    }
+
+    [Fact]
+    public void Mid_range_long_with_fresh_continuation_tape_is_not_blocked()
+    {
+        var result = FuturesEntryFreshnessGuard.Evaluate(
+            Market(0.21000247245m, recentHigh: 0.21243989865m, low24: 0.196145m, quoteLast: 0.21085227177m),
+            Observations(0.21011995958m, 0.21042458073m, 0.21085227177m),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.False(result.Blocked);
+        Assert.True(result.HasFreshUpwardTape);
+        Assert.False(result.HasFreshBreakout);
     }
 
     [Fact]
