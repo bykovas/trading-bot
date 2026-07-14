@@ -17,7 +17,7 @@ if (!string.IsNullOrWhiteSpace(pathBase) && pathBase != "/")
 
 if (!app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/Dashboard/Error");
+    app.UseExceptionHandler("/error");
 }
 
 app.UseStaticFiles();
