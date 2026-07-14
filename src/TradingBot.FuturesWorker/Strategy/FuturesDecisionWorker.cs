@@ -596,17 +596,19 @@ internal sealed class FuturesDecisionWorker(
 
         var referencePrice = signalPrice is > 0m ? signalPrice.Value : markPrice;
         var maxDeviation = config.Entry.MaxEntryPriceDeviationPct;
-        var limitPrice = desired == FuturesDesiredExposure.Short
+        var rawLimitPrice = desired == FuturesDesiredExposure.Short
             ? referencePrice * (1m - maxDeviation / 100m)
             : referencePrice * (1m + maxDeviation / 100m);
+        var priceDecimals = ResolvePriceDecimals(instrument, preSubmit, referencePrice);
+        var limitPrice = RoundLimitPrice(rawLimitPrice, desired, priceDecimals);
         var quoteAlreadyWorse = desired == FuturesDesiredExposure.Short
             ? preSubmit.Bid < limitPrice
             : preSubmit.Ask > limitPrice;
         if (quoteAlreadyWorse)
         {
             var rejectReason = desired == FuturesDesiredExposure.Short
-                ? $"live futures entry skipped: refreshed bid {preSubmit.Bid:0.########} is below min allowed {limitPrice:0.########} from signal {referencePrice:0.########} ({maxDeviation:0.###}% max deviation)"
-                : $"live futures entry skipped: refreshed ask {preSubmit.Ask:0.########} exceeds max allowed {limitPrice:0.########} from signal {referencePrice:0.########} ({maxDeviation:0.###}% max deviation)";
+                ? $"live futures entry skipped: refreshed bid {preSubmit.Bid:0.########} is below min allowed {limitPrice:0.########} from signal {referencePrice:0.########} ({maxDeviation:0.###}% max deviation, price decimals {priceDecimals})"
+                : $"live futures entry skipped: refreshed ask {preSubmit.Ask:0.########} exceeds max allowed {limitPrice:0.########} from signal {referencePrice:0.########} ({maxDeviation:0.###}% max deviation, price decimals {priceDecimals})";
             Console.WriteLine($"EXECUTION pair={pair} symbol={instrument.KrakenPair} side={side} rejected=PRICE_DEVIATION signal={referencePrice:0.########} bid={preSubmit.Bid:0.########} ask={preSubmit.Ask:0.########} limit={limitPrice:0.########}");
             var rejected = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage, reason: rejectReason);
             rejected.Action.HoldReasonCode = "LIVE_ENTRY_PRICE_DEVIATION";
@@ -632,7 +634,7 @@ internal sealed class FuturesDecisionWorker(
         if (!order.Accepted)
         {
             var rejectReason = $"live futures entry rejected: {order.Error ?? order.Status}";
-            Console.WriteLine($"futures-live-order-rejected: pair={pair} krakenPair={instrument.KrakenPair} side={side} rawSize={rawSize:0.########} size={size:0.########} limit={limitPrice:0.########} quantityDecimals={quantityDecimals} leverage={entryLeverage:0.#}x reason={rejectReason}");
+            Console.WriteLine($"futures-live-order-rejected: pair={pair} krakenPair={instrument.KrakenPair} side={side} rawSize={rawSize:0.########} size={size:0.########} limit={limitPrice:0.########} rawLimit={rawLimitPrice:0.##############} quantityDecimals={quantityDecimals} priceDecimals={priceDecimals} leverage={entryLeverage:0.#}x reason={rejectReason}");
             var rejected = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, entryLeverage, reason: rejectReason);
             rejected.Action.HoldReasonCode = "LIVE_ORDER_REJECTED";
             rejected.Action.FillSource = "REAL_REJECTED";
@@ -643,7 +645,7 @@ internal sealed class FuturesDecisionWorker(
         if (!order.FillKnown)
         {
             var pendingReason = $"live Kraken Futures order accepted id={order.OrderId ?? "-"} status={order.Status} but fill details were not returned; reconciliation pending";
-            Console.WriteLine($"EXECUTION pair={pair} symbol={instrument.KrakenPair} side={side} status=FILL_RECONCILIATION_PENDING orderId={order.OrderId ?? "-"} requestedQty={size:0.########} limit={limitPrice:0.########}");
+            Console.WriteLine($"EXECUTION pair={pair} symbol={instrument.KrakenPair} side={side} status=FILL_RECONCILIATION_PENDING orderId={order.OrderId ?? "-"} requestedQty={size:0.########} limit={limitPrice:0.########} priceDecimals={priceDecimals}");
             state.PendingFuturesOrders.RemoveAll(order => order.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
             state.PendingFuturesOrders.Add(new PendingFuturesOrder
             {
@@ -675,7 +677,7 @@ internal sealed class FuturesDecisionWorker(
         opened.Action.FillSource = "REAL";
         opened.Action.Reason = $"live Kraken Futures IOC accepted id={order.OrderId ?? "-"} status={order.Status}; {opened.Action.Reason}";
         AttachExecutionDiagnostics(opened.Action, referencePrice, preSubmit, limitPrice, size, order, fillDetails);
-        Console.WriteLine($"EXECUTION pair={pair} symbol={instrument.KrakenPair} side={side} status={order.Status} orderId={order.OrderId ?? "-"} requestedQty={size:0.########} filledQty={fillDetails.Quantity:0.########} avgFill={fillDetails.AveragePrice:0.########} limit={limitPrice:0.########}");
+        Console.WriteLine($"EXECUTION pair={pair} symbol={instrument.KrakenPair} side={side} status={order.Status} orderId={order.OrderId ?? "-"} requestedQty={size:0.########} filledQty={fillDetails.Quantity:0.########} avgFill={fillDetails.AveragePrice:0.########} limit={limitPrice:0.########} priceDecimals={priceDecimals}");
         return opened;
     }
 
@@ -689,6 +691,60 @@ internal sealed class FuturesDecisionWorker(
         }
 
         return Math.Truncate(value * factor) / factor;
+    }
+
+    private static decimal RoundLimitPrice(decimal value, FuturesDesiredExposure desired, int decimals)
+    {
+        decimals = Math.Clamp(decimals, 0, 8);
+        var factor = 1m;
+        for (var i = 0; i < decimals; i++)
+        {
+            factor *= 10m;
+        }
+
+        var scaled = value * factor;
+        var rounded = desired == FuturesDesiredExposure.Short
+            ? Math.Ceiling(scaled)
+            : Math.Floor(scaled);
+        return rounded / factor;
+    }
+
+    private static int ResolvePriceDecimals(InstrumentOptions instrument, FuturesTickerQuote preSubmit, decimal referencePrice)
+    {
+        if (instrument.PriceDecimals is >= 0)
+        {
+            return Math.Clamp(instrument.PriceDecimals.Value, 0, 8);
+        }
+
+        return new[]
+            {
+                DecimalPlaces(preSubmit.Bid),
+                DecimalPlaces(preSubmit.Ask),
+                DecimalPlaces(preSubmit.Last),
+                DecimalPlaces(preSubmit.MarkPrice ?? 0m),
+                DecimalPlaces(referencePrice)
+            }
+            .Where(decimals => decimals > 0)
+            .DefaultIfEmpty(2)
+            .Min();
+    }
+
+    private static int DecimalPlaces(decimal value)
+    {
+        if (value <= 0m)
+        {
+            return 0;
+        }
+
+        value = decimal.Round(value, 8);
+        var places = 0;
+        while (places < 8 && value != decimal.Truncate(value))
+        {
+            value *= 10m;
+            places++;
+        }
+
+        return places;
     }
 
     private async Task RefreshDeadManSwitchAsync(CancellationToken cancellationToken)
@@ -744,6 +800,7 @@ internal sealed class FuturesDecisionWorker(
             var initialMargin = leverage <= 0m ? notional : notional / leverage;
             var pnl = FuturesMath.UnrealizedPnlEur(remote.Side, remote.EntryPrice, mark, remote.Size);
             var existing = state.Positions.FirstOrDefault(position => position.Pair.Equals(instrument.Pair, StringComparison.OrdinalIgnoreCase));
+            var tpSl = ImportedTpSl(existing, remote.Side, remote.EntryPrice);
             imported.Add(new PortfolioPosition
             {
                 Pair = instrument.Pair,
@@ -762,16 +819,16 @@ internal sealed class FuturesDecisionWorker(
                 InitialMarginEur = initialMargin,
                 LiquidationPrice = FuturesMath.EstimateLiquidationPrice(remote.Side, remote.EntryPrice, leverage, config.Margin.MaintenanceMarginRatePercent),
                 LiquidationDistancePercent = FuturesMath.LiquidationDistancePercent(mark, FuturesMath.EstimateLiquidationPrice(remote.Side, remote.EntryPrice, leverage, config.Margin.MaintenanceMarginRatePercent)),
-                TpOrderState = existing?.TpOrderState,
-                SlOrderState = existing?.SlOrderState,
-                StopLossPrice = existing?.StopLossPrice,
-                TakeProfitPrice = existing?.TakeProfitPrice,
+                TpOrderState = tpSl.TpOrderState,
+                SlOrderState = tpSl.SlOrderState,
+                StopLossPrice = tpSl.StopLossPrice,
+                TakeProfitPrice = tpSl.TakeProfitPrice,
                 EntryAtr = existing?.EntryAtr,
                 RoundTripCostEstimatePct = existing?.RoundTripCostEstimatePct,
                 ExpectedFundingPct = existing?.ExpectedFundingPct,
                 AtrPct = existing?.AtrPct,
-                StopDistancePct = existing?.StopDistancePct,
-                TakeProfitDistancePct = existing?.TakeProfitDistancePct
+                StopDistancePct = tpSl.StopDistancePct,
+                TakeProfitDistancePct = tpSl.TakeProfitDistancePct
             });
         }
 
@@ -781,6 +838,44 @@ internal sealed class FuturesDecisionWorker(
             imported.Any(position => position.Pair.Equals(order.Pair, StringComparison.OrdinalIgnoreCase)));
         state.UpdatedAt = utc;
         Console.WriteLine($"futures-kraken-sync: accounts={accounts.Count} remotePositions={positions.Count} trackedPositions={state.Positions.Count} previousTracked={before} availableMargin={state.CashEur:0.####}");
+    }
+
+    private (string? TpOrderState, string? SlOrderState, decimal? StopLossPrice, decimal? TakeProfitPrice, decimal? StopDistancePct, decimal? TakeProfitDistancePct) ImportedTpSl(
+        PortfolioPosition? existing,
+        string side,
+        decimal entryPrice)
+    {
+        var stopDistancePct = existing?.StopDistancePct is > 0m
+            ? existing.StopDistancePct
+            : config.TpSl.StopLossPercent;
+        var takeProfitDistancePct = existing?.TakeProfitDistancePct is > 0m
+            ? existing.TakeProfitDistancePct
+            : config.TpSl.TakeProfitPercent;
+
+        if (!config.TpSl.Enabled || entryPrice <= 0m || stopDistancePct <= 0m || takeProfitDistancePct <= 0m)
+        {
+            return (existing?.TpOrderState, existing?.SlOrderState, existing?.StopLossPrice, existing?.TakeProfitPrice, existing?.StopDistancePct, existing?.TakeProfitDistancePct);
+        }
+
+        var isShort = side.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
+        var stopLossPrice = existing?.StopLossPrice is > 0m
+            ? existing.StopLossPrice
+            : isShort
+                ? entryPrice * (1m + stopDistancePct.Value / 100m)
+                : entryPrice * (1m - stopDistancePct.Value / 100m);
+        var takeProfitPrice = existing?.TakeProfitPrice is > 0m
+            ? existing.TakeProfitPrice
+            : isShort
+                ? entryPrice * (1m - takeProfitDistancePct.Value / 100m)
+                : entryPrice * (1m + takeProfitDistancePct.Value / 100m);
+
+        return (
+            existing?.TpOrderState ?? "SIMULATED_OPEN",
+            existing?.SlOrderState ?? "SIMULATED_OPEN",
+            decimal.Round(stopLossPrice.Value, 8),
+            decimal.Round(takeProfitPrice.Value, 8),
+            stopDistancePct,
+            takeProfitDistancePct);
     }
 
     private bool IsLiveInstance =>

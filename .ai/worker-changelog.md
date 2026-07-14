@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-14-futures-live-price-precision-imported-tpsl
+
+- Futures live entries now round IOC limit prices to the instrument's Kraken Futures price precision before submit. The shared instrument registry stores `price_decimals` from Kraken `tickSize`; entries fall back to quote-derived precision when the registry has not been refreshed yet. This prevents marketable-limit orders such as `0.085044216800700` from being rejected by Kraken as `invalidPrice`.
+- Futures Kraken reconciliation now arms imported/manual positions with simulated TP/SL levels when the position exists on Kraken but the local ledger has no saved levels. The levels use the configured fixed TP/SL percentages from entry price (`TpSl.TakeProfitPercent`, `TpSl.StopLossPercent`) and set both simulated order states to open, so fast/full exit checks can close externally opened positions at TP/SL.
+- Not changed: entry scores, spread/freshness/BTC/funding/margin gates, target margin/leverage sizing, reduce-only close order type, or the 10-second fast-exit cadence.
+
 ## 2026-07-14-market-snapshot-query-indexes
 
 - Added schema-managed indexes for high-volume history lookups: `market_snapshots(bot_instance_id, pair, utc desc, cycle_id desc)` and `dry_run_cycles(bot_instance_id, utc desc, cycle_id desc)`. Live `market_snapshots` has millions of rows; pair-specific UI/API reads previously scanned recent rows for all pairs before filtering.

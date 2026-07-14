@@ -73,6 +73,73 @@ public sealed class FuturesDeadManSwitchTests
     }
 
     [Fact]
+    public async Task Live_reconciliation_arms_tpsl_for_imported_position()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
+        var config = new FuturesBotConfiguration
+        {
+            BotInstance = new BotInstanceOptions { Id = "futures-live", Name = "test" },
+            Futures = new FuturesOptions
+            {
+                LiveTradingEnabled = true,
+                DefaultLeverage = 10m,
+                MaxLeverage = 10m,
+                DeadManSwitchSeconds = 240
+            },
+            TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 3m, StopLossPercent = 2m },
+            Worker = new WorkerOptions { RunOnce = true, LoopIntervalSeconds = 120 },
+            Kraken = new KrakenOptions { MarketDataMode = "sample" },
+            Trading = new TradingOptions { MaxActiveInstruments = 3, TimeframeMinutes = 5 },
+            DryRun = new DryRunOptions { OutputDirectory = outputDirectory },
+            CandidateUniverse =
+            [
+                new InstrumentOptions
+                {
+                    Pair = "ZEC/USD",
+                    KrakenPair = "PF_ZECUSD",
+                    Enabled = true
+                }
+            ]
+        };
+        InvokeNormalize(config);
+
+        var broker = new RecordingFuturesBroker(
+        [
+            new FuturesOpenPosition("PF_ZECUSD", "LONG", 0.86m, 506.64m, 509m, 10m)
+        ]);
+        var worker = new FuturesDecisionWorker(
+            config,
+            new SampleMarketDataSource(),
+            new IndicatorEngine(),
+            new LongShortStrategy(config),
+            new MarginRiskManager(config),
+            new FuturesVirtualPortfolio(config, new FileDryRunPortfolioStore(config.DryRun)),
+            new TpSlOrchestrator(config),
+            broker);
+
+        var state = new PortfolioState { CashEur = 100m };
+        var method = typeof(FuturesDecisionWorker).GetMethod("ReconcileWithKrakenAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = (Task)method.Invoke(worker, new object?[]
+        {
+            state,
+            config.CandidateUniverse,
+            Array.Empty<InstrumentMarketState>(),
+            DateTimeOffset.UtcNow,
+            CancellationToken.None
+        })!;
+        await task;
+
+        var position = Assert.Single(state.Positions);
+        Assert.Equal("SIMULATED_OPEN", position.TpOrderState);
+        Assert.Equal("SIMULATED_OPEN", position.SlOrderState);
+        Assert.Equal(521.8392m, position.TakeProfitPrice);
+        Assert.Equal(496.5072m, position.StopLossPrice);
+        Assert.Equal(3m, position.TakeProfitDistancePct);
+        Assert.Equal(2m, position.StopDistancePct);
+    }
+
+    [Fact]
     public async Task Fast_exit_check_closes_open_position_on_stop_loss_without_full_cycle()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));

@@ -25,10 +25,12 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
                 kraken_symbol text not null,
                 enabled boolean not null default true,
                 quantity_decimals int,
+                price_decimals int,
                 updated_at timestamptz not null,
                 primary key (venue, pair)
             );
             alter table instrument_registry add column if not exists quantity_decimals int;
+            alter table instrument_registry add column if not exists price_decimals int;
 
             create table if not exists market_quotes (
                 venue text not null,
@@ -102,12 +104,13 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
         {
             using var command = new NpgsqlCommand(
                 """
-                insert into instrument_registry (venue, pair, kraken_symbol, enabled, quantity_decimals, updated_at)
-                values (@venue, @pair, @kraken_symbol, @enabled, @quantity_decimals, @updated_at)
+                insert into instrument_registry (venue, pair, kraken_symbol, enabled, quantity_decimals, price_decimals, updated_at)
+                values (@venue, @pair, @kraken_symbol, @enabled, @quantity_decimals, @price_decimals, @updated_at)
                 on conflict (venue, pair) do update set
                     kraken_symbol = excluded.kraken_symbol,
                     enabled = excluded.enabled,
                     quantity_decimals = excluded.quantity_decimals,
+                    price_decimals = excluded.price_decimals,
                     updated_at = excluded.updated_at
                 """,
                 connection);
@@ -116,6 +119,7 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
             command.Parameters.AddWithValue("kraken_symbol", instrument.KrakenSymbol);
             command.Parameters.AddWithValue("enabled", instrument.Enabled);
             command.Parameters.AddWithValue("quantity_decimals", (object?)instrument.QuantityDecimals ?? DBNull.Value);
+            command.Parameters.AddWithValue("price_decimals", (object?)instrument.PriceDecimals ?? DBNull.Value);
             command.Parameters.AddWithValue("updated_at", instrument.UpdatedAt.UtcDateTime);
             command.ExecuteNonQuery();
         }
@@ -262,7 +266,7 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
         using var connection = OpenConnection();
         using var command = new NpgsqlCommand(
             """
-            select venue, pair, kraken_symbol, enabled, updated_at, quantity_decimals
+            select venue, pair, kraken_symbol, enabled, updated_at, quantity_decimals, price_decimals
             from instrument_registry
             where venue = @venue and enabled = true
             order by pair
@@ -412,7 +416,8 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
                 reader.GetString(2),
                 reader.GetBoolean(3),
                 new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc)),
-                reader.IsDBNull(5) ? null : reader.GetInt32(5)));
+                reader.IsDBNull(5) ? null : reader.GetInt32(5),
+                reader.IsDBNull(6) ? null : reader.GetInt32(6)));
         }
 
         return results;

@@ -29,7 +29,8 @@ public sealed class DatabaseUniverseProvider(
             KrakenPair = record.KrakenSymbol,
             Venue = venue == MarketDataVenue.Futures ? "KrakenFutures" : "Kraken",
             Enabled = record.Enabled,
-            QuantityDecimals = record.QuantityDecimals
+            QuantityDecimals = record.QuantityDecimals,
+            PriceDecimals = record.PriceDecimals
         }).ToList();
 
         return Task.FromResult(new UniverseSelection(

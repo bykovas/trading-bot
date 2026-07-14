@@ -311,4 +311,5 @@ public sealed class InstrumentOptions
     public string Venue { get; set; } = "Kraken";
     public bool Enabled { get; set; } = true;
     public int? QuantityDecimals { get; set; }
+    public int? PriceDecimals { get; set; }
 }

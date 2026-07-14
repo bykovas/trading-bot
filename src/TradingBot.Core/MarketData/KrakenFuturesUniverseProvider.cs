@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace TradingBot.Core.MarketData;
@@ -77,7 +78,8 @@ public sealed class KrakenFuturesUniverseProvider(
                 KrakenPair = symbol,
                 Venue = "KrakenFutures",
                 Enabled = true,
-                QuantityDecimals = GetInt(item, "contractValueTradePrecision")
+                QuantityDecimals = GetInt(item, "contractValueTradePrecision"),
+                PriceDecimals = TickDecimals(GetDecimal(item, "tickSize"))
             });
         }
 
@@ -111,7 +113,8 @@ public sealed class KrakenFuturesUniverseProvider(
                         ? discoveredInstrument?.Venue ?? instrument.Venue
                         : instrument.Venue,
                     Enabled = true,
-                    QuantityDecimals = instrument.QuantityDecimals ?? discoveredInstrument?.QuantityDecimals
+                    QuantityDecimals = instrument.QuantityDecimals ?? discoveredInstrument?.QuantityDecimals,
+                    PriceDecimals = instrument.PriceDecimals ?? discoveredInstrument?.PriceDecimals
                 };
             }
         }
@@ -135,7 +138,8 @@ public sealed class KrakenFuturesUniverseProvider(
                     KrakenPair = configuredInstrument.KrakenPair,
                     Venue = configuredInstrument.Venue,
                     Enabled = true,
-                    QuantityDecimals = configuredInstrument.QuantityDecimals
+                    QuantityDecimals = configuredInstrument.QuantityDecimals,
+                    PriceDecimals = configuredInstrument.PriceDecimals
                 };
             }
         }
@@ -222,6 +226,33 @@ public sealed class KrakenFuturesUniverseProvider(
             JsonValueKind.String when int.TryParse(value.GetString(), out var number) => number,
             _ => null
         };
+    }
+
+    private static decimal GetDecimal(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+        {
+            return 0m;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number => value.GetDecimal(),
+            JsonValueKind.String when decimal.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var number) => number,
+            _ => 0m
+        };
+    }
+
+    private static int TickDecimals(decimal tickSize)
+    {
+        if (tickSize <= 0m)
+        {
+            return 0;
+        }
+
+        var text = tickSize.ToString("0.############################", CultureInfo.InvariantCulture);
+        var dot = text.IndexOf('.', StringComparison.Ordinal);
+        return dot < 0 ? 0 : text.Length - dot - 1;
     }
 
     private static void ThrowIfErrorResult(JsonElement root, string endpoint)

@@ -19,7 +19,7 @@ public sealed class FuturesExecutionControlTests
 
         Assert.True(fill.PositionOpened);
         Assert.Equal(1, brokerAfter.IocCallCount);
-        Assert.Equal(3.50679992910237m, decimal.Round(brokerAfter.LastLimitPrice!.Value, 14));
+        Assert.Equal(3.5067m, brokerAfter.LastLimitPrice);
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public sealed class FuturesExecutionControlTests
             false,
             string.Empty,
             null,
-            new InstrumentOptions { Pair = "RIVER/USD", KrakenPair = "PF_RIVERUSD", Enabled = true, QuantityDecimals = 8 },
+            new InstrumentOptions { Pair = "RIVER/USD", KrakenPair = "PF_RIVERUSD", Enabled = true, QuantityDecimals = 8, PriceDecimals = 4 },
             null,
             CancellationToken.None,
             signalPrice
