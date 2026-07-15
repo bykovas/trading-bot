@@ -103,6 +103,8 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_FRESH_TAPE_MIN_SLOPE_PERCENT", value => config.Freshness.FreshTapeMinSlopePct = ParseDecimal(value, config.Freshness.FreshTapeMinSlopePct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_FRESH_TAPE_MIN_POSITIVE_STEPS", value => config.Freshness.FreshTapeMinPositiveSteps = ParseInt(value, config.Freshness.FreshTapeMinPositiveSteps));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_BREAKOUT_MIN_ABOVE_RECENT_HIGH_PERCENT", value => config.Freshness.BreakoutMinAboveRecentHighPct = ParseDecimal(value, config.Freshness.BreakoutMinAboveRecentHighPct));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_CONTINUATION_CANDLE_MOMENTUM_LOOKBACK", value => config.Freshness.ContinuationCandleMomentumLookback = ParseInt(value, config.Freshness.ContinuationCandleMomentumLookback));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_MIN_CONTINUATION_CANDLE_MOMENTUM_PERCENT", value => config.Freshness.MinContinuationCandleMomentumPct = ParseDecimal(value, config.Freshness.MinContinuationCandleMomentumPct));
         SetIfPresent("TRADINGBOT_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_LONG_SCORE", value => config.Strategy.MinimumLongScore = ParseDecimal(value, config.Strategy.MinimumLongScore));
@@ -196,6 +198,8 @@ internal sealed class FuturesBotConfiguration
         Freshness.FreshTapeMinSlopePct = Math.Clamp(Freshness.FreshTapeMinSlopePct <= 0m ? 0.05m : Freshness.FreshTapeMinSlopePct, 0m, 5m);
         Freshness.FreshTapeMinPositiveSteps = Math.Clamp(Freshness.FreshTapeMinPositiveSteps <= 0 ? 2 : Freshness.FreshTapeMinPositiveSteps, 1, Freshness.FreshTapeSnapshotCount - 1);
         Freshness.BreakoutMinAboveRecentHighPct = Math.Clamp(Freshness.BreakoutMinAboveRecentHighPct <= 0m ? 0.05m : Freshness.BreakoutMinAboveRecentHighPct, 0m, 5m);
+        Freshness.ContinuationCandleMomentumLookback = Math.Clamp(Freshness.ContinuationCandleMomentumLookback <= 0 ? 4 : Freshness.ContinuationCandleMomentumLookback, 1, 50);
+        Freshness.MinContinuationCandleMomentumPct = Math.Max(0m, Freshness.MinContinuationCandleMomentumPct);
         Filters.MinQuoteVolume24h = Filters.MinQuoteVolume24h <= 0m ? 50_000m : Filters.MinQuoteVolume24h;
         Filters.MinExitDepthMultiple = Filters.MinExitDepthMultiple <= 0m ? 5m : Filters.MinExitDepthMultiple;
         Filters.MaxExitImpactPct = Filters.MaxExitImpactPct <= 0m ? 0.5m : Filters.MaxExitImpactPct;
@@ -384,6 +388,17 @@ internal sealed class FuturesFreshnessOptions
     public decimal FreshTapeMinSlopePct { get; set; } = 0.05m;
     public int FreshTapeMinPositiveSteps { get; set; } = 2;
     public decimal BreakoutMinAboveRecentHighPct { get; set; } = 0.05m;
+
+    // A fresh micro-tape (last few snapshots ticking up) must not, by itself,
+    // rescue a continuation LONG whose underlying 15m candles are rolling over
+    // (the DOGE case: fresh snapshot tape while the 4-candle change was -0.9% and
+    // price action was FALLING). In the continuation/near-high zone the tape only
+    // counts as fresh when the recent candle momentum over
+    // ContinuationCandleMomentumLookback bars is at least
+    // MinContinuationCandleMomentumPct. Momentum that cannot be computed abstains
+    // (does not block). A genuine breakout above the recent high is unaffected.
+    public int ContinuationCandleMomentumLookback { get; set; } = 4;
+    public decimal MinContinuationCandleMomentumPct { get; set; } = 0m;
 }
 
 internal sealed class FuturesFilterOptions

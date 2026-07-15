@@ -2,6 +2,13 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-13-futures-freshness-candle-momentum
+
+- Tightened the futures long-continuation freshness guard so a fresh micro-tape can no longer rescue an entry into a rolling-over 15m structure (the DOGE case: last 3 snapshots ticked up while the 4-candle change was ~-0.9% and price action was FALLING, yet the entry passed). In the continuation/near-high zone a tape now counts as fresh only when it is a fresh upward snapshot tape AND the recent candle momentum over `Freshness.ContinuationCandleMomentumLookback` (4) bars is at least `Freshness.MinContinuationCandleMomentumPct` (0 → non-negative). A genuine breakout above the recent high is unaffected; momentum that cannot be computed abstains (does not block).
+- New config `Freshness.ContinuationCandleMomentumLookback` / `MinContinuationCandleMomentumPct` with env overrides `TRADINGBOT_FUTURES_FRESHNESS_CONTINUATION_CANDLE_MOMENTUM_LOOKBACK` / `_MIN_CONTINUATION_CANDLE_MOMENTUM_PERCENT`. Codex's continuation-zone default (`FreshContinuationMin24hRangePositionPct=50`) already generalized the near-high guard across the range; this adds the candle-momentum confirmation on top.
+- Deploy: live worker appsettings.json is now refreshed from the repository on EVERY deploy (identical to virtual) for both spot and futures, instead of being create-once/operator-owned. Live and virtual now always run the same strategy config; operator-specific overrides stay in the preserved live .env files, which are unchanged.
+- Not changed: sizing, leverage, execution/price-deviation, margin/funding/regime gates, TP/SL, dead-man switch, short entries.
+
 ## 2026-07-15-futures-margin-utilization-80
 
 - Futures margin utilization cap default is raised from 50% to 80% (`Margin.MaxAccountMarginUtilizationPercent`) so one oversized imported/manual position does not block every additional 10 EUR margin entry while there is still account headroom.

@@ -84,25 +84,17 @@ mkdir -p \
 cp infra/docker-compose.prod.yml "${COMPOSE_FILE}"
 cp infra/traefik/trading-bot.yml "${TRAEFIK_DYNAMIC_FILE}"
 
-# Keep virtual config in sync with repository settings on every deploy.
-# Live config is created only once and then treated as operator-owned.
-if [ -f "${LIVE_APPSETTINGS}" ]; then
-  echo "Keeping existing live worker appsettings at ${LIVE_APPSETTINGS}"
-else
-  echo "Creating live worker appsettings at ${LIVE_APPSETTINGS}"
-  cp "${WORKER_APPSETTINGS_SOURCE}" "${LIVE_APPSETTINGS}"
-fi
+# appsettings.json is repository-owned: on EVERY deploy both live and virtual get
+# the same fresh file from the repo, so live and virtual always run identical
+# strategy/config. Operator-specific overrides belong in the .env files (which are
+# preserved for live below), NOT in appsettings.
+echo "Updating live worker appsettings from repository config (identical to virtual)"
+cp "${WORKER_APPSETTINGS_SOURCE}" "${LIVE_APPSETTINGS}"
 echo "Updating virtual worker appsettings from repository config"
 cp "${WORKER_APPSETTINGS_SOURCE}" "${VIRTUAL_APPSETTINGS}"
 
-# Futures appsettings follow the same rule: live is create-once/operator-owned,
-# virtual is refreshed from the repository on every deploy.
-if [ -f "${FUTURES_LIVE_APPSETTINGS}" ]; then
-  echo "Keeping existing futures live appsettings at ${FUTURES_LIVE_APPSETTINGS}"
-else
-  echo "Creating futures live appsettings at ${FUTURES_LIVE_APPSETTINGS}"
-  cp "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_LIVE_APPSETTINGS}"
-fi
+echo "Updating futures live appsettings from repository config (identical to virtual)"
+cp "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_LIVE_APPSETTINGS}"
 echo "Updating futures virtual appsettings from repository config"
 cp "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_VIRTUAL_APPSETTINGS}"
 echo "Updating market data worker appsettings from repository config"

@@ -41,6 +41,16 @@ internal static class FuturesEntryFreshnessGuard
         var tape = EvaluateTape(priceActionHistoryObservations, thresholds);
         var spreadOk = SpreadPercentOf(marketState) <= Math.Max(0m, thresholds.NearHighMaxDistanceFromRecentHighPct);
 
+        // 15m candle momentum over the recent lookback. A fresh micro-tape must not
+        // rescue a continuation LONG when the underlying candles are rolling over.
+        // Momentum that cannot be computed abstains (does not block).
+        var candleMomentumPct = RecentCandleMomentumPct(marketState.Candles, thresholds.ContinuationCandleMomentumLookback);
+        var candleMomentumOk = candleMomentumPct is not { } momentum || momentum >= thresholds.MinContinuationCandleMomentumPct;
+
+        // "Fresh continuation" needs BOTH a fresh snapshot tape AND non-falling 15m
+        // candles — a positive micro-tick into a declining structure is not fresh.
+        var freshContinuationTape = tape.HasFreshUpwardTape && candleMomentumOk;
+
         var isNearHigh =
             range.PositionIn24hRangePct is { } position
             && position >= thresholds.NearHighMin24hRangePositionPct
@@ -54,12 +64,15 @@ internal static class FuturesEntryFreshnessGuard
         var continuationZone =
             range.PositionIn24hRangePct is { } continuationPosition
             && continuationPosition >= thresholds.FreshContinuationMin24hRangePositionPct;
-        var staleContinuation = continuationZone && !tape.HasFreshUpwardTape && !freshBreakout;
-        var blocked = staleContinuation || (isNearHigh && !tape.HasFreshUpwardTape && !freshBreakout);
+        var staleContinuation = continuationZone && !freshContinuationTape && !freshBreakout;
+        var blocked = staleContinuation || (isNearHigh && !freshContinuationTape && !freshBreakout);
+        var momentumNote = !candleMomentumOk && tape.HasFreshUpwardTape
+            ? $"; fresh micro-tape ignored because {thresholds.ContinuationCandleMomentumLookback}-candle momentum {candleMomentumPct:0.###}% < {thresholds.MinContinuationCandleMomentumPct:0.###}%"
+            : string.Empty;
         var reason = blocked
             ? isNearHigh
-                ? $"entry stale near high: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.NearHighMin24hRangePositionPct:0.###}%, distance from recent high {distanceFromRecentHighPct:0.###}% <= {thresholds.NearHighMaxDistanceFromRecentHighPct:0.###}%, short tape slope {tape.ShortSnapshotSlopePct:0.###}% is not fresh"
-                : $"entry stale continuation: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.FreshContinuationMin24hRangePositionPct:0.###}%, but no fresh upward tape and no valid breakout"
+                ? $"entry stale near high: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.NearHighMin24hRangePositionPct:0.###}%, distance from recent high {distanceFromRecentHighPct:0.###}% <= {thresholds.NearHighMaxDistanceFromRecentHighPct:0.###}%, short tape slope {tape.ShortSnapshotSlopePct:0.###}% is not fresh{momentumNote}"
+                : $"entry stale continuation: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.FreshContinuationMin24hRangePositionPct:0.###}%, but no fresh upward tape and no valid breakout{momentumNote}"
             : null;
 
         return new EntryFreshnessResult(
@@ -69,7 +82,7 @@ internal static class FuturesEntryFreshnessGuard
             tape.ShortSnapshotSlopePct,
             tape.PositiveSteps,
             isNearHigh,
-            tape.HasFreshUpwardTape,
+            freshContinuationTape,
             freshBreakout,
             blocked,
             reason);
@@ -92,6 +105,21 @@ internal static class FuturesEntryFreshnessGuard
         }
 
         return ((live - low) / (high - low) * 100m, high, low);
+    }
+
+    // Percent change of the latest close versus the close `lookback` candles earlier.
+    // Null when there are not enough candles or the reference close is non-positive.
+    private static decimal? RecentCandleMomentumPct(IReadOnlyList<Candle> candles, int lookback)
+    {
+        var bars = Math.Max(1, lookback);
+        if (candles.Count <= bars)
+        {
+            return null;
+        }
+
+        var latest = candles[^1].Close;
+        var reference = candles[^(bars + 1)].Close;
+        return reference > 0m ? (latest - reference) / reference * 100m : (decimal?)null;
     }
 
     private static decimal? RecentHigh(IReadOnlyList<Candle> candles, int lookbackCandles)
