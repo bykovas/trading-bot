@@ -2,6 +2,13 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-15-futures-conditional-max-hold
+
+- Futures max-hold exits are now stale-loss exits instead of a hard age timer. After `Exits.MaxHoldMinutes`, a futures position is closed only when its marked unrealized PnL is negative; profitable or flat positions are held for TP/SL, trailing, or signal reversal handling instead of being closed solely because they are old.
+- The fast 10-second exit check now uses the same conditional max-hold rule as the full cycle, preventing profitable imported/manual futures positions from being closed by the fast path just because they crossed 360 minutes.
+- Updated the trades UI copy for futures closes so SHORT exits are described as closing a short, and max-hold text no longer claims every futures max-hold close was a stale long sell.
+- Not changed: TP/SL precedence, signal-reversal exits, sizing/leverage, entry filters, funding/margin/BTC-regime gates, IOC execution, or Kraken reconciliation.
+
 ## 2026-07-14-futures-long-continuation-freshness
 
 - Futures LONG entry freshness is now stricter above the lower half of the 24h range: once `FreshContinuationMin24hRangePositionPct` is reached (default 50%), bullish EMA/RSI structure is not enough by itself. A LONG must have either fresh upward tape or a valid breakout; otherwise it is rejected as `entry stale continuation`.

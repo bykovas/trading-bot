@@ -805,22 +805,26 @@
       return "exit";
     }
 
-    function exitExplanation(code, reason) {
+    function exitExplanation(code, reason, side) {
+      const normalized = normalizedReason(reason);
+      const isShort = side === "SHORT";
       const map = {
-        SELL_TAKE_PROFIT: "Продал, потому что позиция достигла take-profit. Это фиксация прибыли, а не паника.",
-        SELL_STOP_LOSS: "Продал, потому что позиция дошла до hard stop-loss.",
-        SELL_SCORE_DECAY: "Продал, потому что первоначальный сильный сигнал развалился, пока позиция была убыточной.",
-        SELL_POST_ENTRY_ADVERSE: "Продал, потому что сразу после входа цена пошла против позиции, а сигнал перестал подтверждаться.",
-        SELL_MAX_HOLD: "Продал как stale-позицию: она старая и одновременно была в минусе или сигнал уже не подтверждал long.",
-        SELL_SIGNAL_FLIP: "Продал, потому что стратегия больше не хотела держать long.",
-        SELL_TRAILING_STOP: "Продал по trailing stop: позиция уже была в прибыли, но откатилась от локального пика.",
-        SELL_KILL_SWITCH: "Продал из-за kill switch. Это аварийная защита.",
-        SELL_EMERGENCY_RISK: "Продал из-за emergency risk rule.",
-        SELL_BROKER_SAFETY: "Продал из-за broker/account safety rule."
+        SELL_TAKE_PROFIT: isShort ? "Закрыл SHORT, потому что позиция достигла take-profit." : "Продал, потому что позиция достигла take-profit. Это фиксация прибыли, а не паника.",
+        SELL_STOP_LOSS: isShort ? "Закрыл SHORT, потому что позиция дошла до hard stop-loss." : "Продал, потому что позиция дошла до hard stop-loss.",
+        SELL_SCORE_DECAY: isShort ? "Закрыл SHORT, потому что первоначальный сильный сигнал развалился, пока позиция была убыточной." : "Продал, потому что первоначальный сильный сигнал развалился, пока позиция была убыточной.",
+        SELL_POST_ENTRY_ADVERSE: isShort ? "Закрыл SHORT, потому что сразу после входа цена пошла против позиции, а сигнал перестал подтверждаться." : "Продал, потому что сразу после входа цена пошла против позиции, а сигнал перестал подтверждаться.",
+        SELL_MAX_HOLD: normalized.includes("stale loss")
+          ? "Закрыл stale futures-позицию по max-hold, потому что она старая и уже была в минусе."
+          : "Закрыл по max-hold таймеру. Старые сделки могли закрываться прежней жёсткой логикой; новая логика не закрывает прибыльную futures-позицию только из-за возраста.",
+        SELL_SIGNAL_FLIP: isShort ? "Закрыл SHORT, потому что стратегия больше не хотела держать short." : "Продал, потому что стратегия больше не хотела держать long.",
+        SELL_TRAILING_STOP: isShort ? "Закрыл SHORT по trailing stop: позиция уже была в прибыли, но откатилась от локального пика." : "Продал по trailing stop: позиция уже была в прибыли, но откатилась от локального пика.",
+        SELL_KILL_SWITCH: isShort ? "Закрыл SHORT из-за kill switch. Это аварийная защита." : "Продал из-за kill switch. Это аварийная защита.",
+        SELL_EMERGENCY_RISK: isShort ? "Закрыл SHORT из-за emergency risk rule." : "Продал из-за emergency risk rule.",
+        SELL_BROKER_SAFETY: isShort ? "Закрыл SHORT из-за broker/account safety rule." : "Продал из-за broker/account safety rule."
       };
       const inferred = inferExitCode(code, reason);
       if (inferred && map[inferred]) return map[inferred];
-      return "Продал по exit rule. Точный технический текст ниже.";
+      return isShort ? "Закрыл SHORT по exit rule. Точный технический текст ниже." : "Продал по exit rule. Точный технический текст ниже.";
     }
 
     function buyExplanation(decision, action, contribs) {
@@ -887,7 +891,7 @@
           : "sell",
         explanation: isOpen
           ? (action.action?.startsWith("WOULD_OPEN") ? futuresOpenExplanation(decision, action, contribs) : buyExplanation(decision, action, contribs))
-          : exitExplanation(action.exitReasonCode, reason),
+          : exitExplanation(action.exitReasonCode, reason, action.side),
         technicalReason: reason,
         technicalReasonLabel: isOpen ? "Technical fill text" : "Technical exit text",
         score: decision.score,

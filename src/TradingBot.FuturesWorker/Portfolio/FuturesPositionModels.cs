@@ -13,6 +13,8 @@ internal enum FuturesDesiredExposure
 // Outcome of applying one decision to the virtual portfolio.
 internal sealed record FuturesFillResult(DryRunAction Action, bool PositionOpened, bool PositionClosed);
 
+internal sealed record FuturesMaxHoldExit(bool ShouldClose, string? Reason);
+
 internal sealed record FuturesEntryPlan(
     decimal RequestedNotionalEur,
     decimal FilledNotionalEur,

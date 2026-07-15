@@ -188,18 +188,18 @@ internal sealed class FuturesDecisionWorker(
                     fill.Action.ExitReasonCode = trigger.Kind == "STOP_LOSS" ? "SELL_STOP_LOSS" : "SELL_TAKE_PROFIT";
                     riskReasons = new[] { $"hard exit: {trigger.Kind} via {trigger.TriggerSource} price" };
                 }
-                else if (IsPastMaxHold(held, utc))
+                else if (EvaluateMaxHoldExit(held, utc, config.Exits.MaxHoldMinutes) is { ShouldClose: true } maxHold)
                 {
                     fill = await ApplyOrExecuteLiveAsync(
                         state, pair, FuturesDesiredExposure.Flat, markPrice,
                         0m, held.Leverage ?? 1m, reduceOnly: true,
-                        reason: $"MAX_HOLD forced close after {config.Exits.MaxHoldMinutes}m",
+                        reason: maxHold.Reason ?? $"MAX_HOLD forced close after {config.Exits.MaxHoldMinutes}m",
                         exitTriggerSource: config.TpSl.TriggerSource,
                         instrument: marketState.Instrument,
                         entryPlan: null,
                         cancellationToken);
                     fill.Action.ExitReasonCode = "SELL_MAX_HOLD";
-                    riskReasons = new[] { $"hard exit: maxHold {config.Exits.MaxHoldMinutes}m elapsed" };
+                    riskReasons = new[] { maxHold.Reason ?? $"hard exit: maxHold {config.Exits.MaxHoldMinutes}m elapsed" };
                 }
                 else
                 {
@@ -417,12 +417,12 @@ internal sealed class FuturesDecisionWorker(
                     cancellationToken);
                 fill.Action.ExitReasonCode = trigger.Kind == "STOP_LOSS" ? "SELL_STOP_LOSS" : "SELL_TAKE_PROFIT";
             }
-            else if (IsPastMaxHold(held, utc))
+            else if (EvaluateMaxHoldExit(held, utc, config.Exits.MaxHoldMinutes) is { ShouldClose: true } maxHold)
             {
                 fill = await ApplyOrExecuteLiveAsync(
                     state, held.Pair, FuturesDesiredExposure.Flat, markPrice,
                     0m, held.Leverage ?? 1m, reduceOnly: true,
-                    reason: $"MAX_HOLD fast close after {config.Exits.MaxHoldMinutes}m",
+                    reason: maxHold.Reason ?? $"MAX_HOLD fast close after {config.Exits.MaxHoldMinutes}m",
                     exitTriggerSource: config.TpSl.TriggerSource,
                     instrument: marketState.Instrument,
                     entryPlan: null,
@@ -882,10 +882,24 @@ internal sealed class FuturesDecisionWorker(
         config.BotInstance.Id.Equals("live", StringComparison.OrdinalIgnoreCase)
         || config.BotInstance.Id.EndsWith("-live", StringComparison.OrdinalIgnoreCase);
 
-    private bool IsPastMaxHold(PortfolioPosition position, DateTimeOffset utc) =>
-        config.Exits.MaxHoldMinutes > 0
-        && position.OpenedAtUtc is { } opened
-        && utc - opened >= TimeSpan.FromMinutes(config.Exits.MaxHoldMinutes);
+    internal static FuturesMaxHoldExit EvaluateMaxHoldExit(PortfolioPosition position, DateTimeOffset utc, int maxHoldMinutes)
+    {
+        if (maxHoldMinutes <= 0 || position.OpenedAtUtc is not { } opened || utc - opened < TimeSpan.FromMinutes(maxHoldMinutes))
+        {
+            return new FuturesMaxHoldExit(false, null);
+        }
+
+        if (position.UnrealizedPnlEur >= 0m)
+        {
+            return new FuturesMaxHoldExit(
+                false,
+                $"MAX_HOLD healthy hold after {maxHoldMinutes}m: unrealized PnL EUR {position.UnrealizedPnlEur:0.####} >= 0");
+        }
+
+        return new FuturesMaxHoldExit(
+            true,
+            $"MAX_HOLD stale-loss close after {maxHoldMinutes}m: unrealized PnL EUR {position.UnrealizedPnlEur:0.####} < 0");
+    }
 
     private bool IsMinHoldActive(PortfolioPosition position, DateTimeOffset utc) =>
         config.ExecutionPolicy.MinHoldSeconds > 0
