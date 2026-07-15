@@ -516,8 +516,15 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 -- Entry channel (Standard / Continuation / Breakout / DipBounce). On
                 -- open rows it labels the admitting channel; on close rows it is the
                 -- channel carried from the opened position, so realized PnL groups by
-                -- channel directly. Appended last per CREATE OR REPLACE VIEW rules.
-                decision -> 'dryRunAction' ->> 'entryChannel' as entry_channel
+                -- channel directly. New diagnostics append after existing columns per
+                -- CREATE OR REPLACE VIEW rules.
+                decision -> 'dryRunAction' ->> 'entryChannel' as entry_channel,
+                (decision -> 'dryRunAction' ->> 'entryDistanceFromLocalHighPct')::numeric as entry_distance_from_local_high_pct,
+                decision -> 'dryRunAction' ->> 'localHighSource' as local_high_source,
+                (decision -> 'dryRunAction' ->> 'breakoutBufferPct')::numeric as breakout_buffer_pct,
+                (decision -> 'dryRunAction' ->> 'livePriceVsSignalClosePct')::numeric as live_price_vs_signal_close_pct,
+                (decision -> 'dryRunAction' ->> 'postFillEntryDistanceFromLocalHighPct')::numeric as post_fill_entry_distance_from_local_high_pct,
+                (decision -> 'dryRunAction' ->> 'postFillLivePriceVsSignalClosePct')::numeric as post_fill_live_price_vs_signal_close_pct
             from dry_run_cycles cycle
             cross join lateral jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision;
 

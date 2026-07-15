@@ -106,6 +106,10 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_BREAKOUT_MIN_ABOVE_RECENT_HIGH_PERCENT", value => config.Freshness.BreakoutMinAboveRecentHighPct = ParseDecimal(value, config.Freshness.BreakoutMinAboveRecentHighPct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_CONTINUATION_CANDLE_MOMENTUM_LOOKBACK", value => config.Freshness.ContinuationCandleMomentumLookback = ParseInt(value, config.Freshness.ContinuationCandleMomentumLookback));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_MIN_CONTINUATION_CANDLE_MOMENTUM_PERCENT", value => config.Freshness.MinContinuationCandleMomentumPct = ParseDecimal(value, config.Freshness.MinContinuationCandleMomentumPct));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_LOCAL_HIGH_LOOKBACK_CLOSED_CANDLES", value => config.Freshness.LocalHighLookbackClosedCandles = ParseInt(value, config.Freshness.LocalHighLookbackClosedCandles));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_MAX_ENTRY_DISTANCE_FROM_LOCAL_HIGH_PERCENT", value => config.Freshness.MaxEntryDistanceFromLocalHighPct = ParseDecimal(value, config.Freshness.MaxEntryDistanceFromLocalHighPct));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_BREAKOUT_HOLD_SNAPSHOT_COUNT", value => config.Freshness.BreakoutHoldSnapshotCount = ParseInt(value, config.Freshness.BreakoutHoldSnapshotCount));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_MAX_ENTRY_DRIFT_FROM_SIGNAL_PERCENT", value => config.Freshness.MaxEntryDriftFromSignalPct = ParseDecimal(value, config.Freshness.MaxEntryDriftFromSignalPct));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_ENABLED", value => config.Dip.Enabled = ParseBool(value, config.Dip.Enabled));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_NEAR_LOW_MAX_24H_RANGE_POSITION_PERCENT", value => config.Dip.NearLowMax24hRangePositionPct = ParseDecimal(value, config.Dip.NearLowMax24hRangePositionPct));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_MIN_SCORE", value => config.Dip.MinScore = ParseDecimal(value, config.Dip.MinScore));
@@ -204,6 +208,10 @@ internal sealed class FuturesBotConfiguration
         Freshness.BreakoutMinAboveRecentHighPct = Math.Clamp(Freshness.BreakoutMinAboveRecentHighPct <= 0m ? 0.05m : Freshness.BreakoutMinAboveRecentHighPct, 0m, 5m);
         Freshness.ContinuationCandleMomentumLookback = Math.Clamp(Freshness.ContinuationCandleMomentumLookback <= 0 ? 4 : Freshness.ContinuationCandleMomentumLookback, 1, 50);
         Freshness.MinContinuationCandleMomentumPct = Math.Max(0m, Freshness.MinContinuationCandleMomentumPct);
+        Freshness.LocalHighLookbackClosedCandles = Math.Clamp(Freshness.LocalHighLookbackClosedCandles <= 0 ? 2 : Freshness.LocalHighLookbackClosedCandles, 1, 8);
+        Freshness.MaxEntryDistanceFromLocalHighPct = Math.Clamp(Freshness.MaxEntryDistanceFromLocalHighPct <= 0m ? 0.12m : Freshness.MaxEntryDistanceFromLocalHighPct, 0m, 2m);
+        Freshness.BreakoutHoldSnapshotCount = Math.Clamp(Freshness.BreakoutHoldSnapshotCount <= 0 ? 2 : Freshness.BreakoutHoldSnapshotCount, 1, Freshness.FreshTapeSnapshotCount);
+        Freshness.MaxEntryDriftFromSignalPct = Math.Clamp(Freshness.MaxEntryDriftFromSignalPct <= 0m ? 0.10m : Freshness.MaxEntryDriftFromSignalPct, 0m, 2m);
 
         // Dip-bounce channel: near-low zone is the lower band of the 24h range; the
         // relaxed entry score must stay below the firm long bar or the channel is a
@@ -409,6 +417,10 @@ internal sealed class FuturesFreshnessOptions
     // (does not block). A genuine breakout above the recent high is unaffected.
     public int ContinuationCandleMomentumLookback { get; set; } = 4;
     public decimal MinContinuationCandleMomentumPct { get; set; } = 0m;
+    public int LocalHighLookbackClosedCandles { get; set; } = 2;
+    public decimal MaxEntryDistanceFromLocalHighPct { get; set; } = 0.12m;
+    public int BreakoutHoldSnapshotCount { get; set; } = 2;
+    public decimal MaxEntryDriftFromSignalPct { get; set; } = 0.10m;
 }
 
 internal sealed class FuturesDipBounceOptions

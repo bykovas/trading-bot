@@ -280,6 +280,12 @@ public sealed class DryRunAction
     public bool? EntryFreshnessHasFreshUpwardTape { get; set; }
     public bool? EntryFreshnessHasFreshBreakout { get; set; }
     public string? EntryFreshnessBlockReason { get; set; }
+    public decimal? EntryDistanceFromLocalHighPct { get; set; }
+    public string? LocalHighSource { get; set; }
+    public decimal? BreakoutBufferPct { get; set; }
+    public decimal? LivePriceVsSignalClosePct { get; set; }
+    public decimal? PostFillEntryDistanceFromLocalHighPct { get; set; }
+    public decimal? PostFillLivePriceVsSignalClosePct { get; set; }
     public decimal? SignalPrice { get; set; }
     public decimal? PreSubmitBid { get; set; }
     public decimal? PreSubmitAsk { get; set; }

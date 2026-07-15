@@ -2,6 +2,14 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-15-futures-local-high-entry-guard
+
+- Futures continuation LONG entries now evaluate the executable entry reference price before submit (ask for longs) against the local high of the last closed 15m candles. A fresh upward tape no longer bypasses this guard: if the entry price is within `Freshness.MaxEntryDistanceFromLocalHighPct` (default 0.12%) of the local high, the entry is rejected unless a breakout is confirmed.
+- Breakout confirmation now requires more than touching the high: price must exceed the local high by `Freshness.BreakoutMinAboveRecentHighPct` and hold above that buffered level for `Freshness.BreakoutHoldSnapshotCount` recent snapshot observations. New local-high settings are env-tunable via `TRADINGBOT_FUTURES_FRESHNESS_LOCAL_HIGH_LOOKBACK_CLOSED_CANDLES`, `_MAX_ENTRY_DISTANCE_FROM_LOCAL_HIGH_PERCENT`, and `_BREAKOUT_HOLD_SNAPSHOT_COUNT`.
+- Added an executable-price drift guard: entries are rejected when the live executable price has moved more than `Freshness.MaxEntryDriftFromSignalPct` (default 0.10%) from the candle signal close, unless the move is a confirmed breakout. This blocks chase entries like the INJ case where signal close was 5.140747 but executable/fill moved to ~5.1468.
+- Entry diagnostics now persist local-high and drift telemetry on decision actions and SQL views: entry distance from local high, local high source, breakout buffer, live price vs signal close, plus post-fill local-high/drift measurements for accepted live orders.
+- Not changed: scoring weights, dip-bounce promotion rules, short entries, margin sizing/leverage, TP/SL exchange order placement, funding/BTC-regime gates, or IOC execution semantics.
+
 ## 2026-07-15-futures-dip-bounce-and-40x10-sizing
 
 - Sizing: futures now trades at margin 40 EUR × 10x leverage (`Futures.TargetMarginEur` 10 → 40; notional 400 EUR ≈ 432 USD per position). At `Portfolio.StartingCashEur` 100 EUR and the 80% `Margin.MaxAccountMarginUtilizationPercent` cap this leaves room for ~2 concurrent positions (40% equity each); `Risk.MaxConcurrentOpenRisk` and per-group exposure recompute from the new notional automatically.

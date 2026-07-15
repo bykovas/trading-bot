@@ -12,7 +12,13 @@ internal sealed record EntryFreshnessResult(
     bool HasFreshUpwardTape,
     bool HasFreshBreakout,
     bool Blocked,
-    string? BlockReason);
+    string? BlockReason,
+    decimal? EntryDistanceFromLocalHighPct = null,
+    string? LocalHighSource = null,
+    decimal? BreakoutBufferPct = null,
+    decimal? LivePriceVsSignalClosePct = null,
+    decimal? PostFillEntryDistanceFromLocalHighPct = null,
+    decimal? PostFillLivePriceVsSignalClosePct = null);
 
 internal static class FuturesEntryFreshnessGuard
 {
@@ -31,7 +37,8 @@ internal static class FuturesEntryFreshnessGuard
 
         var range = CalculateRangePosition(marketState.Candles);
         var recentHigh = RecentHigh(marketState.Candles, thresholds.RecentHighLookbackCandles);
-        var livePrice = LiveReferencePrice(marketState);
+        var signalClose = marketState.LastPrice;
+        var livePrice = EntryReferencePrice(marketState, desired);
         var distanceFromRecentHighPct = recentHigh is > 0m && livePrice > 0m
             ? Math.Max(0m, (recentHigh.Value - livePrice) / recentHigh.Value * 100m)
             : (decimal?)null;
@@ -39,6 +46,12 @@ internal static class FuturesEntryFreshnessGuard
             ? (livePrice - recentHigh.Value) / recentHigh.Value * 100m
             : (decimal?)null;
         var tape = EvaluateTape(priceActionHistoryObservations, thresholds);
+        var localHigh = LocalExecutionHigh(marketState.Candles, thresholds.LocalHighLookbackClosedCandles);
+        var localHighSource = localHigh.Source;
+        var entryDistanceFromLocalHighPct = DistanceBelowHighPct(livePrice, localHigh.High);
+        var livePriceVsSignalClosePct = signalClose > 0m && livePrice > 0m
+            ? (livePrice - signalClose) / signalClose * 100m
+            : (decimal?)null;
         var spreadOk = SpreadPercentOf(marketState) <= Math.Max(0m, thresholds.NearHighMaxDistanceFromRecentHighPct);
 
         // 15m candle momentum over the recent lookback. A fresh micro-tape must not
@@ -56,21 +69,41 @@ internal static class FuturesEntryFreshnessGuard
             && position >= thresholds.NearHighMin24hRangePositionPct
             && distanceFromRecentHighPct is { } distance
             && distance <= thresholds.NearHighMaxDistanceFromRecentHighPct;
+        var breakoutHeld =
+            localHigh.High is > 0m
+            && BreakoutConfirmedByTape(priceActionHistoryObservations, localHigh.High.Value, thresholds);
         var freshBreakout =
             breakoutAboveHighPct is { } breakout
             && breakout >= thresholds.BreakoutMinAboveRecentHighPct
             && spreadOk
-            && tape.HasFreshUpwardTape;
+            && tape.HasFreshUpwardTape
+            && breakoutHeld;
         var continuationZone =
             range.PositionIn24hRangePct is { } continuationPosition
             && continuationPosition >= thresholds.FreshContinuationMin24hRangePositionPct;
         var staleContinuation = continuationZone && !freshContinuationTape && !freshBreakout;
-        var blocked = staleContinuation || (isNearHigh && !freshContinuationTape && !freshBreakout);
+        var localExecutionOverextended =
+            localHigh.High is > 0m
+            && entryDistanceFromLocalHighPct is { } distanceFromLocalHigh
+            && distanceFromLocalHigh <= thresholds.MaxEntryDistanceFromLocalHighPct
+            && !freshBreakout;
+        var chasedSignal =
+            livePriceVsSignalClosePct is { } signalDrift
+            && signalDrift > thresholds.MaxEntryDriftFromSignalPct
+            && !freshBreakout;
+        var blocked = staleContinuation
+            || (isNearHigh && !freshContinuationTape && !freshBreakout)
+            || localExecutionOverextended
+            || chasedSignal;
         var momentumNote = !candleMomentumOk && tape.HasFreshUpwardTape
             ? $"; fresh micro-tape ignored because {thresholds.ContinuationCandleMomentumLookback}-candle momentum {candleMomentumPct:0.###}% < {thresholds.MinContinuationCandleMomentumPct:0.###}%"
             : string.Empty;
         var reason = blocked
-            ? isNearHigh
+            ? localExecutionOverextended
+                ? $"entry local-high chase: executable entry price is {entryDistanceFromLocalHighPct:0.###}% below {localHighSource} high, threshold {thresholds.MaxEntryDistanceFromLocalHighPct:0.###}%, breakout buffer {thresholds.BreakoutMinAboveRecentHighPct:0.###}% was not confirmed by {thresholds.BreakoutHoldSnapshotCount} snapshots"
+                : chasedSignal
+                    ? $"entry chased signal: executable entry price drifted +{livePriceVsSignalClosePct:0.###}% from signal close, max {thresholds.MaxEntryDriftFromSignalPct:0.###}%, breakout not confirmed"
+                : isNearHigh
                 ? $"entry stale near high: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.NearHighMin24hRangePositionPct:0.###}%, distance from recent high {distanceFromRecentHighPct:0.###}% <= {thresholds.NearHighMaxDistanceFromRecentHighPct:0.###}%, short tape slope {tape.ShortSnapshotSlopePct:0.###}% is not fresh{momentumNote}"
                 : $"entry stale continuation: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.FreshContinuationMin24hRangePositionPct:0.###}%, but no fresh upward tape and no valid breakout{momentumNote}"
             : null;
@@ -85,7 +118,11 @@ internal static class FuturesEntryFreshnessGuard
             freshContinuationTape,
             freshBreakout,
             blocked,
-            reason);
+            reason,
+            entryDistanceFromLocalHighPct,
+            localHighSource,
+            thresholds.BreakoutMinAboveRecentHighPct,
+            livePriceVsSignalClosePct);
     }
 
     private static (decimal? PositionIn24hRangePct, decimal? High, decimal? Low) CalculateRangePosition(IReadOnlyList<Candle> candles)
@@ -128,10 +165,86 @@ internal static class FuturesEntryFreshnessGuard
         return recent.Count == 0 ? null : recent.Max(candle => candle.High);
     }
 
-    private static decimal LiveReferencePrice(InstrumentMarketState marketState) =>
-        marketState.Quote?.Last > 0m
+    public static EntryFreshnessResult WithFillDiagnostics(
+        EntryFreshnessResult result,
+        InstrumentMarketState marketState,
+        FuturesDesiredExposure desired,
+        decimal fillPrice,
+        FuturesFreshnessOptions thresholds)
+    {
+        if (desired != FuturesDesiredExposure.Long || fillPrice <= 0m)
+        {
+            return result;
+        }
+
+        var localHigh = LocalExecutionHigh(marketState.Candles, thresholds.LocalHighLookbackClosedCandles);
+        var signalClose = marketState.LastPrice;
+        var postFillDistance = DistanceBelowHighPct(fillPrice, localHigh.High);
+        var postFillDrift = signalClose > 0m
+            ? (fillPrice - signalClose) / signalClose * 100m
+            : (decimal?)null;
+
+        return result with
+        {
+            PostFillEntryDistanceFromLocalHighPct = postFillDistance,
+            PostFillLivePriceVsSignalClosePct = postFillDrift
+        };
+    }
+
+    private static decimal EntryReferencePrice(InstrumentMarketState marketState, FuturesDesiredExposure desired)
+    {
+        if (desired == FuturesDesiredExposure.Long && marketState.BestAsk > 0m)
+        {
+            return marketState.BestAsk;
+        }
+
+        if (desired == FuturesDesiredExposure.Short && marketState.BestBid > 0m)
+        {
+            return marketState.BestBid;
+        }
+
+        return marketState.Quote?.Last > 0m
             ? marketState.Quote.Last
             : marketState.LastPrice;
+    }
+
+    private static (decimal? High, string? Source) LocalExecutionHigh(IReadOnlyList<Candle> candles, int lookbackClosedCandles)
+    {
+        var count = Math.Clamp(lookbackClosedCandles <= 0 ? 2 : lookbackClosedCandles, 1, 8);
+        var recent = candles.TakeLast(Math.Min(count, candles.Count)).ToList();
+        if (recent.Count == 0)
+        {
+            return (null, null);
+        }
+
+        return (recent.Max(candle => candle.High), $"last-{recent.Count}-closed-15m");
+    }
+
+    private static decimal? DistanceBelowHighPct(decimal entryPrice, decimal? high) =>
+        high is > 0m && entryPrice > 0m
+            ? (high.Value - entryPrice) / high.Value * 100m
+            : null;
+
+    private static bool BreakoutConfirmedByTape(
+        IReadOnlyList<PriceObservation> observations,
+        decimal localHigh,
+        FuturesFreshnessOptions thresholds)
+    {
+        if (localHigh <= 0m)
+        {
+            return false;
+        }
+
+        var count = Math.Max(1, thresholds.BreakoutHoldSnapshotCount);
+        var tape = observations.TakeLast(Math.Min(count, observations.Count)).ToList();
+        if (tape.Count < count)
+        {
+            return false;
+        }
+
+        var trigger = localHigh * (1m + thresholds.BreakoutMinAboveRecentHighPct / 100m);
+        return tape.All(observation => observation.Last >= trigger);
+    }
 
     private static (decimal? LastSnapshotStepPct, decimal? ShortSnapshotSlopePct, int PositiveSteps, bool HasFreshUpwardTape) EvaluateTape(
         IReadOnlyList<PriceObservation> observations,

@@ -322,6 +322,12 @@ internal sealed class FuturesDecisionWorker(
                             signalPrice: marketState.LastPrice);
                         if (freshness is not null)
                         {
+                            freshness = FuturesEntryFreshnessGuard.WithFillDiagnostics(
+                                freshness,
+                                marketState,
+                                desired,
+                                fill.Action.AverageFillPrice ?? fill.Action.FillPrice,
+                                config.Freshness);
                             AttachEntryFreshnessDiagnostics(fill.Action, freshness);
                         }
 
@@ -1342,6 +1348,12 @@ internal sealed class FuturesDecisionWorker(
         action.EntryFreshnessHasFreshUpwardTape = freshness.HasFreshUpwardTape;
         action.EntryFreshnessHasFreshBreakout = freshness.HasFreshBreakout;
         action.EntryFreshnessBlockReason = freshness.BlockReason;
+        action.EntryDistanceFromLocalHighPct = freshness.EntryDistanceFromLocalHighPct;
+        action.LocalHighSource = freshness.LocalHighSource;
+        action.BreakoutBufferPct = freshness.BreakoutBufferPct;
+        action.LivePriceVsSignalClosePct = freshness.LivePriceVsSignalClosePct;
+        action.PostFillEntryDistanceFromLocalHighPct = freshness.PostFillEntryDistanceFromLocalHighPct;
+        action.PostFillLivePriceVsSignalClosePct = freshness.PostFillLivePriceVsSignalClosePct;
     }
 
     private static void AttachExecutionDiagnostics(
