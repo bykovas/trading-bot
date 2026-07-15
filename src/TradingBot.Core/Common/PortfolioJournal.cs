@@ -120,6 +120,11 @@ public sealed class PortfolioPosition
     public string? TpOrderState { get; set; }
     public string? SlOrderState { get; set; }
 
+    // Which entry channel opened this position: Standard / Continuation / Breakout /
+    // DipBounce. Null for legacy positions and spot rows. Carried to the close
+    // action so realized-PnL-per-channel is queryable in SQL.
+    public string? EntryChannel { get; set; }
+
     public PortfolioPosition Clone() => new()
     {
         Pair = Pair,
@@ -152,7 +157,8 @@ public sealed class PortfolioPosition
         LiquidationDistancePercent = LiquidationDistancePercent,
         FundingPaidEur = FundingPaidEur,
         TpOrderState = TpOrderState,
-        SlOrderState = SlOrderState
+        SlOrderState = SlOrderState,
+        EntryChannel = EntryChannel
     };
 }
 
@@ -301,6 +307,11 @@ public sealed class DryRunAction
     public bool? ReduceOnly { get; set; }
     public decimal? Leverage { get; set; }
     public string? ExitTriggerSource { get; set; }
+
+    // Entry channel that opened (or, on a close, that had opened) the position:
+    // Standard / Continuation / Breakout / DipBounce. Null on non-position rows and
+    // on spot rows. Enables per-channel win-rate / avg-PnL comparison in SQL.
+    public string? EntryChannel { get; set; }
 
     // Spot BUY maker-then-IOC execution telemetry (null on every non-entry row and
     // on futures rows). Kept as a nested object so the flat action shape is unchanged.

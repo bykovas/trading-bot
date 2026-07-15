@@ -228,7 +228,40 @@ internal sealed class FuturesDecisionWorker(
                 var desired = strategy.DecideEntry(signal);
                 FuturesEntryPlan? entryPlan = null;
                 EntryFreshnessResult? freshness = null;
+                var dipBounce = false;
                 var remainingSlots = Math.Max(0, config.Futures.MaxPositions - state.Positions.Count);
+
+                // Dip-bounce channel: a LONG candidate whose score sits just below the
+                // firm bar is still admitted when price is near its 24h low AND a
+                // confirmed bounce is visible — a fresh upward snapshot tape plus
+                // non-negative 15m candle momentum (the same freshness the continuation
+                // channel demands). This buys support-reclaim setups without catching a
+                // falling knife: without the fresh tape+momentum the candidate stays
+                // flat, and it still runs the full quality / freshness / risk gauntlet.
+                if (desired == FuturesDesiredExposure.Flat
+                    && config.Dip.Enabled
+                    && signal.AllowsLong
+                    && signal.Score >= config.Dip.MinScore
+                    && signal.Score < config.Strategy.MinimumLongScore
+                    && newEntriesThisCycle < remainingSlots)
+                {
+                    var dipFreshness = FuturesEntryFreshnessGuard.Evaluate(
+                        marketState,
+                        _priceHistory.RecentObservations(pair, config.Freshness.FreshTapeSnapshotCount),
+                        FuturesDesiredExposure.Long,
+                        config.Freshness);
+                    if (!dipFreshness.Blocked
+                        && dipFreshness.HasFreshUpwardTape
+                        && dipFreshness.PositionIn24hRangePct is { } dipPos
+                        && dipPos <= config.Dip.NearLowMax24hRangePositionPct)
+                    {
+                        desired = FuturesDesiredExposure.Long;
+                        dipBounce = true;
+                        Console.WriteLine(
+                            $"DIP_BOUNCE_ENTRY pair={pair} score={signal.Score:0.##} minScore={config.Dip.MinScore:0.##} firmBar={config.Strategy.MinimumLongScore:0.##} pos24={dipPos:0.###} nearLowMax={config.Dip.NearLowMax24hRangePositionPct:0.###} freshTape={dipFreshness.HasFreshUpwardTape} slope={dipFreshness.ShortSnapshotSlopePct:0.###} lastStep={dipFreshness.LastSnapshotStepPct:0.###}");
+                    }
+                }
+
                 if (desired == FuturesDesiredExposure.Flat)
                 {
                     riskReasons = new[] { ExplainNoEntry(signal) };
@@ -292,8 +325,16 @@ internal sealed class FuturesDecisionWorker(
                             AttachEntryFreshnessDiagnostics(fill.Action, freshness);
                         }
 
+                        var entryChannel = ClassifyEntryChannel(dipBounce, freshness);
+                        fill.Action.EntryChannel = entryChannel;
                         if (fill.PositionOpened)
                         {
+                            var openedPosition = state.Positions.FirstOrDefault(position => position.Pair == pair);
+                            if (openedPosition is not null)
+                            {
+                                openedPosition.EntryChannel = entryChannel;
+                            }
+
                             newEntriesThisCycle++;
                         }
 
@@ -847,6 +888,7 @@ internal sealed class FuturesDecisionWorker(
                 SlOrderState = tpSl.SlOrderState,
                 StopLossPrice = tpSl.StopLossPrice,
                 TakeProfitPrice = tpSl.TakeProfitPrice,
+                EntryChannel = existing?.EntryChannel,
                 EntryAtr = existing?.EntryAtr,
                 RoundTripCostEstimatePct = existing?.RoundTripCostEstimatePct,
                 ExpectedFundingPct = existing?.ExpectedFundingPct,
@@ -1279,6 +1321,15 @@ internal sealed class FuturesDecisionWorker(
         action.BtcRegimeState = plan.BtcRegimeState;
         action.ShortAllowed = plan.ShortAllowed;
     }
+
+    // Labels the entry channel for per-channel PnL attribution. DipBounce wins over
+    // the freshness-derived labels because a dip-bounce entry is, by construction,
+    // near the 24h low where the breakout/continuation flags do not apply.
+    private static string ClassifyEntryChannel(bool dipBounce, EntryFreshnessResult? freshness) =>
+        dipBounce ? "DipBounce"
+        : freshness is { HasFreshBreakout: true } ? "Breakout"
+        : freshness is { HasFreshUpwardTape: true } ? "Continuation"
+        : "Standard";
 
     private static void AttachEntryFreshnessDiagnostics(DryRunAction action, EntryFreshnessResult freshness)
     {

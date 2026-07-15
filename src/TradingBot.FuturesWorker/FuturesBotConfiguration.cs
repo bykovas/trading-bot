@@ -22,6 +22,7 @@ internal sealed class FuturesBotConfiguration
     public FundingOptions Funding { get; set; } = new();
     public FuturesEntryOptions Entry { get; set; } = new();
     public FuturesFreshnessOptions Freshness { get; set; } = new();
+    public FuturesDipBounceOptions Dip { get; set; } = new();
     public FuturesFilterOptions Filters { get; set; } = new();
     public FuturesExitOptions Exits { get; set; } = new();
     public FuturesRegimeOptions Regime { get; set; } = new();
@@ -105,6 +106,9 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_BREAKOUT_MIN_ABOVE_RECENT_HIGH_PERCENT", value => config.Freshness.BreakoutMinAboveRecentHighPct = ParseDecimal(value, config.Freshness.BreakoutMinAboveRecentHighPct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_CONTINUATION_CANDLE_MOMENTUM_LOOKBACK", value => config.Freshness.ContinuationCandleMomentumLookback = ParseInt(value, config.Freshness.ContinuationCandleMomentumLookback));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_MIN_CONTINUATION_CANDLE_MOMENTUM_PERCENT", value => config.Freshness.MinContinuationCandleMomentumPct = ParseDecimal(value, config.Freshness.MinContinuationCandleMomentumPct));
+        SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_ENABLED", value => config.Dip.Enabled = ParseBool(value, config.Dip.Enabled));
+        SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_NEAR_LOW_MAX_24H_RANGE_POSITION_PERCENT", value => config.Dip.NearLowMax24hRangePositionPct = ParseDecimal(value, config.Dip.NearLowMax24hRangePositionPct));
+        SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_MIN_SCORE", value => config.Dip.MinScore = ParseDecimal(value, config.Dip.MinScore));
         SetIfPresent("TRADINGBOT_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_LONG_SCORE", value => config.Strategy.MinimumLongScore = ParseDecimal(value, config.Strategy.MinimumLongScore));
@@ -200,6 +204,12 @@ internal sealed class FuturesBotConfiguration
         Freshness.BreakoutMinAboveRecentHighPct = Math.Clamp(Freshness.BreakoutMinAboveRecentHighPct <= 0m ? 0.05m : Freshness.BreakoutMinAboveRecentHighPct, 0m, 5m);
         Freshness.ContinuationCandleMomentumLookback = Math.Clamp(Freshness.ContinuationCandleMomentumLookback <= 0 ? 4 : Freshness.ContinuationCandleMomentumLookback, 1, 50);
         Freshness.MinContinuationCandleMomentumPct = Math.Max(0m, Freshness.MinContinuationCandleMomentumPct);
+
+        // Dip-bounce channel: near-low zone is the lower band of the 24h range; the
+        // relaxed entry score must stay below the firm long bar or the channel is a
+        // no-op (a score already >= MinimumLongScore is a normal entry).
+        Dip.NearLowMax24hRangePositionPct = Math.Clamp(Dip.NearLowMax24hRangePositionPct <= 0m ? 25m : Dip.NearLowMax24hRangePositionPct, 0m, 100m);
+        Dip.MinScore = Math.Clamp(Dip.MinScore <= 0m ? 0.70m : Dip.MinScore, 0m, 1m);
         Filters.MinQuoteVolume24h = Filters.MinQuoteVolume24h <= 0m ? 50_000m : Filters.MinQuoteVolume24h;
         Filters.MinExitDepthMultiple = Filters.MinExitDepthMultiple <= 0m ? 5m : Filters.MinExitDepthMultiple;
         Filters.MaxExitImpactPct = Filters.MaxExitImpactPct <= 0m ? 0.5m : Filters.MaxExitImpactPct;
@@ -399,6 +409,27 @@ internal sealed class FuturesFreshnessOptions
     // (does not block). A genuine breakout above the recent high is unaffected.
     public int ContinuationCandleMomentumLookback { get; set; } = 4;
     public decimal MinContinuationCandleMomentumPct { get; set; } = 0m;
+}
+
+internal sealed class FuturesDipBounceOptions
+{
+    // Dip-bounce entry channel. When a LONG candidate's score sits below the firm
+    // MinimumLongScore but at or above MinScore, and price is in the lower
+    // NearLowMax24hRangePositionPct band of its 24h range (near the 24h low) WITH a
+    // confirmed bounce (fresh upward snapshot tape + non-negative 15m candle
+    // momentum — the same freshness the continuation channel uses), the entry is
+    // promoted to a LONG. It never catches a falling knife: without the fresh
+    // tape+momentum the candidate stays flat. Disable to fall back to the firm bar.
+    public bool Enabled { get; set; } = true;
+
+    // Upper bound of the "near the 24h low" zone, as a 24h-range position percent
+    // (0 = at the 24h low, 100 = at the 24h high). Disjoint from the continuation
+    // zone (>= 50%) and the near-high zone (>= 88%).
+    public decimal NearLowMax24hRangePositionPct { get; set; } = 25m;
+
+    // Relaxed minimum long score for this channel. Tunable without a recompile so
+    // the sweet spot (0.70 / 0.72 / 0.75 / 0.78) can be searched from config/DB.
+    public decimal MinScore { get; set; } = 0.70m;
 }
 
 internal sealed class FuturesFilterOptions

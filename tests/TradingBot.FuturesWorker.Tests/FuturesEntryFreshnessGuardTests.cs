@@ -127,6 +127,69 @@ public sealed class FuturesEntryFreshnessGuardTests
         Assert.True(result.HasFreshUpwardTape);
     }
 
+    [Fact]
+    public void Near_low_bounce_is_fresh_and_admits_dip_channel()
+    {
+        // Price in the lower quarter of the 24h range, last 4 candles ticking up and
+        // a fresh rising micro-tape: this is the dip-bounce setup the worker promotes.
+        var result = FuturesEntryFreshnessGuard.Evaluate(
+            NearLowMarket(rising: true),
+            Observations(0.11480m, 0.11490m, 0.11500m),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.False(result.Blocked);
+        Assert.True(result.HasFreshUpwardTape); // fresh tape + non-negative candle momentum
+        Assert.False(result.IsNearHigh);
+        Assert.NotNull(result.PositionIn24hRangePct);
+        Assert.True(result.PositionIn24hRangePct < 25m); // lower quarter of the 24h range
+    }
+
+    [Fact]
+    public void Near_low_with_falling_candles_is_not_fresh_no_dip_knife()
+    {
+        // Same near-low zone but the 15m candles are rolling over. Even with a rising
+        // micro-tape the candle momentum denies freshness, so the dip-bounce channel
+        // will NOT fire — the guard refuses to catch a falling knife.
+        var result = FuturesEntryFreshnessGuard.Evaluate(
+            NearLowMarket(rising: false),
+            Observations(0.11480m, 0.11490m, 0.11500m),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.False(result.HasFreshUpwardTape);
+        Assert.NotNull(result.PositionIn24hRangePct);
+        Assert.True(result.PositionIn24hRangePct < 25m);
+    }
+
+    // Wide 24h range (high spike far back, low floor) with the last 5 candles sitting
+    // in the lower quarter. rising -> a confirmed bounce; falling -> rolling over.
+    private static InstrumentMarketState NearLowMarket(bool rising)
+    {
+        var candles = new List<Candle>();
+        for (var i = 95; i >= 5; i--)
+        {
+            var high = i == 50 ? 0.20m : 0.1040m;
+            candles.Add(new Candle(T.AddMinutes(-15 * i), 0.1020m, high, 0.1000m, 0.1020m, 1m, 1));
+        }
+
+        decimal[] closes = rising
+            ? [0.1080m, 0.1100m, 0.1120m, 0.1140m, 0.1150m]
+            : [0.1210m, 0.1190m, 0.1170m, 0.1155m, 0.1150m];
+        for (var i = 0; i < closes.Length; i++)
+        {
+            var c = closes[i];
+            candles.Add(new Candle(T.AddMinutes(-15 * (5 - i)), c - 0.0005m, c + 0.0003m, c - 0.0006m, c, 1m, 1));
+        }
+
+        return new InstrumentMarketState
+        {
+            Instrument = new InstrumentOptions { Pair = "DIP/USD", KrakenPair = "PF_DIPUSD", Enabled = true },
+            Candles = candles,
+            Quote = new Quote(0.11490m, 0.11510m, 0.11500m, 1_000_000m)
+        };
+    }
+
     // 96 flat candles then the last 4 declining into the entry (fresh micro-tape,
     // falling 15m structure).
     private static InstrumentMarketState FallingCandleMarket(decimal close, decimal recentHigh, decimal low24, decimal quoteLast)

@@ -413,7 +413,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 (position ->> 'liquidationDistancePercent')::numeric as liquidation_distance_percent,
                 (position ->> 'fundingPaidEur')::numeric as funding_paid_eur,
                 position ->> 'tpOrderState' as tp_order_state,
-                position ->> 'slOrderState' as sl_order_state
+                position ->> 'slOrderState' as sl_order_state,
+                position ->> 'entryChannel' as entry_channel
             from portfolio_state state
             cross join lateral jsonb_array_elements(coalesce(state.state_json -> 'positions', '[]'::jsonb)) as position;
 
@@ -511,7 +512,12 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 (decision -> 'dryRunAction' ->> 'entryDeviationFromSignalPct')::numeric as entry_deviation_from_signal_pct,
                 (decision -> 'dryRunAction' ->> 'entryDeviationFromAskPct')::numeric as entry_deviation_from_ask_pct,
                 decision -> 'dryRunAction' ->> 'exchangeOrderId' as exchange_order_id,
-                (decision -> 'dryRunAction' ->> 'exchangeFillTimestamp')::timestamptz as exchange_fill_timestamp
+                (decision -> 'dryRunAction' ->> 'exchangeFillTimestamp')::timestamptz as exchange_fill_timestamp,
+                -- Entry channel (Standard / Continuation / Breakout / DipBounce). On
+                -- open rows it labels the admitting channel; on close rows it is the
+                -- channel carried from the opened position, so realized PnL groups by
+                -- channel directly. Appended last per CREATE OR REPLACE VIEW rules.
+                decision -> 'dryRunAction' ->> 'entryChannel' as entry_channel
             from dry_run_cycles cycle
             cross join lateral jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision;
 

@@ -241,6 +241,9 @@ internal sealed class FuturesVirtualPortfolio(
         action.GrossNotionalEur = grossExit;
         action.NetNotionalEur = pnl;
         action.ExitTriggerSource = exitTriggerSource ?? config.TpSl.TriggerSource;
+        // Carry the opening channel onto the close so realized PnL is attributable
+        // to Continuation / Breakout / DipBounce without a separate open-close join.
+        action.EntryChannel = position.EntryChannel;
         FillLedger(action, before, state);
         return new FuturesFillResult(action, PositionOpened: false, PositionClosed: true);
     }
