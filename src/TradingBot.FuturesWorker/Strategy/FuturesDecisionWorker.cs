@@ -677,6 +677,27 @@ internal sealed class FuturesDecisionWorker(
         opened.Action.FillSource = "REAL";
         opened.Action.Reason = $"live Kraken Futures IOC accepted id={order.OrderId ?? "-"} status={order.Status}; {opened.Action.Reason}";
         AttachExecutionDiagnostics(opened.Action, referencePrice, preSubmit, limitPrice, size, order, fillDetails);
+        if (state.Positions.FirstOrDefault(position => position.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase)) is { } openedPosition)
+        {
+            var remote = new FuturesOpenPosition(
+                instrument.KrakenPair,
+                openedPosition.Side,
+                openedPosition.Quantity,
+                openedPosition.EntryPrice,
+                openedPosition.MarkPrice ?? openedPosition.LastPrice,
+                openedPosition.Leverage ?? entryLeverage);
+            var tpSl = new ImportedTpSlState(
+                openedPosition.TpOrderState,
+                openedPosition.SlOrderState,
+                openedPosition.StopLossPrice,
+                openedPosition.TakeProfitPrice,
+                openedPosition.StopDistancePct,
+                openedPosition.TakeProfitDistancePct);
+            var armed = await EnsureExchangeProtectionOrdersAsync(instrument, remote, tpSl, null, null, cancellationToken);
+            openedPosition.TpOrderState = armed.TpOrderState;
+            openedPosition.SlOrderState = armed.SlOrderState;
+        }
+
         Console.WriteLine($"EXECUTION pair={pair} symbol={instrument.KrakenPair} side={side} status={order.Status} orderId={order.OrderId ?? "-"} requestedQty={size:0.########} filledQty={fillDetails.Quantity:0.########} avgFill={fillDetails.AveragePrice:0.########} limit={limitPrice:0.########} priceDecimals={priceDecimals}");
         return opened;
     }
@@ -749,7 +770,7 @@ internal sealed class FuturesDecisionWorker(
 
     private async Task RefreshDeadManSwitchAsync(CancellationToken cancellationToken)
     {
-        if (!config.Futures.LiveTradingEnabled || broker?.IsConfigured != true)
+        if (!config.Futures.LiveTradingEnabled || !config.Futures.DeadManSwitchEnabled || broker?.IsConfigured != true)
         {
             return;
         }
@@ -772,6 +793,7 @@ internal sealed class FuturesDecisionWorker(
 
         var accounts = await broker.GetAccountsAsync(cancellationToken);
         var positions = await broker.GetOpenPositionsAsync(cancellationToken);
+        var openOrders = await broker.GetOpenOrdersAsync(cancellationToken);
         var bySymbol = universe
             .Where(instrument => !string.IsNullOrWhiteSpace(instrument.KrakenPair))
             .ToDictionary(instrument => instrument.KrakenPair, StringComparer.OrdinalIgnoreCase);
@@ -800,7 +822,9 @@ internal sealed class FuturesDecisionWorker(
             var initialMargin = leverage <= 0m ? notional : notional / leverage;
             var pnl = FuturesMath.UnrealizedPnlEur(remote.Side, remote.EntryPrice, mark, remote.Size);
             var existing = state.Positions.FirstOrDefault(position => position.Pair.Equals(instrument.Pair, StringComparison.OrdinalIgnoreCase));
-            var tpSl = ImportedTpSl(existing, remote.Side, remote.EntryPrice);
+            var protectionOrders = FindProtectionOrders(openOrders, remote.Symbol, remote.Side);
+            var tpSl = ImportedTpSl(existing, remote.Side, remote.EntryPrice, protectionOrders.StopLossOrder, protectionOrders.TakeProfitOrder);
+            tpSl = await EnsureExchangeProtectionOrdersAsync(instrument, remote, tpSl, protectionOrders.StopLossOrder, protectionOrders.TakeProfitOrder, cancellationToken);
             imported.Add(new PortfolioPosition
             {
                 Pair = instrument.Pair,
@@ -837,46 +861,182 @@ internal sealed class FuturesDecisionWorker(
         state.PendingFuturesOrders.RemoveAll(order =>
             imported.Any(position => position.Pair.Equals(order.Pair, StringComparison.OrdinalIgnoreCase)));
         state.UpdatedAt = utc;
-        Console.WriteLine($"futures-kraken-sync: accounts={accounts.Count} remotePositions={positions.Count} trackedPositions={state.Positions.Count} previousTracked={before} availableMargin={state.CashEur:0.####}");
+        Console.WriteLine($"futures-kraken-sync: accounts={accounts.Count} remotePositions={positions.Count} openOrders={openOrders.Count} trackedPositions={state.Positions.Count} previousTracked={before} availableMargin={state.CashEur:0.####}");
     }
 
-    private (string? TpOrderState, string? SlOrderState, decimal? StopLossPrice, decimal? TakeProfitPrice, decimal? StopDistancePct, decimal? TakeProfitDistancePct) ImportedTpSl(
+    private async Task<ImportedTpSlState> EnsureExchangeProtectionOrdersAsync(
+        InstrumentOptions instrument,
+        FuturesOpenPosition remote,
+        ImportedTpSlState tpSl,
+        FuturesOpenOrder? existingStopLoss,
+        FuturesOpenOrder? existingTakeProfit,
+        CancellationToken cancellationToken)
+    {
+        if (!config.TpSl.Enabled || broker?.IsConfigured != true)
+        {
+            return tpSl;
+        }
+
+        var closeSide = CloseSide(remote.Side);
+        var triggerSource = config.TpSl.TriggerSource;
+        var result = tpSl;
+        if (existingStopLoss is null && tpSl.StopLossPrice is > 0m)
+        {
+            var stopPrice = RoundTriggerPrice(tpSl.StopLossPrice.Value, remote.Side, isTakeProfit: false, instrument.PriceDecimals);
+            var stop = await broker.SendTriggerOrderAsync(
+                instrument.KrakenPair,
+                closeSide,
+                remote.Size,
+                "stp",
+                stopPrice,
+                triggerSource,
+                reduceOnly: true,
+                cancellationToken);
+            if (stop.Accepted)
+            {
+                result = result with { SlOrderState = "EXCHANGE_OPEN", StopLossPrice = stopPrice };
+                Console.WriteLine($"futures-tpsl-arm: symbol={instrument.KrakenPair} side={remote.Side} kind=stop_loss orderId={stop.OrderId ?? "-"} price={stopPrice:0.########}");
+            }
+            else
+            {
+                Console.WriteLine($"futures-tpsl-arm: FAILED symbol={instrument.KrakenPair} side={remote.Side} kind=stop_loss price={stopPrice:0.########} rawPrice={tpSl.StopLossPrice:0.########} reason={stop.Error ?? stop.Status}");
+            }
+        }
+
+        if (existingTakeProfit is null && tpSl.TakeProfitPrice is > 0m)
+        {
+            var takeProfitPrice = RoundTriggerPrice(tpSl.TakeProfitPrice.Value, remote.Side, isTakeProfit: true, instrument.PriceDecimals);
+            var takeProfit = await broker.SendTriggerOrderAsync(
+                instrument.KrakenPair,
+                closeSide,
+                remote.Size,
+                "take_profit",
+                takeProfitPrice,
+                triggerSource,
+                reduceOnly: true,
+                cancellationToken);
+            if (takeProfit.Accepted)
+            {
+                result = result with { TpOrderState = "EXCHANGE_OPEN", TakeProfitPrice = takeProfitPrice };
+                Console.WriteLine($"futures-tpsl-arm: symbol={instrument.KrakenPair} side={remote.Side} kind=take_profit orderId={takeProfit.OrderId ?? "-"} price={takeProfitPrice:0.########}");
+            }
+            else
+            {
+                Console.WriteLine($"futures-tpsl-arm: FAILED symbol={instrument.KrakenPair} side={remote.Side} kind=take_profit price={takeProfitPrice:0.########} rawPrice={tpSl.TakeProfitPrice:0.########} reason={takeProfit.Error ?? takeProfit.Status}");
+            }
+        }
+
+        return result;
+    }
+
+    private ImportedTpSlState ImportedTpSl(
         PortfolioPosition? existing,
         string side,
-        decimal entryPrice)
+        decimal entryPrice,
+        FuturesOpenOrder? existingStopLoss,
+        FuturesOpenOrder? existingTakeProfit)
     {
-        var stopDistancePct = existing?.StopDistancePct is > 0m
+        decimal? exchangeStopDistancePct = existingStopLoss?.StopPrice is > 0m
+            ? DistancePercent(entryPrice, existingStopLoss.StopPrice.Value)
+            : null;
+        decimal? exchangeTakeProfitDistancePct = existingTakeProfit?.StopPrice is > 0m
+            ? DistancePercent(entryPrice, existingTakeProfit.StopPrice.Value)
+            : null;
+        var stopDistancePct = exchangeStopDistancePct is > 0m
+            ? exchangeStopDistancePct
+            : existing?.StopDistancePct is > 0m
             ? existing.StopDistancePct
             : config.TpSl.StopLossPercent;
-        var takeProfitDistancePct = existing?.TakeProfitDistancePct is > 0m
+        var takeProfitDistancePct = exchangeTakeProfitDistancePct is > 0m
+            ? exchangeTakeProfitDistancePct
+            : existing?.TakeProfitDistancePct is > 0m
             ? existing.TakeProfitDistancePct
             : config.TpSl.TakeProfitPercent;
 
         if (!config.TpSl.Enabled || entryPrice <= 0m || stopDistancePct <= 0m || takeProfitDistancePct <= 0m)
         {
-            return (existing?.TpOrderState, existing?.SlOrderState, existing?.StopLossPrice, existing?.TakeProfitPrice, existing?.StopDistancePct, existing?.TakeProfitDistancePct);
+            return new ImportedTpSlState(existing?.TpOrderState, existing?.SlOrderState, existing?.StopLossPrice, existing?.TakeProfitPrice, existing?.StopDistancePct, existing?.TakeProfitDistancePct);
         }
 
         var isShort = side.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
-        var stopLossPrice = existing?.StopLossPrice is > 0m
+        var stopLossPrice = existingStopLoss?.StopPrice is > 0m
+            ? existingStopLoss.StopPrice.Value
+            : existing?.StopLossPrice is > 0m
             ? existing.StopLossPrice
             : isShort
                 ? entryPrice * (1m + stopDistancePct.Value / 100m)
                 : entryPrice * (1m - stopDistancePct.Value / 100m);
-        var takeProfitPrice = existing?.TakeProfitPrice is > 0m
+        var takeProfitPrice = existingTakeProfit?.StopPrice is > 0m
+            ? existingTakeProfit.StopPrice.Value
+            : existing?.TakeProfitPrice is > 0m
             ? existing.TakeProfitPrice
             : isShort
                 ? entryPrice * (1m - takeProfitDistancePct.Value / 100m)
                 : entryPrice * (1m + takeProfitDistancePct.Value / 100m);
 
-        return (
-            existing?.TpOrderState ?? "SIMULATED_OPEN",
-            existing?.SlOrderState ?? "SIMULATED_OPEN",
+        return new ImportedTpSlState(
+            existingTakeProfit is not null ? "EXCHANGE_OPEN" : existing?.TpOrderState ?? "SIMULATED_OPEN",
+            existingStopLoss is not null ? "EXCHANGE_OPEN" : existing?.SlOrderState ?? "SIMULATED_OPEN",
             decimal.Round(stopLossPrice.Value, 8),
             decimal.Round(takeProfitPrice.Value, 8),
             stopDistancePct,
             takeProfitDistancePct);
     }
+
+    private static (FuturesOpenOrder? StopLossOrder, FuturesOpenOrder? TakeProfitOrder) FindProtectionOrders(
+        IReadOnlyList<FuturesOpenOrder> openOrders,
+        string symbol,
+        string positionSide)
+    {
+        var closeSide = CloseSide(positionSide);
+        var matching = openOrders
+            .Where(order => order.ReduceOnly
+                && order.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase)
+                && order.Side.Equals(closeSide, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var stop = matching.FirstOrDefault(order => IsStopLossOrder(order.OrderType));
+        var takeProfit = matching.FirstOrDefault(order => IsTakeProfitOrder(order.OrderType));
+        return (stop, takeProfit);
+    }
+
+    private static bool IsStopLossOrder(string orderType) =>
+        orderType.Equals("stp", StringComparison.OrdinalIgnoreCase)
+        || orderType.Equals("stop", StringComparison.OrdinalIgnoreCase)
+        || orderType.Equals("stop_loss", StringComparison.OrdinalIgnoreCase)
+        || orderType.Equals("stop-loss", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTakeProfitOrder(string orderType) =>
+        orderType.Equals("take_profit", StringComparison.OrdinalIgnoreCase)
+        || orderType.Equals("takeprofit", StringComparison.OrdinalIgnoreCase)
+        || orderType.Equals("take-profit", StringComparison.OrdinalIgnoreCase);
+
+    private static string CloseSide(string positionSide) =>
+        positionSide.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? "buy" : "sell";
+
+    private static decimal DistancePercent(decimal entryPrice, decimal triggerPrice) =>
+        entryPrice <= 0m ? 0m : Math.Abs(triggerPrice - entryPrice) / entryPrice * 100m;
+
+    private static decimal RoundTriggerPrice(decimal price, string positionSide, bool isTakeProfit, int? priceDecimals)
+    {
+        var decimals = Math.Clamp(priceDecimals ?? DecimalPlaces(price), 0, 8);
+        var factor = 1m;
+        for (var i = 0; i < decimals; i++)
+        {
+            factor *= 10m;
+        }
+
+        var scaled = price * factor;
+        var roundDown = positionSide.Equals("LONG", StringComparison.OrdinalIgnoreCase) == isTakeProfit;
+        return (roundDown ? Math.Floor(scaled) : Math.Ceiling(scaled)) / factor;
+    }
+
+    private sealed record ImportedTpSlState(
+        string? TpOrderState,
+        string? SlOrderState,
+        decimal? StopLossPrice,
+        decimal? TakeProfitPrice,
+        decimal? StopDistancePct,
+        decimal? TakeProfitDistancePct);
 
     private bool IsLiveInstance =>
         config.BotInstance.Id.Equals("live", StringComparison.OrdinalIgnoreCase)

@@ -11,6 +11,8 @@ internal interface IFuturesBroker
 
     Task<IReadOnlyList<FuturesOpenPosition>> GetOpenPositionsAsync(CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<FuturesOpenOrder>> GetOpenOrdersAsync(CancellationToken cancellationToken);
+
     Task<FuturesTickerQuote?> GetTickerAsync(string symbol, CancellationToken cancellationToken);
 
     // reduceOnly MUST be true for every exit order; leverage applies to entries.
@@ -30,6 +32,16 @@ internal interface IFuturesBroker
         bool reduceOnly,
         CancellationToken cancellationToken);
 
+    Task<FuturesOrderResult> SendTriggerOrderAsync(
+        string symbol,
+        string side,
+        decimal size,
+        string orderType,
+        decimal stopPrice,
+        string triggerSignal,
+        bool reduceOnly,
+        CancellationToken cancellationToken);
+
     // Sets the per-symbol max leverage (Kraken margin preference). Kraken Futures
     // leverage is NOT an order field, so this MUST be set before an entry order or
     // the position inherits the exchange/account default (often 10x+), posting a
@@ -44,6 +56,15 @@ internal interface IFuturesBroker
 internal sealed record FuturesAccountBalance(string Currency, decimal MarginBalance, decimal AvailableMargin);
 
 internal sealed record FuturesOpenPosition(string Symbol, string Side, decimal Size, decimal EntryPrice, decimal MarkPrice, decimal Leverage);
+
+internal sealed record FuturesOpenOrder(
+    string OrderId,
+    string Symbol,
+    string Side,
+    string OrderType,
+    decimal UnfilledSize,
+    decimal? StopPrice,
+    bool ReduceOnly);
 
 internal sealed record FuturesTickerQuote(string Symbol, decimal Bid, decimal Ask, decimal Last, decimal? MarkPrice, DateTimeOffset TimestampUtc);
 

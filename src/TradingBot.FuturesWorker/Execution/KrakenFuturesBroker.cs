@@ -82,6 +82,48 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
         return positions;
     }
 
+    public async Task<IReadOnlyList<FuturesOpenOrder>> GetOpenOrdersAsync(CancellationToken cancellationToken)
+    {
+        using var doc = await SendPrivateAsync(HttpMethod.Get, "/derivatives/api/v3/openorders", Array.Empty<KeyValuePair<string, string>>(), cancellationToken);
+        var root = doc.RootElement;
+        EnsureSuccess(root, "openorders");
+
+        var orders = new List<FuturesOpenOrder>();
+        if (!root.TryGetProperty("openOrders", out var openOrders) || openOrders.ValueKind != JsonValueKind.Array)
+        {
+            return orders;
+        }
+
+        foreach (var item in openOrders.EnumerateArray())
+        {
+            var symbol = GetString(item, "symbol") ?? string.Empty;
+            var side = GetString(item, "side") ?? string.Empty;
+            var orderType = GetString(item, "orderType") ?? GetString(item, "type") ?? string.Empty;
+            var unfilledSize = GetDecimal(item, "unfilledSize")
+                ?? GetDecimal(item, "size")
+                ?? GetDecimal(item, "quantity")
+                ?? 0m;
+            if (string.IsNullOrWhiteSpace(symbol)
+                || string.IsNullOrWhiteSpace(side)
+                || string.IsNullOrWhiteSpace(orderType)
+                || unfilledSize <= 0m)
+            {
+                continue;
+            }
+
+            orders.Add(new FuturesOpenOrder(
+                GetString(item, "order_id") ?? GetString(item, "orderId") ?? string.Empty,
+                symbol,
+                side.Equals("sell", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy",
+                orderType,
+                unfilledSize,
+                GetDecimal(item, "stopPrice") ?? GetDecimal(item, "triggerPrice"),
+                GetBool(item, "reduceOnly") || GetBool(item, "reduce_only")));
+        }
+
+        return orders;
+    }
+
     public async Task<FuturesTickerQuote?> GetTickerAsync(string symbol, CancellationToken cancellationToken)
     {
         using var response = await _httpClient.GetAsync(
@@ -181,6 +223,57 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
             new("side", side.Equals("sell", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy"),
             new("size", FormatDecimal(size)),
             new("limitPrice", FormatDecimal(limitPrice)),
+            new("reduceOnly", reduceOnly ? "true" : "false"),
+            new("cliOrdId", $"tb-{Guid.NewGuid():N}")
+        };
+
+        using var doc = await SendPrivateAsync(HttpMethod.Post, "/derivatives/api/v3/sendorder", parameters, cancellationToken);
+        var root = doc.RootElement;
+        if (!IsSuccess(root))
+        {
+            return FuturesOrderResult.Rejected(ErrorText(root, "sendorder failed"));
+        }
+
+        return ParseOrderResult(root);
+    }
+
+    public async Task<FuturesOrderResult> SendTriggerOrderAsync(
+        string symbol,
+        string side,
+        decimal size,
+        string orderType,
+        decimal stopPrice,
+        string triggerSignal,
+        bool reduceOnly,
+        CancellationToken cancellationToken)
+    {
+        if (size <= 0m)
+        {
+            return FuturesOrderResult.Rejected("size must be positive");
+        }
+
+        if (stopPrice <= 0m)
+        {
+            return FuturesOrderResult.Rejected("stop price must be positive");
+        }
+
+        var normalizedOrderType = orderType.Equals("take_profit", StringComparison.OrdinalIgnoreCase)
+            ? "take_profit"
+            : "stp";
+        var normalizedTrigger = triggerSignal.Equals("last", StringComparison.OrdinalIgnoreCase)
+            ? "last"
+            : triggerSignal.Equals("index", StringComparison.OrdinalIgnoreCase)
+                ? "index"
+                : "mark";
+
+        var parameters = new List<KeyValuePair<string, string>>
+        {
+            new("orderType", normalizedOrderType),
+            new("symbol", symbol),
+            new("side", side.Equals("sell", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy"),
+            new("size", FormatDecimal(size)),
+            new("stopPrice", FormatDecimal(stopPrice)),
+            new("triggerSignal", normalizedTrigger),
             new("reduceOnly", reduceOnly ? "true" : "false"),
             new("cliOrdId", $"tb-{Guid.NewGuid():N}")
         };
@@ -396,6 +489,22 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
             JsonValueKind.Number when value.TryGetDecimal(out var parsed) => parsed,
             JsonValueKind.String when decimal.TryParse(value.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) => parsed,
             _ => null
+        };
+    }
+
+    private static bool GetBool(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var value))
+        {
+            return false;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
+            _ => false
         };
     }
 

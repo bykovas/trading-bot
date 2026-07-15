@@ -2,6 +2,13 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-15-futures-exchange-tpsl-reconciliation
+
+- Futures live reconciliation now reads Kraken Futures open orders and treats existing reduce-only `stp` / `take_profit` orders on the closing side as the source of truth for a position's TP/SL. Existing exchange TP/SL orders are preserved: the worker does not cancel, edit, or replace them.
+- When a live futures position has no exchange stop-loss or take-profit, the worker places only the missing reduce-only trigger order using the configured TP/SL distance and trigger source. Trigger prices are rounded to the instrument price precision before submit. New live IOC entries arm exchange TP/SL immediately after a known fill, using the real filled quantity and price.
+- Added Kraken Futures `/openorders` support and trigger-order submit support. The futures dead-man switch is now opt-in via `Futures.DeadManSwitchEnabled` / `TRADINGBOT_FUTURES_DEAD_MAN_SWITCH_ENABLED` so persistent exchange TP/SL orders are not canceled just because the bot stops refreshing.
+- Not changed: entry scoring, sizing/leverage, position sync, TP/SL percentages, fast-exit cadence, reduce-only close semantics, or virtual-mode simulated TP/SL behavior.
+
 ## 2026-07-15-futures-max-hold-stop-progress
 
 - Futures max-hold stale-loss exits now require meaningful adverse progress toward the configured stop-loss, not merely a negative mark-to-market value. After `Exits.MaxHoldMinutes`, a losing position is held when its stop progress is below `Exits.MaxHoldMinStopProgressPct` (default 60%), so small losses far from SL can continue.

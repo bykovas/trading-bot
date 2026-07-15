@@ -159,6 +159,9 @@ public sealed class FuturesExecutionControlTests
         public Task<IReadOnlyList<FuturesOpenPosition>> GetOpenPositionsAsync(CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<FuturesOpenPosition>>(Array.Empty<FuturesOpenPosition>());
 
+        public Task<IReadOnlyList<FuturesOpenOrder>> GetOpenOrdersAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<FuturesOpenOrder>>(Array.Empty<FuturesOpenOrder>());
+
         public Task<FuturesTickerQuote?> GetTickerAsync(string symbol, CancellationToken cancellationToken) =>
             Task.FromResult(Ticker);
 
@@ -171,6 +174,17 @@ public sealed class FuturesExecutionControlTests
             LastLimitPrice = limitPrice;
             return Task.FromResult(IocResult);
         }
+
+        public Task<FuturesOrderResult> SendTriggerOrderAsync(
+            string symbol,
+            string side,
+            decimal size,
+            string orderType,
+            decimal stopPrice,
+            string triggerSignal,
+            bool reduceOnly,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new FuturesOrderResult("placed", $"{orderType}-1", null));
 
         public Task<bool> SetLeveragePreferenceAsync(string symbol, decimal maxLeverage, CancellationToken cancellationToken) =>
             Task.FromResult(true);

@@ -121,6 +121,7 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_KRAKEN_FUTURES_API_SECRET", value => config.Kraken.ApiSecret = value);
         SetIfPresent("TRADINGBOT_FUTURES_MIN_LIQUIDATION_DISTANCE_PERCENT", value => config.Margin.MinLiquidationDistancePercent = ParseDecimal(value, config.Margin.MinLiquidationDistancePercent));
         SetIfPresent("TRADINGBOT_FUTURES_MAX_MARGIN_UTILIZATION_PERCENT", value => config.Margin.MaxAccountMarginUtilizationPercent = ParseDecimal(value, config.Margin.MaxAccountMarginUtilizationPercent));
+        SetIfPresent("TRADINGBOT_FUTURES_DEAD_MAN_SWITCH_ENABLED", value => config.Futures.DeadManSwitchEnabled = ParseBool(value, config.Futures.DeadManSwitchEnabled));
         SetIfPresent("TRADINGBOT_FUTURES_DEAD_MAN_SWITCH_SECONDS", value => config.Futures.DeadManSwitchSeconds = ParseInt(value, config.Futures.DeadManSwitchSeconds));
     }
 
@@ -337,6 +338,7 @@ internal sealed class FuturesOptions
 
     public int FastExitCheckSeconds { get; set; } = 10;
     public bool LiveTradingEnabled { get; set; }
+    public bool DeadManSwitchEnabled { get; set; }
     public int DeadManSwitchSeconds { get; set; } = 90;
 
     // Derived position notional in EUR for a new entry at the given leverage.

@@ -32,6 +32,7 @@ public sealed class FuturesDeadManSwitchTests
             Futures = new FuturesOptions
             {
                 LiveTradingEnabled = true,
+                DeadManSwitchEnabled = true,
                 DefaultLeverage = 2m,
                 MaxLeverage = 2m,
                 DeadManSwitchSeconds = 240
@@ -131,12 +132,155 @@ public sealed class FuturesDeadManSwitchTests
         await task;
 
         var position = Assert.Single(state.Positions);
-        Assert.Equal("SIMULATED_OPEN", position.TpOrderState);
-        Assert.Equal("SIMULATED_OPEN", position.SlOrderState);
+        Assert.Equal("EXCHANGE_OPEN", position.TpOrderState);
+        Assert.Equal("EXCHANGE_OPEN", position.SlOrderState);
         Assert.Equal(521.8392m, position.TakeProfitPrice);
         Assert.Equal(496.5072m, position.StopLossPrice);
         Assert.Equal(3m, position.TakeProfitDistancePct);
         Assert.Equal(2m, position.StopDistancePct);
+        Assert.Equal(2, broker.TriggerOrderCallCount);
+        Assert.Contains(broker.TriggerOrders, order => order.OrderType == "stp" && order.StopPrice == 496.5072m);
+        Assert.Contains(broker.TriggerOrders, order => order.OrderType == "take_profit" && order.StopPrice == 521.8392m);
+    }
+
+    [Fact]
+    public async Task Live_reconciliation_preserves_existing_exchange_tpsl_orders()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
+        var config = new FuturesBotConfiguration
+        {
+            BotInstance = new BotInstanceOptions { Id = "futures-live", Name = "test" },
+            Futures = new FuturesOptions
+            {
+                LiveTradingEnabled = true,
+                DefaultLeverage = 10m,
+                MaxLeverage = 10m,
+                DeadManSwitchSeconds = 240
+            },
+            TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 3m, StopLossPercent = 2m },
+            Worker = new WorkerOptions { RunOnce = true, LoopIntervalSeconds = 120 },
+            Kraken = new KrakenOptions { MarketDataMode = "sample" },
+            Trading = new TradingOptions { MaxActiveInstruments = 3, TimeframeMinutes = 5 },
+            DryRun = new DryRunOptions { OutputDirectory = outputDirectory },
+            CandidateUniverse =
+            [
+                new InstrumentOptions
+                {
+                    Pair = "BCH/USD",
+                    KrakenPair = "PF_BCHUSD",
+                    PriceDecimals = 2,
+                    Enabled = true
+                }
+            ]
+        };
+        InvokeNormalize(config);
+
+        var broker = new RecordingFuturesBroker(
+        [
+            new FuturesOpenPosition("PF_BCHUSD", "LONG", 1.86m, 234.7502m, 234.33m, 10m)
+        ])
+        {
+            OpenOrders =
+            [
+                new FuturesOpenOrder("sl-1", "PF_BCHUSD", "sell", "stop_loss", 1.86m, 230.05m, true),
+                new FuturesOpenOrder("tp-1", "PF_BCHUSD", "sell", "take_profit", 1.86m, 244.14m, true)
+            ]
+        };
+        var worker = new FuturesDecisionWorker(
+            config,
+            new SampleMarketDataSource(),
+            new IndicatorEngine(),
+            new LongShortStrategy(config),
+            new MarginRiskManager(config),
+            new FuturesVirtualPortfolio(config, new FileDryRunPortfolioStore(config.DryRun)),
+            new TpSlOrchestrator(config),
+            broker);
+
+        var state = new PortfolioState { CashEur = 100m };
+        var method = typeof(FuturesDecisionWorker).GetMethod("ReconcileWithKrakenAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = (Task)method.Invoke(worker, new object?[]
+        {
+            state,
+            config.CandidateUniverse,
+            Array.Empty<InstrumentMarketState>(),
+            DateTimeOffset.UtcNow,
+            CancellationToken.None
+        })!;
+        await task;
+
+        var position = Assert.Single(state.Positions);
+        Assert.Equal("EXCHANGE_OPEN", position.TpOrderState);
+        Assert.Equal("EXCHANGE_OPEN", position.SlOrderState);
+        Assert.Equal(244.14m, position.TakeProfitPrice);
+        Assert.Equal(230.05m, position.StopLossPrice);
+        Assert.Equal(0, broker.TriggerOrderCallCount);
+    }
+
+    [Fact]
+    public async Task Live_reconciliation_rounds_exchange_tpsl_to_price_precision()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
+        var config = new FuturesBotConfiguration
+        {
+            BotInstance = new BotInstanceOptions { Id = "futures-live", Name = "test" },
+            Futures = new FuturesOptions
+            {
+                LiveTradingEnabled = true,
+                DefaultLeverage = 10m,
+                MaxLeverage = 10m,
+                DeadManSwitchSeconds = 240
+            },
+            TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 3m, StopLossPercent = 2m },
+            Worker = new WorkerOptions { RunOnce = true, LoopIntervalSeconds = 120 },
+            Kraken = new KrakenOptions { MarketDataMode = "sample" },
+            Trading = new TradingOptions { MaxActiveInstruments = 3, TimeframeMinutes = 5 },
+            DryRun = new DryRunOptions { OutputDirectory = outputDirectory },
+            CandidateUniverse =
+            [
+                new InstrumentOptions
+                {
+                    Pair = "BCH/USD",
+                    KrakenPair = "PF_BCHUSD",
+                    PriceDecimals = 2,
+                    Enabled = true
+                }
+            ]
+        };
+        InvokeNormalize(config);
+
+        var broker = new RecordingFuturesBroker(
+        [
+            new FuturesOpenPosition("PF_BCHUSD", "LONG", 1.86m, 234.750215m, 234.33m, 10m)
+        ]);
+        var worker = new FuturesDecisionWorker(
+            config,
+            new SampleMarketDataSource(),
+            new IndicatorEngine(),
+            new LongShortStrategy(config),
+            new MarginRiskManager(config),
+            new FuturesVirtualPortfolio(config, new FileDryRunPortfolioStore(config.DryRun)),
+            new TpSlOrchestrator(config),
+            broker);
+
+        var state = new PortfolioState { CashEur = 100m };
+        var method = typeof(FuturesDecisionWorker).GetMethod("ReconcileWithKrakenAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = (Task)method.Invoke(worker, new object?[]
+        {
+            state,
+            config.CandidateUniverse,
+            Array.Empty<InstrumentMarketState>(),
+            DateTimeOffset.UtcNow,
+            CancellationToken.None
+        })!;
+        await task;
+
+        Assert.Contains(broker.TriggerOrders, order => order.OrderType == "stp" && order.StopPrice == 230.06m);
+        Assert.Contains(broker.TriggerOrders, order => order.OrderType == "take_profit" && order.StopPrice == 241.79m);
+        var position = Assert.Single(state.Positions);
+        Assert.Equal(230.06m, position.StopLossPrice);
+        Assert.Equal(241.79m, position.TakeProfitPrice);
     }
 
     [Fact]
@@ -264,6 +408,9 @@ public sealed class FuturesDeadManSwitchTests
         public int? LastDeadManSwitchSeconds { get; private set; }
         public decimal? LastLeverageSet { get; private set; }
         public string? LastLeverageSymbol { get; private set; }
+        public IReadOnlyList<FuturesOpenOrder> OpenOrders { get; init; } = Array.Empty<FuturesOpenOrder>();
+        public List<(string Symbol, string Side, string OrderType, decimal Size, decimal StopPrice, string TriggerSignal, bool ReduceOnly)> TriggerOrders { get; } = new();
+        public int TriggerOrderCallCount => TriggerOrders.Count;
 
         public Task<IReadOnlyList<FuturesAccountBalance>> GetAccountsAsync(CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<FuturesAccountBalance>>(
@@ -273,6 +420,9 @@ public sealed class FuturesDeadManSwitchTests
 
         public Task<IReadOnlyList<FuturesOpenPosition>> GetOpenPositionsAsync(CancellationToken cancellationToken) =>
             Task.FromResult(positions);
+
+        public Task<IReadOnlyList<FuturesOpenOrder>> GetOpenOrdersAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(OpenOrders);
 
         public Task<FuturesTickerQuote?> GetTickerAsync(string symbol, CancellationToken cancellationToken) =>
             Task.FromResult<FuturesTickerQuote?>(new FuturesTickerQuote(symbol, 100m, 100.1m, 100m, 100m, DateTimeOffset.UtcNow));
@@ -294,6 +444,20 @@ public sealed class FuturesDeadManSwitchTests
             bool reduceOnly,
             CancellationToken cancellationToken) =>
             Task.FromResult(new FuturesOrderResult("filled", "order-1", null, new FuturesOrderFill(size, limitPrice, null, DateTimeOffset.UtcNow)));
+
+        public Task<FuturesOrderResult> SendTriggerOrderAsync(
+            string symbol,
+            string side,
+            decimal size,
+            string orderType,
+            decimal stopPrice,
+            string triggerSignal,
+            bool reduceOnly,
+            CancellationToken cancellationToken)
+        {
+            TriggerOrders.Add((symbol, side, orderType, size, stopPrice, triggerSignal, reduceOnly));
+            return Task.FromResult(new FuturesOrderResult("placed", $"{orderType}-1", null));
+        }
 
         public Task<bool> SetLeveragePreferenceAsync(string symbol, decimal maxLeverage, CancellationToken cancellationToken)
         {

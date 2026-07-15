@@ -65,6 +65,94 @@ public sealed class KrakenFuturesBrokerTests
         Assert.Contains("maxLeverage=2", handler.Body);
     }
 
+    [Fact]
+    public async Task Send_trigger_order_places_reduce_only_mark_stop()
+    {
+        var handler = new CapturingHandler("""
+            {"result":"success","sendStatus":{"status":"placed","order_id":"sl-1"}}
+            """);
+        using var client = new HttpClient(handler);
+        var broker = new KrakenFuturesBroker(client, new KrakenOptions
+        {
+            BaseUrl = "https://futures.kraken.test",
+            ApiKey = "public",
+            ApiSecret = Convert.ToBase64String(Encoding.UTF8.GetBytes("secret"))
+        });
+
+        var result = await broker.SendTriggerOrderAsync("PF_BCHUSD", "sell", 1.86m, "stp", 230.05m, "mark", reduceOnly: true, CancellationToken.None);
+
+        Assert.True(result.Accepted);
+        Assert.Equal("sl-1", result.OrderId);
+        Assert.Equal(HttpMethod.Post, handler.Request!.Method);
+        Assert.Equal("https://futures.kraken.test/derivatives/api/v3/sendorder", handler.Request.RequestUri!.ToString());
+        Assert.Contains("orderType=stp", handler.Body);
+        Assert.Contains("symbol=PF_BCHUSD", handler.Body);
+        Assert.Contains("side=sell", handler.Body);
+        Assert.Contains("size=1.86", handler.Body);
+        Assert.Contains("stopPrice=230.05", handler.Body);
+        Assert.Contains("triggerSignal=mark", handler.Body);
+        Assert.Contains("reduceOnly=true", handler.Body);
+    }
+
+    [Fact]
+    public async Task Get_open_orders_reads_reduce_only_tpsl_orders()
+    {
+        var handler = new CapturingHandler("""
+            {
+              "result": "success",
+              "openOrders": [
+                {
+                  "order_id": "sl-1",
+                  "symbol": "PF_BCHUSD",
+                  "side": "sell",
+                  "orderType": "stp",
+                  "unfilledSize": 1.86,
+                  "stopPrice": 230.05,
+                  "reduceOnly": true
+                },
+                {
+                  "order_id": "tp-1",
+                  "symbol": "PF_BCHUSD",
+                  "side": "sell",
+                  "orderType": "take_profit",
+                  "unfilledSize": 1.86,
+                  "stopPrice": 244.14,
+                  "reduceOnly": true
+                }
+              ]
+            }
+            """);
+        using var client = new HttpClient(handler);
+        var broker = new KrakenFuturesBroker(client, new KrakenOptions
+        {
+            BaseUrl = "https://futures.kraken.test",
+            ApiKey = "public",
+            ApiSecret = Convert.ToBase64String(Encoding.UTF8.GetBytes("secret"))
+        });
+
+        var orders = await broker.GetOpenOrdersAsync(CancellationToken.None);
+
+        Assert.Equal(HttpMethod.Get, handler.Request!.Method);
+        Assert.Equal("https://futures.kraken.test/derivatives/api/v3/openorders", handler.Request.RequestUri!.ToString());
+        Assert.Collection(orders,
+            stop =>
+            {
+                Assert.Equal("sl-1", stop.OrderId);
+                Assert.Equal("PF_BCHUSD", stop.Symbol);
+                Assert.Equal("sell", stop.Side);
+                Assert.Equal("stp", stop.OrderType);
+                Assert.Equal(230.05m, stop.StopPrice);
+                Assert.True(stop.ReduceOnly);
+            },
+            takeProfit =>
+            {
+                Assert.Equal("tp-1", takeProfit.OrderId);
+                Assert.Equal("take_profit", takeProfit.OrderType);
+                Assert.Equal(244.14m, takeProfit.StopPrice);
+                Assert.True(takeProfit.ReduceOnly);
+            });
+    }
+
     private static string ExpectedAuthent(string endpointPath, string nonce, string postData, string secret)
     {
         var payload = Encoding.UTF8.GetBytes(postData + nonce + endpointPath);
