@@ -2,6 +2,12 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-15-futures-max-hold-stop-progress
+
+- Futures max-hold stale-loss exits now require meaningful adverse progress toward the configured stop-loss, not merely a negative mark-to-market value. After `Exits.MaxHoldMinutes`, a losing position is held when its stop progress is below `Exits.MaxHoldMinStopProgressPct` (default 60%), so small losses far from SL can continue.
+- Added `Exits.MaxHoldMinStopProgressPct` plus env override `TRADINGBOT_FUTURES_EXITS_MAX_HOLD_MIN_STOP_PROGRESS_PERCENT`. When stop-loss data is missing, stale losing positions still fail closed after max-hold.
+- Not changed: TP/SL precedence, profitable max-hold holds, signal-reversal exits, entry behavior, sizing/leverage, IOC execution, or Kraken reconciliation.
+
 ## 2026-07-15-futures-conditional-max-hold
 
 - Futures max-hold exits are now stale-loss exits instead of a hard age timer. After `Exits.MaxHoldMinutes`, a futures position is closed only when its marked unrealized PnL is negative; profitable or flat positions are held for TP/SL, trailing, or signal reversal handling instead of being closed solely because they are old.

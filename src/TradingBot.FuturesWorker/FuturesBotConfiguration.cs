@@ -113,6 +113,7 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_MIN_SHORT_SCORE", value => config.Shorts.MinShortScore = ParseDecimal(value, config.Shorts.MinShortScore));
         SetIfPresent("TRADINGBOT_FUTURES_BTC_REGIME_LONG_OVERRIDE_MIN_SCORE", value => config.Regime.LongOverrideMinScore = ParseDecimal(value, config.Regime.LongOverrideMinScore));
         SetIfPresent("TRADINGBOT_FUTURES_BTC_REGIME_SHORT_OVERRIDE_MIN_SCORE", value => config.Regime.ShortOverrideMinScore = ParseDecimal(value, config.Regime.ShortOverrideMinScore));
+        SetIfPresent("TRADINGBOT_FUTURES_EXITS_MAX_HOLD_MIN_STOP_PROGRESS_PERCENT", value => config.Exits.MaxHoldMinStopProgressPct = ParseDecimal(value, config.Exits.MaxHoldMinStopProgressPct));
         SetIfPresent("TRADINGBOT_TPSL_TAKE_PROFIT_PERCENT", value => config.TpSl.TakeProfitPercent = ParseDecimal(value, config.TpSl.TakeProfitPercent));
         SetIfPresent("TRADINGBOT_TPSL_STOP_LOSS_PERCENT", value => config.TpSl.StopLossPercent = ParseDecimal(value, config.TpSl.StopLossPercent));
         SetIfPresent("TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED", value => config.Futures.LiveTradingEnabled = ParseBool(value, config.Futures.LiveTradingEnabled));
@@ -203,6 +204,7 @@ internal sealed class FuturesBotConfiguration
         Exits.MinTpVsCostMult = Exits.MinTpVsCostMult <= 0m ? 3m : Exits.MinTpVsCostMult;
         Exits.SlippageBufferPct = Exits.SlippageBufferPct < 0m ? 0.10m : Exits.SlippageBufferPct;
         Exits.MaxHoldMinutes = Exits.MaxHoldMinutes <= 0 ? 360 : Exits.MaxHoldMinutes;
+        Exits.MaxHoldMinStopProgressPct = Math.Clamp(Exits.MaxHoldMinStopProgressPct <= 0m ? 60m : Exits.MaxHoldMinStopProgressPct, 0m, 100m);
         Exits.TrailingActivationBufferPct = Math.Max(0m, Exits.TrailingActivationBufferPct);
         Regime.BtcTrendMa = Regime.BtcTrendMa <= 0 ? 50 : Regime.BtcTrendMa;
         Regime.BtcSlopeLookback = Regime.BtcSlopeLookback <= 0 ? 3 : Regime.BtcSlopeLookback;
@@ -398,6 +400,7 @@ internal sealed class FuturesExitOptions
     public decimal MinTpVsCostMult { get; set; } = 3m;
     public decimal SlippageBufferPct { get; set; } = 0.10m;
     public int MaxHoldMinutes { get; set; } = 360;
+    public decimal MaxHoldMinStopProgressPct { get; set; } = 60m;
     public decimal TrailingActivationBufferPct { get; set; } = 0m;
 }
 

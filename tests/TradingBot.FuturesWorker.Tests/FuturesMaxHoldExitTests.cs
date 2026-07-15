@@ -11,21 +11,44 @@ public sealed class FuturesMaxHoldExitTests
     {
         var position = Position(openedMinutesAgo: 420, unrealizedPnlEur: 5.65m);
 
-        var result = FuturesDecisionWorker.EvaluateMaxHoldExit(position, Now, maxHoldMinutes: 360);
+        var result = FuturesDecisionWorker.EvaluateMaxHoldExit(position, Now, maxHoldMinutes: 360, minStopProgressPct: 60m);
 
         Assert.False(result.ShouldClose);
         Assert.Contains("healthy hold", result.Reason);
     }
 
     [Fact]
-    public void Old_losing_position_is_closed_by_max_hold_timer()
+    public void Old_small_losing_position_far_from_stop_is_not_closed_by_max_hold_timer()
     {
-        var position = Position(openedMinutesAgo: 420, unrealizedPnlEur: -0.25m);
+        var position = Position(
+            openedMinutesAgo: 420,
+            unrealizedPnlEur: -0.25m,
+            entryPrice: 100m,
+            markPrice: 101m,
+            stopLossPrice: 105m);
 
-        var result = FuturesDecisionWorker.EvaluateMaxHoldExit(position, Now, maxHoldMinutes: 360);
+        var result = FuturesDecisionWorker.EvaluateMaxHoldExit(position, Now, maxHoldMinutes: 360, minStopProgressPct: 60m);
+
+        Assert.False(result.ShouldClose);
+        Assert.Contains("stale-loss hold", result.Reason);
+        Assert.Contains("20", result.Reason);
+    }
+
+    [Fact]
+    public void Old_losing_position_near_stop_is_closed_by_max_hold_timer()
+    {
+        var position = Position(
+            openedMinutesAgo: 420,
+            unrealizedPnlEur: -0.25m,
+            entryPrice: 100m,
+            markPrice: 104m,
+            stopLossPrice: 105m);
+
+        var result = FuturesDecisionWorker.EvaluateMaxHoldExit(position, Now, maxHoldMinutes: 360, minStopProgressPct: 60m);
 
         Assert.True(result.ShouldClose);
         Assert.Contains("stale-loss close", result.Reason);
+        Assert.Contains("80", result.Reason);
     }
 
     [Fact]
@@ -33,17 +56,26 @@ public sealed class FuturesMaxHoldExitTests
     {
         var position = Position(openedMinutesAgo: 120, unrealizedPnlEur: -0.25m);
 
-        var result = FuturesDecisionWorker.EvaluateMaxHoldExit(position, Now, maxHoldMinutes: 360);
+        var result = FuturesDecisionWorker.EvaluateMaxHoldExit(position, Now, maxHoldMinutes: 360, minStopProgressPct: 60m);
 
         Assert.False(result.ShouldClose);
         Assert.Null(result.Reason);
     }
 
-    private static PortfolioPosition Position(int openedMinutesAgo, decimal unrealizedPnlEur) => new()
+    private static PortfolioPosition Position(
+        int openedMinutesAgo,
+        decimal unrealizedPnlEur,
+        decimal entryPrice = 100m,
+        decimal markPrice = 100m,
+        decimal? stopLossPrice = null) => new()
     {
         Pair = "UNI/USD",
         Side = "SHORT",
         OpenedAtUtc = Now.AddMinutes(-openedMinutesAgo),
+        EntryPrice = entryPrice,
+        LastPrice = markPrice,
+        MarkPrice = markPrice,
+        StopLossPrice = stopLossPrice,
         UnrealizedPnlEur = unrealizedPnlEur
     };
 }

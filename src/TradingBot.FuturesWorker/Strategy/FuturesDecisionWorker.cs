@@ -188,7 +188,7 @@ internal sealed class FuturesDecisionWorker(
                     fill.Action.ExitReasonCode = trigger.Kind == "STOP_LOSS" ? "SELL_STOP_LOSS" : "SELL_TAKE_PROFIT";
                     riskReasons = new[] { $"hard exit: {trigger.Kind} via {trigger.TriggerSource} price" };
                 }
-                else if (EvaluateMaxHoldExit(held, utc, config.Exits.MaxHoldMinutes) is { ShouldClose: true } maxHold)
+                else if (EvaluateMaxHoldExit(held, utc, config.Exits.MaxHoldMinutes, config.Exits.MaxHoldMinStopProgressPct) is { ShouldClose: true } maxHold)
                 {
                     fill = await ApplyOrExecuteLiveAsync(
                         state, pair, FuturesDesiredExposure.Flat, markPrice,
@@ -417,7 +417,7 @@ internal sealed class FuturesDecisionWorker(
                     cancellationToken);
                 fill.Action.ExitReasonCode = trigger.Kind == "STOP_LOSS" ? "SELL_STOP_LOSS" : "SELL_TAKE_PROFIT";
             }
-            else if (EvaluateMaxHoldExit(held, utc, config.Exits.MaxHoldMinutes) is { ShouldClose: true } maxHold)
+            else if (EvaluateMaxHoldExit(held, utc, config.Exits.MaxHoldMinutes, config.Exits.MaxHoldMinStopProgressPct) is { ShouldClose: true } maxHold)
             {
                 fill = await ApplyOrExecuteLiveAsync(
                     state, held.Pair, FuturesDesiredExposure.Flat, markPrice,
@@ -882,7 +882,11 @@ internal sealed class FuturesDecisionWorker(
         config.BotInstance.Id.Equals("live", StringComparison.OrdinalIgnoreCase)
         || config.BotInstance.Id.EndsWith("-live", StringComparison.OrdinalIgnoreCase);
 
-    internal static FuturesMaxHoldExit EvaluateMaxHoldExit(PortfolioPosition position, DateTimeOffset utc, int maxHoldMinutes)
+    internal static FuturesMaxHoldExit EvaluateMaxHoldExit(
+        PortfolioPosition position,
+        DateTimeOffset utc,
+        int maxHoldMinutes,
+        decimal minStopProgressPct)
     {
         if (maxHoldMinutes <= 0 || position.OpenedAtUtc is not { } opened || utc - opened < TimeSpan.FromMinutes(maxHoldMinutes))
         {
@@ -896,9 +900,43 @@ internal sealed class FuturesDecisionWorker(
                 $"MAX_HOLD healthy hold after {maxHoldMinutes}m: unrealized PnL EUR {position.UnrealizedPnlEur:0.####} >= 0");
         }
 
+        var stopProgressPct = StopProgressPct(position);
+        if (stopProgressPct is { } progress && progress < minStopProgressPct)
+        {
+            return new FuturesMaxHoldExit(
+                false,
+                $"MAX_HOLD stale-loss hold after {maxHoldMinutes}m: unrealized PnL EUR {position.UnrealizedPnlEur:0.####} < 0, but stop progress {progress:0.##}% < {minStopProgressPct:0.##}%");
+        }
+
+        var stopText = stopProgressPct is { } value
+            ? $", stop progress {value:0.##}% >= {minStopProgressPct:0.##}%"
+            : ", stop progress unavailable";
         return new FuturesMaxHoldExit(
             true,
-            $"MAX_HOLD stale-loss close after {maxHoldMinutes}m: unrealized PnL EUR {position.UnrealizedPnlEur:0.####} < 0");
+            $"MAX_HOLD stale-loss close after {maxHoldMinutes}m: unrealized PnL EUR {position.UnrealizedPnlEur:0.####} < 0{stopText}");
+    }
+
+    private static decimal? StopProgressPct(PortfolioPosition position)
+    {
+        var stop = position.StopLossPrice;
+        var mark = position.MarkPrice > 0m ? position.MarkPrice.Value : position.LastPrice;
+        if (stop is null || position.EntryPrice <= 0m || mark <= 0m)
+        {
+            return null;
+        }
+
+        var stopDistance = position.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase)
+            ? stop.Value - position.EntryPrice
+            : position.EntryPrice - stop.Value;
+        var adverseMove = position.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase)
+            ? mark - position.EntryPrice
+            : position.EntryPrice - mark;
+        if (stopDistance <= 0m || adverseMove <= 0m)
+        {
+            return 0m;
+        }
+
+        return decimal.Round(Math.Min(100m, adverseMove / stopDistance * 100m), 4);
     }
 
     private bool IsMinHoldActive(PortfolioPosition position, DateTimeOffset utc) =>
