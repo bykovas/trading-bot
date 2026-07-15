@@ -88,17 +88,29 @@ cp infra/traefik/trading-bot.yml "${TRAEFIK_DYNAMIC_FILE}"
 # the same fresh file from the repo, so live and virtual always run identical
 # strategy/config. Operator-specific overrides belong in the .env files (which are
 # preserved for live below), NOT in appsettings.
+#
+# install_config overwrites the destination even when the existing file is owned by
+# another user (e.g. a live appsettings.json created root-owned by an earlier
+# create-once deploy): plain `cp` truncates in place and fails with EACCES on such a
+# file, so remove-then-copy first, which only needs the (writable) target directory
+# and re-creates the file owned by the deploy user.
+install_config() {
+  local src="$1" dest="$2"
+  rm -f "${dest}"
+  cp "${src}" "${dest}"
+}
+
 echo "Updating live worker appsettings from repository config (identical to virtual)"
-cp "${WORKER_APPSETTINGS_SOURCE}" "${LIVE_APPSETTINGS}"
+install_config "${WORKER_APPSETTINGS_SOURCE}" "${LIVE_APPSETTINGS}"
 echo "Updating virtual worker appsettings from repository config"
-cp "${WORKER_APPSETTINGS_SOURCE}" "${VIRTUAL_APPSETTINGS}"
+install_config "${WORKER_APPSETTINGS_SOURCE}" "${VIRTUAL_APPSETTINGS}"
 
 echo "Updating futures live appsettings from repository config (identical to virtual)"
-cp "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_LIVE_APPSETTINGS}"
+install_config "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_LIVE_APPSETTINGS}"
 echo "Updating futures virtual appsettings from repository config"
-cp "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_VIRTUAL_APPSETTINGS}"
+install_config "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_VIRTUAL_APPSETTINGS}"
 echo "Updating market data worker appsettings from repository config"
-cp "${MARKET_DATA_APPSETTINGS_SOURCE}" "${MARKET_DATA_APPSETTINGS}"
+install_config "${MARKET_DATA_APPSETTINGS_SOURCE}" "${MARKET_DATA_APPSETTINGS}"
 
 # Live trading comes from the GitHub PROD environment variable
 # TRADINGBOT_LIVE_TRADING_ENABLED. Anything but an explicit "true" (any case)
