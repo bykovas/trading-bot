@@ -349,7 +349,7 @@ internal sealed class MarginOptions
 {
     public decimal MaintenanceMarginRatePercent { get; set; } = 0.5m;
     public decimal MinLiquidationDistancePercent { get; set; } = 15m;
-    public decimal MaxAccountMarginUtilizationPercent { get; set; } = 50m;
+    public decimal MaxAccountMarginUtilizationPercent { get; set; } = 80m;
 }
 
 internal sealed class FuturesFeesOptions

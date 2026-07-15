@@ -2,6 +2,11 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-15-futures-margin-utilization-80
+
+- Futures margin utilization cap default is raised from 50% to 80% (`Margin.MaxAccountMarginUtilizationPercent`) so one oversized imported/manual position does not block every additional 10 EUR margin entry while there is still account headroom.
+- Not changed: target margin/leverage sizing, max positions, liquidation-distance gate, TP/SL exchange protection, freshness/entry quality gates, spread checks, or live execution semantics.
+
 ## 2026-07-15-futures-exchange-tpsl-reconciliation
 
 - Futures live reconciliation now reads Kraken Futures open orders and treats existing reduce-only `stp` / `take_profit` orders on the closing side as the source of truth for a position's TP/SL. Existing exchange TP/SL orders are preserved: the worker does not cancel, edit, or replace them.
