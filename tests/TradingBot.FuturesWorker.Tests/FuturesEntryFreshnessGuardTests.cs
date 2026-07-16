@@ -47,8 +47,10 @@ public sealed class FuturesEntryFreshnessGuardTests
     [Fact]
     public void Mid_range_long_with_fresh_continuation_tape_is_not_blocked()
     {
+        // recentHigh set well above the entry so pos24 lands ~65% (mid-range, below
+        // MaxContinuationRangePositionPct): a fresh continuation tape still admits here.
         var result = FuturesEntryFreshnessGuard.Evaluate(
-            Market(0.21075m, recentHigh: 0.21243989865m, low24: 0.196145m, quoteLast: 0.21085227177m),
+            Market(0.21075m, recentHigh: 0.2323m, low24: 0.196145m, quoteLast: 0.21085227177m),
             Observations(0.21011995958m, 0.21042458073m, 0.21085227177m),
             FuturesDesiredExposure.Long,
             ThresholdsWithoutDriftGuard());
@@ -56,6 +58,7 @@ public sealed class FuturesEntryFreshnessGuardTests
         Assert.False(result.Blocked);
         Assert.True(result.HasFreshUpwardTape);
         Assert.False(result.HasFreshBreakout);
+        Assert.True(result.PositionIn24hRangePct < 80m); // below the upper-range band
     }
 
     [Fact]
@@ -76,8 +79,12 @@ public sealed class FuturesEntryFreshnessGuardTests
     {
         var thresholds = Thresholds();
         thresholds.FreshTapeSnapshotCount = 4;
+        // Mid-range fixture (pos24 ~64%, below MaxContinuationRangePositionPct) so this
+        // isolates the tape-freshness logic: a single negative tick inside a positive
+        // tape must not break freshness. Near the daily high a fresh tape is blocked by
+        // the upper-range rule regardless, which is covered separately.
         var result = FuturesEntryFreshnessGuard.Evaluate(
-            Market(100.00m, recentHigh: 100.40m, low24: 80m, quoteLast: 100.02m),
+            Market(100.00m, recentHigh: 111.00m, low24: 80m, quoteLast: 100.02m),
             Observations(99.80m, 100.05m, 100.02m, 100.08m),
             FuturesDesiredExposure.Long,
             thresholds);
@@ -120,15 +127,17 @@ public sealed class FuturesEntryFreshnessGuardTests
     [Fact]
     public void Continuation_tape_with_rising_candles_still_passes()
     {
-        // Same fresh micro-tape but candles are rising over the last 4 bars -> allowed.
+        // Same fresh micro-tape, candles rising over the last 4 bars, and pos24 ~65%
+        // (mid-range, recentHigh raised above the entry) -> allowed.
         var result = FuturesEntryFreshnessGuard.Evaluate(
-            RisingCandleMarket(close: 0.21082m, recentHigh: 0.2124m, low24: 0.196145m, quoteLast: 0.21085227177m),
+            RisingCandleMarket(close: 0.21082m, recentHigh: 0.2188m, low24: 0.196145m, quoteLast: 0.21085227177m),
             Observations(0.21011995958m, 0.21042458073m, 0.21085227177m),
             FuturesDesiredExposure.Long,
             ThresholdsWithoutDriftGuard());
 
         Assert.False(result.Blocked);
         Assert.True(result.HasFreshUpwardTape);
+        Assert.True(result.PositionIn24hRangePct < 80m); // below the upper-range band
     }
 
     [Fact]
@@ -217,6 +226,57 @@ public sealed class FuturesEntryFreshnessGuardTests
         Assert.False(result.HasFreshUpwardTape);
         Assert.NotNull(result.PositionIn24hRangePct);
         Assert.True(result.PositionIn24hRangePct < 25m);
+    }
+
+    [Fact]
+    public void Virtual_fixture_blocks_fresh_continuation_near_daily_high()
+    {
+        // VIRTUAL 2026-07-16: pos24 ~86.7%, a fresh 3-snapshot rebound off a pullback,
+        // last closed 15m candle red, not a breakout. Under the upper-range rule the
+        // fresh tape no longer admits a LONG near the daily high.
+        var result = FuturesEntryFreshnessGuard.Evaluate(
+            UpperRangeContinuationMarket(),
+            Observations(0.62519m, 0.62778m, 0.62783m),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.True(result.Blocked);
+        Assert.True(result.HasFreshUpwardTape);   // the tape IS fresh...
+        Assert.False(result.HasFreshBreakout);    // ...but it is not a breakout
+        Assert.False(result.IsNearHigh);          // 86.7% < 88% near-high line
+        Assert.InRange(result.PositionIn24hRangePct!.Value, 80m, 88m);
+        Assert.Contains("upper-range continuation", result.BlockReason);
+    }
+
+    // pos24 ~86.7% of the 24h range with a fresh micro-tape into a RED last candle and
+    // no breakout. Tight spread so the local-high and signal-drift guards do not fire —
+    // this isolates the upper-range continuation rule.
+    private static InstrumentMarketState UpperRangeContinuationMarket()
+    {
+        const decimal low24 = 0.5826m;
+        var candles = new List<Candle>();
+        for (var i = 95; i >= 5; i--)
+        {
+            var high = i == 50 ? 0.6350m : low24 + 0.001m;
+            candles.Add(new Candle(T.AddMinutes(-15 * i), low24 + 0.0003m, high, low24, low24 + 0.0003m, 1m, 1));
+        }
+
+        decimal[] closes = [0.6240m, 0.6275m, 0.6300m, 0.6305m, 0.6280m];
+        for (var i = 0; i < closes.Length; i++)
+        {
+            var c = closes[i];
+            var open = i == 0 ? c - 0.0005m : closes[i - 1];
+            var high = Math.Max(open, c) + 0.0002m;
+            var low = Math.Min(open, c) - 0.0004m;
+            candles.Add(new Candle(T.AddMinutes(-15 * (5 - i)), open, high, low, c, 1m, 1));
+        }
+
+        return new InstrumentMarketState
+        {
+            Instrument = new InstrumentOptions { Pair = "VIRTUAL/USD", KrakenPair = "PF_VIRTUALUSD", Enabled = true },
+            Candles = candles,
+            Quote = new Quote(0.62795m, 0.62805m, 0.62800m, 1_000_000m)
+        };
     }
 
     // Wide 24h range (high spike far back, low floor) with the last 5 candles sitting

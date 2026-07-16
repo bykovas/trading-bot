@@ -82,7 +82,15 @@ internal static class FuturesEntryFreshnessGuard
         var continuationZone =
             range.PositionIn24hRangePct is { } continuationPosition
             && continuationPosition >= thresholds.FreshContinuationMin24hRangePositionPct;
-        var staleContinuation = continuationZone && !freshContinuationTape && !freshBreakout;
+        // Upper band of the 24h range: a fresh continuation tape is NOT enough here —
+        // near the daily high the "last green micro-tick" is exactly the exhaustion
+        // push, so only a confirmed breakout may enter. Below the band, fresh tape
+        // still admits as before.
+        var upperRangeZone =
+            range.PositionIn24hRangePct is { } upperPosition
+            && upperPosition >= thresholds.MaxContinuationRangePositionPct;
+        var freshContinuationAdmits = freshContinuationTape && !upperRangeZone;
+        var staleContinuation = continuationZone && !freshContinuationAdmits && !freshBreakout;
         var localExecutionOverextended =
             localHigh.High is > 0m
             && entryDistanceFromLocalHighPct is { } distanceFromLocalHigh
@@ -106,6 +114,8 @@ internal static class FuturesEntryFreshnessGuard
                     ? $"entry chased signal: executable entry price drifted +{livePriceVsSignalClosePct:0.###}% from signal close, max {thresholds.MaxEntryDriftFromSignalPct:0.###}%, breakout not confirmed"
                 : isNearHigh
                 ? $"entry stale near high: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.NearHighMin24hRangePositionPct:0.###}%, distance from recent high {distanceFromRecentHighPct:0.###}% <= {thresholds.NearHighMaxDistanceFromRecentHighPct:0.###}%, short tape slope {tape.ShortSnapshotSlopePct:0.###}% is not fresh{momentumNote}"
+                : upperRangeZone && freshContinuationTape
+                ? $"entry upper-range continuation: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.MaxContinuationRangePositionPct:0.###}%, fresh tape is not sufficient near the daily high — only a confirmed breakout may enter{momentumNote}"
                 : $"entry stale continuation: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.FreshContinuationMin24hRangePositionPct:0.###}%, but no fresh upward tape and no valid breakout{momentumNote}"
             : null;
 

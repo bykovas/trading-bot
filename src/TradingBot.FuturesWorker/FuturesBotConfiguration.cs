@@ -97,6 +97,7 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_FAST_EXIT_CHECK_SECONDS", value => config.Futures.FastExitCheckSeconds = ParseInt(value, config.Futures.FastExitCheckSeconds));
         SetIfPresent("TRADINGBOT_FUTURES_ENTRY_MAX_PRICE_DEVIATION_PERCENT", value => config.Entry.MaxEntryPriceDeviationPct = ParseDecimal(value, config.Entry.MaxEntryPriceDeviationPct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_FRESH_CONTINUATION_MIN_24H_RANGE_POSITION_PERCENT", value => config.Freshness.FreshContinuationMin24hRangePositionPct = ParseDecimal(value, config.Freshness.FreshContinuationMin24hRangePositionPct));
+        SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_MAX_CONTINUATION_24H_RANGE_POSITION_PERCENT", value => config.Freshness.MaxContinuationRangePositionPct = ParseDecimal(value, config.Freshness.MaxContinuationRangePositionPct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_NEAR_HIGH_MIN_24H_RANGE_POSITION_PERCENT", value => config.Freshness.NearHighMin24hRangePositionPct = ParseDecimal(value, config.Freshness.NearHighMin24hRangePositionPct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_NEAR_HIGH_MAX_DISTANCE_FROM_RECENT_HIGH_PERCENT", value => config.Freshness.NearHighMaxDistanceFromRecentHighPct = ParseDecimal(value, config.Freshness.NearHighMaxDistanceFromRecentHighPct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_RECENT_HIGH_LOOKBACK_CANDLES", value => config.Freshness.RecentHighLookbackCandles = ParseInt(value, config.Freshness.RecentHighLookbackCandles));
@@ -200,6 +201,7 @@ internal sealed class FuturesBotConfiguration
             ? 0.35m
             : Math.Clamp(Entry.MaxEntryPriceDeviationPct, 0.05m, 2m);
         Freshness.FreshContinuationMin24hRangePositionPct = Math.Clamp(Freshness.FreshContinuationMin24hRangePositionPct < 0m ? 50m : Freshness.FreshContinuationMin24hRangePositionPct, 0m, 100m);
+        Freshness.MaxContinuationRangePositionPct = Math.Clamp(Freshness.MaxContinuationRangePositionPct <= 0m ? 80m : Freshness.MaxContinuationRangePositionPct, 50m, 100m);
         Freshness.NearHighMin24hRangePositionPct = Math.Clamp(Freshness.NearHighMin24hRangePositionPct <= 0m ? 88m : Freshness.NearHighMin24hRangePositionPct, 50m, 100m);
         Freshness.NearHighMaxDistanceFromRecentHighPct = Math.Clamp(Freshness.NearHighMaxDistanceFromRecentHighPct <= 0m ? 0.5m : Freshness.NearHighMaxDistanceFromRecentHighPct, 0m, 10m);
         Freshness.RecentHighLookbackCandles = Math.Clamp(Freshness.RecentHighLookbackCandles <= 0 ? 12 : Freshness.RecentHighLookbackCandles, 2, 96);
@@ -401,6 +403,15 @@ internal sealed class FuturesEntryOptions
 internal sealed class FuturesFreshnessOptions
 {
     public decimal FreshContinuationMin24hRangePositionPct { get; set; } = 50m;
+
+    // Upper band of the 24h range above which a fresh continuation tape is NOT enough
+    // to admit a LONG — only a confirmed breakout (price above the recent high, held
+    // over BreakoutHoldSnapshotCount snapshots) may enter. Below this band a fresh
+    // continuation tape still admits. This closes the "buy the last green micro-tick
+    // near the daily high" hole (the VIRTUAL case: pos24 ~86.7%, fresh 3-snapshot
+    // rebound off a pullback, last 15m candle red, not a breakout — yet admitted).
+    public decimal MaxContinuationRangePositionPct { get; set; } = 80m;
+
     public decimal NearHighMin24hRangePositionPct { get; set; } = 88m;
     public decimal NearHighMaxDistanceFromRecentHighPct { get; set; } = 0.5m;
     public int RecentHighLookbackCandles { get; set; } = 12;

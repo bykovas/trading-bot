@@ -2,6 +2,13 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-16-futures-upper-range-continuation-guard
+
+- Root-cause of the VIRTUAL/USD peak buy (fill 0.62844 at pos24 ~86.7%, cycle futures-live-20260716033116): a fresh 3-snapshot micro-rebound (0.62519 → 0.62778 → 0.62783) off a pullback admitted a Continuation LONG while the last closed 15m candle was RED (O 0.630507 → C 0.627982) and the price sat in the top of the 24h range. The near-high block did not fire (86.7% < 88%), the local-high chase guard did not fire (0.47% below local high > 0.12%), and there was no breakout — so a fresh continuation tape carried the entry into the daily top.
+- Fix: fresh continuation tape is no longer sufficient in the upper band of the 24h range. Above `Freshness.MaxContinuationRangePositionPct` (new, default 80%) a LONG requires a CONFIRMED breakout (price above the recent high, held over `BreakoutHoldSnapshotCount` snapshots); a fresh micro-tape alone is rejected with reason "entry upper-range continuation". Below the band, behavior is unchanged. Env override `TRADINGBOT_FUTURES_FRESHNESS_MAX_CONTINUATION_24H_RANGE_POSITION_PERCENT`; clamped to [50, 100].
+- Note on the range-position basis: `CalculateRangePosition` still uses the last 15m candle close (not the executable ask). Recomputing VIRTUAL on the executable fill against the candle 24h range gives ~87.5%, still below the 88% near-high line, so switching the basis alone would not have blocked it and would have shifted every calibrated fixture; the upper-range rule (default 80%) closes the hole robustly regardless of the exact basis. The basis change remains available as a future refinement.
+- Not changed: dip-bounce channel, near-high (>=88% and within 0.5% of recent high) and local-high/drift guards, sizing/leverage, TP/SL, scoring weights, short entries, or execution semantics.
+
 ## 2026-07-16-futures-dip-bounce-momentum-and-diagnostics
 
 - Dip-bounce now demands a real up-tick, not merely a non-falling candle: promotion requires recent 15m candle momentum >= `Dip.MinCandleMomentumPct` (a small POSITIVE floor, default 0.10%) on top of the fresh upward tape, and momentum that cannot be computed no longer qualifies. Env override `TRADINGBOT_FUTURES_DIP_BOUNCE_MIN_CANDLE_MOMENTUM_PERCENT`; config/DB-tunable.
