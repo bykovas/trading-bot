@@ -346,6 +346,29 @@
     .pill.bad { border-color: rgba(255,83,103,.32); background: rgba(255,83,103,.08); }
     .pill.warn { border-color: rgba(240,166,58,.34); background: rgba(240,166,58,.08); }
     .pill.info { border-color: rgba(111,174,255,.28); background: rgba(111,174,255,.08); }
+    .pill.primary-bad {
+      color: #ffd2d8;
+      border-color: rgba(255,83,103,.56);
+      background: rgba(255,83,103,.18);
+      box-shadow: inset 0 0 0 1px rgba(255,83,103,.12);
+    }
+    .pill.primary-good {
+      color: #d9ffec;
+      border-color: rgba(65,237,160,.52);
+      background: rgba(65,237,160,.16);
+      box-shadow: inset 0 0 0 1px rgba(65,237,160,.12);
+    }
+
+    .signal-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .signal-strip:empty {
+      display: none;
+    }
 
     .why {
       max-width: 620px;
@@ -502,6 +525,11 @@
         gap: 6px;
       }
 
+      .signal-strip {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
       .pill {
         width: 100%;
         justify-content: center;
@@ -651,11 +679,12 @@
               <th class="num">Score</th>
               <th class="num">Price</th>
               <th>Parameters</th>
+              <th>Signals</th>
               <th>Human reason</th>
             </tr>
           </thead>
           <tbody id="decision-rows">
-            <tr><td class="empty" colspan="7">Loading</td></tr>
+            <tr><td class="empty" colspan="8">Loading</td></tr>
           </tbody>
         </table>
       </div>
@@ -886,6 +915,89 @@
       return "";
     }
 
+    function signalPill(label, cls, title = "") {
+      const suffix = title ? ` title="${escapeHtml(title)}"` : "";
+      return `<span class="pill ${cls}"${suffix}>${escapeHtml(label)}</span>`;
+    }
+
+    function decisionSignals(decision) {
+      const action = getAction(decision);
+      const reason = collectReason(decision);
+      const reasonLower = reason.toLowerCase();
+      const actionName = actionText(decision);
+      const desired = String(decision.desiredPosition ?? action.desiredPosition ?? sideText(decision) ?? "FLAT").toUpperCase();
+      const scoreValue = Number(decision.score);
+      const spreadValue = Number(decision.spreadPercent ?? action.spreadPercent);
+      const paDirection = String(decision.priceActionDirection ?? action.priceActionDirection ?? "").toUpperCase();
+      const paTrend = Number(decision.priceActionTrendPercent ?? action.priceActionTrendPercent);
+      const emaGap = Number(decision.bullishEmaGapPercent ?? action.bullishEmaGapPercent);
+      const hasFreshTape = action.entryFreshnessHasFreshUpwardTape;
+      const hasBreakout = action.entryFreshnessHasFreshBreakout;
+      const pills = [];
+      const seen = new Set();
+      const add = (label, cls, title = "") => {
+        const key = `${label}:${cls}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        pills.push(signalPill(label, cls, title));
+      };
+
+      if (/OPEN|BUY/.test(actionName)) add("главное за: entry разрешен", "primary-good");
+      if (/CLOSE|SELL/.test(actionName)) add("главное: exit rule", "primary-bad");
+      if (/HOLD/.test(actionName)) add("главное за: держим позицию", "primary-good");
+
+      if (/score .*below|below required|score .*below/i.test(reason)) add("главный блокер: score ниже порога", "primary-bad", reason);
+      else if (/ema gap/i.test(reason)) add("главный блокер: EMA слабая", "primary-bad", reason);
+      else if (/spread/i.test(reason)) add("главный блокер: spread", "primary-bad", reason);
+      else if (/local high|overextension|drift/i.test(reason)) add("главный блокер: поздний вход", "primary-bad", reason);
+      else if (/rising snapshots/i.test(reason)) add("главный блокер: нет свежего роста", "primary-bad", reason);
+      else if (/falling snapshots/i.test(reason)) add("главный блокер: нет свежего падения", "primary-bad", reason);
+      else if (/position slots/i.test(reason)) add("главный блокер: нет слота", "primary-bad", reason);
+      else if (/margin|notional|risk/i.test(reason)) add("главный блокер: risk/margin", "primary-bad", reason);
+      else if (/short blocked|short gate|short score|short/i.test(reason) && /NO_ORDER/.test(actionName)) add("главный блокер: short gate", "primary-bad", reason);
+
+      if (Number.isFinite(scoreValue)) {
+        if (scoreValue >= 0.85) add(`сильное за: score ${score(scoreValue)}`, "primary-good");
+        else if (scoreValue >= 0.7) add(`за: score ${score(scoreValue)}`, "info");
+        else if (/NO_ORDER/.test(actionName)) add(`против: score ${score(scoreValue)}`, scoreValue < 0.5 ? "warn" : "info");
+      }
+
+      if (Number.isFinite(spreadValue)) {
+        if (spreadValue <= 0.15) add(`за: spread ${pct(spreadValue)}`, "info");
+        else if (spreadValue <= 0.35) add(`средний блокер: spread ${pct(spreadValue)}`, "warn");
+        else add(`блокер: spread ${pct(spreadValue)}`, "primary-bad");
+      }
+
+      if (paDirection) {
+        const isDesiredLong = desired === "LONG";
+        const isDesiredShort = desired === "SHORT";
+        const paHelps = (isDesiredLong && paDirection.includes("RISING")) || (isDesiredShort && paDirection.includes("FALLING"));
+        const paHurts = (isDesiredLong && paDirection.includes("FALLING")) || (isDesiredShort && paDirection.includes("RISING"));
+        const label = `PA ${paDirection}${Number.isFinite(paTrend) ? ` ${pct(paTrend)}` : ""}`;
+        if (paHelps) add(`за: ${label}`, "info");
+        else if (paHurts) add(`против: ${label}`, "warn");
+        else add(label, "");
+      }
+
+      if (Number.isFinite(emaGap)) {
+        if (emaGap >= 0.2) add(`за: EMA gap ${pct(emaGap)}`, "info");
+        else if (emaGap > 0) add(`слабое за: EMA gap ${pct(emaGap)}`, "info");
+        else add(`против: EMA gap ${pct(emaGap)}`, "warn");
+      }
+
+      if (hasFreshTape === true) add("за: fresh tape", "info");
+      if (hasFreshTape === false && /LONG|SHORT/.test(desired)) add("блокер: no fresh tape", "warn");
+      if (hasBreakout === true) add("сильное за: breakout", "primary-good");
+      if (hasBreakout === false && /breakout|local high|local low/i.test(reasonLower)) add("блокер: breakout no", "warn");
+
+      if (/take profit/i.test(reason)) add("за: take profit", "primary-good");
+      if (/stop loss/i.test(reason)) add("блокер: stop loss", "primary-bad");
+      if (/stale|max hold/i.test(reason)) add("средний блокер: stale", "warn");
+      if (/signal|reversal|flip/i.test(reason)) add("блокер: signal reversal", "primary-bad");
+
+      return pills.join("");
+    }
+
     function parameterPills(decision) {
       const action = getAction(decision);
       const pills = [];
@@ -955,7 +1067,7 @@
       els.cycleMeta.textContent = `${cycle.cycleId || "--"} · ${record.changeSet || cycle.changeSet || "no change-set"} · ${record.workerCommit || cycle.workerCommit || "no commit"}`;
 
       if (decisions.length === 0) {
-        els.decisionRows.innerHTML = '<tr><td class="empty" colspan="7">Latest cycle has no decisions</td></tr>';
+        els.decisionRows.innerHTML = '<tr><td class="empty" colspan="8">Latest cycle has no decisions</td></tr>';
         return;
       }
 
@@ -970,6 +1082,7 @@
             <td class="num" data-label="Score">${score(decision.score)}</td>
             <td class="num" data-label="Price">${num(action.signalPrice ?? action.entryPrice ?? action.fillPrice ?? decision.price)}</td>
             <td data-label="Parameters"><div class="pill-row">${parameterPills(decision)}</div></td>
+            <td data-label="Signals"><div class="signal-strip">${decisionSignals(decision)}</div></td>
             <td class="why" data-label="Human reason">
               ${escapeHtml(explain(decision))}
               ${reason ? `<details class="tech-details"><summary>technical details</summary><div class="tech">${escapeHtml(reason)}</div></details>` : ""}
@@ -994,7 +1107,7 @@
 
     async function refresh() {
       els.errorRows.innerHTML = '<tr><td class="empty" colspan="6">Loading</td></tr>';
-      els.decisionRows.innerHTML = '<tr><td class="empty" colspan="7">Loading</td></tr>';
+      els.decisionRows.innerHTML = '<tr><td class="empty" colspan="8">Loading</td></tr>';
       els.errorUpdated.textContent = "loading";
       els.decisionUpdated.textContent = "loading";
       await refreshBotStatus().catch(() => {
@@ -1009,7 +1122,7 @@
         els.pairCount.textContent = "0";
         els.actionCount.textContent = "0";
         renderErrorRows([]);
-        els.decisionRows.innerHTML = '<tr><td class="empty" colspan="7">No cycles</td></tr>';
+        els.decisionRows.innerHTML = '<tr><td class="empty" colspan="8">No cycles</td></tr>';
         return;
       }
 
@@ -1038,14 +1151,14 @@
     document.getElementById("reload").addEventListener("click", () => {
       refresh().catch(error => {
         els.errorRows.innerHTML = `<tr><td class="empty" colspan="6">${escapeHtml(error.message)}</td></tr>`;
-        els.decisionRows.innerHTML = `<tr><td class="empty" colspan="7">${escapeHtml(error.message)}</td></tr>`;
+        els.decisionRows.innerHTML = `<tr><td class="empty" colspan="8">${escapeHtml(error.message)}</td></tr>`;
       });
     });
 
     initBotSelector();
     refresh().catch(error => {
       els.errorRows.innerHTML = `<tr><td class="empty" colspan="6">${escapeHtml(error.message)}</td></tr>`;
-      els.decisionRows.innerHTML = `<tr><td class="empty" colspan="7">${escapeHtml(error.message)}</td></tr>`;
+      els.decisionRows.innerHTML = `<tr><td class="empty" colspan="8">${escapeHtml(error.message)}</td></tr>`;
     });
   </script>
 </body>
