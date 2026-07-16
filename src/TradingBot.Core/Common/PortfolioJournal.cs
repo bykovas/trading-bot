@@ -280,6 +280,10 @@ public sealed class DryRunAction
     public bool? EntryFreshnessHasFreshUpwardTape { get; set; }
     public bool? EntryFreshnessHasFreshBreakout { get; set; }
     public string? EntryFreshnessBlockReason { get; set; }
+    // Recent 15m candle momentum (percent over the freshness lookback) used to
+    // qualify continuation and dip-bounce entries. Persisted so a losing entry's
+    // momentum context is queryable after the fact.
+    public decimal? EntryFreshnessRecentCandleMomentumPct { get; set; }
     public decimal? EntryDistanceFromLocalHighPct { get; set; }
     public string? LocalHighSource { get; set; }
     public decimal? BreakoutBufferPct { get; set; }
@@ -318,6 +322,11 @@ public sealed class DryRunAction
     // Standard / Continuation / Breakout / DipBounce. Null on non-position rows and
     // on spot rows. Enables per-channel win-rate / avg-PnL comparison in SQL.
     public string? EntryChannel { get; set; }
+
+    // The relaxed Dip.MinScore threshold that admitted a DipBounce entry (null on
+    // every other channel). Recorded alongside the actual score so a bad dip entry's
+    // admission conditions are fully reconstructable from the decision row.
+    public decimal? DipBounceMinScoreApplied { get; set; }
 
     // Spot BUY maker-then-IOC execution telemetry (null on every non-entry row and
     // on futures rows). Kept as a nested object so the flat action shape is unchanged.

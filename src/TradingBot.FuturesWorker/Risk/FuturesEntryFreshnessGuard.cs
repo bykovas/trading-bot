@@ -18,7 +18,8 @@ internal sealed record EntryFreshnessResult(
     decimal? BreakoutBufferPct = null,
     decimal? LivePriceVsSignalClosePct = null,
     decimal? PostFillEntryDistanceFromLocalHighPct = null,
-    decimal? PostFillLivePriceVsSignalClosePct = null);
+    decimal? PostFillLivePriceVsSignalClosePct = null,
+    decimal? RecentCandleMomentumPct = null);
 
 internal static class FuturesEntryFreshnessGuard
 {
@@ -122,7 +123,8 @@ internal static class FuturesEntryFreshnessGuard
             entryDistanceFromLocalHighPct,
             localHighSource,
             thresholds.BreakoutMinAboveRecentHighPct,
-            livePriceVsSignalClosePct);
+            livePriceVsSignalClosePct,
+            RecentCandleMomentumPct: candleMomentumPct);
     }
 
     private static (decimal? PositionIn24hRangePct, decimal? High, decimal? Low) CalculateRangePosition(IReadOnlyList<Candle> candles)

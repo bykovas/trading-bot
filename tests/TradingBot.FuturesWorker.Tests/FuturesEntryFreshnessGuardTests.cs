@@ -147,6 +147,10 @@ public sealed class FuturesEntryFreshnessGuardTests
         Assert.False(result.IsNearHigh);
         Assert.NotNull(result.PositionIn24hRangePct);
         Assert.True(result.PositionIn24hRangePct < 25m); // lower quarter of the 24h range
+        // Candle momentum is exposed and clearly positive here, so a small positive
+        // Dip.MinCandleMomentumPct floor (0.10%) still admits this genuine bounce.
+        Assert.NotNull(result.RecentCandleMomentumPct);
+        Assert.True(result.RecentCandleMomentumPct > 0.10m);
     }
 
     [Fact]

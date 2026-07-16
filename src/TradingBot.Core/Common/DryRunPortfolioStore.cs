@@ -524,7 +524,11 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 (decision -> 'dryRunAction' ->> 'breakoutBufferPct')::numeric as breakout_buffer_pct,
                 (decision -> 'dryRunAction' ->> 'livePriceVsSignalClosePct')::numeric as live_price_vs_signal_close_pct,
                 (decision -> 'dryRunAction' ->> 'postFillEntryDistanceFromLocalHighPct')::numeric as post_fill_entry_distance_from_local_high_pct,
-                (decision -> 'dryRunAction' ->> 'postFillLivePriceVsSignalClosePct')::numeric as post_fill_live_price_vs_signal_close_pct
+                (decision -> 'dryRunAction' ->> 'postFillLivePriceVsSignalClosePct')::numeric as post_fill_live_price_vs_signal_close_pct,
+                -- Momentum context and the relaxed dip threshold, so a losing entry's
+                -- admission conditions are fully reconstructable per channel.
+                (decision -> 'dryRunAction' ->> 'entryFreshnessRecentCandleMomentumPct')::numeric as entry_freshness_recent_candle_momentum_pct,
+                (decision -> 'dryRunAction' ->> 'dipBounceMinScoreApplied')::numeric as dip_bounce_min_score_applied
             from dry_run_cycles cycle
             cross join lateral jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision;
 

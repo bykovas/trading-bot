@@ -250,15 +250,22 @@ internal sealed class FuturesDecisionWorker(
                         _priceHistory.RecentObservations(pair, config.Freshness.FreshTapeSnapshotCount),
                         FuturesDesiredExposure.Long,
                         config.Freshness);
+                    // A lower-score entry demands a real up-tick, not merely a
+                    // non-falling candle: require candle momentum >= Dip.MinCandleMomentumPct
+                    // (a small POSITIVE floor) on top of the fresh tape. Momentum that
+                    // cannot be computed (null) does not qualify — no blind dip entry.
+                    var dipMomentumOk = dipFreshness.RecentCandleMomentumPct is { } dipMomentum
+                        && dipMomentum >= config.Dip.MinCandleMomentumPct;
                     if (!dipFreshness.Blocked
                         && dipFreshness.HasFreshUpwardTape
+                        && dipMomentumOk
                         && dipFreshness.PositionIn24hRangePct is { } dipPos
                         && dipPos <= config.Dip.NearLowMax24hRangePositionPct)
                     {
                         desired = FuturesDesiredExposure.Long;
                         dipBounce = true;
                         Console.WriteLine(
-                            $"DIP_BOUNCE_ENTRY pair={pair} score={signal.Score:0.##} minScore={config.Dip.MinScore:0.##} firmBar={config.Strategy.MinimumLongScore:0.##} pos24={dipPos:0.###} nearLowMax={config.Dip.NearLowMax24hRangePositionPct:0.###} freshTape={dipFreshness.HasFreshUpwardTape} slope={dipFreshness.ShortSnapshotSlopePct:0.###} lastStep={dipFreshness.LastSnapshotStepPct:0.###}");
+                            $"DIP_BOUNCE_ENTRY pair={pair} score={signal.Score:0.##} minScore={config.Dip.MinScore:0.##} firmBar={config.Strategy.MinimumLongScore:0.##} pos24={dipPos:0.###} nearLowMax={config.Dip.NearLowMax24hRangePositionPct:0.###} freshTape={dipFreshness.HasFreshUpwardTape} candleMom={dipFreshness.RecentCandleMomentumPct:0.###} minCandleMom={config.Dip.MinCandleMomentumPct:0.###} slope={dipFreshness.ShortSnapshotSlopePct:0.###} lastStep={dipFreshness.LastSnapshotStepPct:0.###}");
                     }
                 }
 
@@ -333,6 +340,11 @@ internal sealed class FuturesDecisionWorker(
 
                         var entryChannel = ClassifyEntryChannel(dipBounce, freshness);
                         fill.Action.EntryChannel = entryChannel;
+                        if (dipBounce)
+                        {
+                            fill.Action.DipBounceMinScoreApplied = config.Dip.MinScore;
+                        }
+
                         if (fill.PositionOpened)
                         {
                             var openedPosition = state.Positions.FirstOrDefault(position => position.Pair == pair);
@@ -1348,6 +1360,7 @@ internal sealed class FuturesDecisionWorker(
         action.EntryFreshnessHasFreshUpwardTape = freshness.HasFreshUpwardTape;
         action.EntryFreshnessHasFreshBreakout = freshness.HasFreshBreakout;
         action.EntryFreshnessBlockReason = freshness.BlockReason;
+        action.EntryFreshnessRecentCandleMomentumPct = freshness.RecentCandleMomentumPct;
         action.EntryDistanceFromLocalHighPct = freshness.EntryDistanceFromLocalHighPct;
         action.LocalHighSource = freshness.LocalHighSource;
         action.BreakoutBufferPct = freshness.BreakoutBufferPct;

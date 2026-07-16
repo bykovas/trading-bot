@@ -24,11 +24,12 @@ public sealed class FuturesDipBounceTests
     {
         var low = new FuturesBotConfiguration
         {
-            Dip = new FuturesDipBounceOptions { NearLowMax24hRangePositionPct = 0m, MinScore = 0m }
+            Dip = new FuturesDipBounceOptions { NearLowMax24hRangePositionPct = 0m, MinScore = 0m, MinCandleMomentumPct = -1m }
         };
         InvokeNormalize(low);
         Assert.Equal(25m, low.Dip.NearLowMax24hRangePositionPct);
         Assert.Equal(0.70m, low.Dip.MinScore);
+        Assert.Equal(0m, low.Dip.MinCandleMomentumPct); // negative floors clamp to 0
         Assert.True(low.Dip.Enabled); // enabled by default
 
         var over = new FuturesBotConfiguration

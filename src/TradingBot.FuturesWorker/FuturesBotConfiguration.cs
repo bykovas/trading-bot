@@ -113,6 +113,7 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_ENABLED", value => config.Dip.Enabled = ParseBool(value, config.Dip.Enabled));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_NEAR_LOW_MAX_24H_RANGE_POSITION_PERCENT", value => config.Dip.NearLowMax24hRangePositionPct = ParseDecimal(value, config.Dip.NearLowMax24hRangePositionPct));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_MIN_SCORE", value => config.Dip.MinScore = ParseDecimal(value, config.Dip.MinScore));
+        SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_MIN_CANDLE_MOMENTUM_PERCENT", value => config.Dip.MinCandleMomentumPct = ParseDecimal(value, config.Dip.MinCandleMomentumPct));
         SetIfPresent("TRADINGBOT_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_EMA_GAP_PERCENT", value => config.Strategy.MinimumEmaGapPercent = ParseDecimal(value, config.Strategy.MinimumEmaGapPercent));
         SetIfPresent("TRADINGBOT_STRATEGY_MINIMUM_LONG_SCORE", value => config.Strategy.MinimumLongScore = ParseDecimal(value, config.Strategy.MinimumLongScore));
@@ -218,6 +219,7 @@ internal sealed class FuturesBotConfiguration
         // no-op (a score already >= MinimumLongScore is a normal entry).
         Dip.NearLowMax24hRangePositionPct = Math.Clamp(Dip.NearLowMax24hRangePositionPct <= 0m ? 25m : Dip.NearLowMax24hRangePositionPct, 0m, 100m);
         Dip.MinScore = Math.Clamp(Dip.MinScore <= 0m ? 0.70m : Dip.MinScore, 0m, 1m);
+        Dip.MinCandleMomentumPct = Math.Max(0m, Dip.MinCandleMomentumPct);
         Filters.MinQuoteVolume24h = Filters.MinQuoteVolume24h <= 0m ? 50_000m : Filters.MinQuoteVolume24h;
         Filters.MinExitDepthMultiple = Filters.MinExitDepthMultiple <= 0m ? 5m : Filters.MinExitDepthMultiple;
         Filters.MaxExitImpactPct = Filters.MaxExitImpactPct <= 0m ? 0.5m : Filters.MaxExitImpactPct;
@@ -442,6 +444,13 @@ internal sealed class FuturesDipBounceOptions
     // Relaxed minimum long score for this channel. Tunable without a recompile so
     // the sweet spot (0.70 / 0.72 / 0.75 / 0.78) can be searched from config/DB.
     public decimal MinScore { get; set; } = 0.70m;
+
+    // Minimum recent 15m candle momentum (percent over
+    // Freshness.ContinuationCandleMomentumLookback bars) required to admit a
+    // dip-bounce. A LOWER-score entry needs a real up-tick, not merely a flat "not
+    // falling" candle, so this is a small POSITIVE floor (default 0.10%) rather than
+    // the continuation channel's non-negative >= 0. Tunable from config/DB.
+    public decimal MinCandleMomentumPct { get; set; } = 0.10m;
 }
 
 internal sealed class FuturesFilterOptions

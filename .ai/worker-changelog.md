@@ -2,6 +2,13 @@
 
 Latest entry must be first. The first `## <id>` heading is used as `worker.changeSet`.
 
+## 2026-07-16-futures-dip-bounce-momentum-and-diagnostics
+
+- Dip-bounce now demands a real up-tick, not merely a non-falling candle: promotion requires recent 15m candle momentum >= `Dip.MinCandleMomentumPct` (a small POSITIVE floor, default 0.10%) on top of the fresh upward tape, and momentum that cannot be computed no longer qualifies. Env override `TRADINGBOT_FUTURES_DIP_BOUNCE_MIN_CANDLE_MOMENTUM_PERCENT`; config/DB-tunable.
+- Confirmed dip-bounce does not bypass any shared guard. A promoted entry still runs the full gauntlet: entry-quality gate (spread, anti-lag price action, warm-up, anti-extension, run-up), freshness guard, portfolio guards (pending-order dedupe, entry blackout, post-close and post-stop-loss cooldowns, correlation group/exposure caps), and the margin risk manager (liquidation distance, margin utilization, open-risk cap, funding, exit depth, BTC regime — a sub-0.85 dip score cannot trigger the long regime override).
+- Decision rows now persist the dip-bounce admission context for post-hoc analysis: recent candle momentum (`entry_freshness_recent_candle_momentum_pct`) and the relaxed threshold that admitted the entry (`dip_bounce_min_score_applied`), alongside the already-recorded 24h range position, fresh-tape flag, entry channel, and score. Both new columns are exposed on the `dry_run_decisions` view.
+- Not changed: dip-bounce near-low zone / min-score, sizing/leverage, TP/SL, local-high and drift guards, scoring weights, short entries, or execution semantics.
+
 ## 2026-07-15-futures-local-high-entry-guard
 
 - Futures continuation LONG entries now evaluate the executable entry reference price before submit (ask for longs) against the local high of the last closed 15m candles. A fresh upward tape no longer bypasses this guard: if the entry price is within `Freshness.MaxEntryDistanceFromLocalHighPct` (default 0.12%) of the local high, the entry is rejected unless a breakout is confirmed.
