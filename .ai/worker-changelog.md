@@ -1,3 +1,9 @@
+## 2026-07-16-futures-400-notional-live-caps
+
+- Restored futures live sizing to the requested 40 EUR margin × 10x leverage target: `Futures.TargetMarginEur`=40 and `Risk.TargetRiskEur`=3 so a 0.75% floor-stop entry sizes to 400 EUR notional before ATR shrinkage.
+- Raised the independent caps that were still clipping entries after the ATR risk-sizing change: `Futures.MaxNotionalEur` 150 → 400, `Futures.MaxMarginPerPositionEur` 20 → 40, aggregate `Futures.MaxTotalNotionalEur` 300 → 1200 for the three configured slots, and `CorrelationRisk.MaxExposureEurPerGroup` 150 → 400.
+- Raised `Risk.MaxConcurrentOpenRisk` 3 → 9 so the configured three slots can each carry the 3 EUR stop-distance budget. Volatile instruments can still size below 400 when ATR requires a wider stop; the caps no longer force every calm/floor-stop setup down to ~150 notional.
+
 ## 2026-07-16-futures-short-entry-guard-mirror
 
 - New authoritative SHORT entry gate `FuturesShortEntryGuard` — the mirror of the LONG range/freshness guards, evaluated on the EXECUTABLE BID (a short sells into the bid). It runs only when `desired == Short` and `Shorts.RangeGuardEnabled`. LONG is never touched by it; SHORT sizing/risk/cost/caps are unchanged (already symmetric).
