@@ -352,6 +352,18 @@
       color: var(--ink);
     }
 
+    details.tech-details {
+      margin-top: 8px;
+    }
+
+    details.tech-details summary {
+      color: var(--gold);
+      cursor: pointer;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      user-select: none;
+    }
+
     .tech {
       margin-top: 6px;
       color: var(--muted);
@@ -374,6 +386,153 @@
       .bot-switch { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .summary { grid-template-columns: 1fr 1fr; }
       th, td { padding: 10px 9px; }
+    }
+
+    @media (max-width: 640px) {
+      main {
+        width: min(100% - 14px, 1400px);
+        padding-bottom: 28px;
+      }
+
+      .api-links {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .api-links a {
+        justify-content: center;
+        text-align: center;
+        min-height: 38px;
+        padding: 0 8px;
+        font-size: 12px;
+      }
+
+      .summary {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin: 14px 0;
+      }
+
+      .metric {
+        min-height: 78px;
+        padding: 12px;
+      }
+
+      .value {
+        font-size: 21px;
+      }
+
+      .subvalue {
+        font-size: 12px;
+      }
+
+      .panel {
+        margin-top: 14px;
+      }
+
+      .panel-head {
+        display: block;
+        padding: 14px;
+      }
+
+      .panel-title {
+        font-size: 18px;
+      }
+
+      .updated {
+        margin-top: 4px;
+        text-align: left;
+        font-size: 11px;
+      }
+
+      .table-wrap {
+        overflow: visible;
+      }
+
+      table, thead, tbody, tr, th, td {
+        display: block;
+      }
+
+      thead {
+        display: none;
+      }
+
+      tr {
+        padding: 12px 12px 14px;
+        border-bottom: 1px solid rgba(246, 218, 160, .14);
+      }
+
+      td {
+        min-width: 0;
+        width: 100%;
+        padding: 0;
+        border-bottom: 0;
+      }
+
+      td::before {
+        content: attr(data-label);
+        display: block;
+        margin: 10px 0 3px;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: .07em;
+        text-transform: uppercase;
+      }
+
+      td:first-child::before {
+        display: none;
+      }
+
+      td.num {
+        text-align: left;
+      }
+
+      .pair {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 18px;
+      }
+
+      .pill-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      .pill {
+        width: 100%;
+        justify-content: center;
+        min-height: 28px;
+        padding: 3px 7px;
+        overflow-wrap: anywhere;
+        white-space: normal;
+        text-align: center;
+      }
+
+      .why {
+        max-width: none;
+        font-size: 16px;
+        line-height: 1.45;
+      }
+
+      details.tech-details summary {
+        min-height: 32px;
+        display: inline-flex;
+        align-items: center;
+      }
+
+      .tech {
+        font-size: 11px;
+        line-height: 1.45;
+        word-break: break-word;
+      }
+
+      .empty {
+        padding: 18px 10px;
+      }
     }
   </style>
 </head>
@@ -767,12 +926,12 @@
         const klass = severityClass(decision);
         return `
           <tr>
-            <td class="mono">${ltDateTime(row.utc, false)}</td>
-            <td><span class="pair">${escapeHtml(decision.pair ?? action.pair ?? "--")}</span></td>
-            <td><span class="pill ${actionClass(decision)}">${escapeHtml(actionText(decision))}</span></td>
-            <td>${escapeHtml(sideText(decision))}</td>
-            <td class="num">${score(decision.score)}</td>
-            <td class="why ${klass}">
+            <td class="mono" data-label="Time">${ltDateTime(row.utc, false)}</td>
+            <td data-label="Pair"><span class="pair">${escapeHtml(decision.pair ?? action.pair ?? "--")}</span></td>
+            <td data-label="Action"><span class="pill ${actionClass(decision)}">${escapeHtml(actionText(decision))}</span></td>
+            <td data-label="Side">${escapeHtml(sideText(decision))}</td>
+            <td class="num" data-label="Score">${score(decision.score)}</td>
+            <td class="why ${klass}" data-label="Exchange / order text">
               ${escapeHtml(reason)}
               <div class="tech">cycle ${escapeHtml(row.cycleId)}</div>
             </td>
@@ -805,15 +964,15 @@
         const reason = collectReason(decision);
         return `
           <tr>
-            <td><span class="pair">${escapeHtml(decision.pair ?? action.pair ?? "--")}</span></td>
-            <td><span class="pill ${actionClass(decision)}">${escapeHtml(actionText(decision))}</span></td>
-            <td>${escapeHtml(sideText(decision))}</td>
-            <td class="num">${score(decision.score)}</td>
-            <td class="num">${num(action.signalPrice ?? action.entryPrice ?? action.fillPrice ?? decision.price)}</td>
-            <td><div class="pill-row">${parameterPills(decision)}</div></td>
-            <td class="why">
+            <td data-label="Pair"><span class="pair">${escapeHtml(decision.pair ?? action.pair ?? "--")}</span></td>
+            <td data-label="Action"><span class="pill ${actionClass(decision)}">${escapeHtml(actionText(decision))}</span></td>
+            <td data-label="Side">${escapeHtml(sideText(decision))}</td>
+            <td class="num" data-label="Score">${score(decision.score)}</td>
+            <td class="num" data-label="Price">${num(action.signalPrice ?? action.entryPrice ?? action.fillPrice ?? decision.price)}</td>
+            <td data-label="Parameters"><div class="pill-row">${parameterPills(decision)}</div></td>
+            <td class="why" data-label="Human reason">
               ${escapeHtml(explain(decision))}
-              ${reason ? `<div class="tech">${escapeHtml(reason)}</div>` : ""}
+              ${reason ? `<details class="tech-details"><summary>technical details</summary><div class="tech">${escapeHtml(reason)}</div></details>` : ""}
             </td>
           </tr>
         `;
