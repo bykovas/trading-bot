@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BlynAI Capital - Cycle Decisions</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --font-display: "Space Grotesk", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+      --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+      --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+      --bg: #050505;
+      --line: rgba(246, 218, 160, 0.13);
+      --ink: #f6efe1;
+      --soft: #c8bba6;
+      --muted: #81786b;
+      --gold: #f5b84f;
+      --gold-soft: #ffd987;
+      --cream: #f7e6c1;
+      --green: #41eda0;
+      --red: #ff5367;
+      --blue: #6faeff;
+      --amber: #f0a63a;
+      --purple: #b9a6f5;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font-body);
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      background:
+        linear-gradient(120deg, rgba(5, 5, 5, 0.98), rgba(14, 15, 12, 0.96) 52%, rgba(4, 15, 12, 0.94)),
+        radial-gradient(circle at 12% 8%, rgba(245, 184, 79, 0.11), transparent 32%),
+        radial-gradient(circle at 88% 12%, rgba(65, 237, 160, 0.08), transparent 35%),
+        var(--bg);
+    }
+
+    main {
+      width: min(1400px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 44px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 0 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand-lockup {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .bc-mark {
+      width: 40px;
+      height: 40px;
+      flex: none;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid rgba(246, 218, 160, 0.24);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 22px rgba(245, 184, 79, 0.18);
+    }
+
+    .brand-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .brand-copy .n {
+      margin: 0;
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 16px;
+      letter-spacing: 0;
+      line-height: 1.05;
+      color: var(--cream);
+      white-space: nowrap;
+    }
+
+    .brand-copy .n .ai { color: var(--gold); }
+
+    .brand-copy .s {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #9b87f5;
+      white-space: nowrap;
+    }
+
+    .right-tools {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 38px;
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .82);
+      color: var(--soft);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 14px rgba(111, 174, 255, .5);
+    }
+
+    .dot.ok { background: var(--green); box-shadow: 0 0 14px rgba(65, 237, 160, .5); }
+    .dot.bad { background: var(--red); box-shadow: 0 0 14px rgba(255, 83, 103, .5); }
+    .dot.warn { background: var(--amber); box-shadow: 0 0 14px rgba(240, 166, 58, .5); }
+
+    .bot-switch {
+      display: inline-grid;
+      grid-template-columns: repeat(4, minmax(64px, 1fr));
+      align-items: center;
+      gap: 3px;
+      min-height: 38px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .82);
+    }
+
+    .bot-switch button {
+      min-height: 30px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .bot-switch button.active {
+      background: rgba(245, 184, 79, .16);
+      color: var(--gold-soft);
+      box-shadow: inset 0 0 0 1px rgba(245, 184, 79, .28);
+    }
+
+    .api-links {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    .api-links a, .reload {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 18, 15, .72);
+      color: var(--gold);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .api-links a:hover, .reload:hover {
+      border-color: rgba(245, 184, 79, .38);
+      background: rgba(245, 184, 79, .08);
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: 22px 0;
+    }
+
+    .metric, .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012)), rgba(17,18,15,.9);
+      box-shadow: 0 22px 60px rgba(0,0,0,.28);
+    }
+
+    .metric {
+      min-height: 94px;
+      padding: 16px;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+
+    .value {
+      margin-top: 10px;
+      font-family: var(--font-mono);
+      font-size: 26px;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+
+    .subvalue {
+      margin-top: 8px;
+      color: var(--soft);
+      font-size: 13px;
+    }
+
+    .panel {
+      margin-top: 20px;
+      overflow: hidden;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-title {
+      font-family: var(--font-display);
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--cream);
+    }
+
+    .updated {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .table-wrap { overflow-x: auto; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 11px 12px;
+      border-bottom: 1px solid rgba(246, 218, 160, .08);
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    td {
+      color: var(--soft);
+      min-width: 88px;
+    }
+
+    .pair {
+      color: var(--cream);
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 16px;
+      white-space: nowrap;
+    }
+
+    .mono {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: .01em;
+    }
+
+    .num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    .good { color: var(--green); }
+    .bad { color: var(--red); }
+    .warn { color: var(--amber); }
+    .info { color: var(--blue); }
+    .gold { color: var(--gold); }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 7px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border: 1px solid rgba(246, 218, 160, .14);
+      border-radius: 999px;
+      color: var(--soft);
+      background: rgba(0, 0, 0, .16);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .pill.good { border-color: rgba(65,237,160,.28); background: rgba(65,237,160,.08); }
+    .pill.bad { border-color: rgba(255,83,103,.32); background: rgba(255,83,103,.08); }
+    .pill.warn { border-color: rgba(240,166,58,.34); background: rgba(240,166,58,.08); }
+    .pill.info { border-color: rgba(111,174,255,.28); background: rgba(111,174,255,.08); }
+
+    .why {
+      max-width: 620px;
+      color: var(--ink);
+    }
+
+    .tech {
+      margin-top: 6px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .empty {
+      padding: 22px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    @media (max-width: 820px) {
+      main { width: min(100% - 20px, 1400px); padding-top: 18px; }
+      header { align-items: stretch; flex-direction: column; }
+      .right-tools { justify-content: stretch; }
+      .status, .reload { width: 100%; justify-content: center; }
+      .bot-switch { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .summary { grid-template-columns: 1fr 1fr; }
+      th, td { padding: 10px 9px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <a class="brand-lockup" href="/dash.html" aria-label="BlynAI Capital">
+        <span class="bc-mark">
+          <svg width="30" height="30" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="bcMark" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#FFD987"/>
+                <stop offset="1" stop-color="#F5B84F"/>
+              </linearGradient>
+            </defs>
+            <path d="M16.5 9 L8.5 20 L16.5 31" stroke="url(#bcMark)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <path d="M23.5 9 L31.5 20 L23.5 31" stroke="url(#bcMark)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <circle cx="17" cy="17.5" r="2.1" fill="#FFD987"/>
+            <circle cx="23" cy="17.5" r="2.1" fill="#C8963B"/>
+            <circle cx="17" cy="22.5" r="2.1" fill="#C8963B"/>
+            <circle cx="23" cy="22.5" r="2.1" fill="#FFD987"/>
+          </svg>
+        </span>
+        <span class="brand-copy">
+          <span class="n">Blyn<span class="ai">AI</span> Capital</span>
+          <span class="s">BYKOVAS-FINANCE LAB</span>
+        </span>
+      </a>
+      <div class="right-tools">
+        <div class="status">
+          <span id="status-dot" class="dot"></span>
+          <span id="status-text">Loading status</span>
+        </div>
+        <button id="reload" class="reload" type="button">Reload</button>
+        <div class="bot-switch" role="group" aria-label="Bot instance">
+          <button type="button" data-bot-instance="spot-live">Spot Live</button>
+          <button type="button" data-bot-instance="spot-virtual">Spot Virt</button>
+          <button type="button" data-bot-instance="futures-live">Fut Live</button>
+          <button type="button" data-bot-instance="futures-virtual">Fut Virt</button>
+        </div>
+      </div>
+    </header>
+
+    <nav class="api-links" aria-label="Navigation links">
+      <a href="/dash.html">Portfolio dashboard</a>
+      <a href="/trades.html">Trades journal</a>
+      <a href="/cycles.html">Cycles table</a>
+      <a href="/market-snapshots.html">Market snapshots table</a>
+    </nav>
+
+    <section class="summary" aria-label="Cycle summary">
+      <div class="metric">
+        <div class="label">Latest cycle</div>
+        <div id="cycle-time" class="value gold">--</div>
+        <div id="cycle-id" class="subvalue">--</div>
+      </div>
+      <div class="metric">
+        <div class="label">Pairs in cycle</div>
+        <div id="pair-count" class="value">--</div>
+        <div class="subvalue">All decisions</div>
+      </div>
+      <div class="metric">
+        <div class="label">Actionable</div>
+        <div id="action-count" class="value">--</div>
+        <div class="subvalue">Open/close/buy/sell rows</div>
+      </div>
+      <div class="metric">
+        <div class="label">Kraken errors</div>
+        <div id="error-count" class="value">--</div>
+        <div class="subvalue">Last 10 minutes</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">Kraken execution errors</div>
+          <div class="updated">Actionable rows from the last 10 minutes where the exchange/order text looks like an error</div>
+        </div>
+        <div id="error-updated" class="updated">not loaded</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>LT</th>
+              <th>Pair</th>
+              <th>Action</th>
+              <th>Side</th>
+              <th class="num">Score</th>
+              <th>Exchange / order text</th>
+            </tr>
+          </thead>
+          <tbody id="error-rows">
+            <tr><td class="empty" colspan="6">Loading</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">Latest cycle decisions</div>
+          <div id="cycle-meta" class="updated">All pairs from one latest cycle</div>
+        </div>
+        <div id="decision-updated" class="updated">not loaded</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Pair</th>
+              <th>Action</th>
+              <th>Side</th>
+              <th class="num">Score</th>
+              <th class="num">Price</th>
+              <th>Parameters</th>
+              <th>Human reason</th>
+            </tr>
+          </thead>
+          <tbody id="decision-rows">
+            <tr><td class="empty" colspan="7">Loading</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/bot-status.js"></script>
+  <script>
+    const botButtons = Array.from(document.querySelectorAll("[data-bot-instance]"));
+    const botInstances = ["spot-live", "spot-virtual", "futures-live", "futures-virtual"];
+    let currentBotInstance = "futures-live";
+
+    const els = {
+      cycleTime: document.getElementById("cycle-time"),
+      cycleId: document.getElementById("cycle-id"),
+      pairCount: document.getElementById("pair-count"),
+      actionCount: document.getElementById("action-count"),
+      errorCount: document.getElementById("error-count"),
+      errorRows: document.getElementById("error-rows"),
+      decisionRows: document.getElementById("decision-rows"),
+      errorUpdated: document.getElementById("error-updated"),
+      decisionUpdated: document.getElementById("decision-updated"),
+      cycleMeta: document.getElementById("cycle-meta")
+    };
+
+    const numberFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
+    const percentFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 });
+    const eurFmt = new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", maximumFractionDigits: 2 });
+
+    function normalizeBotInstance(value) {
+      if (value === "live") return "spot-live";
+      if (value === "virtual") return "spot-virtual";
+      return botInstances.includes(value) ? value : "futures-live";
+    }
+
+    function setBotInstance(value, persist = false) {
+      currentBotInstance = normalizeBotInstance(value);
+      botButtons.forEach(button => {
+        const active = button.dataset.botInstance === currentBotInstance;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      if (persist) localStorage.setItem("tradingBot.botInstanceId", currentBotInstance);
+    }
+
+    function initBotSelector() {
+      const fromUrl = new URLSearchParams(location.search).get("botInstanceId");
+      const saved = localStorage.getItem("tradingBot.botInstanceId");
+      setBotInstance(fromUrl || saved || "futures-live");
+      botButtons.forEach(button => button.addEventListener("click", () => {
+        setBotInstance(button.dataset.botInstance, true);
+        refresh();
+      }));
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function num(value, digits = 4) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "--";
+      return new Intl.NumberFormat("en-US", { maximumFractionDigits: digits }).format(n);
+    }
+
+    function pct(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "--";
+      return `${n >= 0 ? "+" : ""}${percentFmt.format(n)}%`;
+    }
+
+    function money(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? eurFmt.format(n) : "--";
+    }
+
+    function score(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n.toFixed(2) : "--";
+    }
+
+    function ltDateTime(value, withSeconds = true) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "--";
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/Vilnius",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: withSeconds ? "2-digit" : undefined,
+        hourCycle: "h23"
+      }).formatToParts(date);
+      const byType = Object.fromEntries(parts.map(part => [part.type, part.value]));
+      return withSeconds
+        ? `${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute}:${byType.second} LT`
+        : `${byType.hour}:${byType.minute} LT`;
+    }
+
+    function getRecord(cycle) {
+      return cycle.record ?? cycle.Record ?? {};
+    }
+
+    function getAction(decision) {
+      return decision.dryRunAction ?? decision.DryRunAction ?? {};
+    }
+
+    function actionText(decision) {
+      const action = getAction(decision).action ?? decision.action ?? "NO_ORDER";
+      return String(action || "NO_ORDER");
+    }
+
+    function sideText(decision) {
+      const action = getAction(decision);
+      return action.side ?? decision.side ?? decision.desiredPosition ?? "--";
+    }
+
+    function isActionable(decision) {
+      const action = actionText(decision);
+      return /BUY|SELL|OPEN|CLOSE/.test(action) && action !== "NO_ORDER";
+    }
+
+    function collectReason(decision) {
+      const action = getAction(decision);
+      const parts = [];
+      const push = value => {
+        if (value !== null && value !== undefined && String(value).trim()) parts.push(String(value).trim());
+      };
+      push(action.reason);
+      push(decision.reason);
+      push(action.holdReason);
+      push(action.holdReasonCode);
+      push(action.entryRejectionReason);
+      push(action.exitReasonCode);
+      push(action.entryFreshnessBlockReason);
+      push(action.longRangeBlockReasonCode);
+      push(action.shortEntryBlockReasonCode);
+      push(action.correlationRejectedReason);
+      push(action.fundingState);
+      push(action.shortAllowed);
+      const riskReasons = Array.isArray(decision.riskReasons) ? decision.riskReasons : [];
+      for (const item of riskReasons) push(item);
+      return Array.from(new Set(parts)).join(" | ");
+    }
+
+    function looksLikeExchangeError(decision) {
+      if (!isActionable(decision)) return false;
+      const action = getAction(decision);
+      const haystack = [
+        collectReason(decision),
+        action.exchangeOrderId,
+        action.exchangeStatus,
+        action.broker,
+        action.fillSource,
+        action.entryExecution?.executionMode
+      ].filter(Boolean).join(" ").toLowerCase();
+
+      if (!haystack) return false;
+      if (/accepted|placed|filled|validated_ok|exchange_open|real/.test(haystack) && !/error|fail|reject|denied|invalid|insufficient|cancel|timeout|exception/.test(haystack)) {
+        return false;
+      }
+      return /kraken|exchange|broker|order|submit|validate|reject|denied|error|fail|failed|invalid|insufficient|timeout|exception|cancelled|canceled/.test(haystack);
+    }
+
+    function severityClass(decision) {
+      const reason = collectReason(decision).toLowerCase();
+      if (/error|fail|reject|denied|invalid|insufficient|exception/.test(reason)) return "bad";
+      if (/timeout|cancel/.test(reason)) return "warn";
+      return "info";
+    }
+
+    function explain(decision) {
+      const action = getAction(decision);
+      const actionName = actionText(decision);
+      const pair = decision.pair ?? action.pair ?? "pair";
+      const side = sideText(decision);
+      const reason = collectReason(decision);
+      const scoreValue = Number(decision.score);
+      const desired = decision.desiredPosition ?? action.desiredPosition;
+
+      if (/WOULD_OPEN_LONG|WOULD_BUY/.test(actionName)) {
+        return action.entryChannel === "Breakout"
+          ? `Открыл ${side === "SHORT" ? "short" : "long"}: правила посчитали это breakout, score ${score(scoreValue)}, и risk/exchange проверка пропустила.`
+          : `Открыл ${side === "SHORT" ? "short" : "long"}: score ${score(scoreValue)} прошел фильтры, risk/exchange проверка пропустила.`;
+      }
+      if (/WOULD_OPEN_SHORT/.test(actionName)) {
+        return `Открыл short: bearish setup прошел short-фильтр, score ${score(scoreValue)}, risk/exchange проверка пропустила.`;
+      }
+      if (/WOULD_CLOSE|WOULD_SELL/.test(actionName)) {
+        if (/take profit/i.test(reason)) return `Закрыл ${pair}: позиция дошла до take-profit.`;
+        if (/stop loss/i.test(reason)) return `Закрыл ${pair}: позиция дошла до stop-loss.`;
+        if (/signal|reversal|flip/i.test(reason)) return `Закрыл ${pair}: сигнал больше не подтверждает текущую сторону.`;
+        if (/max hold|stale/i.test(reason)) return `Закрыл ${pair}: позиция стала stale по правилу удержания.`;
+        return `Закрыл ${pair}: сработало правило выхода.`;
+      }
+      if (/WOULD_HOLD|HOLD/.test(actionName)) {
+        return `Оставил ${pair}: позиция уже открыта, TP/SL и reversal-правила дальше управляют выходом.`;
+      }
+      if (/NO_ORDER/.test(actionName)) {
+        if (/score .*below|below required|long threshold/i.test(reason)) return `Не вошел: score ниже нужного порога.`;
+        if (/ema gap/i.test(reason)) return `Не вошел: EMA gap слишком слабый, тренд не подтвержден.`;
+        if (/spread/i.test(reason)) return `Не вошел: spread слишком широкий для входа.`;
+        if (/price action/i.test(reason)) return `Не вошел: последние price-action snapshots идут против входа.`;
+        if (/rising snapshots/i.test(reason)) return `Не вошел в long: последние snapshots не подтвердили свежий рост.`;
+        if (/falling snapshots/i.test(reason)) return `Не вошел в short: последние snapshots не подтвердили свежее падение.`;
+        if (/local high/i.test(reason)) return `Не вошел в long: цена слишком близко к локальному high без надежного breakout.`;
+        if (/local low/i.test(reason)) return `Не вошел в short: цена слишком близко к локальному low без надежного breakdown.`;
+        if (/position slots/i.test(reason)) return `Не вошел: уже заняты слоты позиций.`;
+        if (/margin|notional|risk/i.test(reason)) return `Не вошел: risk/margin/notional limit не пропустил сделку.`;
+        if (/short/i.test(reason)) return `Не вошел в short: bearish structure была, но short gate не подтвердил безопасный вход.`;
+        if (desired && desired !== "FLAT") return `Не вошел: сигнал был ${desired}, но один из фильтров заблокировал entry.`;
+        return `Не вошел: нет достаточно сильного сигнала.`;
+      }
+      return reason ? `Решение: ${reason}` : "Нет действия по этой паре.";
+    }
+
+    function actionClass(decision) {
+      const action = actionText(decision);
+      if (/OPEN|BUY/.test(action)) return "good";
+      if (/CLOSE|SELL/.test(action)) return "bad";
+      if (/HOLD/.test(action)) return "info";
+      return "";
+    }
+
+    function parameterPills(decision) {
+      const action = getAction(decision);
+      const pills = [];
+      const add = (label, value, cls = "") => {
+        if (value === null || value === undefined || value === "") return;
+        pills.push(`<span class="pill ${cls}">${escapeHtml(label)} ${escapeHtml(value)}</span>`);
+      };
+
+      add("desired", decision.desiredPosition ?? action.desiredPosition);
+      add("score", score(decision.score));
+      add("spread", pct(decision.spreadPercent ?? action.spreadPercent));
+      add("PA", `${decision.priceActionDirection ?? action.priceActionDirection ?? ""} ${pct(decision.priceActionTrendPercent ?? action.priceActionTrendPercent)}`.trim());
+      add("EMA gap", pct(decision.bullishEmaGapPercent ?? action.bullishEmaGapPercent));
+      add("entry", num(action.signalPrice ?? action.entryPrice ?? action.fillPrice ?? decision.price));
+      add("fill", num(action.fillPrice ?? action.averageFillPrice));
+      add("margin", money(action.requestedMarginEur ?? action.requiredMarginEur));
+      add("notional", money(action.requestedNotionalEur ?? action.sizedNotionalEur ?? action.targetNotionalEur));
+      add("SL", pct(action.stopDistancePct));
+      add("TP", pct(action.takeProfitDistancePct));
+      add("risk", money(action.targetRiskEur ?? action.openRiskEur));
+      add("range", pct(action.longRange24hPosition ?? action.closePercentile));
+      add("fresh", action.entryFreshnessHasFreshUpwardTape === true ? "yes" : action.entryFreshnessHasFreshUpwardTape === false ? "no" : null, action.entryFreshnessHasFreshUpwardTape ? "good" : "warn");
+      add("breakout", action.entryFreshnessHasFreshBreakout === true ? "yes" : action.entryFreshnessHasFreshBreakout === false ? "no" : null, action.entryFreshnessHasFreshBreakout ? "good" : "");
+      return pills.join("");
+    }
+
+    function renderErrorRows(rows) {
+      els.errorCount.textContent = String(rows.length);
+      if (rows.length === 0) {
+        els.errorRows.innerHTML = '<tr><td class="empty" colspan="6">No Kraken/exchange errors in the last 10 minutes</td></tr>';
+        return;
+      }
+
+      els.errorRows.innerHTML = rows.map(row => {
+        const decision = row.decision;
+        const action = getAction(decision);
+        const reason = collectReason(decision) || "No technical text";
+        const klass = severityClass(decision);
+        return `
+          <tr>
+            <td class="mono">${ltDateTime(row.utc, false)}</td>
+            <td><span class="pair">${escapeHtml(decision.pair ?? action.pair ?? "--")}</span></td>
+            <td><span class="pill ${actionClass(decision)}">${escapeHtml(actionText(decision))}</span></td>
+            <td>${escapeHtml(sideText(decision))}</td>
+            <td class="num">${score(decision.score)}</td>
+            <td class="why ${klass}">
+              ${escapeHtml(reason)}
+              <div class="tech">cycle ${escapeHtml(row.cycleId)}</div>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderDecisionRows(cycle) {
+      const record = getRecord(cycle);
+      const decisions = [...(record.decisions || [])].sort((a, b) => {
+        const aa = actionText(a) === "NO_ORDER" ? 1 : 0;
+        const bb = actionText(b) === "NO_ORDER" ? 1 : 0;
+        if (aa !== bb) return aa - bb;
+        return String(a.pair || "").localeCompare(String(b.pair || ""));
+      });
+      els.pairCount.textContent = String(decisions.length);
+      els.actionCount.textContent = String(decisions.filter(isActionable).length);
+      els.cycleTime.textContent = ltDateTime(cycle.utc, false);
+      els.cycleId.textContent = cycle.cycleId || "--";
+      els.cycleMeta.textContent = `${cycle.cycleId || "--"} · ${record.changeSet || cycle.changeSet || "no change-set"} · ${record.workerCommit || cycle.workerCommit || "no commit"}`;
+
+      if (decisions.length === 0) {
+        els.decisionRows.innerHTML = '<tr><td class="empty" colspan="7">Latest cycle has no decisions</td></tr>';
+        return;
+      }
+
+      els.decisionRows.innerHTML = decisions.map(decision => {
+        const action = getAction(decision);
+        const reason = collectReason(decision);
+        return `
+          <tr>
+            <td><span class="pair">${escapeHtml(decision.pair ?? action.pair ?? "--")}</span></td>
+            <td><span class="pill ${actionClass(decision)}">${escapeHtml(actionText(decision))}</span></td>
+            <td>${escapeHtml(sideText(decision))}</td>
+            <td class="num">${score(decision.score)}</td>
+            <td class="num">${num(action.signalPrice ?? action.entryPrice ?? action.fillPrice ?? decision.price)}</td>
+            <td><div class="pill-row">${parameterPills(decision)}</div></td>
+            <td class="why">
+              ${escapeHtml(explain(decision))}
+              ${reason ? `<div class="tech">${escapeHtml(reason)}</div>` : ""}
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    async function loadCycles(limit) {
+      const url = `/api/cycles?limit=${limit}&offset=0&botInstanceId=${encodeURIComponent(currentBotInstance)}&latestMeta=true`;
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      return data.items || [];
+    }
+
+    async function refreshBotStatus() {
+      if (!window.BlynaiBotStatus) return;
+      await window.BlynaiBotStatus.updateBadge({ botInstanceId: currentBotInstance });
+    }
+
+    async function refresh() {
+      els.errorRows.innerHTML = '<tr><td class="empty" colspan="6">Loading</td></tr>';
+      els.decisionRows.innerHTML = '<tr><td class="empty" colspan="7">Loading</td></tr>';
+      els.errorUpdated.textContent = "loading";
+      els.decisionUpdated.textContent = "loading";
+      await refreshBotStatus().catch(() => {
+        document.getElementById("status-dot").className = "dot bad";
+        document.getElementById("status-text").textContent = "API unavailable";
+      });
+
+      const cycles = await loadCycles(80);
+      if (cycles.length === 0) {
+        els.cycleTime.textContent = "--";
+        els.cycleId.textContent = "No cycles";
+        els.pairCount.textContent = "0";
+        els.actionCount.textContent = "0";
+        renderErrorRows([]);
+        els.decisionRows.innerHTML = '<tr><td class="empty" colspan="7">No cycles</td></tr>';
+        return;
+      }
+
+      const latest = cycles[0];
+      const latestUtc = new Date(latest.utc);
+      const cutoff = new Date(latestUtc.getTime() - 10 * 60 * 1000);
+      const errors = [];
+      for (const cycle of cycles) {
+        const utc = new Date(cycle.utc);
+        if (Number.isNaN(utc.getTime()) || utc < cutoff) continue;
+        const record = getRecord(cycle);
+        for (const decision of record.decisions || []) {
+          if (looksLikeExchangeError(decision)) {
+            errors.push({ cycleId: cycle.cycleId, utc: cycle.utc, decision });
+          }
+        }
+      }
+
+      renderErrorRows(errors);
+      renderDecisionRows(latest);
+      const now = ltDateTime(new Date().toISOString());
+      els.errorUpdated.textContent = `loaded ${now}`;
+      els.decisionUpdated.textContent = `loaded ${now}`;
+    }
+
+    document.getElementById("reload").addEventListener("click", () => {
+      refresh().catch(error => {
+        els.errorRows.innerHTML = `<tr><td class="empty" colspan="6">${escapeHtml(error.message)}</td></tr>`;
+        els.decisionRows.innerHTML = `<tr><td class="empty" colspan="7">${escapeHtml(error.message)}</td></tr>`;
+      });
+    });
+
+    initBotSelector();
+    refresh().catch(error => {
+      els.errorRows.innerHTML = `<tr><td class="empty" colspan="6">${escapeHtml(error.message)}</td></tr>`;
+      els.decisionRows.innerHTML = `<tr><td class="empty" colspan="7">${escapeHtml(error.message)}</td></tr>`;
+    });
+  </script>
+</body>
+</html>
