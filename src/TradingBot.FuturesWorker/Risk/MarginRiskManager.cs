@@ -49,6 +49,15 @@ internal sealed class MarginRiskManager(FuturesBotConfiguration config)
             return new RiskEvaluation(false, reasons);
         }
 
+        // Do not trade an instrument whose ATR-required stop exceeds the maximum allowed
+        // stop. Shrinking the stop into the volatility (silent clamp) would guarantee churn;
+        // block instead so the size/stop contract stays honest.
+        if (config.Exits.StopDistanceCapPct > 0m && input.StopDistancePct.Value > config.Exits.StopDistanceCapPct)
+        {
+            reasons.Add($"STOP_DISTANCE_TOO_LARGE: required stop {input.StopDistancePct.Value:0.##}% exceeds max allowed {config.Exits.StopDistanceCapPct:0.##}%");
+            return new RiskEvaluation(false, reasons);
+        }
+
         if (input.FundingRatePercent is null)
         {
             reasons.Add("funding rate unavailable");
@@ -119,6 +128,40 @@ internal sealed class MarginRiskManager(FuturesBotConfiguration config)
 
         var initialMargin = input.Leverage <= 0m ? input.FilledNotionalEur : input.FilledNotionalEur / input.Leverage;
         var equity = input.State.TotalValueEur;
+
+        // Independent cap: max notional for a single position (gap/slippage backstop).
+        if (config.Futures.MaxNotionalEur > 0m && input.FilledNotionalEur > config.Futures.MaxNotionalEur)
+        {
+            reasons.Add($"MAX_NOTIONAL_PER_POSITION: notional EUR {input.FilledNotionalEur:0.####} exceeds cap EUR {config.Futures.MaxNotionalEur:0.####}");
+            return new RiskEvaluation(false, reasons);
+        }
+
+        // Independent cap: max initial margin committed by a single position.
+        if (config.Futures.MaxMarginPerPositionEur > 0m && initialMargin > config.Futures.MaxMarginPerPositionEur)
+        {
+            reasons.Add($"MAX_MARGIN_PER_POSITION: margin EUR {initialMargin:0.####} exceeds cap EUR {config.Futures.MaxMarginPerPositionEur:0.####}");
+            return new RiskEvaluation(false, reasons);
+        }
+
+        // Independent cap: max aggregate notional across all open positions.
+        if (config.Futures.MaxTotalNotionalEur > 0m)
+        {
+            var totalNotionalAfter = input.State.Positions.Sum(position => position.EntryNotionalEur) + input.FilledNotionalEur;
+            if (totalNotionalAfter > config.Futures.MaxTotalNotionalEur)
+            {
+                reasons.Add($"MAX_TOTAL_NOTIONAL: aggregate notional EUR {totalNotionalAfter:0.####} exceeds cap EUR {config.Futures.MaxTotalNotionalEur:0.####}");
+                return new RiskEvaluation(false, reasons);
+            }
+        }
+
+        // Independent cap: the new margin must fit in free collateral (equity - used margin).
+        var availableMargin = equity - input.UsedMarginEur;
+        if (initialMargin > availableMargin)
+        {
+            reasons.Add($"INSUFFICIENT_AVAILABLE_MARGIN: need EUR {initialMargin:0.####}, available EUR {availableMargin:0.####}");
+            return new RiskEvaluation(false, reasons);
+        }
+
         var utilizationAfter = equity <= 0m ? 100m : (input.UsedMarginEur + initialMargin) / equity * 100m;
         if (utilizationAfter > config.Margin.MaxAccountMarginUtilizationPercent)
         {
@@ -126,6 +169,9 @@ internal sealed class MarginRiskManager(FuturesBotConfiguration config)
             return new RiskEvaluation(false, reasons);
         }
 
+        // Concurrent open-risk cap = pure stop-distance heat summed across positions
+        // (= TargetRiskEur * MaxPositions by default). Execution/slippage cost is bounded
+        // by the notional caps above and reported per trade, not double-counted here.
         if (config.Risk.MaxConcurrentOpenRisk > 0m
             && input.ProjectedOpenRiskEur > config.Risk.MaxConcurrentOpenRisk)
         {

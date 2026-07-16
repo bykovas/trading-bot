@@ -119,7 +119,7 @@ internal sealed class FuturesVirtualPortfolio(
         // EUR books (notional, margin) stay in EUR so margin = notional / leverage.
         var usdPerEur = config.Futures.UsdPerEur <= 0m ? 1m : config.Futures.UsdPerEur;
         var quantity = fillPrice <= 0m ? 0m : notionalEur * usdPerEur / fillPrice;
-        var fee = notionalEur * config.Fees.MakerPct / 100m;
+        var fee = FuturesExecutionCostModel.FeeEur(notionalEur, config.Fees.TakerPct);
         var initialMargin = leverage <= 0m ? notionalEur : notionalEur / leverage;
 
         if (quantity <= 0m)
@@ -167,7 +167,7 @@ internal sealed class FuturesVirtualPortfolio(
 
         var action = BaseAction(pair, side == "SHORT" ? "WOULD_OPEN_SHORT" : "WOULD_OPEN_LONG",
             string.IsNullOrEmpty(reason)
-                ? $"open virtual {side.ToLowerInvariant()}: notional EUR {notionalEur:0.####}, margin EUR {initialMargin:0.####}, fee EUR {fee:0.####}, fill {fillPrice:0.####}, leverage {leverage:0.#}x"
+                ? $"open virtual {side.ToLowerInvariant()}: notional EUR {notionalEur:0.####}, margin EUR {initialMargin:0.####}, fee EUR {fee:0.####} ({FuturesExecutionCostModel.TakerIocRoundTrip}), fill {fillPrice:0.####}, leverage {leverage:0.#}x"
                 : reason);
         action.Side = side;
         action.ReduceOnly = false;
@@ -175,8 +175,8 @@ internal sealed class FuturesVirtualPortfolio(
         action.TargetNotionalEur = notionalEur;
         action.RequestedNotionalEur = requestedNotionalEur;
         action.FilledNotionalEur = notionalEur;
-        action.RequestedMarginEur = config.Futures.TargetMarginEur;
-        action.RequestedLeverage = config.Futures.DefaultLeverage;
+        action.RequestedMarginEur = entryPlan?.RequiredMarginEur ?? (leverage <= 0m ? notionalEur : notionalEur / leverage);
+        action.RequestedLeverage = entryPlan?.EffectiveLeverage ?? leverage;
         action.ActualInitialMarginEur = initialMargin;
         action.ActualEffectiveLeverage = initialMargin <= 0m ? null : decimal.Round(notionalEur / initialMargin, 4);
         action.Quantity = quantity;
@@ -185,9 +185,17 @@ internal sealed class FuturesVirtualPortfolio(
         action.LastPrice = markPrice;
         action.FeeEur = fee;
         action.GrossNotionalEur = notionalEur;
-        action.FillSource = "MODELED_MAKER";
+        action.FillSource = "MODELED_TAKER_IOC";
+        action.ExecutionCostModel = entryPlan?.ExecutionCostModel ?? FuturesExecutionCostModel.TakerIocRoundTrip;
+        action.TargetRiskEur = entryPlan?.TargetRiskEur;
+        action.SizedNotionalEur = entryPlan?.SizedNotionalEur ?? notionalEur;
+        action.RequiredMarginEur = entryPlan?.RequiredMarginEur ?? initialMargin;
+        action.EffectiveLeverage = entryPlan?.EffectiveLeverage ?? leverage;
+        action.ProjectedStopLossEur = entryPlan?.ProjectedStopLossEur;
+        action.StopSource = entryPlan?.StopSource;
+        action.NotionalCapReason = entryPlan?.NotionalCapReason;
         Console.WriteLine(
-            $"POSITION_SIZING pair={pair} side={side} targetMarginEur={config.Futures.TargetMarginEur:0.####} leverage={leverage:0.#}x targetNotionalEur={requestedNotionalEur:0.####} usdPerEur={usdPerEur:0.####} quantity={quantity:0.########} fill={fillPrice:0.####} estMarginEur={initialMargin:0.####} availableCollateralEur={state.CashEur + initialMargin + fee:0.####}");
+            $"POSITION_SIZING pair={pair} side={side} targetRiskEur={entryPlan?.TargetRiskEur:0.####} stopPct={slDistancePct:0.###} sizedNotionalEur={notionalEur:0.####} leverage={leverage:0.#}x requiredMarginEur={initialMargin:0.####} usdPerEur={usdPerEur:0.####} quantity={quantity:0.########} fill={fillPrice:0.####} costModel={action.ExecutionCostModel}");
         if (entryPlan is not null)
         {
             action.RoundTripCostEstimatePct = entryPlan.RoundTripCostEstimatePct;
@@ -220,7 +228,7 @@ internal sealed class FuturesVirtualPortfolio(
         var slippage = markPrice * config.DryRun.SlippageBps / 10_000m;
         var fillPrice = position.Side == "SHORT" ? markPrice + slippage : markPrice - slippage;
         var grossExit = fillPrice * position.Quantity;
-        var fee = grossExit * config.DryRun.TakerFeeBps / 10_000m;
+        var fee = FuturesExecutionCostModel.FeeEur(grossExit, config.Fees.TakerPct);
         var pnl = FuturesMath.UnrealizedPnlEur(position.Side, position.EntryPrice, fillPrice, position.Quantity);
 
         var before = Snapshot(state);

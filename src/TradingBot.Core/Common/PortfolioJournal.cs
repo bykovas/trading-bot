@@ -322,13 +322,22 @@ public sealed class DryRunAction
     public string? ExchangeOrderId { get; set; }
     public DateTimeOffset? ExchangeFillTimestamp { get; set; }
 
-    // Margin-based sizing telemetry (futures). RequestedMarginEur is the configured
-    // initial margin; the notional is RequestedMarginEur * RequestedLeverage. Actuals
-    // are read back from the opened position so requested-vs-actual drift is queryable.
+    // Margin / risk-based sizing telemetry (futures).
     public decimal? RequestedMarginEur { get; set; }
     public decimal? RequestedLeverage { get; set; }
     public decimal? ActualInitialMarginEur { get; set; }
     public decimal? ActualEffectiveLeverage { get; set; }
+    public decimal? TargetRiskEur { get; set; }
+    public decimal? SizedNotionalEur { get; set; }
+    public decimal? RequiredMarginEur { get; set; }
+    public decimal? EffectiveLeverage { get; set; }
+    public decimal? ProjectedStopLossEur { get; set; }
+    public string? ExecutionCostModel { get; set; }
+    public string? StopSource { get; set; }
+    public string? NotionalCapReason { get; set; }
+    public string? RangeBasis { get; set; }
+    public decimal? ClosePercentile { get; set; }
+    public decimal? RecentSwingPosition { get; set; }
 
     // Futures-only fields, nullable so spot rows keep their exact shape. Side is
     // LONG/SHORT exposure, ReduceOnly marks simulated exits that may only shrink

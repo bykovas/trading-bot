@@ -257,16 +257,23 @@ internal sealed class FuturesDecisionWorker(
                     // cannot be computed (null) does not qualify — no blind dip entry.
                     var dipMomentumOk = dipFreshness.RecentCandleMomentumPct is { } dipMomentum
                         && dipMomentum >= config.Dip.MinCandleMomentumPct;
+                    var dipEntryPrice = marketState.Quote?.Ask is > 0m
+                        ? marketState.Quote.Ask
+                        : marketState.LastPrice;
+                    var dipClosePct = FuturesLongRangeGuard.ClosePercentileRank(
+                        marketState.Candles, dipEntryPrice, lookback: 96);
+                    // Dip zone uses close-percentile (value distribution), not wick 24h
+                    // high-low, so a reclaim after spikes is not forced into the wick floor.
                     if (!dipFreshness.Blocked
                         && dipFreshness.HasFreshUpwardTape
                         && dipMomentumOk
-                        && dipFreshness.PositionIn24hRangePct is { } dipPos
+                        && dipClosePct is { } dipPos
                         && dipPos <= config.Dip.NearLowMax24hRangePositionPct)
                     {
                         desired = FuturesDesiredExposure.Long;
                         dipBounce = true;
                         Console.WriteLine(
-                            $"DIP_BOUNCE_ENTRY pair={pair} score={signal.Score:0.##} minScore={config.Dip.MinScore:0.##} firmBar={config.Strategy.MinimumLongScore:0.##} pos24={dipPos:0.###} nearLowMax={config.Dip.NearLowMax24hRangePositionPct:0.###} freshTape={dipFreshness.HasFreshUpwardTape} candleMom={dipFreshness.RecentCandleMomentumPct:0.###} minCandleMom={config.Dip.MinCandleMomentumPct:0.###} slope={dipFreshness.ShortSnapshotSlopePct:0.###} lastStep={dipFreshness.LastSnapshotStepPct:0.###}");
+                            $"DIP_BOUNCE_ENTRY pair={pair} score={signal.Score:0.##} minScore={config.Dip.MinScore:0.##} firmBar={config.Strategy.MinimumLongScore:0.##} closePct={dipPos:0.###} nearLowMax={config.Dip.NearLowMax24hRangePositionPct:0.###} freshTape={dipFreshness.HasFreshUpwardTape} candleMom={dipFreshness.RecentCandleMomentumPct:0.###} minCandleMom={config.Dip.MinCandleMomentumPct:0.###} slope={dipFreshness.ShortSnapshotSlopePct:0.###} lastStep={dipFreshness.LastSnapshotStepPct:0.###}");
                     }
                 }
 
@@ -320,7 +327,14 @@ internal sealed class FuturesDecisionWorker(
                             ? new RiskEvaluation(false, new[] { freshness.BlockReason ?? "entry stale near high" })
                             : qualityGate;
                     var portfolioGate = freshnessGate.Approved
-                        ? EvaluatePortfolioEntryGuards(state, pair, desired, utc)
+                        ? EvaluatePortfolioEntryGuards(
+                            state,
+                            pair,
+                            desired,
+                            utc,
+                            entryPlan?.SizedNotionalEur > 0m
+                                ? entryPlan.SizedNotionalEur
+                                : entryPlan!.RequestedNotionalEur)
                         : freshnessGate;
                     var evaluation = portfolioGate.Approved
                         ? riskManager.EvaluateEntry(BuildRiskInputs(state, marketState, desired, signal, entryPlan, btcRegime))
@@ -335,7 +349,8 @@ internal sealed class FuturesDecisionWorker(
                     {
                         fill = await ApplyOrExecuteLiveAsync(
                             state, pair, desired, markPrice,
-                            config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage), config.Futures.DefaultLeverage,
+                            entryPlan.SizedNotionalEur > 0m ? entryPlan.SizedNotionalEur : entryPlan.RequestedNotionalEur,
+                            entryPlan.EffectiveLeverage > 0m ? entryPlan.EffectiveLeverage : config.Futures.DefaultLeverage,
                             reduceOnly: false,
                             reason: string.Empty,
                             exitTriggerSource: null,
@@ -359,12 +374,14 @@ internal sealed class FuturesDecisionWorker(
                             AttachLongRangeDiagnostics(fill.Action, longRange);
                         }
 
-                        var entryChannel = ClassifyEntryChannel(dipBounce, freshness);
+                        var entryChannel = ClassifyEntryChannel(dipBounce, freshness, longRange);
                         fill.Action.EntryChannel = entryChannel;
                         if (dipBounce)
                         {
                             fill.Action.DipBounceMinScoreApplied = config.Dip.MinScore;
                         }
+
+                        AttachEntryPlanDiagnostics(fill.Action, entryPlan);
 
                         if (fill.PositionOpened)
                         {
@@ -384,12 +401,13 @@ internal sealed class FuturesDecisionWorker(
 
                 fill = await ApplyOrExecuteLiveAsync(
                     state, pair, desired, markPrice,
-                    config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage), config.Futures.DefaultLeverage,
+                    entryPlan?.SizedNotionalEur > 0m ? entryPlan.SizedNotionalEur : config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage),
+                    entryPlan?.EffectiveLeverage > 0m ? entryPlan.EffectiveLeverage : config.Futures.DefaultLeverage,
                     reduceOnly: false,
                     reason: string.Empty,
                     exitTriggerSource: null,
                     instrument: marketState.Instrument,
-                    entryPlan: null,
+                    entryPlan: entryPlan,
                     cancellationToken);
                 if (entryPlan is not null)
                 {
@@ -1200,7 +1218,8 @@ internal sealed class FuturesDecisionWorker(
         PortfolioState state,
         string pair,
         FuturesDesiredExposure desired,
-        DateTimeOffset utc)
+        DateTimeOffset utc,
+        decimal sizedNotionalEur)
     {
         if (desired == FuturesDesiredExposure.Flat)
         {
@@ -1248,10 +1267,13 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var groupExposure = groupPositions.Sum(position => position.EntryNotionalEur);
+        var incrementalNotional = sizedNotionalEur > 0m
+            ? sizedNotionalEur
+            : config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage);
         if (config.CorrelationRisk.MaxExposureEurPerGroup > 0m
-            && groupExposure + config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage) > config.CorrelationRisk.MaxExposureEurPerGroup)
+            && groupExposure + incrementalNotional > config.CorrelationRisk.MaxExposureEurPerGroup)
         {
-            return new RiskEvaluation(false, new[] { $"correlation group {group} exposure EUR {groupExposure + config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage):0.####} exceeds cap EUR {config.CorrelationRisk.MaxExposureEurPerGroup:0.####}" });
+            return new RiskEvaluation(false, new[] { $"correlation group {group} exposure EUR {groupExposure + incrementalNotional:0.####} exceeds cap EUR {config.CorrelationRisk.MaxExposureEurPerGroup:0.####}" });
         }
 
         return new RiskEvaluation(true, new[] { $"portfolio entry guards passed for group {group}" });
@@ -1281,37 +1303,41 @@ internal sealed class FuturesDecisionWorker(
         var markPrice = marketState.Quote?.MarkPrice ?? marketState.LastPrice;
         var atr = AtrIndicator.CalculateLatestClosedAtr(marketState.Candles, 14);
         var atrPct = atr is > 0m && markPrice > 0m ? atr.Value / markPrice * 100m : 0m;
-        var stopDistancePct = config.TpSl.Enabled
-            ? config.TpSl.StopLossPercent
-            : Math.Max(config.Exits.StopAtrMult, config.Exits.MinStopAtrFloor) * atrPct;
-        var expectedFundingPct = ExpectedFundingPct(desired, marketState.Quote?.FundingRatePercent);
-        var roundTripCost = 2m * config.Fees.TakerPct + config.Exits.SlippageBufferPct + expectedFundingPct;
-        var takeProfitDistancePct = config.TpSl.Enabled
-            ? config.TpSl.TakeProfitPercent
-            : Math.Max(config.Exits.TakeProfitAtrMult * atrPct, config.Exits.MinTpVsCostMult * roundTripCost);
+        var costs = FuturesExecutionCostModel.Estimate(config, desired, marketState.Quote?.FundingRatePercent);
+        var leverage = config.Futures.DefaultLeverage;
+        var size = FuturesPositionSizer.Size(config, atrPct, costs, leverage);
         var queueAhead = QueueAheadEur(marketState, desired);
-        var makerFilled = SimulatedMakerFillEur(queueAhead, config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage));
-        var openRisk = ProjectedOpenRiskEur(state, desired, markPrice, makerFilled, stopDistancePct, roundTripCost);
+        // Taker IOC model: plan the full risk-sized notional. Live still refreshes the
+        // quote and enforces MaxEntryPriceDeviationPct before submit.
+        var filledNotional = size.SizedNotionalEur;
+        var openRisk = ProjectedConcurrentStopRiskEur(state, markPrice, filledNotional, size.StopDistancePct);
         var shortGate = EvaluateShortGate(desired, signal, btcRegime);
 
         return new FuturesEntryPlan(
-            RequestedNotionalEur: config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage),
-            FilledNotionalEur: makerFilled,
-            AtrPct: decimal.Round(atrPct, 6),
-            StopDistancePct: decimal.Round(stopDistancePct, 6),
-            TakeProfitDistancePct: decimal.Round(takeProfitDistancePct, 6),
-            RoundTripCostEstimatePct: decimal.Round(roundTripCost, 6),
-            ExpectedFundingPct: decimal.Round(expectedFundingPct, 6),
+            RequestedNotionalEur: size.SizedNotionalEur,
+            FilledNotionalEur: filledNotional,
+            AtrPct: size.AtrPct,
+            StopDistancePct: size.StopDistancePct,
+            TakeProfitDistancePct: size.TakeProfitDistancePct,
+            RoundTripCostEstimatePct: costs.RoundTripCostPct,
+            ExpectedFundingPct: costs.ExpectedFundingPct,
             QueueAheadEur: decimal.Round(queueAhead, 6),
-            MakerFillRate: config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage) <= 0m ? 0m : decimal.Round(makerFilled / config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage), 6),
-            TimeToFillMs: makerFilled > 0m ? Math.Min(config.Entry.MakerFillTimeoutSec * 1000L, 1000L) : config.Entry.MakerFillTimeoutSec * 1000L,
-            RepegCount: makerFilled > 0m && config.Entry.MakerRepegs > 0 ? 1 : 0,
+            MakerFillRate: 1m,
+            TimeToFillMs: 0,
+            RepegCount: 0,
             OpenRiskEur: openRisk,
             FundingState: FundingState(marketState.Quote?.FundingRatePercent, desired),
             BtcRegimeState: btcRegime.Description,
-            ShortAllowed: shortGate.Allowed ? "yes" : $"no: {shortGate.Reason}");
+            ShortAllowed: shortGate.Allowed ? "yes" : $"no: {shortGate.Reason}",
+            TargetRiskEur: size.TargetRiskEur,
+            SizedNotionalEur: size.SizedNotionalEur,
+            RequiredMarginEur: size.RequiredMarginEur,
+            EffectiveLeverage: size.EffectiveLeverage,
+            ProjectedStopLossEur: size.ProjectedStopLossEur,
+            ExecutionCostModel: costs.Model,
+            StopSource: size.StopSource,
+            NotionalCapReason: size.NotionalCapReason);
     }
-
     private FuturesEntryRiskInputs BuildRiskInputs(
         PortfolioState state,
         InstrumentMarketState marketState,
@@ -1335,9 +1361,9 @@ internal sealed class FuturesDecisionWorker(
             state,
             desired,
             marketState.Quote?.MarkPrice ?? marketState.LastPrice,
-            config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage),
+            plan.SizedNotionalEur > 0m ? plan.SizedNotionalEur : plan.RequestedNotionalEur,
             plan.FilledNotionalEur,
-            config.Futures.DefaultLeverage,
+            plan.EffectiveLeverage > 0m ? plan.EffectiveLeverage : config.Futures.DefaultLeverage,
             portfolio.UsedMarginEur(state),
             marketState.Quote?.FundingRatePercent,
             plan.AtrPct > 0m ? plan.AtrPct : null,
@@ -1370,16 +1396,53 @@ internal sealed class FuturesDecisionWorker(
         action.FundingState = plan.FundingState;
         action.BtcRegimeState = plan.BtcRegimeState;
         action.ShortAllowed = plan.ShortAllowed;
+        action.TargetRiskEur = plan.TargetRiskEur;
+        action.SizedNotionalEur = plan.SizedNotionalEur;
+        action.RequiredMarginEur = plan.RequiredMarginEur;
+        action.EffectiveLeverage = plan.EffectiveLeverage;
+        action.ProjectedStopLossEur = plan.ProjectedStopLossEur;
+        action.ExecutionCostModel = plan.ExecutionCostModel;
+        action.StopSource = plan.StopSource;
+        action.NotionalCapReason = plan.NotionalCapReason;
+        action.RequestedMarginEur = plan.RequiredMarginEur;
+        action.RequestedLeverage = plan.EffectiveLeverage;
     }
 
-    // Labels the entry channel for per-channel PnL attribution. DipBounce wins over
-    // the freshness-derived labels because a dip-bounce entry is, by construction,
-    // near the 24h low where the breakout/continuation flags do not apply.
-    private static string ClassifyEntryChannel(bool dipBounce, EntryFreshnessResult? freshness) =>
-        dipBounce ? "DipBounce"
-        : freshness is { HasFreshBreakout: true } ? "Breakout"
-        : freshness is { HasFreshUpwardTape: true } ? "Continuation"
-        : "Standard";
+    // Labels the entry channel for per-channel PnL attribution.
+    private string ClassifyEntryChannel(
+        bool dipBounce,
+        EntryFreshnessResult? freshness,
+        LongRangeResult? longRange)
+    {
+        if (dipBounce)
+        {
+            return "DipBounce";
+        }
+
+        if (freshness is { HasFreshBreakout: true })
+        {
+            return "Breakout";
+        }
+
+        var continuationZone = freshness?.PositionIn24hRangePct is { } pos
+            && pos >= config.Freshness.FreshContinuationMin24hRangePositionPct;
+        if (freshness is { HasFreshUpwardTape: true } && continuationZone && freshness is not { HasFreshBreakout: true })
+        {
+            return "Continuation";
+        }
+
+        // Reclaim: mid close-percentile with fresh tape after a wide wick range —
+        // not glued to the 24h low, not a breakout chase.
+        if (freshness is { HasFreshUpwardTape: true }
+            && longRange?.ClosePercentile is { } closePct
+            && closePct >= 25m
+            && closePct <= 75m)
+        {
+            return "Reclaim";
+        }
+
+        return "Standard";
+    }
 
     private static void AttachEntryFreshnessDiagnostics(DryRunAction action, EntryFreshnessResult freshness)
     {
@@ -1418,6 +1481,9 @@ internal sealed class FuturesDecisionWorker(
         action.LongRangeRisingSnapshotCount = longRange.RisingSnapshotCount;
         action.EntryBlockedBy24hRange = longRange.Blocked;
         action.LongRangeBlockReasonCode = longRange.BlockReasonCode;
+        action.RangeBasis = longRange.RangeBasis;
+        action.ClosePercentile = longRange.ClosePercentile;
+        action.RecentSwingPosition = longRange.RecentSwingPosition;
     }
 
     private static void AttachExecutionDiagnostics(
@@ -1499,13 +1565,16 @@ internal sealed class FuturesDecisionWorker(
             : 0m;
     }
 
-    private decimal ProjectedOpenRiskEur(
+    // Concurrent portfolio heat = PURE stop-distance loss summed over open positions plus
+    // the new entry. This matches the MaxConcurrentOpenRisk = TargetRiskEur * MaxPositions
+    // budget exactly. Realistic execution/slippage cost is reported per trade by the sizer
+    // (PositionSizePlan.ProjectedOpenRiskEur) and bounded by the notional caps; it is NOT
+    // added here so the budget stays a clean N-stops figure.
+    private decimal ProjectedConcurrentStopRiskEur(
         PortfolioState state,
-        FuturesDesiredExposure desired,
         decimal markPrice,
         decimal filledNotionalEur,
-        decimal stopDistancePct,
-        decimal roundTripCostPct)
+        decimal stopDistancePct)
     {
         var current = state.Positions.Sum(position => PositionRiskEur(position, markPrice));
         if (filledNotionalEur <= 0m || stopDistancePct <= 0m)
@@ -1513,8 +1582,7 @@ internal sealed class FuturesDecisionWorker(
             return current;
         }
 
-        var newRisk = filledNotionalEur * stopDistancePct / 100m
-            + filledNotionalEur * (roundTripCostPct + config.Risk.EstimatedEmergencyExitCostPct) / 100m;
+        var newRisk = filledNotionalEur * stopDistancePct / 100m;
         return decimal.Round(current + Math.Max(0m, newRisk), 8);
     }
 
@@ -1525,11 +1593,9 @@ internal sealed class FuturesDecisionWorker(
             return config.Risk.MaxConcurrentOpenRisk + 1m;
         }
 
-        var risk = position.Side == "SHORT"
+        return position.Side == "SHORT"
             ? Math.Max(0m, (position.StopLossPrice.Value - markPrice) * position.Quantity)
             : Math.Max(0m, (markPrice - position.StopLossPrice.Value) * position.Quantity);
-        var emergency = position.EntryNotionalEur * (config.Fees.TakerPct + config.Risk.EstimatedEmergencyExitCostPct) / 100m;
-        return risk + emergency;
     }
 
     private decimal? ExitDepthEur(InstrumentMarketState marketState, FuturesDesiredExposure desired)
@@ -1819,7 +1885,7 @@ internal sealed class FuturesDecisionWorker(
             RejectionCounts: rejectionCounts,
             TopCandidates: topCandidates,
             ExcludedPairs: excludedPairs,
-            ExecutionMode: "dry-run-maker-post-only",
+            ExecutionMode: FuturesExecutionCostModel.TakerIocRoundTrip,
             FillRate: entryDecisions.Count == 0
                 ? 0m
                 : decimal.Round(entryDecisions.Count(decision => (decision.DryRunAction.MakerFillRate ?? 0m) > 0m) / (decimal)entryDecisions.Count, 4),

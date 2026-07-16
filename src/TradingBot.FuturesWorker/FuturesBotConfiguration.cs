@@ -91,6 +91,12 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_MAX_POSITIONS", value => config.Futures.MaxPositions = ParseInt(value, config.Futures.MaxPositions));
         SetIfPresent("TRADINGBOT_FUTURES_ALLOW_SHORTS", value => config.Futures.AllowShorts = ParseBool(value, config.Futures.AllowShorts));
         SetIfPresent("TRADINGBOT_FUTURES_TARGET_MARGIN_EUR", value => config.Futures.TargetMarginEur = ParseDecimal(value, config.Futures.TargetMarginEur));
+        SetIfPresent("TRADINGBOT_FUTURES_MAX_NOTIONAL_EUR", value => config.Futures.MaxNotionalEur = ParseDecimal(value, config.Futures.MaxNotionalEur));
+        SetIfPresent("TRADINGBOT_FUTURES_TARGET_RISK_EUR", value => config.Risk.TargetRiskEur = ParseDecimal(value, config.Risk.TargetRiskEur));
+        SetIfPresent("TRADINGBOT_FUTURES_STOP_ATR_MULT", value => config.Exits.StopAtrMult = ParseDecimal(value, config.Exits.StopAtrMult));
+        SetIfPresent("TRADINGBOT_FUTURES_STOP_DISTANCE_CAP_PERCENT", value => config.Exits.StopDistanceCapPct = ParseDecimal(value, config.Exits.StopDistanceCapPct));
+        SetIfPresent("TRADINGBOT_FUTURES_MIN_REWARD_RISK_MULTIPLE", value => config.Exits.MinRewardRiskMultiple = ParseDecimal(value, config.Exits.MinRewardRiskMultiple));
+        SetIfPresent("TRADINGBOT_FUTURES_MIN_TP_VS_COST_MULT", value => config.Exits.MinTpVsCostMult = ParseDecimal(value, config.Exits.MinTpVsCostMult));
         // Deprecated alias: sets the legacy notional field, migrated in Normalize.
         SetIfPresent("TRADINGBOT_FUTURES_TARGET_NOTIONAL_EUR", value => config.Futures.TargetNotionalEur = ParseDecimal(value, config.Futures.TargetNotionalEur ?? 0m));
         SetIfPresent("TRADINGBOT_FUTURES_USD_PER_EUR", value => config.Futures.UsdPerEur = ParseDecimal(value, config.Futures.UsdPerEur));
@@ -178,6 +184,9 @@ internal sealed class FuturesBotConfiguration
                 $"config-migration: Futures.TargetNotionalEur={legacyNotional:0.####} is deprecated; interpreted as legacy NOTIONAL and migrated to TargetMarginEur={Futures.TargetMarginEur:0.####} (notional/leverage) to preserve exposure. Set TargetMarginEur explicitly.");
         }
         Futures.TargetMarginEur = Futures.TargetMarginEur <= 0m ? 10m : Futures.TargetMarginEur;
+        Futures.MaxNotionalEur = Futures.MaxNotionalEur < 0m ? 0m : Futures.MaxNotionalEur;
+        Futures.MaxMarginPerPositionEur = Futures.MaxMarginPerPositionEur < 0m ? 0m : Futures.MaxMarginPerPositionEur;
+        Futures.MaxTotalNotionalEur = Futures.MaxTotalNotionalEur < 0m ? 0m : Futures.MaxTotalNotionalEur;
         Futures.TargetNotionalEur = null;
         Futures.UsdPerEur = Futures.UsdPerEur <= 0m ? 1m : Futures.UsdPerEur;
         Futures.FastExitCheckSeconds = Math.Clamp(Futures.FastExitCheckSeconds <= 0 ? 10 : Futures.FastExitCheckSeconds, 5, Worker.LoopIntervalSeconds);
@@ -244,10 +253,13 @@ internal sealed class FuturesBotConfiguration
         Filters.MinQuoteVolume24h = Filters.MinQuoteVolume24h <= 0m ? 50_000m : Filters.MinQuoteVolume24h;
         Filters.MinExitDepthMultiple = Filters.MinExitDepthMultiple <= 0m ? 5m : Filters.MinExitDepthMultiple;
         Filters.MaxExitImpactPct = Filters.MaxExitImpactPct <= 0m ? 0.5m : Filters.MaxExitImpactPct;
-        Exits.StopAtrMult = Exits.StopAtrMult <= 0m ? 2m : Exits.StopAtrMult;
+        Exits.StopAtrMult = Exits.StopAtrMult <= 0m ? 1m : Exits.StopAtrMult;
         Exits.MinStopAtrFloor = Exits.MinStopAtrFloor <= 0m ? 1.5m : Exits.MinStopAtrFloor;
         Exits.TakeProfitAtrMult = Exits.TakeProfitAtrMult <= 0m ? 3m : Exits.TakeProfitAtrMult;
+        Exits.MinRewardRiskMultiple = Exits.MinRewardRiskMultiple <= 0m ? 2m : Exits.MinRewardRiskMultiple;
         Exits.MinTpVsCostMult = Exits.MinTpVsCostMult <= 0m ? 3m : Exits.MinTpVsCostMult;
+        Exits.StopDistanceCapPct = Exits.StopDistanceCapPct <= 0m ? 3m : Exits.StopDistanceCapPct;
+        Exits.TakeProfitCapPct = Math.Max(0m, Exits.TakeProfitCapPct);
         Exits.SlippageBufferPct = Exits.SlippageBufferPct < 0m ? 0.10m : Exits.SlippageBufferPct;
         Exits.MaxHoldMinutes = Exits.MaxHoldMinutes <= 0 ? 360 : Exits.MaxHoldMinutes;
         Exits.MaxHoldMinStopProgressPct = Math.Clamp(Exits.MaxHoldMinStopProgressPct <= 0m ? 60m : Exits.MaxHoldMinStopProgressPct, 0m, 100m);
@@ -260,14 +272,15 @@ internal sealed class FuturesBotConfiguration
         Regime.ShortOverrideMinScore = Math.Clamp(Regime.ShortOverrideMinScore <= 0m ? 0.85m : Regime.ShortOverrideMinScore, 0m, 1m);
         Shorts.MaxChaseDrawdownPct = Shorts.MaxChaseDrawdownPct <= 0m ? 3m : Shorts.MaxChaseDrawdownPct;
         Shorts.MinShortScore = Shorts.MinShortScore <= 0m ? 0.90m : Shorts.MinShortScore;
-        // Open-risk cap must follow the NOTIONAL semantics, not the old margin-sized
-        // number. A stop-out loses ~notional * stopPct; the default lets all
-        // MaxPositions sit open at once. A too-small legacy value (sized for the old
-        // ~10 EUR notional) would otherwise block every 100 EUR entry, so it is
-        // recomputed when below one position's stop-out loss.
-        var stopLossPercentForRisk = TpSl.StopLossPercent <= 0m ? 2m : TpSl.StopLossPercent;
-        var perPositionOpenRisk = Futures.DerivedNotionalEur(Futures.DefaultLeverage) * stopLossPercentForRisk / 100m;
-        if (Risk.MaxConcurrentOpenRisk < perPositionOpenRisk)
+        // Risk-based sizing: TargetRiskEur is the EUR stop-distance budget per entry.
+        // Default 1.00 EUR = 1% of ~100 EUR virtual equity per position. Worked example
+        // (leverage 10x, stop floor 0.75%): notional = 1.00 / 0.0075 ≈ 133 EUR, margin
+        // ≈ 13.3 EUR; three concurrent slots = 3 EUR stop heat (3% equity) and ≈ 40 EUR
+        // margin (40% utilization). MaxConcurrentOpenRisk defaults to
+        // TargetRiskEur * MaxPositions so all slots can hold one full-budget position.
+        Risk.TargetRiskEur = Risk.TargetRiskEur <= 0m ? 1m : Risk.TargetRiskEur;
+        var perPositionOpenRisk = Risk.TargetRiskEur;
+        if (Risk.MaxConcurrentOpenRisk <= 0m || Risk.MaxConcurrentOpenRisk < perPositionOpenRisk)
         {
             Risk.MaxConcurrentOpenRisk = decimal.Round(perPositionOpenRisk * Futures.MaxPositions, 4);
         }
@@ -308,9 +321,22 @@ internal sealed class FuturesBotConfiguration
         }
 
         TpSl.Enabled = true;
-        TpSl.TakeProfitPercent = TpSl.TakeProfitPercent <= 0m ? 3m : TpSl.TakeProfitPercent;
-        TpSl.StopLossPercent = TpSl.StopLossPercent <= 0m ? 2m : TpSl.StopLossPercent;
+        // Legacy fixed percents. Migration semantics (documented): with the risk-based
+        // sizer these are no longer FIXED stop/TP — TpSl.StopLossPercent is the MINIMUM
+        // stop floor and TpSl.TakeProfitPercent is the MINIMUM TP floor, and they seed the
+        // decoupled Exits.MinStopDistancePct / Exits.MinTakeProfitPct below. Do NOT try to
+        // "fix" losses by raising StopLossPercent while holding a fixed notional — the sizer
+        // shrinks notional for wider stops instead. MinRewardRiskMultiple / MinTpVsCostMult
+        // always apply on top.
+        TpSl.TakeProfitPercent = TpSl.TakeProfitPercent <= 0m ? 1.5m : TpSl.TakeProfitPercent;
+        TpSl.StopLossPercent = TpSl.StopLossPercent <= 0m ? 0.75m : TpSl.StopLossPercent;
         TpSl.TriggerSource = string.IsNullOrWhiteSpace(TpSl.TriggerSource) ? "mark" : TpSl.TriggerSource;
+
+        // Decoupled sizer floors inherit the legacy TpSl percents when unset (0), giving a
+        // clean, explicit name (MinStopDistancePct = minimum stop, not fixed stop) with a
+        // backward-compatible mapping from old appsettings/env.
+        Exits.MinStopDistancePct = Exits.MinStopDistancePct <= 0m ? TpSl.StopLossPercent : Exits.MinStopDistancePct;
+        Exits.MinTakeProfitPct = Exits.MinTakeProfitPct <= 0m ? TpSl.TakeProfitPercent : Exits.MinTakeProfitPct;
     }
 
     private static void SetIfPresent(string name, Action<string> apply)
@@ -361,12 +387,21 @@ internal sealed class FuturesOptions
     // forces this to false regardless of config.
     public bool AllowFlip { get; set; }
 
-    // Business sizing parameter: the initial margin (collateral) committed per
-    // position, in EUR. The position NOTIONAL is derived once as
-    // TargetMarginEur * leverage, so TargetMarginEur=10 at 10x opens ~100 EUR
-    // notional and posts ~10 EUR margin. This is the ONLY sizing input; nothing
-    // else multiplies by leverage a second time.
+    // Legacy per-position margin reference (EUR). Still used by DerivedNotionalEur for
+    // migration/compat and as the fallback per-position margin cap when
+    // MaxMarginPerPositionEur is unset. Prefer MaxMarginPerPositionEur going forward.
     public decimal TargetMarginEur { get; set; } = 10m;
+
+    // Independent portfolio caps (all EUR, 0 = disabled/derive). These are hard backstops
+    // that bound gap/slippage/stop-failure and correlation tail risk INDEPENDENTLY of the
+    // open-risk (stop-distance) budget — the open-risk cap does not replace them.
+    //   MaxNotionalEur           : max notional for a single position.
+    //   MaxTotalNotionalEur      : max aggregate notional across all open positions.
+    //   MaxMarginPerPositionEur  : max initial margin committed by a single position.
+    // Total USED margin is bounded by Margin.MaxAccountMarginUtilizationPercent (equity %).
+    public decimal MaxNotionalEur { get; set; } = 0m;
+    public decimal MaxTotalNotionalEur { get; set; } = 0m;
+    public decimal MaxMarginPerPositionEur { get; set; } = 0m;
 
     // Legacy alias (deprecated): previously this value was the position NOTIONAL.
     // Kept only so old appsettings/env do not silently change the risk envelope on
@@ -454,15 +489,13 @@ internal sealed class FuturesFreshnessOptions
     public int BreakoutHoldSnapshotCount { get; set; } = 2;
     public decimal MaxEntryDriftFromSignalPct { get; set; } = 0.10m;
 
-    // Authoritative LONG 24h-range gate (FuturesLongRangeGuard). A LONG is admitted
-    // only in the lower band of a robust 24h range AND with a confirmed upward
-    // reversal. Percent fields follow the project convention (0.20 == 0.20%); range
-    // positions are 0..100 like every other *RangePositionPct field.
+    // LONG context/anti-knife gate (FuturesLongRangeGuard). Wick 24h position is
+    // diagnostic only — mid-range reclaim after wide spikes is allowed. Late-entry
+    // protection is FuturesEntryFreshnessGuard. Percent fields: 0.20 == 0.20%.
     public bool LongRangeGuardEnabled { get; set; } = true;
 
-    // Maximum allowed position of the executable entry inside the robust 24h range,
-    // as a 0..100 percent (30 == lower 30% of the range). Above this a LONG is
-    // rejected regardless of fresh tape or breakout.
+    // Soft diagnostic band for labeling / SQL (legacy name kept). No longer a hard
+    // admit veto; breakouts and mid-range reclaim may pass above this level.
     public decimal Max24hRangePositionForLong { get; set; } = 30m;
 
     // Minimum confirmed rebound of the executable entry above the absolute 24h low,
@@ -499,9 +532,9 @@ internal sealed class FuturesDipBounceOptions
     // tape+momentum the candidate stays flat. Disable to fall back to the firm bar.
     public bool Enabled { get; set; } = true;
 
-    // Upper bound of the "near the 24h low" zone, as a 24h-range position percent
-    // (0 = at the 24h low, 100 = at the 24h high). Disjoint from the continuation
-    // zone (>= 50%) and the near-high zone (>= 88%).
+    // Upper bound of the "near the value-area low" zone using close-percentile
+    // (0 = among the lowest recent closes, 100 = among the highest). Wick 24h
+    // high-low is no longer the dip admit basis.
     public decimal NearLowMax24hRangePositionPct { get; set; } = 25m;
 
     // Relaxed minimum long score for this channel. Tunable without a recompile so
@@ -526,10 +559,35 @@ internal sealed class FuturesFilterOptions
 
 internal sealed class FuturesExitOptions
 {
-    public decimal StopAtrMult { get; set; } = 2m;
+    // ATR stop multiplier: stopPct = clamp(StopAtrMult * atrPct, floor, cap).
+    // Default 1.0 so a 0.75% ATR at the legacy floor stays ~flat vs old fixed 0.75% SL
+    // when TargetRiskEur is calibrated to that risk; volatile names widen stop and shrink size.
+    public decimal StopAtrMult { get; set; } = 1m;
+
+    // Legacy name kept for older appsettings; Normalize maps it into StopDistanceCapPct
+    // when the new cap is unset. Prefer StopDistanceCapPct going forward.
     public decimal MinStopAtrFloor { get; set; } = 1.5m;
+
     public decimal TakeProfitAtrMult { get; set; } = 3m;
     public decimal MinTpVsCostMult { get; set; } = 3m;
+
+    // Minimum TP as a multiple of stop distance (R:R). Applied together with MinTpVsCostMult.
+    public decimal MinRewardRiskMultiple { get; set; } = 2m;
+
+    // Maximum ALLOWED stop distance (%). If StopAtrMult * atrPct exceeds this, the entry is
+    // BLOCKED (STOP_DISTANCE_TOO_LARGE) — the sizer never silently shrinks the stop into the
+    // instrument's own volatility.
+    public decimal StopDistanceCapPct { get; set; } = 3m;
+
+    // Optional TP cap (%). 0 = no cap beyond R-multiple / cost floor / TP floor.
+    public decimal TakeProfitCapPct { get; set; } = 0m;
+
+    // Stop/TP FLOORS (%). 0 = inherit the legacy TpSl.StopLossPercent / TpSl.TakeProfitPercent
+    // (see Normalize). These decouple the risk-sizer floors from the legacy fixed-percent
+    // names so config is unambiguous: MinStopDistancePct is a MINIMUM stop, not a fixed stop.
+    public decimal MinStopDistancePct { get; set; } = 0m;
+    public decimal MinTakeProfitPct { get; set; } = 0m;
+
     public decimal SlippageBufferPct { get; set; } = 0.10m;
     public int MaxHoldMinutes { get; set; } = 360;
     public decimal MaxHoldMinStopProgressPct { get; set; } = 60m;
@@ -555,7 +613,16 @@ internal sealed class FuturesShortOptions
 
 internal sealed class FuturesRiskOptions
 {
-    public decimal MaxConcurrentOpenRisk { get; set; } = 1.5m;
+    // EUR stop-distance risk budget per new entry (stopPct × notional). Drives risk-based
+    // sizing together with the ATR stop. Default 1.00 EUR = 1% of the ~100 EUR virtual
+    // equity per position (a conservative live default; the old 3 EUR ≈ 3% was too hot).
+    public decimal TargetRiskEur { get; set; } = 1m;
+
+    // Concurrent portfolio heat cap = pure stop-distance loss summed over open positions.
+    // Normalize defaults it to TargetRiskEur * MaxPositions so every slot can hold one
+    // full-budget position and no more. Execution/slippage cost is bounded separately by
+    // the notional caps and reported per trade (see FuturesPositionSizer.ProjectedOpenRiskEur).
+    public decimal MaxConcurrentOpenRisk { get; set; } = 3m;
     public decimal EstimatedEmergencyExitCostPct { get; set; } = 0m;
 }
 
@@ -571,8 +638,16 @@ internal sealed class FuturesExecutionPolicyOptions
 internal sealed class TpSlOptions
 {
     public bool Enabled { get; set; } = true;
-    public decimal TakeProfitPercent { get; set; } = 3m;
-    public decimal StopLossPercent { get; set; } = 2m;
+
+    // Legacy fixed TP percent: used as a TP FLOOR (and fallback) by FuturesPositionSizer
+    // together with MinRewardRiskMultiple × stop and MinTpVsCostMult × round-trip cost.
+    // Not deleted for backward compatibility with existing appsettings/env.
+    public decimal TakeProfitPercent { get; set; } = 1.5m;
+
+    // Legacy fixed SL percent: used as the ATR stop FLOOR and ATR-unavailable fallback.
+    // Risk-based sizing shrinks notional when ATR wants a wider stop — do not "fix"
+    // losses by raising this while keeping a fixed notional.
+    public decimal StopLossPercent { get; set; } = 0.75m;
 
     // Which price stream triggers simulated TP/SL: "mark" | "index" | "last".
     // Only "mark"/"last" are meaningful for the virtual portfolio today.

@@ -1,27 +1,32 @@
 namespace TradingBot.FuturesWorker;
 
-// Authoritative LONG entry gate over the 24h price range. A LONG is only admitted
-// in the lower part of a robust 24h range AND with a confirmed upward reversal —
-// this is what stops the bot from chasing a move that has already happened (buying
-// near the daily high) and, symmetrically, from catching a falling knife near the
-// low without a confirmed bounce.
+// LONG entry context + anti-knife checks. The old hard veto
+// "24h wick position > Max24hRangePositionForLong" is removed: wick mid-range
+// (e.g. reclaim 100 after spikes 10–150) is diagnostic only. Late-entry protection
+// stays in FuturesEntryFreshnessGuard (local-high, drift, continuation/breakout).
 //
-// It deliberately REUSES the freshness guard's already-computed signals (fresh
-// tape, rising snapshots, short slope, local-high distance, entry drift, breakout)
-// rather than recomputing them, and adds only the robust 24h range position and the
-// rebound-from-low confirmation on top. SHORT is never evaluated here.
+// This guard still:
+//   - computes close-percentile / recent-swing / wick-24h diagnostics (rangeBasis);
+//   - blocks falling-knife entries (no rebound / no rising tape) when enabled;
+//   - never blocks solely because wick 24h position is mid-range.
+// SHORT is never evaluated here.
 internal static class FuturesLongRangeGuard
 {
-    // Distinct block reasons so the failing condition is visible without parsing text.
-    public const string RangePositionTooHigh = "LONG_24H_RANGE_POSITION_TOO_HIGH";
     public const string RangeUnavailable = "LONG_24H_RANGE_UNAVAILABLE";
-    public const string RangeTooNarrow = "LONG_24H_RANGE_TOO_NARROW";
     public const string ReboundTooSmall = "LONG_REBOUND_FROM_24H_LOW_TOO_SMALL";
     public const string ShortSlopeNotPositive = "LONG_SHORT_SLOPE_NOT_POSITIVE";
     public const string RisingSnapshotsNotConfirmed = "LONG_RISING_SNAPSHOTS_NOT_CONFIRMED";
     public const string FreshTapeNotConfirmed = "LONG_FRESH_TAPE_NOT_CONFIRMED";
     public const string EntryTooCloseToLocalHigh = "LONG_ENTRY_TOO_CLOSE_TO_LOCAL_HIGH";
     public const string EntryDriftTooHigh = "LONG_ENTRY_DRIFT_TOO_HIGH";
+
+    // Kept for diagnostics / SQL compatibility; no longer used as an admit veto.
+    public const string RangePositionTooHigh = "LONG_24H_RANGE_POSITION_TOO_HIGH";
+    public const string RangeTooNarrow = "LONG_24H_RANGE_TOO_NARROW";
+
+    public const string RangeBasisClosePercentile = "CLOSE_PERCENTILE_96";
+    public const string RangeBasisRecentSwing = "RECENT_SWING_16";
+    public const string RangeBasisWick24h = "WICK_24H_DIAGNOSTIC";
 
     public static LongRangeResult Evaluate(
         InstrumentMarketState marketState,
@@ -35,72 +40,53 @@ internal static class FuturesLongRangeGuard
         }
 
         var (entryPrice, entryPriceSource) = ExecutableEntryPrice(marketState);
-        var range = Compute24hRange(marketState.Candles, thresholds.RobustRangeMinSampleCount);
+        var wickRange = Compute24hRange(marketState.Candles, thresholds.RobustRangeMinSampleCount);
+        var closePercentile = ClosePercentileRank(marketState.Candles, entryPrice, lookback: 96);
+        var swing = RecentSwingPosition(marketState.Candles, entryPrice, lookback: 16);
 
-        // The range used for the position: robust percentile when available, else the
-        // absolute 24h range. Rebound is always measured from the ABSOLUTE 24h low so a
-        // fresh new-low print is never treated as "off the low".
-        var low = range.RobustLow ?? range.AbsoluteLow;
-        var high = range.RobustHigh ?? range.AbsoluteHigh;
-        var absoluteLow = range.AbsoluteLow;
+        var low = wickRange.RobustLow ?? wickRange.AbsoluteLow;
+        var high = wickRange.RobustHigh ?? wickRange.AbsoluteHigh;
+        var absoluteLow = wickRange.AbsoluteLow;
 
-        decimal? rawPosition = null;
-        decimal? clampedPosition = null;
+        decimal? rawWickPosition = null;
+        decimal? clampedWickPosition = null;
+        if (low is { } rangeLow && high is { } rangeHigh && entryPrice > 0m && rangeHigh > rangeLow)
+        {
+            rawWickPosition = (entryPrice - rangeLow) / (rangeHigh - rangeLow) * 100m;
+            clampedWickPosition = Math.Clamp(rawWickPosition.Value, 0m, 100m);
+        }
+
         decimal? distanceFromLowPct = absoluteLow is > 0m && entryPrice > 0m
             ? (entryPrice - absoluteLow.Value) / absoluteLow.Value * 100m
             : null;
 
-        LongRangeResult Blocked(string code, string reason) => new(
-            Evaluated: true, Blocked: true, BlockReasonCode: code, BlockReason: reason,
-            EntryPrice: entryPrice, EntryPriceSource: entryPriceSource,
-            AbsoluteLow24h: range.AbsoluteLow, AbsoluteHigh24h: range.AbsoluteHigh,
-            RobustLow24h: range.RobustLow, RobustHigh24h: range.RobustHigh,
-            Range24hSource: range.Source, Range24hSampleCount: range.SampleCount,
-            Range24hPositionRaw: rawPosition, Range24hPosition: clampedPosition,
-            Max24hRangePositionForLong: thresholds.Max24hRangePositionForLong,
-            DistanceFrom24hLowPct: distanceFromLowPct,
-            MinReboundFrom24hLowPct: thresholds.MinReboundFrom24hLowPct,
-            RisingSnapshotCount: freshness.PositiveStepsInLast3,
-            RequiredRisingSnapshotCount: thresholds.RequiredRisingSnapshotCount,
-            ShortSlopePct: freshness.ShortSnapshotSlopePct,
-            FreshTape: freshness.HasFreshUpwardTape,
-            EntryDistanceFromLocalHighPct: freshness.EntryDistanceFromLocalHighPct,
-            EntryDriftFromSignalPct: freshness.LivePriceVsSignalClosePct);
+        // Primary structural basis for Dip/Reclaim labeling: where the entry sits in
+        // the recent close distribution. Fall back to swing, then wick diagnostic.
+        var rangeBasis = closePercentile is not null ? RangeBasisClosePercentile
+            : swing.PositionPct is not null ? RangeBasisRecentSwing
+            : RangeBasisWick24h;
+        var primaryPosition = closePercentile ?? swing.PositionPct ?? clampedWickPosition;
 
-        // 1. Range data must be computable — never let a calculation gap silently admit.
-        if (low is not { } rangeLow || high is not { } rangeHigh || entryPrice <= 0m)
+        LongRangeResult Blocked(string code, string reason) => Build(
+            blocked: true, code, reason,
+            entryPrice, entryPriceSource, wickRange,
+            rawWickPosition, clampedWickPosition, distanceFromLowPct,
+            freshness, thresholds, rangeBasis, closePercentile, swing.PositionPct, primaryPosition);
+
+        // Wick mid-range is NEVER a hard veto (reclaim after wide spikes must pass).
+        // Still require computable entry + anti-knife confirmation.
+        if (entryPrice <= 0m)
         {
             return Blocked(RangeUnavailable,
-                $"long blocked: 24h range unavailable (source {range.Source}, {range.SampleCount} candles) — cannot place the entry in its range");
+                "long blocked: executable entry price unavailable — cannot evaluate reclaim/tape context");
         }
 
-        // 2. Range width sanity — a near-flat range makes the position meaningless and
-        //    risks a divide-by-tiny amplification.
-        var rangeWidthPct = rangeLow > 0m ? (rangeHigh - rangeLow) / rangeLow * 100m : 0m;
-        if (rangeHigh <= rangeLow || rangeWidthPct < thresholds.Min24hRangeWidthPct)
-        {
-            return Blocked(RangeTooNarrow,
-                $"long blocked: 24h range too narrow ({rangeWidthPct:0.###}% < {thresholds.Min24hRangeWidthPct:0.###}%, source {range.Source})");
-        }
-
-        rawPosition = (entryPrice - rangeLow) / (rangeHigh - rangeLow) * 100m;
-        clampedPosition = Math.Clamp(rawPosition.Value, 0m, 100m);
-
-        // 3. Range position: LONG only in the lower band of the robust 24h range.
-        if (clampedPosition > thresholds.Max24hRangePositionForLong)
-        {
-            return Blocked(RangePositionTooHigh,
-                $"long blocked: 24h range position {clampedPosition:0.###}% > allowed max {thresholds.Max24hRangePositionForLong:0.###}% (entry {entryPrice:0.######} via {entryPriceSource}, robust low {rangeLow:0.######}, robust high {rangeHigh:0.######}, source {range.Source})");
-        }
-
-        // 4. Rebound from the absolute 24h low — do not buy while the low is being made.
         if (distanceFromLowPct is { } rebound && rebound < thresholds.MinReboundFrom24hLowPct)
         {
             return Blocked(ReboundTooSmall,
                 $"long blocked: rebound from 24h low {rebound:0.###}% < required {thresholds.MinReboundFrom24hLowPct:0.###}% (entry {entryPrice:0.######}, 24h low {absoluteLow:0.######})");
         }
 
-        // 5. Confirmed upward reversal: rising snapshots, positive short slope, fresh tape.
         if (freshness.PositiveStepsInLast3 < thresholds.RequiredRisingSnapshotCount)
         {
             return Blocked(RisingSnapshotsNotConfirmed,
@@ -122,11 +108,9 @@ internal static class FuturesLongRangeGuard
         if (thresholds.RequireFreshTapeForLowRangeLong && !freshness.HasFreshUpwardTape)
         {
             return Blocked(FreshTapeNotConfirmed,
-                $"long blocked: fresh upward tape not confirmed (rising snapshots and candle momentum did not both hold)");
+                "long blocked: fresh upward tape not confirmed (rising snapshots and candle momentum did not both hold)");
         }
 
-        // 6. Local-high guard — never buy right into a local high unless it is a
-        //    confirmed breakout. Reuses the freshness guard's measurement.
         if (freshness.EntryDistanceFromLocalHighPct is { } localHighDistance
             && localHighDistance <= thresholds.MaxEntryDistanceFromLocalHighPct
             && !freshness.HasFreshBreakout)
@@ -135,7 +119,6 @@ internal static class FuturesLongRangeGuard
                 $"long blocked: entry {localHighDistance:0.###}% below {freshness.LocalHighSource} high (min {thresholds.MaxEntryDistanceFromLocalHighPct:0.###}%), no confirmed breakout");
         }
 
-        // 7. Entry drift — the executable ask must not have run away from the signal.
         if (freshness.LivePriceVsSignalClosePct is { } drift
             && drift > thresholds.MaxEntryDriftFromSignalPct
             && !freshness.HasFreshBreakout)
@@ -144,13 +127,36 @@ internal static class FuturesLongRangeGuard
                 $"long blocked: executable entry drifted +{drift:0.###}% from signal close (max {thresholds.MaxEntryDriftFromSignalPct:0.###}%), no confirmed breakout");
         }
 
-        return new LongRangeResult(
-            Evaluated: true, Blocked: false, BlockReasonCode: null, BlockReason: null,
+        return Build(
+            blocked: false, null, null,
+            entryPrice, entryPriceSource, wickRange,
+            rawWickPosition, clampedWickPosition, distanceFromLowPct,
+            freshness, thresholds, rangeBasis, closePercentile, swing.PositionPct, primaryPosition);
+    }
+
+    private static LongRangeResult Build(
+        bool blocked,
+        string? code,
+        string? reason,
+        decimal entryPrice,
+        string entryPriceSource,
+        Range24h range,
+        decimal? rawWickPosition,
+        decimal? clampedWickPosition,
+        decimal? distanceFromLowPct,
+        EntryFreshnessResult freshness,
+        FuturesFreshnessOptions thresholds,
+        string rangeBasis,
+        decimal? closePercentile,
+        decimal? recentSwingPosition,
+        decimal? primaryPosition) =>
+        new(
+            Evaluated: true, Blocked: blocked, BlockReasonCode: code, BlockReason: reason,
             EntryPrice: entryPrice, EntryPriceSource: entryPriceSource,
             AbsoluteLow24h: range.AbsoluteLow, AbsoluteHigh24h: range.AbsoluteHigh,
             RobustLow24h: range.RobustLow, RobustHigh24h: range.RobustHigh,
             Range24hSource: range.Source, Range24hSampleCount: range.SampleCount,
-            Range24hPositionRaw: rawPosition, Range24hPosition: clampedPosition,
+            Range24hPositionRaw: rawWickPosition, Range24hPosition: clampedWickPosition,
             Max24hRangePositionForLong: thresholds.Max24hRangePositionForLong,
             DistanceFrom24hLowPct: distanceFromLowPct,
             MinReboundFrom24hLowPct: thresholds.MinReboundFrom24hLowPct,
@@ -159,11 +165,12 @@ internal static class FuturesLongRangeGuard
             ShortSlopePct: freshness.ShortSnapshotSlopePct,
             FreshTape: freshness.HasFreshUpwardTape,
             EntryDistanceFromLocalHighPct: freshness.EntryDistanceFromLocalHighPct,
-            EntryDriftFromSignalPct: freshness.LivePriceVsSignalClosePct);
-    }
+            EntryDriftFromSignalPct: freshness.LivePriceVsSignalClosePct,
+            RangeBasis: rangeBasis,
+            ClosePercentile: closePercentile,
+            RecentSwingPosition: recentSwingPosition,
+            PrimaryRangePosition: primaryPosition);
 
-    // Executable entry price for a LONG is the current ask; fall back explicitly and
-    // tag the source so a fallback is never mistaken for a real ask.
     private static (decimal Price, string Source) ExecutableEntryPrice(InstrumentMarketState marketState)
     {
         if (marketState.Quote?.Ask is > 0m)
@@ -179,9 +186,6 @@ internal static class FuturesLongRangeGuard
         return (marketState.LastPrice, "CANDLE_CLOSE");
     }
 
-    // Robust 24h range from the last 96 closed 15m candles. Percentile 5/95 (over
-    // candle lows/highs) rejects a single spike; falls back to the absolute range when
-    // the sample is too small, and reports which source was used.
     public static Range24h Compute24hRange(IReadOnlyList<Candle> candles, int minSampleCount)
     {
         var recent = candles.TakeLast(Math.Min(96, candles.Count)).ToList();
@@ -208,7 +212,57 @@ internal static class FuturesLongRangeGuard
         return new Range24h(absoluteLow, absoluteHigh, null, null, "ABSOLUTE_24H", recent.Count);
     }
 
-    // Linear-interpolation percentile over an already-sorted ascending list.
+    // Rank of entryPrice among the last `lookback` closes, 0..100.
+    // Spike wicks do not move this; a reclaim to prior value sits near historical closes.
+    public static decimal? ClosePercentileRank(IReadOnlyList<Candle> candles, decimal entryPrice, int lookback)
+    {
+        if (entryPrice <= 0m || candles.Count < 2)
+        {
+            return null;
+        }
+
+        var closes = candles.TakeLast(Math.Min(lookback, candles.Count)).Select(c => c.Close).OrderBy(v => v).ToList();
+        if (closes.Count < 2)
+        {
+            return null;
+        }
+
+        // Flat value area (all closes equal): treat the shared close as mid-distribution.
+        if (closes[^1] <= closes[0])
+        {
+            if (entryPrice < closes[0])
+            {
+                return 0m;
+            }
+
+            return entryPrice > closes[0] ? 100m : 50m;
+        }
+
+        var below = closes.Count(c => c < entryPrice);
+        var equal = closes.Count(c => c == entryPrice);
+        var rank = (below + 0.5m * equal) / closes.Count * 100m;
+        return Math.Clamp(decimal.Round(rank, 4), 0m, 100m);
+    }
+
+    public static (decimal? PositionPct, decimal? Low, decimal? High) RecentSwingPosition(
+        IReadOnlyList<Candle> candles, decimal entryPrice, int lookback)
+    {
+        if (entryPrice <= 0m || candles.Count < 2)
+        {
+            return (null, null, null);
+        }
+
+        var recent = candles.TakeLast(Math.Min(lookback, candles.Count)).ToList();
+        var low = recent.Min(c => c.Low);
+        var high = recent.Max(c => c.High);
+        if (high <= low)
+        {
+            return (null, low, high);
+        }
+
+        return (Math.Clamp((entryPrice - low) / (high - low) * 100m, 0m, 100m), low, high);
+    }
+
     private static decimal Percentile(IReadOnlyList<decimal> sorted, decimal percentile)
     {
         if (sorted.Count == 0)
@@ -265,7 +319,11 @@ internal sealed record LongRangeResult(
     decimal? ShortSlopePct,
     bool FreshTape,
     decimal? EntryDistanceFromLocalHighPct,
-    decimal? EntryDriftFromSignalPct)
+    decimal? EntryDriftFromSignalPct,
+    string RangeBasis = "NONE",
+    decimal? ClosePercentile = null,
+    decimal? RecentSwingPosition = null,
+    decimal? PrimaryRangePosition = null)
 {
     public static readonly LongRangeResult NotEvaluated = new(
         Evaluated: false, Blocked: false, BlockReasonCode: null, BlockReason: null,

@@ -106,20 +106,20 @@ public sealed class FuturesSizingTests
     }
 
     [Fact]
-    public void Normalize_recomputes_risk_caps_for_notional_semantics()
+    public void Normalize_recomputes_risk_caps_for_target_risk_semantics()
     {
         var config = new FuturesBotConfiguration
         {
-            Futures = new FuturesOptions { TargetMarginEur = 10m, DefaultLeverage = 10m, MaxLeverage = 10m, MaxPositions = 3 },
-            TpSl = new TpSlOptions { Enabled = true, StopLossPercent = 2m }
+            Futures = new FuturesOptions { TargetMarginEur = 40m, DefaultLeverage = 10m, MaxLeverage = 10m, MaxPositions = 3 },
+            Risk = new FuturesRiskOptions { TargetRiskEur = 3m, MaxConcurrentOpenRisk = 1.5m },
+            TpSl = new TpSlOptions { Enabled = true, StopLossPercent = 0.75m, TakeProfitPercent = 1.5m }
         };
         InvokeNormalize(config);
 
-        // Derived notional = 100. Per-group exposure defaults to one notional.
-        Assert.Equal(100m, config.CorrelationRisk.MaxExposureEurPerGroup);
-        // Open-risk cap must clear one position's stop-out loss (100 * 2% = 2 EUR);
-        // the old 1.5 default would block every entry, so it is recomputed.
-        Assert.True(config.Risk.MaxConcurrentOpenRisk >= 2m);
+        Assert.Equal(400m, config.Futures.DerivedNotionalEur(10m));
+        Assert.Equal(400m, config.CorrelationRisk.MaxExposureEurPerGroup);
+        Assert.Equal(3m, config.Risk.TargetRiskEur);
+        Assert.Equal(9m, config.Risk.MaxConcurrentOpenRisk);
     }
 
     [Fact]

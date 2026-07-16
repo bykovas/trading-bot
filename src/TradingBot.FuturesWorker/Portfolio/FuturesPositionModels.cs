@@ -30,7 +30,15 @@ internal sealed record FuturesEntryPlan(
     decimal OpenRiskEur,
     string FundingState,
     string BtcRegimeState,
-    string ShortAllowed);
+    string ShortAllowed,
+    decimal TargetRiskEur = 0m,
+    decimal SizedNotionalEur = 0m,
+    decimal RequiredMarginEur = 0m,
+    decimal EffectiveLeverage = 0m,
+    decimal ProjectedStopLossEur = 0m,
+    string ExecutionCostModel = FuturesExecutionCostModel.TakerIocRoundTrip,
+    string StopSource = "UNKNOWN",
+    string? NotionalCapReason = null);
 
 internal sealed record BtcRegimeState(
     bool AllowsLongs,

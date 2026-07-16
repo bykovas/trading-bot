@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 
@@ -93,9 +94,16 @@ public sealed class KrakenFuturesMarketDataSourceTests
     {
         var start = DateTimeOffset.UtcNow.AddHours(-10);
         var candles = string.Join(",", Enumerable.Range(0, 40).Select(index =>
-            $$"""
-              { "time": {{start.AddMinutes(index * 15).ToUnixTimeMilliseconds()}}, "open": "{{100 + index}}", "high": "{{101 + index}}", "low": "{{99 + index}}", "close": "{{100.5m + index}}", "volume": "{{1000 + index}}" }
-              """));
+        {
+            var open = (100 + index).ToString(CultureInfo.InvariantCulture);
+            var high = (101 + index).ToString(CultureInfo.InvariantCulture);
+            var low = (99 + index).ToString(CultureInfo.InvariantCulture);
+            var close = (100.5m + index).ToString(CultureInfo.InvariantCulture);
+            var volume = (1000 + index).ToString(CultureInfo.InvariantCulture);
+            return $$"""
+              { "time": {{start.AddMinutes(index * 15).ToUnixTimeMilliseconds()}}, "open": "{{open}}", "high": "{{high}}", "low": "{{low}}", "close": "{{close}}", "volume": "{{volume}}" }
+              """;
+        }));
         var handler = new StubHandler(request =>
         {
             var url = request.RequestUri!.ToString();
