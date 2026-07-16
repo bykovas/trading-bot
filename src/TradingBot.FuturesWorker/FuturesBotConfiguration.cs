@@ -272,6 +272,14 @@ internal sealed class FuturesBotConfiguration
         Regime.ShortOverrideMinScore = Math.Clamp(Regime.ShortOverrideMinScore <= 0m ? 0.85m : Regime.ShortOverrideMinScore, 0m, 1m);
         Shorts.MaxChaseDrawdownPct = Shorts.MaxChaseDrawdownPct <= 0m ? 3m : Shorts.MaxChaseDrawdownPct;
         Shorts.MinShortScore = Shorts.MinShortScore <= 0m ? 0.90m : Shorts.MinShortScore;
+        // SHORT range/anti-knife gate (mirror of the LONG Freshness thresholds).
+        if (Shorts.Min24hRangePositionForShort < 0m || Shorts.Min24hRangePositionForShort > 100m)
+        {
+            Console.WriteLine($"config-validation: Shorts.Min24hRangePositionForShort={Shorts.Min24hRangePositionForShort} is out of [0,100]; reset to 70.");
+            Shorts.Min24hRangePositionForShort = 70m;
+        }
+        Shorts.MinPullbackFrom24hHighPct = Math.Max(0m, Shorts.MinPullbackFrom24hHighPct);
+        Shorts.RequiredFallingSnapshotCount = Math.Max(1, Shorts.RequiredFallingSnapshotCount);
         // Risk-based sizing: TargetRiskEur is the EUR stop-distance budget per entry.
         // Default 1.00 EUR = 1% of ~100 EUR virtual equity per position. Worked example
         // (leverage 10x, stop floor 0.75%): notional = 1.00 / 0.0075 ≈ 133 EUR, margin
@@ -609,6 +617,33 @@ internal sealed class FuturesShortOptions
 {
     public decimal MaxChaseDrawdownPct { get; set; } = 3.0m;
     public decimal MinShortScore { get; set; } = 0.90m;
+
+    // SHORT entry context + anti-knife gate (FuturesShortEntryGuard) — the mirror of the
+    // LONG range/freshness guards. Wick 24h position is diagnostic only (mid-range
+    // reclaim-down after wide spikes is allowed). Late-entry / rising-knife protection is
+    // structural. Mechanical lookbacks / tape counts / breakdown buffer / candle momentum
+    // are shared with Freshness (same magnitudes, mirrored direction). Percent fields:
+    // 0.20 == 0.20%.
+    public bool RangeGuardEnabled { get; set; } = true;
+
+    // Diagnostic band for labeling (mirror of Max24hRangePositionForLong=30): a healthy
+    // short usually sits in the UPPER band of the range, so this is a MIN position. Not a
+    // hard veto — breakdowns and mid-range reclaim-down may pass below it.
+    public decimal Min24hRangePositionForShort { get; set; } = 70m;
+
+    // Minimum confirmed pullback of the executable entry BELOW the absolute 24h high, so
+    // the bot does not sell while the high is still being made (mirror of rebound-from-low).
+    public decimal MinPullbackFrom24hHighPct { get; set; } = 0.20m;
+
+    // Minimum consecutive FALLING snapshot steps to confirm the down move.
+    public int RequiredFallingSnapshotCount { get; set; } = 2;
+
+    // Whether the short-term snapshot slope must be strictly negative.
+    public bool RequireNegativeShortSlope { get; set; } = true;
+
+    // Whether a fresh downward tape (falling snapshots + non-positive candle momentum) is
+    // mandatory for an upper-range SHORT — an old candle-based signal alone is not enough.
+    public bool RequireFreshTapeForHighRangeShort { get; set; } = true;
 }
 
 internal sealed class FuturesRiskOptions

@@ -229,6 +229,7 @@ internal sealed class FuturesDecisionWorker(
                 FuturesEntryPlan? entryPlan = null;
                 EntryFreshnessResult? freshness = null;
                 LongRangeResult? longRange = null;
+                ShortEntryResult? shortEntry = null;
                 var dipBounce = false;
                 var remainingSlots = Math.Max(0, config.Futures.MaxPositions - state.Positions.Count);
 
@@ -319,10 +320,28 @@ internal sealed class FuturesDecisionWorker(
                             $"LONG_RANGE pair={pair} entry={longRange.EntryPrice:0.######}({longRange.EntryPriceSource}) rangeSrc={longRange.Range24hSource} robustLow={longRange.RobustLow24h:0.######} robustHigh={longRange.RobustHigh24h:0.######} pos={longRange.Range24hPosition:0.###} max={longRange.Max24hRangePositionForLong:0.###} rebound={longRange.DistanceFrom24hLowPct:0.###} rising={longRange.RisingSnapshotCount} slope={longRange.ShortSlopePct:0.###} freshTape={longRange.FreshTape} blocked={longRange.Blocked} reason={longRange.BlockReasonCode ?? "-"}");
                     }
 
-                    // Gate precedence: 24h-range guard first (its reasons are the most
-                    // specific), then the freshness guard, then the quality gate.
+                    // Authoritative SHORT entry gate — mirror of the LONG range/freshness
+                    // guards on the executable bid. Fresh down-tape can never bypass it.
+                    shortEntry = qualityGate.Approved && desired == FuturesDesiredExposure.Short
+                        ? FuturesShortEntryGuard.Evaluate(
+                            marketState,
+                            _priceHistory.RecentObservations(pair, config.Freshness.FreshTapeSnapshotCount),
+                            desired,
+                            config.Shorts,
+                            config.Freshness)
+                        : null;
+                    if (shortEntry is { Evaluated: true })
+                    {
+                        Console.WriteLine(
+                            $"SHORT_ENTRY pair={pair} entry={shortEntry.EntryPrice:0.######}({shortEntry.EntryPriceSource}) rangeSrc={shortEntry.Range24hSource} robustLow={shortEntry.RobustLow24h:0.######} robustHigh={shortEntry.RobustHigh24h:0.######} pos={shortEntry.Range24hPosition:0.###} min={shortEntry.Min24hRangePositionForShort:0.###} pullback={shortEntry.DistanceFrom24hHighPct:0.###} falling={shortEntry.FallingSnapshotCount} slope={shortEntry.ShortSlopePct:0.###} freshTape={shortEntry.FreshTape} breakdown={shortEntry.HasFreshBreakdown} blocked={shortEntry.Blocked} reason={shortEntry.BlockReasonCode ?? "-"}");
+                    }
+
+                    // Gate precedence: side range/anti-knife guard first (its reasons are the
+                    // most specific), then the freshness guard, then the quality gate.
                     var freshnessGate = qualityGate.Approved && longRange is { Blocked: true }
                         ? new RiskEvaluation(false, new[] { longRange.BlockReason ?? "long blocked by 24h range guard" })
+                        : qualityGate.Approved && shortEntry is { Blocked: true }
+                            ? new RiskEvaluation(false, new[] { shortEntry.BlockReason ?? "short blocked by range guard" })
                         : qualityGate.Approved && freshness is { Blocked: true }
                             ? new RiskEvaluation(false, new[] { freshness.BlockReason ?? "entry stale near high" })
                             : qualityGate;
@@ -374,7 +393,12 @@ internal sealed class FuturesDecisionWorker(
                             AttachLongRangeDiagnostics(fill.Action, longRange);
                         }
 
-                        var entryChannel = ClassifyEntryChannel(dipBounce, freshness, longRange);
+                        if (shortEntry is { Evaluated: true })
+                        {
+                            AttachShortEntryDiagnostics(fill.Action, shortEntry);
+                        }
+
+                        var entryChannel = ClassifyEntryChannel(dipBounce, freshness, longRange, shortEntry);
                         fill.Action.EntryChannel = entryChannel;
                         if (dipBounce)
                         {
@@ -420,6 +444,17 @@ internal sealed class FuturesDecisionWorker(
                     if (freshness.Blocked)
                     {
                         fill.Action.HoldReasonCode = FuturesEntryFreshnessGuard.HoldReasonCode;
+                    }
+                }
+
+                if (shortEntry is { Evaluated: true })
+                {
+                    AttachShortEntryDiagnostics(fill.Action, shortEntry);
+                    // The side range/anti-knife block reason is the most specific, so it
+                    // wins the hold-reason code when that guard rejected the entry.
+                    if (shortEntry.Blocked)
+                    {
+                        fill.Action.HoldReasonCode = shortEntry.BlockReasonCode;
                     }
                 }
 
@@ -1412,8 +1447,35 @@ internal sealed class FuturesDecisionWorker(
     private string ClassifyEntryChannel(
         bool dipBounce,
         EntryFreshnessResult? freshness,
-        LongRangeResult? longRange)
+        LongRangeResult? longRange,
+        ShortEntryResult? shortEntry)
     {
+        // SHORT channels mirror the LONG ones (breakdown ~ breakout, continuation, reclaim).
+        if (shortEntry is { Evaluated: true })
+        {
+            if (shortEntry.HasFreshBreakdown)
+            {
+                return "ShortBreakdown";
+            }
+
+            var upperZone = shortEntry.Range24hPosition is { } sp
+                && sp >= config.Shorts.Min24hRangePositionForShort;
+            if (shortEntry.FreshTape && upperZone)
+            {
+                return "ShortContinuation";
+            }
+
+            if (shortEntry.FreshTape
+                && shortEntry.ClosePercentile is { } scp
+                && scp >= 25m
+                && scp <= 75m)
+            {
+                return "ShortReclaim";
+            }
+
+            return "Standard";
+        }
+
         if (dipBounce)
         {
             return "DipBounce";
@@ -1484,6 +1546,17 @@ internal sealed class FuturesDecisionWorker(
         action.RangeBasis = longRange.RangeBasis;
         action.ClosePercentile = longRange.ClosePercentile;
         action.RecentSwingPosition = longRange.RecentSwingPosition;
+    }
+
+    // SHORT diagnostics reuse the side-agnostic range fields (basis / close-percentile /
+    // recent-swing / range-blocked). The detailed short numbers are emitted on the
+    // SHORT_ENTRY log line and the block reason is surfaced as the decision reason.
+    private static void AttachShortEntryDiagnostics(DryRunAction action, ShortEntryResult shortEntry)
+    {
+        action.RangeBasis = shortEntry.RangeBasis;
+        action.ClosePercentile = shortEntry.ClosePercentile;
+        action.RecentSwingPosition = shortEntry.RecentSwingPosition;
+        action.EntryBlockedBy24hRange = shortEntry.Blocked;
     }
 
     private static void AttachExecutionDiagnostics(
