@@ -228,6 +228,7 @@ internal sealed class FuturesDecisionWorker(
                 var desired = strategy.DecideEntry(signal);
                 FuturesEntryPlan? entryPlan = null;
                 EntryFreshnessResult? freshness = null;
+                LongRangeResult? longRange = null;
                 var dipBounce = false;
                 var remainingSlots = Math.Max(0, config.Futures.MaxPositions - state.Positions.Count);
 
@@ -300,9 +301,24 @@ internal sealed class FuturesDecisionWorker(
                             $"ENTRY_FRESHNESS pair={pair} desired={desired} nearHigh={freshness.IsNearHigh} freshTape={freshness.HasFreshUpwardTape} breakout={freshness.HasFreshBreakout} blocked={freshness.Blocked} pos24={freshness.PositionIn24hRangePct:0.###} distHigh={freshness.DistanceFromRecentHighPct:0.###} lastStep={freshness.LastSnapshotStepPct:0.###} slope={freshness.ShortSnapshotSlopePct:0.###}");
                     }
 
-                    var freshnessGate = qualityGate.Approved && freshness is { Blocked: true }
-                        ? new RiskEvaluation(false, new[] { freshness.BlockReason ?? "entry stale near high" })
-                        : qualityGate;
+                    // Authoritative 24h-range LONG gate. Runs on the executable ask over a
+                    // robust 24h range; fresh tape can never bypass it. SHORT is untouched.
+                    longRange = freshness is not null
+                        ? FuturesLongRangeGuard.Evaluate(marketState, freshness, desired, config.Freshness)
+                        : null;
+                    if (longRange is { Evaluated: true })
+                    {
+                        Console.WriteLine(
+                            $"LONG_RANGE pair={pair} entry={longRange.EntryPrice:0.######}({longRange.EntryPriceSource}) rangeSrc={longRange.Range24hSource} robustLow={longRange.RobustLow24h:0.######} robustHigh={longRange.RobustHigh24h:0.######} pos={longRange.Range24hPosition:0.###} max={longRange.Max24hRangePositionForLong:0.###} rebound={longRange.DistanceFrom24hLowPct:0.###} rising={longRange.RisingSnapshotCount} slope={longRange.ShortSlopePct:0.###} freshTape={longRange.FreshTape} blocked={longRange.Blocked} reason={longRange.BlockReasonCode ?? "-"}");
+                    }
+
+                    // Gate precedence: 24h-range guard first (its reasons are the most
+                    // specific), then the freshness guard, then the quality gate.
+                    var freshnessGate = qualityGate.Approved && longRange is { Blocked: true }
+                        ? new RiskEvaluation(false, new[] { longRange.BlockReason ?? "long blocked by 24h range guard" })
+                        : qualityGate.Approved && freshness is { Blocked: true }
+                            ? new RiskEvaluation(false, new[] { freshness.BlockReason ?? "entry stale near high" })
+                            : qualityGate;
                     var portfolioGate = freshnessGate.Approved
                         ? EvaluatePortfolioEntryGuards(state, pair, desired, utc)
                         : freshnessGate;
@@ -336,6 +352,11 @@ internal sealed class FuturesDecisionWorker(
                                 fill.Action.AverageFillPrice ?? fill.Action.FillPrice,
                                 config.Freshness);
                             AttachEntryFreshnessDiagnostics(fill.Action, freshness);
+                        }
+
+                        if (longRange is { Evaluated: true })
+                        {
+                            AttachLongRangeDiagnostics(fill.Action, longRange);
                         }
 
                         var entryChannel = ClassifyEntryChannel(dipBounce, freshness);
@@ -381,6 +402,17 @@ internal sealed class FuturesDecisionWorker(
                     if (freshness.Blocked)
                     {
                         fill.Action.HoldReasonCode = FuturesEntryFreshnessGuard.HoldReasonCode;
+                    }
+                }
+
+                if (longRange is { Evaluated: true })
+                {
+                    AttachLongRangeDiagnostics(fill.Action, longRange);
+                    // The 24h-range block reason is the most specific, so it wins the
+                    // hold-reason code when the range guard rejected the entry.
+                    if (longRange.Blocked)
+                    {
+                        fill.Action.HoldReasonCode = longRange.BlockReasonCode;
                     }
                 }
             }
@@ -1367,6 +1399,25 @@ internal sealed class FuturesDecisionWorker(
         action.LivePriceVsSignalClosePct = freshness.LivePriceVsSignalClosePct;
         action.PostFillEntryDistanceFromLocalHighPct = freshness.PostFillEntryDistanceFromLocalHighPct;
         action.PostFillLivePriceVsSignalClosePct = freshness.PostFillLivePriceVsSignalClosePct;
+    }
+
+    private static void AttachLongRangeDiagnostics(DryRunAction action, LongRangeResult longRange)
+    {
+        action.LongRangeEntryPrice = longRange.EntryPrice;
+        action.LongRangeEntryPriceSource = longRange.EntryPriceSource;
+        action.LongRangeAbsoluteLow24h = longRange.AbsoluteLow24h;
+        action.LongRangeAbsoluteHigh24h = longRange.AbsoluteHigh24h;
+        action.LongRangeRobustLow24h = longRange.RobustLow24h;
+        action.LongRangeRobustHigh24h = longRange.RobustHigh24h;
+        action.LongRange24hSource = longRange.Range24hSource;
+        action.LongRange24hSampleCount = longRange.Range24hSampleCount;
+        action.LongRange24hPositionRaw = longRange.Range24hPositionRaw;
+        action.LongRange24hPosition = longRange.Range24hPosition;
+        action.LongRangeMaxPositionForLong = longRange.Max24hRangePositionForLong;
+        action.LongRangeDistanceFrom24hLowPct = longRange.DistanceFrom24hLowPct;
+        action.LongRangeRisingSnapshotCount = longRange.RisingSnapshotCount;
+        action.EntryBlockedBy24hRange = longRange.Blocked;
+        action.LongRangeBlockReasonCode = longRange.BlockReasonCode;
     }
 
     private static void AttachExecutionDiagnostics(

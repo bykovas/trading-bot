@@ -284,6 +284,26 @@ public sealed class DryRunAction
     // qualify continuation and dip-bounce entries. Persisted so a losing entry's
     // momentum context is queryable after the fact.
     public decimal? EntryFreshnessRecentCandleMomentumPct { get; set; }
+
+    // LONG 24h-range guard diagnostics (FuturesLongRangeGuard). Null on SHORT rows and
+    // when the guard is disabled. entryPriceSource/range24hSource make the inputs
+    // auditable; entryBlockedBy24hRange + block reason code make the verdict queryable.
+    public decimal? LongRangeEntryPrice { get; set; }
+    public string? LongRangeEntryPriceSource { get; set; }
+    public decimal? LongRangeAbsoluteLow24h { get; set; }
+    public decimal? LongRangeAbsoluteHigh24h { get; set; }
+    public decimal? LongRangeRobustLow24h { get; set; }
+    public decimal? LongRangeRobustHigh24h { get; set; }
+    public string? LongRange24hSource { get; set; }
+    public int? LongRange24hSampleCount { get; set; }
+    public decimal? LongRange24hPositionRaw { get; set; }
+    public decimal? LongRange24hPosition { get; set; }
+    public decimal? LongRangeMaxPositionForLong { get; set; }
+    public decimal? LongRangeDistanceFrom24hLowPct { get; set; }
+    public int? LongRangeRisingSnapshotCount { get; set; }
+    public bool? EntryBlockedBy24hRange { get; set; }
+    public string? LongRangeBlockReasonCode { get; set; }
+
     public decimal? EntryDistanceFromLocalHighPct { get; set; }
     public string? LocalHighSource { get; set; }
     public decimal? BreakoutBufferPct { get; set; }

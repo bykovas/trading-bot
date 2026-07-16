@@ -98,6 +98,14 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_ENTRY_MAX_PRICE_DEVIATION_PERCENT", value => config.Entry.MaxEntryPriceDeviationPct = ParseDecimal(value, config.Entry.MaxEntryPriceDeviationPct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_FRESH_CONTINUATION_MIN_24H_RANGE_POSITION_PERCENT", value => config.Freshness.FreshContinuationMin24hRangePositionPct = ParseDecimal(value, config.Freshness.FreshContinuationMin24hRangePositionPct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_MAX_CONTINUATION_24H_RANGE_POSITION_PERCENT", value => config.Freshness.MaxContinuationRangePositionPct = ParseDecimal(value, config.Freshness.MaxContinuationRangePositionPct));
+        SetIfPresent("TRADINGBOT_FUTURES_LONG_RANGE_GUARD_ENABLED", value => config.Freshness.LongRangeGuardEnabled = ParseBool(value, config.Freshness.LongRangeGuardEnabled));
+        SetIfPresent("TRADINGBOT_FUTURES_LONG_MAX_24H_RANGE_POSITION_PERCENT", value => config.Freshness.Max24hRangePositionForLong = ParseDecimal(value, config.Freshness.Max24hRangePositionForLong));
+        SetIfPresent("TRADINGBOT_FUTURES_LONG_MIN_REBOUND_FROM_24H_LOW_PERCENT", value => config.Freshness.MinReboundFrom24hLowPct = ParseDecimal(value, config.Freshness.MinReboundFrom24hLowPct));
+        SetIfPresent("TRADINGBOT_FUTURES_LONG_REQUIRED_RISING_SNAPSHOT_COUNT", value => config.Freshness.RequiredRisingSnapshotCount = ParseInt(value, config.Freshness.RequiredRisingSnapshotCount));
+        SetIfPresent("TRADINGBOT_FUTURES_LONG_REQUIRE_POSITIVE_SHORT_SLOPE", value => config.Freshness.RequirePositiveShortSlope = ParseBool(value, config.Freshness.RequirePositiveShortSlope));
+        SetIfPresent("TRADINGBOT_FUTURES_LONG_REQUIRE_FRESH_TAPE_FOR_LOW_RANGE", value => config.Freshness.RequireFreshTapeForLowRangeLong = ParseBool(value, config.Freshness.RequireFreshTapeForLowRangeLong));
+        SetIfPresent("TRADINGBOT_FUTURES_LONG_ROBUST_RANGE_MIN_SAMPLE_COUNT", value => config.Freshness.RobustRangeMinSampleCount = ParseInt(value, config.Freshness.RobustRangeMinSampleCount));
+        SetIfPresent("TRADINGBOT_FUTURES_LONG_MIN_24H_RANGE_WIDTH_PERCENT", value => config.Freshness.Min24hRangeWidthPct = ParseDecimal(value, config.Freshness.Min24hRangeWidthPct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_NEAR_HIGH_MIN_24H_RANGE_POSITION_PERCENT", value => config.Freshness.NearHighMin24hRangePositionPct = ParseDecimal(value, config.Freshness.NearHighMin24hRangePositionPct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_NEAR_HIGH_MAX_DISTANCE_FROM_RECENT_HIGH_PERCENT", value => config.Freshness.NearHighMaxDistanceFromRecentHighPct = ParseDecimal(value, config.Freshness.NearHighMaxDistanceFromRecentHighPct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_RECENT_HIGH_LOOKBACK_CANDLES", value => config.Freshness.RecentHighLookbackCandles = ParseInt(value, config.Freshness.RecentHighLookbackCandles));
@@ -202,6 +210,17 @@ internal sealed class FuturesBotConfiguration
             : Math.Clamp(Entry.MaxEntryPriceDeviationPct, 0.05m, 2m);
         Freshness.FreshContinuationMin24hRangePositionPct = Math.Clamp(Freshness.FreshContinuationMin24hRangePositionPct < 0m ? 50m : Freshness.FreshContinuationMin24hRangePositionPct, 0m, 100m);
         Freshness.MaxContinuationRangePositionPct = Math.Clamp(Freshness.MaxContinuationRangePositionPct <= 0m ? 80m : Freshness.MaxContinuationRangePositionPct, 50m, 100m);
+        // LONG 24h-range gate validation. Invalid production values are reset to safe
+        // defaults (never silently left in a dangerous state).
+        if (Freshness.Max24hRangePositionForLong < 0m || Freshness.Max24hRangePositionForLong > 100m)
+        {
+            Console.WriteLine($"config-validation: Freshness.Max24hRangePositionForLong={Freshness.Max24hRangePositionForLong} is out of [0,100]; reset to 30.");
+            Freshness.Max24hRangePositionForLong = 30m;
+        }
+        Freshness.MinReboundFrom24hLowPct = Math.Max(0m, Freshness.MinReboundFrom24hLowPct);
+        Freshness.RequiredRisingSnapshotCount = Math.Max(1, Freshness.RequiredRisingSnapshotCount);
+        Freshness.RobustRangeMinSampleCount = Math.Clamp(Freshness.RobustRangeMinSampleCount <= 0 ? 20 : Freshness.RobustRangeMinSampleCount, 2, 96);
+        Freshness.Min24hRangeWidthPct = Math.Max(0m, Freshness.Min24hRangeWidthPct);
         Freshness.NearHighMin24hRangePositionPct = Math.Clamp(Freshness.NearHighMin24hRangePositionPct <= 0m ? 88m : Freshness.NearHighMin24hRangePositionPct, 50m, 100m);
         Freshness.NearHighMaxDistanceFromRecentHighPct = Math.Clamp(Freshness.NearHighMaxDistanceFromRecentHighPct <= 0m ? 0.5m : Freshness.NearHighMaxDistanceFromRecentHighPct, 0m, 10m);
         Freshness.RecentHighLookbackCandles = Math.Clamp(Freshness.RecentHighLookbackCandles <= 0 ? 12 : Freshness.RecentHighLookbackCandles, 2, 96);
@@ -434,6 +453,39 @@ internal sealed class FuturesFreshnessOptions
     public decimal MaxEntryDistanceFromLocalHighPct { get; set; } = 0.12m;
     public int BreakoutHoldSnapshotCount { get; set; } = 2;
     public decimal MaxEntryDriftFromSignalPct { get; set; } = 0.10m;
+
+    // Authoritative LONG 24h-range gate (FuturesLongRangeGuard). A LONG is admitted
+    // only in the lower band of a robust 24h range AND with a confirmed upward
+    // reversal. Percent fields follow the project convention (0.20 == 0.20%); range
+    // positions are 0..100 like every other *RangePositionPct field.
+    public bool LongRangeGuardEnabled { get; set; } = true;
+
+    // Maximum allowed position of the executable entry inside the robust 24h range,
+    // as a 0..100 percent (30 == lower 30% of the range). Above this a LONG is
+    // rejected regardless of fresh tape or breakout.
+    public decimal Max24hRangePositionForLong { get; set; } = 30m;
+
+    // Minimum confirmed rebound of the executable entry above the absolute 24h low,
+    // in percent, so the bot does not buy while the low is still being made.
+    public decimal MinReboundFrom24hLowPct { get; set; } = 0.20m;
+
+    // Minimum consecutive rising snapshot steps required to confirm the reversal.
+    public int RequiredRisingSnapshotCount { get; set; } = 2;
+
+    // Whether the short-term snapshot slope must be strictly positive.
+    public bool RequirePositiveShortSlope { get; set; } = true;
+
+    // Whether a fresh upward tape (rising snapshots + non-negative candle momentum) is
+    // mandatory for a lower-range LONG — an old candle-based signal alone is not enough.
+    public bool RequireFreshTapeForLowRangeLong { get; set; } = true;
+
+    // Minimum closed-candle sample before the robust percentile 24h range is used;
+    // below it the guard falls back to the absolute 24h range and tags the source.
+    public int RobustRangeMinSampleCount { get; set; } = 20;
+
+    // Minimum 24h range width (percent of the range low). A narrower range makes the
+    // position meaningless, so a LONG is rejected as LONG_24H_RANGE_TOO_NARROW.
+    public decimal Min24hRangeWidthPct { get; set; } = 0.50m;
 }
 
 internal sealed class FuturesDipBounceOptions

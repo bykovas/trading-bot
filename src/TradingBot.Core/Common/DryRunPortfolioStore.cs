@@ -528,7 +528,24 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 -- Momentum context and the relaxed dip threshold, so a losing entry's
                 -- admission conditions are fully reconstructable per channel.
                 (decision -> 'dryRunAction' ->> 'entryFreshnessRecentCandleMomentumPct')::numeric as entry_freshness_recent_candle_momentum_pct,
-                (decision -> 'dryRunAction' ->> 'dipBounceMinScoreApplied')::numeric as dip_bounce_min_score_applied
+                (decision -> 'dryRunAction' ->> 'dipBounceMinScoreApplied')::numeric as dip_bounce_min_score_applied,
+                -- 24h-range LONG guard diagnostics (FuturesLongRangeGuard). Appended last
+                -- per CREATE OR REPLACE VIEW rules.
+                (decision -> 'dryRunAction' ->> 'longRangeEntryPrice')::numeric as long_range_entry_price,
+                decision -> 'dryRunAction' ->> 'longRangeEntryPriceSource' as long_range_entry_price_source,
+                (decision -> 'dryRunAction' ->> 'longRangeAbsoluteLow24h')::numeric as long_range_absolute_low_24h,
+                (decision -> 'dryRunAction' ->> 'longRangeAbsoluteHigh24h')::numeric as long_range_absolute_high_24h,
+                (decision -> 'dryRunAction' ->> 'longRangeRobustLow24h')::numeric as long_range_robust_low_24h,
+                (decision -> 'dryRunAction' ->> 'longRangeRobustHigh24h')::numeric as long_range_robust_high_24h,
+                decision -> 'dryRunAction' ->> 'longRange24hSource' as long_range_24h_source,
+                (decision -> 'dryRunAction' ->> 'longRange24hSampleCount')::int as long_range_24h_sample_count,
+                (decision -> 'dryRunAction' ->> 'longRange24hPositionRaw')::numeric as long_range_24h_position_raw,
+                (decision -> 'dryRunAction' ->> 'longRange24hPosition')::numeric as long_range_24h_position,
+                (decision -> 'dryRunAction' ->> 'longRangeMaxPositionForLong')::numeric as long_range_max_position_for_long,
+                (decision -> 'dryRunAction' ->> 'longRangeDistanceFrom24hLowPct')::numeric as long_range_distance_from_24h_low_pct,
+                (decision -> 'dryRunAction' ->> 'longRangeRisingSnapshotCount')::int as long_range_rising_snapshot_count,
+                (decision -> 'dryRunAction' ->> 'entryBlockedBy24hRange')::boolean as entry_blocked_by_24h_range,
+                decision -> 'dryRunAction' ->> 'longRangeBlockReasonCode' as long_range_block_reason_code
             from dry_run_cycles cycle
             cross join lateral jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision;
 
