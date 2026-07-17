@@ -346,3 +346,12 @@ for WORKER_CONTAINER in trading-bot-spot-worker-live trading-bot-spot-worker-vir
   fi
   echo "Health check passed for ${WORKER_CONTAINER} container."
 done
+
+echo "Docker disk usage before image cleanup:"
+docker system df
+
+echo "Removing unused Docker images from previous deploys."
+docker image prune -a -f
+
+echo "Docker disk usage after image cleanup:"
+docker system df
