@@ -214,6 +214,34 @@ public sealed class FuturesVirtualPortfolioTests
     }
 
     [Fact]
+    public void Futures_close_action_carries_frozen_tpsl_distances_and_actual_exit_percent()
+    {
+        var (portfolio, state) = Setup();
+        portfolio.Apply(state, "XBT/EUR", FuturesDesiredExposure.Long, 100m, 20m, 2m);
+
+        var close = portfolio.Apply(
+            state,
+            "XBT/EUR",
+            FuturesDesiredExposure.Flat,
+            98m,
+            0m,
+            2m,
+            reduceOnly: true,
+            reason: "STOP_LOSS fast trigger at 98",
+            exitTriggerSource: "bid");
+
+        Assert.True(close.PositionClosed);
+        Assert.Equal(2m, close.Action.StopDistancePct);
+        Assert.Equal(3m, close.Action.TakeProfitDistancePct);
+        Assert.Equal(0.4m, close.Action.OpenRiskEur);
+        Assert.Equal("bid", close.Action.ExitTriggerSource);
+        Assert.Contains("entry 100", close.Action.Reason);
+        Assert.Contains("fill 98", close.Action.Reason);
+        Assert.Contains("(-2", close.Action.Reason);
+        Assert.Contains("working SL 2%", close.Action.Reason);
+    }
+
+    [Fact]
     public void Liquidation_estimates_sit_on_the_correct_side()
     {
         var longLiquidation = FuturesMath.EstimateLiquidationPrice("LONG", 100m, 2m, 0.5m);

@@ -1,3 +1,8 @@
+## 2026-07-17-futures-tpsl-close-explainability
+
+- Futures close actions now carry the frozen TP/SL distances, estimated open risk, and exact entry/fill realized percent from the closed position. Stop-loss/take-profit journal rows can show the actual working level that fired instead of losing that context on close.
+- Futures stop-loss close text now includes entry price, fill price, realized percent, and the frozen working SL/TP level. This is an observability-only change; TP/SL trigger mechanics, live order execution, and sizing are unchanged.
+
 ## 2026-07-17-futures-external-trailing-profit-protection
 
 - Futures live reconciliation can now manage KRAKEN_SYNC / external positions only after they already have both matching reduce-only Kraken TP and SL orders. When the closeable live price reaches `TpSl.ExternalTrailingActivationProgressPercent` (default 80%) of the way from entry to the existing Kraken TP, the worker cancels those TP/SL orders and places a reduce-only Kraken trailing stop using `TpSl.TrailingStopPercent` (default 2%).

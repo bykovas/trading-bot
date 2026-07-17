@@ -248,8 +248,19 @@ internal sealed class FuturesVirtualPortfolio(
         state.Positions.Remove(position);
         StampCloseHistory(state, position.Pair, _clock.UtcNow, reason.Contains("STOP_LOSS", StringComparison.OrdinalIgnoreCase));
 
+        var realizedPct = position.EntryPrice <= 0m
+            ? 0m
+            : decimal.Round((position.Side == "SHORT"
+                ? (position.EntryPrice - fillPrice) / position.EntryPrice
+                : (fillPrice - position.EntryPrice) / position.EntryPrice) * 100m, 4);
+        var levelText = reason.Contains("STOP_LOSS", StringComparison.OrdinalIgnoreCase) && position.StopDistancePct is > 0m
+            ? $", working SL {position.StopDistancePct:0.####}% @ {position.StopLossPrice:0.########}"
+            : reason.Contains("TAKE_PROFIT", StringComparison.OrdinalIgnoreCase) && position.TakeProfitDistancePct is > 0m
+                ? $", working TP {position.TakeProfitDistancePct:0.####}% @ {position.TakeProfitPrice:0.########}"
+                : string.Empty;
+
         var action = BaseAction(position.Pair, "WOULD_CLOSE",
-            $"{reason}: close virtual {position.Side.ToLowerInvariant()}, fill {fillPrice:0.####}, realized PnL EUR {pnl:0.####}, fee EUR {fee:0.####}");
+            $"{reason}: close virtual {position.Side.ToLowerInvariant()}, entry {position.EntryPrice:0.########}, fill {fillPrice:0.########}, realized PnL EUR {pnl:0.####} ({realizedPct:0.####}%){levelText}, fee EUR {fee:0.####}");
         action.Side = position.Side;
         action.ReduceOnly = true;
         action.Leverage = position.Leverage;
@@ -261,6 +272,13 @@ internal sealed class FuturesVirtualPortfolio(
         action.GrossNotionalEur = grossExit;
         action.NetNotionalEur = pnl;
         action.ExitTriggerSource = exitTriggerSource ?? config.TpSl.TriggerSource;
+        action.StopDistancePct = position.StopDistancePct;
+        action.TakeProfitDistancePct = position.TakeProfitDistancePct;
+        action.RoundTripCostEstimatePct = position.RoundTripCostEstimatePct;
+        action.AtrPct = position.AtrPct;
+        action.OpenRiskEur = position.EntryNotionalEur > 0m && position.StopDistancePct is > 0m
+            ? decimal.Round(position.EntryNotionalEur * position.StopDistancePct.Value / 100m, 4)
+            : null;
         // Carry the opening channel onto the close so realized PnL is attributable
         // to Continuation / Breakout / DipBounce without a separate open-close join.
         action.EntryChannel = position.EntryChannel;
