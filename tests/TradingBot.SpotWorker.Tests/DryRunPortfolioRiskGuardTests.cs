@@ -5,6 +5,9 @@ namespace TradingBot.SpotWorker.Tests;
 
 public class DryRunPortfolioRiskGuardTests
 {
+    private static readonly DateTimeOffset TestNow = DateTimeOffset.Parse("2026-07-17T12:00:00Z");
+    private static readonly FixedClock Clock = new(TestNow);
+
     private static DryRunPortfolio Portfolio(ExecutionPolicyOptions? executionPolicy = null) => new(
         new DryRunOptions
         {
@@ -14,11 +17,12 @@ public class DryRunPortfolioRiskGuardTests
         new PortfolioOptions { StartingCashEur = 75m },
         executionPolicy ?? new ExecutionPolicyOptions(),
         new PositionExitOptions(),
-        new PositionSizingOptions { Enabled = true, CashReserveEur = 15m });
+        new PositionSizingOptions { Enabled = true, CashReserveEur = 15m },
+        clock: Clock);
 
     private static PortfolioState State(decimal cashEur = 75m, params decimal[] entries) => new()
     {
-        UpdatedAt = DateTimeOffset.UtcNow,
+        UpdatedAt = TestNow,
         CashEur = cashEur,
         Positions = entries
             .Select((entry, index) => new PortfolioPosition
@@ -39,7 +43,7 @@ public class DryRunPortfolioRiskGuardTests
         Instrument = new InstrumentOptions { Pair = pair, KrakenPair = pair.Replace("/", string.Empty, StringComparison.Ordinal), Venue = "Kraken", Enabled = true },
         Candles = Enumerable.Range(0, 30)
             .Select(index => new Candle(
-                DateTimeOffset.UtcNow.AddMinutes(-index),
+                TestNow.AddMinutes(-index),
                 Open: 1m,
                 High: 1m,
                 Low: 1m,
@@ -83,6 +87,7 @@ public class DryRunPortfolioRiskGuardTests
         new ExecutionPolicyOptions(),
         config.PositionExit,
         new PositionSizingOptions { Enabled = false },
+        clock: Clock,
         strategy: config.Strategy,
         fullConfig: config);
     }
@@ -96,7 +101,7 @@ public class DryRunPortfolioRiskGuardTests
             [new OrderBookLevel(100.05m, 100m)]),
         Candles = Enumerable.Range(0, 30)
             .Select(index => new Candle(
-                DateTimeOffset.UtcNow.AddMinutes(-(30 - index)),
+                TestNow.AddMinutes(-(30 - index)),
                 Open: 100m,
                 High: 100m + range / 2m,
                 Low: 100m - range / 2m,
@@ -219,11 +224,12 @@ public class DryRunPortfolioRiskGuardTests
             new PortfolioOptions { StartingCashEur = 75m },
             new ExecutionPolicyOptions { MaxNewPositionsPerCycle = 1, AllowImmediateExitOnSignalFlip = true },
             new PositionExitOptions { MinProfitToExitOnSignalFlipPercent = 0m, TakeProfitPercent = 0m, MaxHoldMinutes = 0 },
-            new PositionSizingOptions());
+            new PositionSizingOptions(),
+            clock: Clock);
 
         var state = new PortfolioState
         {
-            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = TestNow,
             CashEur = 10m,
             Positions = new List<PortfolioPosition>
             {
@@ -238,7 +244,7 @@ public class DryRunPortfolioRiskGuardTests
                     EntryNotionalEur = 4.5m,
                     LastPrice = 1m,
                     MarketValueEur = 5m,
-                    OpenedAtUtc = DateTimeOffset.UtcNow.AddHours(-1)
+                    OpenedAtUtc = TestNow.AddHours(-1)
                 }
             }
         };
@@ -264,7 +270,7 @@ public class DryRunPortfolioRiskGuardTests
         var state = State();
         state.DailyRisk = new DailyRiskState
         {
-            DateUtc = DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd"),
+            DateUtc = TestNow.UtcDateTime.ToString("yyyy-MM-dd"),
             RealizedPnlEur = -5.10m
         };
 
@@ -289,7 +295,7 @@ public class DryRunPortfolioRiskGuardTests
         var state = State();
         state.DailyRisk = new DailyRiskState
         {
-            DateUtc = DateTimeOffset.UtcNow.UtcDateTime.AddDays(-1).ToString("yyyy-MM-dd"),
+            DateUtc = TestNow.UtcDateTime.AddDays(-1).ToString("yyyy-MM-dd"),
             RealizedPnlEur = -20m
         };
 
@@ -303,5 +309,10 @@ public class DryRunPortfolioRiskGuardTests
 
         Assert.Equal("WOULD_BUY", action.Action);
         Assert.Single(state.Positions);
+    }
+
+    private sealed class FixedClock(DateTimeOffset utcNow) : IClock
+    {
+        public DateTimeOffset UtcNow { get; } = utcNow;
     }
 }
