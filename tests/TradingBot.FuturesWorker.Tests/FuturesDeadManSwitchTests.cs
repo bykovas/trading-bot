@@ -224,6 +224,94 @@ public sealed class FuturesDeadManSwitchTests
     }
 
     [Fact]
+    public async Task Live_reconciliation_preserves_frozen_working_tpsl_distances_for_existing_position()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
+        var config = new FuturesBotConfiguration
+        {
+            BotInstance = new BotInstanceOptions { Id = "futures-live", Name = "test" },
+            Futures = new FuturesOptions
+            {
+                LiveTradingEnabled = true,
+                DefaultLeverage = 10m,
+                MaxLeverage = 10m,
+                DeadManSwitchSeconds = 240
+            },
+            TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 4m, StopLossPercent = 2m },
+            Worker = new WorkerOptions { RunOnce = true, LoopIntervalSeconds = 120 },
+            Kraken = new KrakenOptions { MarketDataMode = "sample" },
+            Trading = new TradingOptions { MaxActiveInstruments = 3, TimeframeMinutes = 5 },
+            DryRun = new DryRunOptions { OutputDirectory = outputDirectory },
+            CandidateUniverse =
+            [
+                new InstrumentOptions
+                {
+                    Pair = "HYPE/USD",
+                    KrakenPair = "PF_HYPEUSD",
+                    PriceDecimals = 4,
+                    Enabled = true
+                }
+            ]
+        };
+        InvokeNormalize(config);
+
+        var broker = new RecordingFuturesBroker(
+        [
+            new FuturesOpenPosition("PF_HYPEUSD", "LONG", 5.3m, 60.531m, 60.20m, 10m)
+        ])
+        {
+            OpenOrders =
+            [
+                new FuturesOpenOrder("sl-1", "PF_HYPEUSD", "sell", "stop_loss", 5.3m, 58.109m, true),
+                new FuturesOpenOrder("tp-1", "PF_HYPEUSD", "sell", "take_profit", 5.3m, 65.373m, true)
+            ]
+        };
+        var worker = new FuturesDecisionWorker(
+            config,
+            new SampleMarketDataSource(),
+            new IndicatorEngine(),
+            new LongShortStrategy(config),
+            new MarginRiskManager(config),
+            new FuturesVirtualPortfolio(config, new FileDryRunPortfolioStore(config.DryRun)),
+            new TpSlOrchestrator(config),
+            broker);
+
+        var state = new PortfolioState { CashEur = 100m };
+        state.Positions.Add(new PortfolioPosition
+        {
+            Pair = "HYPE/USD",
+            Side = "LONG",
+            Origin = PositionOrigins.Bot,
+            StopLossPrice = 59.92569m,
+            TakeProfitPrice = 62.34693m,
+            StopDistancePct = 1m,
+            TakeProfitDistancePct = 3m,
+            ExchangeStopLossPrice = 58.109m,
+            ExchangeTakeProfitPrice = 65.373m
+        });
+        var method = typeof(FuturesDecisionWorker).GetMethod("ReconcileWithKrakenAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = (Task)method.Invoke(worker, new object?[]
+        {
+            state,
+            config.CandidateUniverse,
+            Array.Empty<InstrumentMarketState>(),
+            DateTimeOffset.UtcNow,
+            CancellationToken.None
+        })!;
+        await task;
+
+        var position = Assert.Single(state.Positions);
+        Assert.Equal(59.92569m, position.StopLossPrice);
+        Assert.Equal(62.34693m, position.TakeProfitPrice);
+        Assert.Equal(1m, position.StopDistancePct);
+        Assert.Equal(3m, position.TakeProfitDistancePct);
+        Assert.Equal(58.109m, position.ExchangeStopLossPrice);
+        Assert.Equal(65.373m, position.ExchangeTakeProfitPrice);
+        Assert.Equal(0, broker.TriggerOrderCallCount);
+    }
+
+    [Fact]
     public async Task Live_reconciliation_rounds_exchange_tpsl_to_price_precision()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));

@@ -1,3 +1,8 @@
+## 2026-07-17-futures-preserve-frozen-tpsl-distances
+
+- Futures live reconciliation now keeps frozen working TP/SL distances together with frozen working TP/SL prices for already-open bot-owned positions. Existing positions opened before a TP/SL config change no longer show the new percent while still closing on the old frozen price.
+- Added regression coverage for the HYPE/USD case: a position opened with old 1%/3% working levels remains internally consistent after the default config is changed to 2%/4%; new positions still use the current config.
+
 ## 2026-07-17-decisions-explainability-refactor
 
 - Futures decision records now persist the actual SHORT-side diagnostics (`ShortScore`, bearish EMA gap/structure, allow verdict, configured score/EMA thresholds) instead of forcing the Decisions UI to mislabel the LONG score as the reason a SHORT was rejected.

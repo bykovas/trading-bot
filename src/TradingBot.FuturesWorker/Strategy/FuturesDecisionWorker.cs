@@ -1328,16 +1328,28 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var isShort = side.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
-        var stopLossPrice = existing?.StopLossPrice is > 0m
-            ? existing.StopLossPrice
+        var hasExistingStopLossPrice = existing?.StopLossPrice is > 0m;
+        var hasExistingTakeProfitPrice = existing?.TakeProfitPrice is > 0m;
+        var stopLossPrice = hasExistingStopLossPrice
+            ? existing!.StopLossPrice!.Value
             : isShort
                 ? entryPrice * (1m + stopDistancePct / 100m)
                 : entryPrice * (1m - stopDistancePct / 100m);
-        var takeProfitPrice = existing?.TakeProfitPrice is > 0m
-            ? existing.TakeProfitPrice
+        var takeProfitPrice = hasExistingTakeProfitPrice
+            ? existing!.TakeProfitPrice!.Value
             : isShort
                 ? entryPrice * (1m - takeProfitDistancePct / 100m)
                 : entryPrice * (1m + takeProfitDistancePct / 100m);
+        var effectiveStopDistancePct = hasExistingStopLossPrice
+            ? existing?.StopDistancePct is > 0m
+                ? existing.StopDistancePct.Value
+                : DistancePct(entryPrice, stopLossPrice)
+            : stopDistancePct;
+        var effectiveTakeProfitDistancePct = hasExistingTakeProfitPrice
+            ? existing?.TakeProfitDistancePct is > 0m
+                ? existing.TakeProfitDistancePct.Value
+                : DistancePct(entryPrice, takeProfitPrice)
+            : takeProfitDistancePct;
         var exchangeStopLossPrice = existingStopLoss?.StopPrice is > 0m
             ? existingStopLoss.StopPrice.Value
             : existing?.ExchangeStopLossPrice is > 0m
@@ -1352,10 +1364,10 @@ internal sealed class FuturesDecisionWorker(
         return new ImportedTpSlState(
             existingTakeProfit is not null ? "EXCHANGE_OPEN" : existing?.TpOrderState ?? "SIMULATED_OPEN",
             existingStopLoss is not null ? "EXCHANGE_OPEN" : existing?.SlOrderState ?? "SIMULATED_OPEN",
-            decimal.Round(stopLossPrice.Value, 8),
-            decimal.Round(takeProfitPrice.Value, 8),
-            stopDistancePct,
-            takeProfitDistancePct,
+            decimal.Round(stopLossPrice, 8),
+            decimal.Round(takeProfitPrice, 8),
+            effectiveStopDistancePct,
+            effectiveTakeProfitDistancePct,
             decimal.Round(exchangeStopLossPrice, 8),
             decimal.Round(exchangeTakeProfitPrice, 8),
             config.TpSl.ExchangeProtectionMultiplierPercent,
@@ -1364,6 +1376,11 @@ internal sealed class FuturesDecisionWorker(
             existing?.TrailingStopOrderId,
             existing?.TrailingActivatedAtUtc);
     }
+
+    private static decimal DistancePct(decimal entryPrice, decimal price) =>
+        entryPrice <= 0m || price <= 0m
+            ? 0m
+            : decimal.Round(Math.Abs(price - entryPrice) / entryPrice * 100m, 6);
 
     private static (FuturesOpenOrder? StopLossOrder, FuturesOpenOrder? TakeProfitOrder) FindProtectionOrders(
         IReadOnlyList<FuturesOpenOrder> openOrders,
