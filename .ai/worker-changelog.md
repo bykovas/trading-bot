@@ -4,6 +4,11 @@
 - Base SHORT rejection now has an explicit machine-readable code and exact explanation: bearish EMA not confirmed, SHORT score below the signal threshold, or missing downside momentum/volume/trend confirmation. Trading decisions, thresholds, sizing, and execution behavior are unchanged.
 - The Decisions page now resolves explicit gate codes before prose fallbacks and presents side-aware, human-readable verdicts while retaining raw technical evidence for audit.
 
+## 2026-07-17-futures-working-tpsl-4-2
+
+- Futures fixed working exit defaults changed from TP 3% / SL 1% to TP 4% / SL 2% in `TpSl`; with the existing `ExchangeProtectionMultiplierPercent` 200, live Kraken protective orders are placed at TP +8% and SL -4%.
+- Trailing stop behavior is unchanged: once the worker-owned position reaches the working TP, protective orders are replaced by the configured 2% reduce-only trailing stop.
+
 ## 2026-07-17-futures-fixed-working-exits-trailing-protection
 
 - Bot-owned futures positions now use fixed working exit policy from `TpSl`: working TP `TakeProfitPercent` and working SL `StopLossPercent` are frozen from entry and no longer silently inherit ATR-derived `entryPlan` distances.
