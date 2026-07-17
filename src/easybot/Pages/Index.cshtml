@@ -1,0 +1,87 @@
+@page
+@model EasyBot.Pages.IndexModel
+
+<h1>easybot &mdash; @Model.Pair</h1>
+
+<div class="grid">
+    <div class="card">
+        <div class="stat-label">Bot status</div>
+        <div class="stat-value @(Model.Status == "running" ? "status-ok" : "status-error")">@Model.Status</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Equity</div>
+        <div class="stat-value">@Model.Equity.ToString("N2")</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Position</div>
+        @if (Model.Position is { } p)
+        {
+            <div class="stat-value @(p.Side == EasyBot.Trading.PositionSide.Long ? "side-long" : "side-short")">@p.Side @p.Quantity.ToString("N4")</div>
+        }
+        else
+        {
+            <div class="stat-value">flat</div>
+        }
+    </div>
+    <div class="card">
+        <form method="post" asp-page-handler="TogglePause">
+            <button type="submit" class="pause-button @(Model.Paused ? "paused" : "")">
+                @(Model.Paused ? "RESUME TRADING" : "PAUSE TRADING")
+            </button>
+        </form>
+    </div>
+</div>
+
+@if (Model.Position is { } pos)
+{
+    <div class="card">
+        <h2>Current position</h2>
+        <table>
+            <tr><th>Side</th><th>Size</th><th>Entry</th><th>Stop</th><th>Unrealized PnL</th><th>Opened</th></tr>
+            <tr>
+                <td class="@(pos.Side == EasyBot.Trading.PositionSide.Long ? "side-long" : "side-short")">@pos.Side</td>
+                <td>@pos.Quantity.ToString("N4")</td>
+                <td>@pos.EntryPrice.ToString("N2")</td>
+                <td>@(Model.StopOrder?.StopPrice?.ToString("N2") ?? "-")</td>
+                <td>@(pos.UnrealizedPnl?.ToString("N2") ?? "-")</td>
+                <td>@pos.FillTime.ToString("u")</td>
+            </tr>
+        </table>
+    </div>
+}
+
+<div class="card">
+    <h2>Last 20 trades</h2>
+    <table>
+        <tr><th>Opened</th><th>Closed</th><th>Side</th><th>Size</th><th>Entry</th><th>Exit</th><th>Stop</th><th>PnL</th><th>Reason</th></tr>
+        @foreach (var t in Model.RecentTrades)
+        {
+            <tr>
+                <td>@t.OpenedAt.ToString("u")</td>
+                <td>@(t.ClosedAt?.ToString("u") ?? "-")</td>
+                <td class="@(t.Side == "Long" ? "side-long" : "side-short")">@t.Side</td>
+                <td>@t.Size.ToString("N4")</td>
+                <td>@t.EntryPrice.ToString("N2")</td>
+                <td>@(t.ExitPrice?.ToString("N2") ?? "-")</td>
+                <td>@t.StopPrice.ToString("N2")</td>
+                <td>@(t.Pnl?.ToString("N2") ?? "-")</td>
+                <td>@(t.CloseReason ?? "-")</td>
+            </tr>
+        }
+    </table>
+</div>
+
+<div class="card">
+    <h2>Last 50 log events</h2>
+    <table>
+        <tr><th>Time</th><th>Level</th><th>Message</th></tr>
+        @foreach (var e in Model.RecentEvents)
+        {
+            <tr>
+                <td>@e.Ts.ToString("u")</td>
+                <td>@e.Level</td>
+                <td>@e.Message</td>
+            </tr>
+        }
+    </table>
+</div>
