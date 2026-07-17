@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>easybot</title>
+    <style>
+        body { font-family: -apple-system, Segoe UI, sans-serif; background: #0b0e14; color: #e6e6e6; margin: 0; padding: 24px; }
+        h1, h2 { font-weight: 600; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 24px; }
+        th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #262b36; font-size: 14px; }
+        th { color: #9aa4b2; text-transform: uppercase; font-size: 12px; }
+        .card { background: #131722; border: 1px solid #262b36; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-label { color: #9aa4b2; font-size: 12px; text-transform: uppercase; }
+        .stat-value { font-size: 24px; font-weight: 600; }
+        .pause-button { background: #d1373f; color: white; border: none; border-radius: 6px; padding: 14px 28px; font-size: 16px; font-weight: 700; cursor: pointer; }
+        .pause-button.paused { background: #2f9e44; }
+        .status-ok { color: #2f9e44; }
+        .status-error { color: #d1373f; }
+        .side-long { color: #2f9e44; }
+        .side-short { color: #d1373f; }
+    </style>
+</head>
+<body>
+    @RenderBody()
+</body>
+</html>
