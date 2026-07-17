@@ -312,6 +312,174 @@ public sealed class FuturesDeadManSwitchTests
     }
 
     [Fact]
+    public async Task Live_reconciliation_replaces_external_tpsl_with_trailing_when_position_reaches_activation_progress()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
+        var config = new FuturesBotConfiguration
+        {
+            BotInstance = new BotInstanceOptions { Id = "futures-live", Name = "test" },
+            Futures = new FuturesOptions
+            {
+                LiveTradingEnabled = true,
+                DefaultLeverage = 10m,
+                MaxLeverage = 10m,
+                DeadManSwitchSeconds = 240
+            },
+            TpSl = new TpSlOptions
+            {
+                Enabled = true,
+                TakeProfitPercent = 4m,
+                StopLossPercent = 2m,
+                TrailingStopPercent = 2m,
+                ExternalTrailingActivationProgressPercent = 80m
+            },
+            Worker = new WorkerOptions { RunOnce = true, LoopIntervalSeconds = 120 },
+            Kraken = new KrakenOptions { MarketDataMode = "sample" },
+            Trading = new TradingOptions { MaxActiveInstruments = 3, TimeframeMinutes = 5 },
+            DryRun = new DryRunOptions { OutputDirectory = outputDirectory },
+            CandidateUniverse =
+            [
+                new InstrumentOptions
+                {
+                    Pair = "HYPE/USD",
+                    KrakenPair = "PF_HYPEUSD",
+                    PriceDecimals = 4,
+                    Enabled = true
+                }
+            ]
+        };
+        InvokeNormalize(config);
+
+        var broker = new RecordingFuturesBroker(
+        [
+            new FuturesOpenPosition("PF_HYPEUSD", "LONG", 5.3m, 60m, 68m, 10m)
+        ])
+        {
+            OpenOrders =
+            [
+                new FuturesOpenOrder("sl-1", "PF_HYPEUSD", "sell", "stop_loss", 5.3m, 55m, true),
+                new FuturesOpenOrder("tp-1", "PF_HYPEUSD", "sell", "take_profit", 5.3m, 70m, true)
+            ],
+            TickerQuote = new FuturesTickerQuote("PF_HYPEUSD", 68m, 68.1m, 68m, 68m, DateTimeOffset.UtcNow)
+        };
+        var worker = new FuturesDecisionWorker(
+            config,
+            new SampleMarketDataSource(),
+            new IndicatorEngine(),
+            new LongShortStrategy(config),
+            new MarginRiskManager(config),
+            new FuturesVirtualPortfolio(config, new FileDryRunPortfolioStore(config.DryRun)),
+            new TpSlOrchestrator(config),
+            broker);
+
+        var state = new PortfolioState { CashEur = 100m };
+        var method = typeof(FuturesDecisionWorker).GetMethod("ReconcileWithKrakenAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = (Task)method.Invoke(worker, new object?[]
+        {
+            state,
+            config.CandidateUniverse,
+            Array.Empty<InstrumentMarketState>(),
+            DateTimeOffset.UtcNow,
+            CancellationToken.None
+        })!;
+        await task;
+
+        Assert.Contains("sl-1", broker.CancelledOrders);
+        Assert.Contains("tp-1", broker.CancelledOrders);
+        var trailing = Assert.Single(broker.TrailingOrders);
+        Assert.Equal("PF_HYPEUSD", trailing.Symbol);
+        Assert.Equal("sell", trailing.Side);
+        Assert.Equal(5.3m, trailing.Size);
+        Assert.Equal(2m, trailing.TrailingStopPercent);
+        Assert.True(trailing.ReduceOnly);
+        var position = Assert.Single(state.Positions);
+        Assert.Equal(PositionOrigins.KrakenSync, position.Origin);
+        Assert.Equal("CANCELLED", position.TpOrderState);
+        Assert.Equal("CANCELLED", position.SlOrderState);
+        Assert.Equal("EXCHANGE_OPEN", position.TrailingStopState);
+        Assert.Equal(2m, position.TrailingStopPercent);
+    }
+
+    [Fact]
+    public async Task Live_reconciliation_does_not_trail_external_position_without_both_tpsl_orders()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
+        var config = new FuturesBotConfiguration
+        {
+            BotInstance = new BotInstanceOptions { Id = "futures-live", Name = "test" },
+            Futures = new FuturesOptions
+            {
+                LiveTradingEnabled = true,
+                DefaultLeverage = 10m,
+                MaxLeverage = 10m,
+                DeadManSwitchSeconds = 240
+            },
+            TpSl = new TpSlOptions
+            {
+                Enabled = true,
+                TrailingStopPercent = 2m,
+                ExternalTrailingActivationProgressPercent = 80m
+            },
+            Worker = new WorkerOptions { RunOnce = true, LoopIntervalSeconds = 120 },
+            Kraken = new KrakenOptions { MarketDataMode = "sample" },
+            Trading = new TradingOptions { MaxActiveInstruments = 3, TimeframeMinutes = 5 },
+            DryRun = new DryRunOptions { OutputDirectory = outputDirectory },
+            CandidateUniverse =
+            [
+                new InstrumentOptions
+                {
+                    Pair = "HYPE/USD",
+                    KrakenPair = "PF_HYPEUSD",
+                    PriceDecimals = 4,
+                    Enabled = true
+                }
+            ]
+        };
+        InvokeNormalize(config);
+
+        var broker = new RecordingFuturesBroker(
+        [
+            new FuturesOpenPosition("PF_HYPEUSD", "LONG", 5.3m, 60m, 68m, 10m)
+        ])
+        {
+            OpenOrders =
+            [
+                new FuturesOpenOrder("tp-1", "PF_HYPEUSD", "sell", "take_profit", 5.3m, 70m, true)
+            ],
+            TickerQuote = new FuturesTickerQuote("PF_HYPEUSD", 68m, 68.1m, 68m, 68m, DateTimeOffset.UtcNow)
+        };
+        var worker = new FuturesDecisionWorker(
+            config,
+            new SampleMarketDataSource(),
+            new IndicatorEngine(),
+            new LongShortStrategy(config),
+            new MarginRiskManager(config),
+            new FuturesVirtualPortfolio(config, new FileDryRunPortfolioStore(config.DryRun)),
+            new TpSlOrchestrator(config),
+            broker);
+
+        var state = new PortfolioState { CashEur = 100m };
+        var method = typeof(FuturesDecisionWorker).GetMethod("ReconcileWithKrakenAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = (Task)method.Invoke(worker, new object?[]
+        {
+            state,
+            config.CandidateUniverse,
+            Array.Empty<InstrumentMarketState>(),
+            DateTimeOffset.UtcNow,
+            CancellationToken.None
+        })!;
+        await task;
+
+        Assert.Empty(broker.CancelledOrders);
+        Assert.Empty(broker.TrailingOrders);
+        var position = Assert.Single(state.Positions);
+        Assert.Null(position.TrailingStopState);
+        Assert.Equal("EXCHANGE_OPEN", position.TpOrderState);
+    }
+
+    [Fact]
     public async Task Live_reconciliation_rounds_exchange_tpsl_to_price_precision()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
@@ -506,6 +674,7 @@ public sealed class FuturesDeadManSwitchTests
         public decimal? LastLeverageSet { get; private set; }
         public string? LastLeverageSymbol { get; private set; }
         public IReadOnlyList<FuturesOpenOrder> OpenOrders { get; init; } = Array.Empty<FuturesOpenOrder>();
+        public FuturesTickerQuote? TickerQuote { get; init; }
         public List<(string Symbol, string Side, string OrderType, decimal Size, decimal StopPrice, string TriggerSignal, bool ReduceOnly)> TriggerOrders { get; } = new();
         public List<(string Symbol, string Side, decimal Size, decimal TrailingStopPercent, string TriggerSignal, bool ReduceOnly)> TrailingOrders { get; } = new();
         public List<string> CancelledOrders { get; } = new();
@@ -524,7 +693,7 @@ public sealed class FuturesDeadManSwitchTests
             Task.FromResult(OpenOrders);
 
         public Task<FuturesTickerQuote?> GetTickerAsync(string symbol, CancellationToken cancellationToken) =>
-            Task.FromResult<FuturesTickerQuote?>(new FuturesTickerQuote(symbol, 100m, 100.1m, 100m, 100m, DateTimeOffset.UtcNow));
+            Task.FromResult<FuturesTickerQuote?>(TickerQuote ?? new FuturesTickerQuote(symbol, 100m, 100.1m, 100m, 100m, DateTimeOffset.UtcNow));
 
         public Task<FuturesOrderResult> SendOrderAsync(
             string symbol,

@@ -335,6 +335,7 @@ internal sealed class FuturesBotConfiguration
         TpSl.StopLossPercent = TpSl.StopLossPercent <= 0m ? 1m : TpSl.StopLossPercent;
         TpSl.ExchangeProtectionMultiplierPercent = TpSl.ExchangeProtectionMultiplierPercent <= 0m ? 200m : TpSl.ExchangeProtectionMultiplierPercent;
         TpSl.TrailingStopPercent = TpSl.TrailingStopPercent <= 0m ? 2m : TpSl.TrailingStopPercent;
+        TpSl.ExternalTrailingActivationProgressPercent = Math.Clamp(TpSl.ExternalTrailingActivationProgressPercent, 0m, 100m);
         TpSl.TriggerSource = string.IsNullOrWhiteSpace(TpSl.TriggerSource) ? "mark" : TpSl.TriggerSource;
 
         // Decoupled sizer floors inherit the legacy TpSl percents when unset (0), giving a
@@ -684,6 +685,12 @@ internal sealed class TpSlOptions
     // Once the bot-owned live position reaches the working TP, protective orders
     // are replaced with a reduce-only Kraken trailing stop at this distance.
     public decimal TrailingStopPercent { get; set; } = 2m;
+
+    // For KRAKEN_SYNC / externally opened positions only: when the closeable live
+    // price has travelled this percent of the way from entry to the existing
+    // exchange TP order, replace existing reduce-only TP/SL with a trailing stop.
+    // Set 0 to disable.
+    public decimal ExternalTrailingActivationProgressPercent { get; set; } = 80m;
 
     // Which price stream triggers simulated TP/SL: "mark" | "index" | "last".
     // Only "mark"/"last" are meaningful for the virtual portfolio today.

@@ -1,3 +1,8 @@
+## 2026-07-17-futures-external-trailing-profit-protection
+
+- Futures live reconciliation can now manage KRAKEN_SYNC / external positions only after they already have both matching reduce-only Kraken TP and SL orders. When the closeable live price reaches `TpSl.ExternalTrailingActivationProgressPercent` (default 80%) of the way from entry to the existing Kraken TP, the worker cancels those TP/SL orders and places a reduce-only Kraken trailing stop using `TpSl.TrailingStopPercent` (default 2%).
+- External trailing activation uses executable close prices (LONG bid, SHORT ask), validates that TP/SL are on the correct side of entry and match the position size, and skips positions that already have trailing active or lack either protective order.
+
 ## 2026-07-17-futures-preserve-frozen-tpsl-distances
 
 - Futures live reconciliation now keeps frozen working TP/SL distances together with frozen working TP/SL prices for already-open bot-owned positions. Existing positions opened before a TP/SL config change no longer show the new percent while still closing on the old frozen price.

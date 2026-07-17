@@ -715,27 +715,34 @@ internal sealed class FuturesDecisionWorker(
     private async Task<string> ActivateTrailingStopAsync(
         PortfolioPosition position,
         InstrumentOptions instrument,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string reasonPrefix = "working take-profit reached",
+        bool requireBothProtectionOrders = false,
+        (FuturesOpenOrder? StopLossOrder, FuturesOpenOrder? TakeProfitOrder)? knownProtection = null)
     {
         if (broker?.IsConfigured != true)
         {
-            return "working take-profit reached, but live broker unavailable; protective TP/SL left unchanged";
+            return $"{reasonPrefix}, but live broker unavailable; protective TP/SL left unchanged";
         }
 
         if (position.TrailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true)
         {
-            return $"working take-profit reached; trailing stop already active at {position.TrailingStopPercent:0.###}%";
+            return $"{reasonPrefix}; trailing stop already active at {position.TrailingStopPercent:0.###}%";
         }
 
-        var openOrders = await broker.GetOpenOrdersAsync(cancellationToken);
-        var protection = FindProtectionOrders(openOrders, instrument.KrakenPair, position.Side);
+        var protection = knownProtection ?? FindProtectionOrders(await broker.GetOpenOrdersAsync(cancellationToken), instrument.KrakenPair, position.Side);
+        if (requireBothProtectionOrders && (protection.StopLossOrder is null || protection.TakeProfitOrder is null))
+        {
+            return $"{reasonPrefix}, but existing reduce-only TP/SL pair was not found; trailing not armed";
+        }
+
         var cancelled = new List<string>();
         foreach (var order in new[] { protection.StopLossOrder, protection.TakeProfitOrder }.Where(order => order is not null).Cast<FuturesOpenOrder>())
         {
             var cancel = await broker.CancelOrderAsync(order.OrderId, cancellationToken);
             if (!cancel.Accepted)
             {
-                return $"working take-profit reached, but protective order cancel failed orderId={order.OrderId}: {cancel.Error ?? cancel.Status}; trailing not armed";
+                return $"{reasonPrefix}, but protective order cancel failed orderId={order.OrderId}: {cancel.Error ?? cancel.Status}; trailing not armed";
             }
 
             cancelled.Add(order.OrderId);
@@ -761,12 +768,70 @@ internal sealed class FuturesDecisionWorker(
             position.TrailingStopOrderId = trailing.OrderId;
             position.TrailingActivatedAtUtc = _clock.UtcNow;
             Console.WriteLine($"futures-trailing-arm: symbol={instrument.KrakenPair} side={position.Side} orderId={trailing.OrderId ?? "-"} distancePct={trailingPercent:0.###} cancelled=[{string.Join(",", cancelled)}]");
-            return $"working take-profit reached; cancelled protective TP/SL and activated reduce-only trailing stop {trailingPercent:0.###}%";
+            return $"{reasonPrefix}; cancelled protective TP/SL and activated reduce-only trailing stop {trailingPercent:0.###}%";
         }
 
         var restored = await RestoreProtectiveStopLossAsync(position, instrument, cancellationToken);
         var restoreText = restored ? "protective SL restored" : "protective SL restore FAILED";
-        return $"working take-profit reached, but trailing stop failed: {trailing.Error ?? trailing.Status}; {restoreText}";
+        return $"{reasonPrefix}, but trailing stop failed: {trailing.Error ?? trailing.Status}; {restoreText}";
+    }
+
+    private async Task TryActivateExternalTrailingStopAsync(
+        PortfolioPosition position,
+        InstrumentOptions instrument,
+        (FuturesOpenOrder? StopLossOrder, FuturesOpenOrder? TakeProfitOrder) protection,
+        CancellationToken cancellationToken)
+    {
+        if (!config.TpSl.Enabled
+            || config.TpSl.ExternalTrailingActivationProgressPercent <= 0m
+            || broker?.IsConfigured != true
+            || position.TrailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return;
+        }
+
+        if (position.Origin?.Equals(PositionOrigins.KrakenSync, StringComparison.OrdinalIgnoreCase) != true)
+        {
+            return;
+        }
+
+        var stop = protection.StopLossOrder;
+        var take = protection.TakeProfitOrder;
+        if (stop?.StopPrice is not > 0m
+            || take?.StopPrice is not > 0m
+            || !OrderSizeMatchesPosition(stop, position)
+            || !OrderSizeMatchesPosition(take, position)
+            || !IsValidProtectionPair(position, stop.StopPrice.Value, take.StopPrice.Value))
+        {
+            return;
+        }
+
+        var ticker = await broker.GetTickerAsync(instrument.KrakenPair, cancellationToken);
+        var isShort = position.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
+        var closeablePrice = isShort
+            ? ticker?.Ask ?? 0m
+            : ticker?.Bid ?? 0m;
+        if (closeablePrice <= 0m)
+        {
+            return;
+        }
+
+        var progressPct = TakeProfitProgressPct(position.EntryPrice, take.StopPrice.Value, closeablePrice, position.Side);
+        if (progressPct < config.TpSl.ExternalTrailingActivationProgressPercent)
+        {
+            return;
+        }
+
+        var reasonPrefix =
+            $"external position reached {progressPct:0.##}% of TP path (threshold {config.TpSl.ExternalTrailingActivationProgressPercent:0.##}%)";
+        var result = await ActivateTrailingStopAsync(
+            position,
+            instrument,
+            cancellationToken,
+            reasonPrefix,
+            requireBothProtectionOrders: true,
+            knownProtection: protection);
+        Console.WriteLine($"futures-external-trailing: symbol={instrument.KrakenPair} side={position.Side} progress={progressPct:0.##}% result={result}");
     }
 
     private async Task<bool> RestoreProtectiveStopLossAsync(
@@ -1175,7 +1240,8 @@ internal sealed class FuturesDecisionWorker(
                 protectionOrders.TakeProfitOrder,
                 botOwned: existing?.Origin?.Equals(PositionOrigins.Bot, StringComparison.OrdinalIgnoreCase) == true,
                 cancellationToken);
-            imported.Add(new PortfolioPosition
+            var origin = existing?.Origin ?? PositionOrigins.KrakenSync;
+            var importedPosition = new PortfolioPosition
             {
                 Pair = instrument.Pair,
                 Side = remote.Side,
@@ -1195,7 +1261,7 @@ internal sealed class FuturesDecisionWorker(
                 LiquidationDistancePercent = FuturesMath.LiquidationDistancePercent(mark, FuturesMath.EstimateLiquidationPrice(remote.Side, remote.EntryPrice, leverage, config.Margin.MaintenanceMarginRatePercent)),
                 TpOrderState = tpSl.TpOrderState,
                 SlOrderState = tpSl.SlOrderState,
-                Origin = existing?.Origin ?? PositionOrigins.KrakenSync,
+                Origin = origin,
                 StopLossPrice = tpSl.StopLossPrice,
                 TakeProfitPrice = tpSl.TakeProfitPrice,
                 ExchangeStopLossPrice = tpSl.ExchangeStopLossPrice,
@@ -1212,7 +1278,14 @@ internal sealed class FuturesDecisionWorker(
                 AtrPct = existing?.AtrPct,
                 StopDistancePct = tpSl.StopDistancePct,
                 TakeProfitDistancePct = tpSl.TakeProfitDistancePct
-            });
+            };
+
+            if (origin.Equals(PositionOrigins.KrakenSync, StringComparison.OrdinalIgnoreCase))
+            {
+                await TryActivateExternalTrailingStopAsync(importedPosition, instrument, protectionOrders, cancellationToken);
+            }
+
+            imported.Add(importedPosition);
         }
 
         var before = state.Positions.Count;
@@ -1414,6 +1487,48 @@ internal sealed class FuturesDecisionWorker(
 
     private static decimal DistancePercent(decimal entryPrice, decimal triggerPrice) =>
         entryPrice <= 0m ? 0m : Math.Abs(triggerPrice - entryPrice) / entryPrice * 100m;
+
+    private static bool OrderSizeMatchesPosition(FuturesOpenOrder order, PortfolioPosition position)
+    {
+        if (order.UnfilledSize <= 0m || position.Quantity <= 0m)
+        {
+            return false;
+        }
+
+        var tolerance = Math.Max(0.00000001m, position.Quantity * 0.001m);
+        return Math.Abs(order.UnfilledSize - position.Quantity) <= tolerance;
+    }
+
+    private static bool IsValidProtectionPair(PortfolioPosition position, decimal stopPrice, decimal takeProfitPrice)
+    {
+        if (position.EntryPrice <= 0m || stopPrice <= 0m || takeProfitPrice <= 0m)
+        {
+            return false;
+        }
+
+        var isShort = position.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
+        return isShort
+            ? takeProfitPrice < position.EntryPrice && stopPrice > position.EntryPrice
+            : takeProfitPrice > position.EntryPrice && stopPrice < position.EntryPrice;
+    }
+
+    private static decimal TakeProfitProgressPct(decimal entryPrice, decimal takeProfitPrice, decimal closeablePrice, string side)
+    {
+        if (entryPrice <= 0m || takeProfitPrice <= 0m || closeablePrice <= 0m)
+        {
+            return 0m;
+        }
+
+        var isShort = side.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
+        var targetDistance = isShort ? entryPrice - takeProfitPrice : takeProfitPrice - entryPrice;
+        var travelled = isShort ? entryPrice - closeablePrice : closeablePrice - entryPrice;
+        if (targetDistance <= 0m || travelled <= 0m)
+        {
+            return 0m;
+        }
+
+        return decimal.Round(Math.Min(100m, travelled / targetDistance * 100m), 4);
+    }
 
     private decimal ExchangeProtectionPrice(decimal entryPrice, string positionSide, bool isTakeProfit)
     {
