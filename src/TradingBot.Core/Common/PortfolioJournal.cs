@@ -480,6 +480,17 @@ public sealed class DryRunDecisionRecord
     public bool EmaFullyConfirmed { get; init; }
     public decimal? BullishEmaGapPercent { get; init; }
     public decimal? EmaGapVelocityPercent { get; init; }
+    // Futures SHORT diagnostics. These deliberately live beside the LONG fields so
+    // replay/UI consumers never have to infer the rejected side from prose.
+    public bool AllowsShort { get; init; }
+    public bool HasBearishStructure { get; init; }
+    public decimal? BearishEmaGapPercent { get; init; }
+    public decimal? ShortScore { get; init; }
+    public decimal? LongScoreThreshold { get; init; }
+    public decimal? ShortScoreThreshold { get; init; }
+    public decimal? MinimumEmaGapPercent { get; init; }
+    public string? ShortBaseBlockReasonCode { get; init; }
+    public string? ShortBaseBlockReason { get; init; }
     public bool EarlyEntryEligible { get; init; }
     public string? EarlyEntryReason { get; init; }
     public decimal EarlyEntryDiagnosticScore { get; init; }

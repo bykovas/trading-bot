@@ -1,3 +1,9 @@
+## 2026-07-17-decisions-explainability-refactor
+
+- Futures decision records now persist the actual SHORT-side diagnostics (`ShortScore`, bearish EMA gap/structure, allow verdict, configured score/EMA thresholds) instead of forcing the Decisions UI to mislabel the LONG score as the reason a SHORT was rejected.
+- Base SHORT rejection now has an explicit machine-readable code and exact explanation: bearish EMA not confirmed, SHORT score below the signal threshold, or missing downside momentum/volume/trend confirmation. Trading decisions, thresholds, sizing, and execution behavior are unchanged.
+- The Decisions page now resolves explicit gate codes before prose fallbacks and presents side-aware, human-readable verdicts while retaining raw technical evidence for audit.
+
 ## 2026-07-17-futures-fixed-working-exits-trailing-protection
 
 - Bot-owned futures positions now use fixed working exit policy from `TpSl`: working TP `TakeProfitPercent` and working SL `StopLossPercent` are frozen from entry and no longer silently inherit ATR-derived `entryPlan` distances.

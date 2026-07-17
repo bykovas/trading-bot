@@ -2046,7 +2046,7 @@ internal sealed class FuturesDecisionWorker(
         return $"apiField=fundingRate value={fundingRatePercent:0.######}% semantic={(fundingRatePercent >= 0m ? "positive longs pay shorts" : "negative shorts pay longs")} adverse={adverse}";
     }
 
-    private static DryRunDecisionRecord BuildDecisionRecord(
+    private DryRunDecisionRecord BuildDecisionRecord(
         InstrumentMarketState marketState,
         IndicatorSnapshot indicators,
         TechnicalSignal signal,
@@ -2076,11 +2076,48 @@ internal sealed class FuturesDecisionWorker(
         EmaFullyConfirmed = signal.EmaFullyConfirmed,
         BullishEmaGapPercent = signal.BullishEmaGapPercent,
         EmaGapVelocityPercent = signal.EmaGapVelocityPercent,
+        AllowsShort = signal.AllowsShort,
+        HasBearishStructure = signal.HasBearishStructure,
+        BearishEmaGapPercent = signal.BearishEmaGapPercent,
+        ShortScore = signal.ShortScore,
+        LongScoreThreshold = config.Strategy.MinimumLongScore,
+        ShortScoreThreshold = config.Shorts.MinShortScore,
+        MinimumEmaGapPercent = config.Strategy.MinimumEmaGapPercent,
+        ShortBaseBlockReasonCode = ShortBaseBlockReasonCode(signal),
+        ShortBaseBlockReason = ShortBaseBlockReason(signal),
         PriceActionDirection = priceAction?.Direction,
         PriceActionTrendPercent = priceAction?.TrendPercent
     };
 
-    private static DryRunDecisionRecord BuildFastExitDecisionRecord(
+    private string? ShortBaseBlockReasonCode(TechnicalSignal signal)
+    {
+        if (!signal.HasBearishStructure || signal.AllowsShort)
+        {
+            return null;
+        }
+
+        if (signal.BearishEmaGapPercent is not { } gap || gap < config.Strategy.MinimumEmaGapPercent)
+        {
+            return "SHORT_EMA_NOT_CONFIRMED";
+        }
+
+        return signal.ShortScore < config.Strategy.MinimumLongScore
+            ? "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD"
+            : "SHORT_DOWNSIDE_CONFIRMATION_MISSING";
+    }
+
+    private string? ShortBaseBlockReason(TechnicalSignal signal) => ShortBaseBlockReasonCode(signal) switch
+    {
+        "SHORT_EMA_NOT_CONFIRMED" =>
+            $"bearish EMA gap {signal.BearishEmaGapPercent?.ToString("0.###") ?? "unavailable"}% is below required {config.Strategy.MinimumEmaGapPercent:0.###}%",
+        "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD" =>
+            $"short score {signal.ShortScore:0.##} is below signal threshold {config.Strategy.MinimumLongScore:0.##}",
+        "SHORT_DOWNSIDE_CONFIRMATION_MISSING" =>
+            "short score and bearish EMA passed, but none of downside momentum, downside volume, or price-below-trend confirmation passed",
+        _ => null
+    };
+
+    private DryRunDecisionRecord BuildFastExitDecisionRecord(
         InstrumentMarketState marketState,
         FuturesFillResult fill) => new()
     {
@@ -2101,6 +2138,15 @@ internal sealed class FuturesDecisionWorker(
         EmaFullyConfirmed = false,
         BullishEmaGapPercent = null,
         EmaGapVelocityPercent = null,
+        AllowsShort = false,
+        HasBearishStructure = false,
+        BearishEmaGapPercent = null,
+        ShortScore = null,
+        LongScoreThreshold = config.Strategy.MinimumLongScore,
+        ShortScoreThreshold = config.Shorts.MinShortScore,
+        MinimumEmaGapPercent = config.Strategy.MinimumEmaGapPercent,
+        ShortBaseBlockReasonCode = null,
+        ShortBaseBlockReason = null,
         PriceActionDirection = null,
         PriceActionTrendPercent = null
     };
