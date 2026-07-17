@@ -81,6 +81,7 @@ public sealed class FuturesVirtualPortfolioTests
         Assert.Equal(90m, state.CashEur);                       // 100 - 10 margin (no fee)
         Assert.Equal(98m, position.StopLossPrice);              // -2%
         Assert.Equal(103m, position.TakeProfitPrice);           // +3%
+        Assert.Equal(PositionOrigins.Bot, position.Origin);
         Assert.NotNull(position.LiquidationPrice);
         Assert.True(position.LiquidationPrice < 100m);
         Assert.Equal("SIMULATED_OPEN", position.TpOrderState);
@@ -159,6 +160,26 @@ public sealed class FuturesVirtualPortfolioTests
         Assert.False(flip.PositionClosed);
         Assert.Equal("LONG", Assert.Single(state.Positions).Side);
         Assert.Contains("flip", flip.Action.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Hold_keeps_explicit_reason_when_desired_side_already_matches()
+    {
+        var (portfolio, state) = Setup();
+        portfolio.Apply(state, "XBT/EUR", FuturesDesiredExposure.Long, 100m, 20m, 2m);
+
+        var hold = portfolio.Apply(
+            state,
+            "XBT/EUR",
+            FuturesDesiredExposure.Long,
+            101m,
+            0m,
+            2m,
+            reason: "external/adopted Kraken Futures position: signal reversal ignored");
+
+        Assert.False(hold.PositionClosed);
+        Assert.Equal("WOULD_HOLD", hold.Action.Action);
+        Assert.Contains("external/adopted", hold.Action.Reason);
     }
 
     [Fact]

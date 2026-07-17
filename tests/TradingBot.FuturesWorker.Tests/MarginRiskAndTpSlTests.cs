@@ -252,4 +252,53 @@ public sealed class MarginRiskAndTpSlTests
         Assert.Equal("TRIGGERED", position.SlOrderState);
         Assert.Equal("CANCELLED", position.TpOrderState);
     }
+
+    [Fact]
+    public void Exchange_open_tpsl_orders_are_not_triggered_by_the_bot()
+    {
+        var orchestrator = new TpSlOrchestrator(Config());
+        var position = new PortfolioPosition
+        {
+            Pair = "XBT/EUR",
+            Side = "LONG",
+            EntryPrice = 100m,
+            StopLossPrice = 98m,
+            TakeProfitPrice = 103m,
+            Origin = PositionOrigins.KrakenSync,
+            TpOrderState = "EXCHANGE_OPEN",
+            SlOrderState = "EXCHANGE_OPEN"
+        };
+
+        Assert.Null(orchestrator.Evaluate(position, 97m, 97m));
+        Assert.Equal("EXCHANGE_OPEN", position.SlOrderState);
+        Assert.Equal("EXCHANGE_OPEN", position.TpOrderState);
+
+        Assert.Null(orchestrator.Evaluate(position, 104m, 104m));
+        Assert.Equal("EXCHANGE_OPEN", position.SlOrderState);
+        Assert.Equal("EXCHANGE_OPEN", position.TpOrderState);
+    }
+
+    [Fact]
+    public void Missing_exchange_protection_can_still_be_triggered_by_simulated_fallback()
+    {
+        var orchestrator = new TpSlOrchestrator(Config());
+        var position = new PortfolioPosition
+        {
+            Pair = "XBT/EUR",
+            Side = "LONG",
+            EntryPrice = 100m,
+            StopLossPrice = 98m,
+            TakeProfitPrice = 103m,
+            Origin = PositionOrigins.KrakenSync,
+            TpOrderState = "EXCHANGE_OPEN",
+            SlOrderState = "SIMULATED_OPEN"
+        };
+
+        var trigger = orchestrator.Evaluate(position, 97m, 97m);
+
+        Assert.NotNull(trigger);
+        Assert.Equal("STOP_LOSS", trigger!.Kind);
+        Assert.Equal("TRIGGERED", position.SlOrderState);
+        Assert.Equal("EXCHANGE_OPEN", position.TpOrderState);
+    }
 }

@@ -1,3 +1,9 @@
+## 2026-07-17-futures-external-position-soft-exit-guard
+
+- Futures positions now carry `Origin`: worker-opened entries are tagged `BOT`, while live Kraken reconciliation tags newly adopted exchange positions as `KRAKEN_SYNC` and preserves any existing origin.
+- `KRAKEN_SYNC` / external futures positions are no longer closed by soft strategy exits: signal-reversal closes are converted to HOLD with `EXTERNAL_SIGNAL_FLIP_BLOCK`, and max-hold stale exits are skipped for those positions. Hard TP/SL fallback triggers run only for protection legs that are not already represented by live Kraken `EXCHANGE_OPEN` reduce-only orders.
+- HOLD actions now preserve an explicit reason when the desired side already matches the held position, so the UI/journal can explain that an adopted Kraken position ignored a reversal instead of showing a generic hold.
+
 ## 2026-07-16-futures-400-notional-live-caps
 
 - Restored futures live sizing to the requested 40 EUR margin × 10x leverage target: `Futures.TargetMarginEur`=40 and `Risk.TargetRiskEur`=3 so a 0.75% floor-stop entry sizes to 400 EUR notional before ATR shrinkage.

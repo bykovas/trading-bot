@@ -120,6 +120,11 @@ public sealed class PortfolioPosition
     public string? TpOrderState { get; set; }
     public string? SlOrderState { get; set; }
 
+    // Futures provenance. BOT means the worker opened the position itself.
+    // KRAKEN_SYNC means the position was adopted from the exchange during live
+    // reconciliation, so soft strategy exits must not assume ownership.
+    public string? Origin { get; set; }
+
     // Which entry channel opened this position: Standard / Continuation / Breakout /
     // DipBounce. Null for legacy positions and spot rows. Carried to the close
     // action so realized-PnL-per-channel is queryable in SQL.
@@ -158,8 +163,15 @@ public sealed class PortfolioPosition
         FundingPaidEur = FundingPaidEur,
         TpOrderState = TpOrderState,
         SlOrderState = SlOrderState,
+        Origin = Origin,
         EntryChannel = EntryChannel
     };
+}
+
+public static class PositionOrigins
+{
+    public const string Bot = "BOT";
+    public const string KrakenSync = "KRAKEN_SYNC";
 }
 
 public sealed class PairActionHistory

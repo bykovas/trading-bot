@@ -52,6 +52,18 @@ public sealed class FuturesMaxHoldExitTests
     }
 
     [Fact]
+    public void Kraken_synced_position_is_classified_as_external()
+    {
+        var synced = Position(openedMinutesAgo: 420, unrealizedPnlEur: -1m);
+        synced.Origin = PositionOrigins.KrakenSync;
+        var botOwned = Position(openedMinutesAgo: 420, unrealizedPnlEur: -1m);
+        botOwned.Origin = PositionOrigins.Bot;
+
+        Assert.True(FuturesDecisionWorker.IsExternalFuturesPosition(synced));
+        Assert.False(FuturesDecisionWorker.IsExternalFuturesPosition(botOwned));
+    }
+
+    [Fact]
     public void Young_losing_position_is_not_closed_by_max_hold_timer()
     {
         var position = Position(openedMinutesAgo: 120, unrealizedPnlEur: -0.25m);

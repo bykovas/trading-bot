@@ -70,7 +70,7 @@ internal sealed class FuturesVirtualPortfolio(
         {
             if (position.Side == desiredSide)
             {
-                return Hold(state, position, "current position already matches desired exposure");
+                return Hold(state, position, string.IsNullOrWhiteSpace(reason) ? "current position already matches desired exposure" : reason);
             }
 
             if (reduceOnly)
@@ -159,6 +159,7 @@ internal sealed class FuturesVirtualPortfolio(
             FundingPaidEur = 0m,
             StopLossPrice = config.TpSl.Enabled ? (side == "SHORT" ? fillPrice + slDistance : fillPrice - slDistance) : null,
             TakeProfitPrice = config.TpSl.Enabled ? (side == "SHORT" ? fillPrice - tpDistance : fillPrice + tpDistance) : null,
+            Origin = PositionOrigins.Bot,
             EntryAtr = entryPlan?.AtrPct,
             RoundTripCostEstimatePct = entryPlan?.RoundTripCostEstimatePct,
             TpOrderState = config.TpSl.Enabled ? "SIMULATED_OPEN" : null,

@@ -188,7 +188,8 @@ internal sealed class FuturesDecisionWorker(
                     fill.Action.ExitReasonCode = trigger.Kind == "STOP_LOSS" ? "SELL_STOP_LOSS" : "SELL_TAKE_PROFIT";
                     riskReasons = new[] { $"hard exit: {trigger.Kind} via {trigger.TriggerSource} price" };
                 }
-                else if (EvaluateMaxHoldExit(held, utc, config.Exits.MaxHoldMinutes, config.Exits.MaxHoldMinStopProgressPct) is { ShouldClose: true } maxHold)
+                else if (!IsExternalFuturesPosition(held)
+                    && EvaluateMaxHoldExit(held, utc, config.Exits.MaxHoldMinutes, config.Exits.MaxHoldMinStopProgressPct) is { ShouldClose: true } maxHold)
                 {
                     fill = await ApplyOrExecuteLiveAsync(
                         state, pair, FuturesDesiredExposure.Flat, markPrice,
@@ -205,7 +206,12 @@ internal sealed class FuturesDecisionWorker(
                 {
                     var desired = strategy.DecideHeld(held, signal);
                     var minHoldBlocked = desired == FuturesDesiredExposure.Flat && IsMinHoldActive(held, utc);
+                    var externalSoftExitBlocked = desired == FuturesDesiredExposure.Flat && IsExternalFuturesPosition(held);
                     if (minHoldBlocked)
+                    {
+                        desired = held.Side == "SHORT" ? FuturesDesiredExposure.Short : FuturesDesiredExposure.Long;
+                    }
+                    else if (externalSoftExitBlocked)
                     {
                         desired = held.Side == "SHORT" ? FuturesDesiredExposure.Short : FuturesDesiredExposure.Long;
                     }
@@ -213,12 +219,24 @@ internal sealed class FuturesDecisionWorker(
                         state, pair, desired, markPrice,
                         0m, held.Leverage ?? 1m,
                         reduceOnly: desired == FuturesDesiredExposure.Flat,
-                        reason: desired == FuturesDesiredExposure.Flat ? "signal reversal close" : minHoldBlocked ? "minimum hold active; reversal ignored" : string.Empty,
+                        reason: desired == FuturesDesiredExposure.Flat
+                            ? "signal reversal close"
+                            : externalSoftExitBlocked
+                                ? "external/adopted Kraken Futures position: signal reversal ignored; exchange TP/SL or manual close only"
+                                : minHoldBlocked
+                                    ? "minimum hold active; reversal ignored"
+                                    : string.Empty,
                         exitTriggerSource: null,
                         instrument: marketState.Instrument,
                         entryPlan: null,
                         cancellationToken);
-                    riskReasons = minHoldBlocked
+                    if (externalSoftExitBlocked)
+                    {
+                        fill.Action.HoldReasonCode = "EXTERNAL_SIGNAL_FLIP_BLOCK";
+                    }
+                    riskReasons = externalSoftExitBlocked
+                        ? new[] { "external/adopted Kraken Futures position: signal reversal ignored; exchange TP/SL or manual close only" }
+                        : minHoldBlocked
                         ? new[] { $"minimum hold active: reversal ignored until {config.ExecutionPolicy.MinHoldSeconds}s" }
                         : new[] { "holding existing exposure; TP/SL and reversal rules govern this pair" };
                 }
@@ -561,7 +579,8 @@ internal sealed class FuturesDecisionWorker(
                     cancellationToken);
                 fill.Action.ExitReasonCode = trigger.Kind == "STOP_LOSS" ? "SELL_STOP_LOSS" : "SELL_TAKE_PROFIT";
             }
-            else if (EvaluateMaxHoldExit(held, utc, config.Exits.MaxHoldMinutes, config.Exits.MaxHoldMinStopProgressPct) is { ShouldClose: true } maxHold)
+            else if (!IsExternalFuturesPosition(held)
+                && EvaluateMaxHoldExit(held, utc, config.Exits.MaxHoldMinutes, config.Exits.MaxHoldMinStopProgressPct) is { ShouldClose: true } maxHold)
             {
                 fill = await ApplyOrExecuteLiveAsync(
                     state, held.Pair, FuturesDesiredExposure.Flat, markPrice,
@@ -989,6 +1008,7 @@ internal sealed class FuturesDecisionWorker(
                 LiquidationDistancePercent = FuturesMath.LiquidationDistancePercent(mark, FuturesMath.EstimateLiquidationPrice(remote.Side, remote.EntryPrice, leverage, config.Margin.MaintenanceMarginRatePercent)),
                 TpOrderState = tpSl.TpOrderState,
                 SlOrderState = tpSl.SlOrderState,
+                Origin = existing?.Origin ?? PositionOrigins.KrakenSync,
                 StopLossPrice = tpSl.StopLossPrice,
                 TakeProfitPrice = tpSl.TakeProfitPrice,
                 EntryChannel = existing?.EntryChannel,
@@ -1186,6 +1206,11 @@ internal sealed class FuturesDecisionWorker(
     private bool IsLiveInstance =>
         config.BotInstance.Id.Equals("live", StringComparison.OrdinalIgnoreCase)
         || config.BotInstance.Id.EndsWith("-live", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsExternalFuturesPosition(PortfolioPosition position) =>
+        position.Origin is null
+            ? false
+            : !position.Origin.Equals(PositionOrigins.Bot, StringComparison.OrdinalIgnoreCase);
 
     internal static FuturesMaxHoldExit EvaluateMaxHoldExit(
         PortfolioPosition position,
