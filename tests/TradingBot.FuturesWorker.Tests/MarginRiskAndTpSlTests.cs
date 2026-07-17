@@ -254,6 +254,52 @@ public sealed class MarginRiskAndTpSlTests
     }
 
     [Fact]
+    public void Long_working_stop_uses_bid_before_mark_or_last()
+    {
+        var orchestrator = new TpSlOrchestrator(Config());
+        var position = new PortfolioPosition
+        {
+            Pair = "XBT/EUR",
+            Side = "LONG",
+            Origin = PositionOrigins.Bot,
+            EntryPrice = 100m,
+            StopLossPrice = 99m,
+            TakeProfitPrice = 103m,
+            TpOrderState = "EXCHANGE_OPEN",
+            SlOrderState = "EXCHANGE_OPEN"
+        };
+
+        var trigger = orchestrator.Evaluate(position, markPrice: 100m, lastPrice: 100m, bidPrice: 98.9m, askPrice: 99.1m);
+
+        Assert.NotNull(trigger);
+        Assert.Equal("STOP_LOSS", trigger!.Kind);
+        Assert.Equal("bid", trigger.TriggerSource);
+    }
+
+    [Fact]
+    public void Short_working_stop_uses_ask_before_mark_or_last()
+    {
+        var orchestrator = new TpSlOrchestrator(Config());
+        var position = new PortfolioPosition
+        {
+            Pair = "XBT/EUR",
+            Side = "SHORT",
+            Origin = PositionOrigins.Bot,
+            EntryPrice = 100m,
+            StopLossPrice = 101m,
+            TakeProfitPrice = 97m,
+            TpOrderState = "EXCHANGE_OPEN",
+            SlOrderState = "EXCHANGE_OPEN"
+        };
+
+        var trigger = orchestrator.Evaluate(position, markPrice: 100m, lastPrice: 100m, bidPrice: 100.9m, askPrice: 101.1m);
+
+        Assert.NotNull(trigger);
+        Assert.Equal("STOP_LOSS", trigger!.Kind);
+        Assert.Equal("ask", trigger.TriggerSource);
+    }
+
+    [Fact]
     public void Exchange_open_tpsl_orders_are_not_triggered_by_the_bot()
     {
         var orchestrator = new TpSlOrchestrator(Config());
@@ -279,7 +325,7 @@ public sealed class MarginRiskAndTpSlTests
     }
 
     [Fact]
-    public void Missing_exchange_protection_can_still_be_triggered_by_simulated_fallback()
+    public void Kraken_synced_position_is_not_triggered_by_simulated_fallback()
     {
         var orchestrator = new TpSlOrchestrator(Config());
         var position = new PortfolioPosition
@@ -296,9 +342,8 @@ public sealed class MarginRiskAndTpSlTests
 
         var trigger = orchestrator.Evaluate(position, 97m, 97m);
 
-        Assert.NotNull(trigger);
-        Assert.Equal("STOP_LOSS", trigger!.Kind);
-        Assert.Equal("TRIGGERED", position.SlOrderState);
+        Assert.Null(trigger);
+        Assert.Equal("SIMULATED_OPEN", position.SlOrderState);
         Assert.Equal("EXCHANGE_OPEN", position.TpOrderState);
     }
 }

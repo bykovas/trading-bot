@@ -142,6 +142,8 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_EXITS_MAX_HOLD_MIN_STOP_PROGRESS_PERCENT", value => config.Exits.MaxHoldMinStopProgressPct = ParseDecimal(value, config.Exits.MaxHoldMinStopProgressPct));
         SetIfPresent("TRADINGBOT_TPSL_TAKE_PROFIT_PERCENT", value => config.TpSl.TakeProfitPercent = ParseDecimal(value, config.TpSl.TakeProfitPercent));
         SetIfPresent("TRADINGBOT_TPSL_STOP_LOSS_PERCENT", value => config.TpSl.StopLossPercent = ParseDecimal(value, config.TpSl.StopLossPercent));
+        SetIfPresent("TRADINGBOT_TPSL_EXCHANGE_PROTECTION_MULTIPLIER_PERCENT", value => config.TpSl.ExchangeProtectionMultiplierPercent = ParseDecimal(value, config.TpSl.ExchangeProtectionMultiplierPercent));
+        SetIfPresent("TRADINGBOT_TPSL_TRAILING_STOP_PERCENT", value => config.TpSl.TrailingStopPercent = ParseDecimal(value, config.TpSl.TrailingStopPercent));
         SetIfPresent("TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED", value => config.Futures.LiveTradingEnabled = ParseBool(value, config.Futures.LiveTradingEnabled));
         SetIfPresent("TRADINGBOT_KRAKEN_FUTURES_API_KEY", value => config.Kraken.ApiKey = value);
         SetIfPresent("TRADINGBOT_KRAKEN_FUTURES_API_SECRET", value => config.Kraken.ApiSecret = value);
@@ -329,15 +331,10 @@ internal sealed class FuturesBotConfiguration
         }
 
         TpSl.Enabled = true;
-        // Legacy fixed percents. Migration semantics (documented): with the risk-based
-        // sizer these are no longer FIXED stop/TP — TpSl.StopLossPercent is the MINIMUM
-        // stop floor and TpSl.TakeProfitPercent is the MINIMUM TP floor, and they seed the
-        // decoupled Exits.MinStopDistancePct / Exits.MinTakeProfitPct below. Do NOT try to
-        // "fix" losses by raising StopLossPercent while holding a fixed notional — the sizer
-        // shrinks notional for wider stops instead. MinRewardRiskMultiple / MinTpVsCostMult
-        // always apply on top.
-        TpSl.TakeProfitPercent = TpSl.TakeProfitPercent <= 0m ? 1.5m : TpSl.TakeProfitPercent;
-        TpSl.StopLossPercent = TpSl.StopLossPercent <= 0m ? 0.75m : TpSl.StopLossPercent;
+        TpSl.TakeProfitPercent = TpSl.TakeProfitPercent <= 0m ? 3m : TpSl.TakeProfitPercent;
+        TpSl.StopLossPercent = TpSl.StopLossPercent <= 0m ? 1m : TpSl.StopLossPercent;
+        TpSl.ExchangeProtectionMultiplierPercent = TpSl.ExchangeProtectionMultiplierPercent <= 0m ? 200m : TpSl.ExchangeProtectionMultiplierPercent;
+        TpSl.TrailingStopPercent = TpSl.TrailingStopPercent <= 0m ? 2m : TpSl.TrailingStopPercent;
         TpSl.TriggerSource = string.IsNullOrWhiteSpace(TpSl.TriggerSource) ? "mark" : TpSl.TriggerSource;
 
         // Decoupled sizer floors inherit the legacy TpSl percents when unset (0), giving a
@@ -674,15 +671,19 @@ internal sealed class TpSlOptions
 {
     public bool Enabled { get; set; } = true;
 
-    // Legacy fixed TP percent: used as a TP FLOOR (and fallback) by FuturesPositionSizer
-    // together with MinRewardRiskMultiple × stop and MinTpVsCostMult × round-trip cost.
-    // Not deleted for backward compatibility with existing appsettings/env.
-    public decimal TakeProfitPercent { get; set; } = 1.5m;
+    // Bot-owned futures working TP/SL policy. The sizer may still use these as
+    // floors when decoupled Exits.* values are unset, but open-position exits use
+    // the fixed values below rather than ATR-derived entry-plan distances.
+    public decimal TakeProfitPercent { get; set; } = 3m;
+    public decimal StopLossPercent { get; set; } = 1m;
 
-    // Legacy fixed SL percent: used as the ATR stop FLOOR and ATR-unavailable fallback.
-    // Risk-based sizing shrinks notional when ATR wants a wider stop — do not "fix"
-    // losses by raising this while keeping a fixed notional.
-    public decimal StopLossPercent { get; set; } = 0.75m;
+    // Exchange-side emergency protection is placed farther than the bot's working
+    // levels. Example: working TP 3 and multiplier 200 => Kraken TP 6.
+    public decimal ExchangeProtectionMultiplierPercent { get; set; } = 200m;
+
+    // Once the bot-owned live position reaches the working TP, protective orders
+    // are replaced with a reduce-only Kraken trailing stop at this distance.
+    public decimal TrailingStopPercent { get; set; } = 2m;
 
     // Which price stream triggers simulated TP/SL: "mark" | "index" | "last".
     // Only "mark"/"last" are meaningful for the virtual portfolio today.

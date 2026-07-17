@@ -119,6 +119,7 @@ public sealed class FuturesDeadManSwitchTests
             broker);
 
         var state = new PortfolioState { CashEur = 100m };
+        state.Positions.Add(new PortfolioPosition { Pair = "ZEC/USD", Side = "LONG", Origin = PositionOrigins.Bot });
         var method = typeof(FuturesDecisionWorker).GetMethod("ReconcileWithKrakenAsync", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
         var task = (Task)method.Invoke(worker, new object?[]
@@ -136,11 +137,13 @@ public sealed class FuturesDeadManSwitchTests
         Assert.Equal("EXCHANGE_OPEN", position.SlOrderState);
         Assert.Equal(521.8392m, position.TakeProfitPrice);
         Assert.Equal(496.5072m, position.StopLossPrice);
+        Assert.Equal(537.0384m, position.ExchangeTakeProfitPrice);
+        Assert.Equal(486.3744m, position.ExchangeStopLossPrice);
         Assert.Equal(3m, position.TakeProfitDistancePct);
         Assert.Equal(2m, position.StopDistancePct);
         Assert.Equal(2, broker.TriggerOrderCallCount);
-        Assert.Contains(broker.TriggerOrders, order => order.OrderType == "stp" && order.StopPrice == 496.5072m);
-        Assert.Contains(broker.TriggerOrders, order => order.OrderType == "take_profit" && order.StopPrice == 521.8392m);
+        Assert.Contains(broker.TriggerOrders, order => order.OrderType == "stp" && order.StopPrice == 486.3744m);
+        Assert.Contains(broker.TriggerOrders, order => order.OrderType == "take_profit" && order.StopPrice == 537.0384m);
     }
 
     [Fact]
@@ -197,6 +200,7 @@ public sealed class FuturesDeadManSwitchTests
             broker);
 
         var state = new PortfolioState { CashEur = 100m };
+        state.Positions.Add(new PortfolioPosition { Pair = "BCH/USD", Side = "LONG", Origin = PositionOrigins.Bot });
         var method = typeof(FuturesDecisionWorker).GetMethod("ReconcileWithKrakenAsync", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
         var task = (Task)method.Invoke(worker, new object?[]
@@ -212,8 +216,10 @@ public sealed class FuturesDeadManSwitchTests
         var position = Assert.Single(state.Positions);
         Assert.Equal("EXCHANGE_OPEN", position.TpOrderState);
         Assert.Equal("EXCHANGE_OPEN", position.SlOrderState);
-        Assert.Equal(244.14m, position.TakeProfitPrice);
-        Assert.Equal(230.05m, position.StopLossPrice);
+        Assert.Equal(241.792706m, position.TakeProfitPrice);
+        Assert.Equal(230.055196m, position.StopLossPrice);
+        Assert.Equal(244.14m, position.ExchangeTakeProfitPrice);
+        Assert.Equal(230.05m, position.ExchangeStopLossPrice);
         Assert.Equal(0, broker.TriggerOrderCallCount);
     }
 
@@ -264,6 +270,7 @@ public sealed class FuturesDeadManSwitchTests
             broker);
 
         var state = new PortfolioState { CashEur = 100m };
+        state.Positions.Add(new PortfolioPosition { Pair = "BCH/USD", Side = "LONG", Origin = PositionOrigins.Bot });
         var method = typeof(FuturesDecisionWorker).GetMethod("ReconcileWithKrakenAsync", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
         var task = (Task)method.Invoke(worker, new object?[]
@@ -276,11 +283,13 @@ public sealed class FuturesDeadManSwitchTests
         })!;
         await task;
 
-        Assert.Contains(broker.TriggerOrders, order => order.OrderType == "stp" && order.StopPrice == 230.06m);
-        Assert.Contains(broker.TriggerOrders, order => order.OrderType == "take_profit" && order.StopPrice == 241.79m);
+        Assert.Contains(broker.TriggerOrders, order => order.OrderType == "stp" && order.StopPrice == 225.37m);
+        Assert.Contains(broker.TriggerOrders, order => order.OrderType == "take_profit" && order.StopPrice == 248.83m);
         var position = Assert.Single(state.Positions);
-        Assert.Equal(230.06m, position.StopLossPrice);
-        Assert.Equal(241.79m, position.TakeProfitPrice);
+        Assert.Equal(230.05521070m, position.StopLossPrice);
+        Assert.Equal(241.79272145m, position.TakeProfitPrice);
+        Assert.Equal(225.37m, position.ExchangeStopLossPrice);
+        Assert.Equal(248.83m, position.ExchangeTakeProfitPrice);
     }
 
     [Fact]
@@ -410,6 +419,8 @@ public sealed class FuturesDeadManSwitchTests
         public string? LastLeverageSymbol { get; private set; }
         public IReadOnlyList<FuturesOpenOrder> OpenOrders { get; init; } = Array.Empty<FuturesOpenOrder>();
         public List<(string Symbol, string Side, string OrderType, decimal Size, decimal StopPrice, string TriggerSignal, bool ReduceOnly)> TriggerOrders { get; } = new();
+        public List<(string Symbol, string Side, decimal Size, decimal TrailingStopPercent, string TriggerSignal, bool ReduceOnly)> TrailingOrders { get; } = new();
+        public List<string> CancelledOrders { get; } = new();
         public int TriggerOrderCallCount => TriggerOrders.Count;
 
         public Task<IReadOnlyList<FuturesAccountBalance>> GetAccountsAsync(CancellationToken cancellationToken) =>
@@ -457,6 +468,25 @@ public sealed class FuturesDeadManSwitchTests
         {
             TriggerOrders.Add((symbol, side, orderType, size, stopPrice, triggerSignal, reduceOnly));
             return Task.FromResult(new FuturesOrderResult("placed", $"{orderType}-1", null));
+        }
+
+        public Task<FuturesOrderResult> SendTrailingStopOrderAsync(
+            string symbol,
+            string side,
+            decimal size,
+            decimal trailingStopPercent,
+            string triggerSignal,
+            bool reduceOnly,
+            CancellationToken cancellationToken)
+        {
+            TrailingOrders.Add((symbol, side, size, trailingStopPercent, triggerSignal, reduceOnly));
+            return Task.FromResult(new FuturesOrderResult("placed", "trailing-1", null));
+        }
+
+        public Task<FuturesOrderResult> CancelOrderAsync(string orderId, CancellationToken cancellationToken)
+        {
+            CancelledOrders.Add(orderId);
+            return Task.FromResult(new FuturesOrderResult("cancelled", orderId, null));
         }
 
         public Task<bool> SetLeveragePreferenceAsync(string symbol, decimal maxLeverage, CancellationToken cancellationToken)

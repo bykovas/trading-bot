@@ -58,8 +58,10 @@ public sealed class FuturesVirtualPortfolioTests
         Assert.Equal(8m, fill.Action.FilledNotionalEur);
         Assert.Equal(20m, fill.Action.RequestedNotionalEur);
         Assert.Equal(0.4m, fill.Action.MakerFillRate);
-        Assert.Equal(97.6m, position.StopLossPrice);
-        Assert.Equal(103.6m, position.TakeProfitPrice);
+        Assert.Equal(98m, position.StopLossPrice);
+        Assert.Equal(103m, position.TakeProfitPrice);
+        Assert.Equal(96m, position.ExchangeStopLossPrice);
+        Assert.Equal(106m, position.ExchangeTakeProfitPrice);
     }
 
     private static (FuturesVirtualPortfolio Portfolio, PortfolioState State) Setup(bool allowShorts = true)
@@ -81,6 +83,8 @@ public sealed class FuturesVirtualPortfolioTests
         Assert.Equal(90m, state.CashEur);                       // 100 - 10 margin (no fee)
         Assert.Equal(98m, position.StopLossPrice);              // -2%
         Assert.Equal(103m, position.TakeProfitPrice);           // +3%
+        Assert.Equal(96m, position.ExchangeStopLossPrice);      // emergency -4% with 200% multiplier
+        Assert.Equal(106m, position.ExchangeTakeProfitPrice);   // emergency +6% with 200% multiplier
         Assert.Equal(PositionOrigins.Bot, position.Origin);
         Assert.NotNull(position.LiquidationPrice);
         Assert.True(position.LiquidationPrice < 100m);

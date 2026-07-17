@@ -153,6 +153,59 @@ public sealed class KrakenFuturesBrokerTests
             });
     }
 
+    [Fact]
+    public async Task Send_trailing_stop_order_places_reduce_only_percent_trailing_stop()
+    {
+        var handler = new CapturingHandler("""
+            {"result":"success","sendStatus":{"status":"placed","order_id":"trail-1"}}
+            """);
+        using var client = new HttpClient(handler);
+        var broker = new KrakenFuturesBroker(client, new KrakenOptions
+        {
+            BaseUrl = "https://futures.kraken.test",
+            ApiKey = "public",
+            ApiSecret = Convert.ToBase64String(Encoding.UTF8.GetBytes("secret"))
+        });
+
+        var result = await broker.SendTrailingStopOrderAsync("PF_BCHUSD", "sell", 1.86m, 2m, "mark", reduceOnly: true, CancellationToken.None);
+
+        Assert.True(result.Accepted);
+        Assert.Equal("trail-1", result.OrderId);
+        Assert.Equal(HttpMethod.Post, handler.Request!.Method);
+        Assert.Equal("https://futures.kraken.test/derivatives/api/v3/sendorder", handler.Request.RequestUri!.ToString());
+        Assert.Contains("orderType=trailing_stop", handler.Body);
+        Assert.Contains("symbol=PF_BCHUSD", handler.Body);
+        Assert.Contains("side=sell", handler.Body);
+        Assert.Contains("size=1.86", handler.Body);
+        Assert.Contains("trailingStopMaxDeviation=2", handler.Body);
+        Assert.Contains("trailingStopDeviationUnit=PERCENT", handler.Body);
+        Assert.Contains("triggerSignal=mark", handler.Body);
+        Assert.Contains("reduceOnly=true", handler.Body);
+    }
+
+    [Fact]
+    public async Task Cancel_order_posts_order_id_and_accepts_cancelled_status()
+    {
+        var handler = new CapturingHandler("""
+            {"result":"success","cancelStatus":{"status":"cancelled","order_id":"sl-1"}}
+            """);
+        using var client = new HttpClient(handler);
+        var broker = new KrakenFuturesBroker(client, new KrakenOptions
+        {
+            BaseUrl = "https://futures.kraken.test",
+            ApiKey = "public",
+            ApiSecret = Convert.ToBase64String(Encoding.UTF8.GetBytes("secret"))
+        });
+
+        var result = await broker.CancelOrderAsync("sl-1", CancellationToken.None);
+
+        Assert.True(result.Accepted);
+        Assert.Equal("sl-1", result.OrderId);
+        Assert.Equal(HttpMethod.Post, handler.Request!.Method);
+        Assert.Equal("https://futures.kraken.test/derivatives/api/v3/cancelorder", handler.Request.RequestUri!.ToString());
+        Assert.Contains("order_id=sl-1", handler.Body);
+    }
+
     private static string ExpectedAuthent(string endpointPath, string nonce, string postData, string secret)
     {
         var payload = Encoding.UTF8.GetBytes(postData + nonce + endpointPath);

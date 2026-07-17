@@ -103,6 +103,13 @@ public sealed class PortfolioPosition
     public decimal? AtrPct { get; set; }
     public decimal? StopDistancePct { get; set; }
     public decimal? TakeProfitDistancePct { get; set; }
+    public decimal? ExchangeStopLossPrice { get; set; }
+    public decimal? ExchangeTakeProfitPrice { get; set; }
+    public decimal? ExchangeProtectionMultiplierPercent { get; set; }
+    public string? TrailingStopState { get; set; }
+    public decimal? TrailingStopPercent { get; set; }
+    public string? TrailingStopOrderId { get; set; }
+    public DateTimeOffset? TrailingActivatedAtUtc { get; set; }
 
     // Consecutive decision cycles in which the current score sat at or below the
     // configured defensive score level. Reset to 0 whenever the score recovers.
@@ -154,6 +161,13 @@ public sealed class PortfolioPosition
         AtrPct = AtrPct,
         StopDistancePct = StopDistancePct,
         TakeProfitDistancePct = TakeProfitDistancePct,
+        ExchangeStopLossPrice = ExchangeStopLossPrice,
+        ExchangeTakeProfitPrice = ExchangeTakeProfitPrice,
+        ExchangeProtectionMultiplierPercent = ExchangeProtectionMultiplierPercent,
+        TrailingStopState = TrailingStopState,
+        TrailingStopPercent = TrailingStopPercent,
+        TrailingStopOrderId = TrailingStopOrderId,
+        TrailingActivatedAtUtc = TrailingActivatedAtUtc,
         LowScoreCycles = LowScoreCycles,
         Leverage = Leverage,
         InitialMarginEur = InitialMarginEur,

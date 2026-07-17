@@ -42,6 +42,17 @@ internal interface IFuturesBroker
         bool reduceOnly,
         CancellationToken cancellationToken);
 
+    Task<FuturesOrderResult> SendTrailingStopOrderAsync(
+        string symbol,
+        string side,
+        decimal size,
+        decimal trailingStopPercent,
+        string triggerSignal,
+        bool reduceOnly,
+        CancellationToken cancellationToken);
+
+    Task<FuturesOrderResult> CancelOrderAsync(string orderId, CancellationToken cancellationToken);
+
     // Sets the per-symbol max leverage (Kraken margin preference). Kraken Futures
     // leverage is NOT an order field, so this MUST be set before an entry order or
     // the position inherits the exchange/account default (often 10x+), posting a
@@ -75,7 +86,9 @@ internal sealed record FuturesOrderResult(string Status, string? OrderId, string
     public bool Accepted =>
         Status.Equals("placed", StringComparison.OrdinalIgnoreCase)
         || Status.Equals("filled", StringComparison.OrdinalIgnoreCase)
-        || Status.Equals("executed", StringComparison.OrdinalIgnoreCase);
+        || Status.Equals("executed", StringComparison.OrdinalIgnoreCase)
+        || Status.Equals("cancelled", StringComparison.OrdinalIgnoreCase)
+        || Status.Equals("canceled", StringComparison.OrdinalIgnoreCase);
 
     public bool FillKnown => Fill is { Quantity: > 0m, AveragePrice: > 0m };
 

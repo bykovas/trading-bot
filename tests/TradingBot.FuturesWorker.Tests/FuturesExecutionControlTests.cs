@@ -186,6 +186,19 @@ public sealed class FuturesExecutionControlTests
             CancellationToken cancellationToken) =>
             Task.FromResult(new FuturesOrderResult("placed", $"{orderType}-1", null));
 
+        public Task<FuturesOrderResult> SendTrailingStopOrderAsync(
+            string symbol,
+            string side,
+            decimal size,
+            decimal trailingStopPercent,
+            string triggerSignal,
+            bool reduceOnly,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new FuturesOrderResult("placed", "trailing-1", null));
+
+        public Task<FuturesOrderResult> CancelOrderAsync(string orderId, CancellationToken cancellationToken) =>
+            Task.FromResult(new FuturesOrderResult("cancelled", orderId, null));
+
         public Task<bool> SetLeveragePreferenceAsync(string symbol, decimal maxLeverage, CancellationToken cancellationToken) =>
             Task.FromResult(true);
 

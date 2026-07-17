@@ -136,10 +136,15 @@ internal sealed class FuturesVirtualPortfolio(
         state.CashEur -= initialMargin + fee;
 
         var liquidationPrice = FuturesMath.EstimateLiquidationPrice(side, fillPrice, leverage, config.Margin.MaintenanceMarginRatePercent);
-        var tpDistancePct = entryPlan?.TakeProfitDistancePct ?? config.TpSl.TakeProfitPercent;
-        var slDistancePct = entryPlan?.StopDistancePct ?? config.TpSl.StopLossPercent;
+        var tpDistancePct = config.TpSl.TakeProfitPercent;
+        var slDistancePct = config.TpSl.StopLossPercent;
+        var protectionMultiplier = Math.Max(0m, config.TpSl.ExchangeProtectionMultiplierPercent) / 100m;
+        var exchangeTpDistancePct = tpDistancePct * protectionMultiplier;
+        var exchangeSlDistancePct = slDistancePct * protectionMultiplier;
         var tpDistance = fillPrice * tpDistancePct / 100m;
         var slDistance = fillPrice * slDistancePct / 100m;
+        var exchangeTpDistance = fillPrice * exchangeTpDistancePct / 100m;
+        var exchangeSlDistance = fillPrice * exchangeSlDistancePct / 100m;
         state.Positions.Add(new PortfolioPosition
         {
             Pair = pair,
@@ -159,6 +164,12 @@ internal sealed class FuturesVirtualPortfolio(
             FundingPaidEur = 0m,
             StopLossPrice = config.TpSl.Enabled ? (side == "SHORT" ? fillPrice + slDistance : fillPrice - slDistance) : null,
             TakeProfitPrice = config.TpSl.Enabled ? (side == "SHORT" ? fillPrice - tpDistance : fillPrice + tpDistance) : null,
+            StopDistancePct = config.TpSl.Enabled ? slDistancePct : null,
+            TakeProfitDistancePct = config.TpSl.Enabled ? tpDistancePct : null,
+            ExchangeStopLossPrice = config.TpSl.Enabled ? (side == "SHORT" ? fillPrice + exchangeSlDistance : fillPrice - exchangeSlDistance) : null,
+            ExchangeTakeProfitPrice = config.TpSl.Enabled ? (side == "SHORT" ? fillPrice - exchangeTpDistance : fillPrice + exchangeTpDistance) : null,
+            ExchangeProtectionMultiplierPercent = config.TpSl.ExchangeProtectionMultiplierPercent,
+            TrailingStopPercent = config.TpSl.TrailingStopPercent,
             Origin = PositionOrigins.Bot,
             EntryAtr = entryPlan?.AtrPct,
             RoundTripCostEstimatePct = entryPlan?.RoundTripCostEstimatePct,

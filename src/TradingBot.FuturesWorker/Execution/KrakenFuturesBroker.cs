@@ -288,6 +288,75 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
         return ParseOrderResult(root);
     }
 
+    public async Task<FuturesOrderResult> SendTrailingStopOrderAsync(
+        string symbol,
+        string side,
+        decimal size,
+        decimal trailingStopPercent,
+        string triggerSignal,
+        bool reduceOnly,
+        CancellationToken cancellationToken)
+    {
+        if (size <= 0m)
+        {
+            return FuturesOrderResult.Rejected("size must be positive");
+        }
+
+        if (trailingStopPercent <= 0m)
+        {
+            return FuturesOrderResult.Rejected("trailing stop percent must be positive");
+        }
+
+        var normalizedTrigger = triggerSignal.Equals("last", StringComparison.OrdinalIgnoreCase)
+            ? "last"
+            : triggerSignal.Equals("index", StringComparison.OrdinalIgnoreCase)
+                ? "index"
+                : "mark";
+        var parameters = new List<KeyValuePair<string, string>>
+        {
+            new("orderType", "trailing_stop"),
+            new("symbol", symbol),
+            new("side", side.Equals("sell", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy"),
+            new("size", FormatDecimal(size)),
+            new("trailingStopMaxDeviation", FormatDecimal(trailingStopPercent)),
+            new("trailingStopDeviationUnit", "PERCENT"),
+            new("triggerSignal", normalizedTrigger),
+            new("reduceOnly", reduceOnly ? "true" : "false"),
+            new("cliOrdId", $"tb-{Guid.NewGuid():N}")
+        };
+
+        using var doc = await SendPrivateAsync(HttpMethod.Post, "/derivatives/api/v3/sendorder", parameters, cancellationToken);
+        var root = doc.RootElement;
+        if (!IsSuccess(root))
+        {
+            return FuturesOrderResult.Rejected(ErrorText(root, "sendorder failed"));
+        }
+
+        return ParseOrderResult(root);
+    }
+
+    public async Task<FuturesOrderResult> CancelOrderAsync(string orderId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(orderId))
+        {
+            return FuturesOrderResult.Rejected("order id is required");
+        }
+
+        var parameters = new List<KeyValuePair<string, string>>
+        {
+            new("order_id", orderId)
+        };
+
+        using var doc = await SendPrivateAsync(HttpMethod.Post, "/derivatives/api/v3/cancelorder", parameters, cancellationToken);
+        var root = doc.RootElement;
+        if (!IsSuccess(root))
+        {
+            return FuturesOrderResult.Rejected(ErrorText(root, "cancelorder failed"));
+        }
+
+        return ParseOrderResult(root);
+    }
+
     public async Task<bool> SetLeveragePreferenceAsync(string symbol, decimal maxLeverage, CancellationToken cancellationToken)
     {
         if (maxLeverage <= 0m)
@@ -393,6 +462,8 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
     {
         var sendStatus = root.TryGetProperty("sendStatus", out var statusElement)
             ? statusElement
+            : root.TryGetProperty("cancelStatus", out var cancelStatusElement)
+                ? cancelStatusElement
             : root;
         var status = GetString(sendStatus, "status") ?? "unknown";
         var orderId = GetString(sendStatus, "order_id") ?? GetString(sendStatus, "orderId");

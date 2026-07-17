@@ -1,3 +1,11 @@
+## 2026-07-17-futures-fixed-working-exits-trailing-protection
+
+- Bot-owned futures positions now use fixed working exit policy from `TpSl`: working TP `TakeProfitPercent` and working SL `StopLossPercent` are frozen from entry and no longer silently inherit ATR-derived `entryPlan` distances.
+- Live bot-owned entries place farther exchange reduce-only protection using `ExchangeProtectionMultiplierPercent`: with TP=3, SL=1, multiplier=200, Kraken receives emergency TP +6% and emergency SL -2% while the bot monitors +3%/-1%.
+- Working SL/TP checks use closeable live quotes when available: LONG uses bid and SHORT uses ask before falling back to configured mark/last. `KRAKEN_SYNC`/external positions are excluded from simulated/working TP/SL triggers and from new protection/trailing mutations.
+- When a bot-owned live position reaches working TP, the worker cancels protective TP/SL and arms a reduce-only Kraken `trailing_stop` using `TrailingStopPercent`; if trailing creation fails after cancel, it immediately attempts to restore the protective SL.
+- Kraken Futures broker support added for single-order cancel and percent trailing-stop orders; portfolio state now records separate working prices, exchange protection prices, and trailing-stop state.
+
 ## 2026-07-17-futures-external-position-soft-exit-guard
 
 - Futures positions now carry `Origin`: worker-opened entries are tagged `BOT`, while live Kraken reconciliation tags newly adopted exchange positions as `KRAKEN_SYNC` and preserves any existing origin.
