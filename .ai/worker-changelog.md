@@ -1,3 +1,8 @@
+## 2026-07-18-futures-partial-collateral-entry-sizing
+
+- Futures entry sizing now shrinks a valid entry plan to the remaining free collateral before portfolio/risk gates and live execution. If the normal target (for example 40 EUR margin × 10x) does not fit, the worker tries the largest smaller notional that fits `state.CashEur` including entry taker fee and the configured account margin-utilization cap.
+- The reduced plan keeps the same signal, stop/TP distances, leverage, funding/depth checks, Kraken precision checks, and live price-deviation guard. If the leftover amount is too small for Kraken quantity precision or any other existing rule, the entry is still skipped with the existing reason.
+
 ## 2026-07-17-futures-tpsl-close-explainability
 
 - Futures close actions now carry the frozen TP/SL distances, estimated open risk, and exact entry/fill realized percent from the closed position. Stop-loss/take-profit journal rows can show the actual working level that fired instead of losing that context on close.

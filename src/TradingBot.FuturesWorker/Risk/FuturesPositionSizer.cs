@@ -126,6 +126,67 @@ internal static class FuturesPositionSizer
             NotionalCapReason: capReason,
             RawNotionalBeforeCapsEur: decimal.Round(rawNotional, 6));
     }
+
+    public static PositionSizePlan FitToAvailableCollateral(
+        PositionSizePlan plan,
+        FuturesBotConfiguration config,
+        PortfolioState state,
+        decimal usedMarginEur,
+        ExecutionCostEstimate costs)
+    {
+        if (plan.SizedNotionalEur <= 0m || plan.EffectiveLeverage <= 0m)
+        {
+            return plan;
+        }
+
+        var equity = state.TotalValueEur;
+        var maxUsedMargin = equity > 0m
+            ? equity * config.Margin.MaxAccountMarginUtilizationPercent / 100m
+            : 0m;
+        var remainingUtilizationMargin = Math.Max(0m, maxUsedMargin - usedMarginEur);
+
+        // Futures state.CashEur is free collateral: virtual cash after committed margin
+        // and live Kraken availableMargin after account sync. Include entry fee so a
+        // partial entry that fits the margin does not immediately fail portfolio cash.
+        var entryFeePct = costs.EntryFeePct > 0m ? costs.EntryFeePct : config.Fees.TakerPct;
+        var cashLimitedNotional = MaxNotionalFromCash(state.CashEur, plan.EffectiveLeverage, entryFeePct);
+        var utilizationLimitedNotional = remainingUtilizationMargin * plan.EffectiveLeverage;
+        var collateralLimitedNotional = Math.Min(cashLimitedNotional, utilizationLimitedNotional);
+        if (collateralLimitedNotional <= 0m || collateralLimitedNotional >= plan.SizedNotionalEur)
+        {
+            return plan;
+        }
+
+        var sizedNotional = decimal.Round(collateralLimitedNotional, 6);
+        var requiredMarginEur = decimal.Round(sizedNotional / plan.EffectiveLeverage, 6);
+        var projectedStopLossEur = decimal.Round(sizedNotional * plan.StopDistancePct / 100m, 8);
+        var projectedOpenRiskEur = decimal.Round(
+            projectedStopLossEur + sizedNotional * (costs.RoundTripCostPct + config.Risk.EstimatedEmergencyExitCostPct) / 100m,
+            8);
+        var reason = string.IsNullOrWhiteSpace(plan.NotionalCapReason)
+            ? "AVAILABLE_COLLATERAL"
+            : $"{plan.NotionalCapReason}+AVAILABLE_COLLATERAL";
+
+        return plan with
+        {
+            SizedNotionalEur = sizedNotional,
+            RequiredMarginEur = requiredMarginEur,
+            ProjectedStopLossEur = projectedStopLossEur,
+            ProjectedOpenRiskEur = projectedOpenRiskEur,
+            NotionalCapReason = reason
+        };
+    }
+
+    private static decimal MaxNotionalFromCash(decimal availableCashEur, decimal leverage, decimal entryFeePct)
+    {
+        if (availableCashEur <= 0m || leverage <= 0m)
+        {
+            return 0m;
+        }
+
+        var cashCostPerNotional = 1m / leverage + Math.Max(0m, entryFeePct) / 100m;
+        return cashCostPerNotional <= 0m ? 0m : availableCashEur / cashCostPerNotional;
+    }
 }
 
 internal sealed record PositionSizePlan(

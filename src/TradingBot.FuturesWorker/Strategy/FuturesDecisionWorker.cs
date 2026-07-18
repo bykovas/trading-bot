@@ -1749,6 +1749,7 @@ internal sealed class FuturesDecisionWorker(
         var costs = FuturesExecutionCostModel.Estimate(config, desired, marketState.Quote?.FundingRatePercent);
         var leverage = config.Futures.DefaultLeverage;
         var size = FuturesPositionSizer.Size(config, atrPct, costs, leverage);
+        size = FuturesPositionSizer.FitToAvailableCollateral(size, config, state, portfolio.UsedMarginEur(state), costs);
         var queueAhead = QueueAheadEur(marketState, desired);
         // Taker IOC model: plan the full risk-sized notional. Live still refreshes the
         // quote and enforces MaxEntryPriceDeviationPct before submit.

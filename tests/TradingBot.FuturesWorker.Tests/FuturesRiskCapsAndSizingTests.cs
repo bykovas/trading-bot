@@ -192,6 +192,37 @@ public sealed class FuturesRiskCapsAndSizingTests
         Assert.Contains(eval.Reasons, r => r.Contains("INSUFFICIENT_AVAILABLE_MARGIN"));
     }
 
+    [Fact]
+    public void Entry_plan_shrinks_to_remaining_free_collateral_before_risk_gate()
+    {
+        var config = LiveConfig();
+        var costs = FuturesExecutionCostModel.Estimate(config, FuturesDesiredExposure.Long, 0m);
+        var full = FuturesPositionSizer.Size(config, atrPct: 0.5m, costs, leverage: 10m);
+        Assert.Equal(400m, full.SizedNotionalEur);
+        Assert.Equal(40m, full.RequiredMarginEur);
+
+        var state = new PortfolioState { CashEur = 3m };
+        var existing = OpenLong(500m, 50m);
+        existing.MarketValueEur = 97m;
+        state.Positions.Add(existing);
+        var shrunk = FuturesPositionSizer.FitToAvailableCollateral(
+            full,
+            config,
+            state,
+            usedMarginEur: 50m,
+            costs);
+
+        Assert.True(shrunk.SizedNotionalEur < full.SizedNotionalEur);
+        Assert.Equal("AVAILABLE_COLLATERAL", shrunk.NotionalCapReason);
+        Assert.Equal(decimal.Round(3m / (1m / 10m + config.Fees.TakerPct / 100m), 6), shrunk.SizedNotionalEur);
+        Assert.Equal(decimal.Round(shrunk.SizedNotionalEur / 10m, 6), shrunk.RequiredMarginEur);
+        Assert.True(shrunk.ProjectedStopLossEur < full.ProjectedStopLossEur);
+
+        var risk = new MarginRiskManager(config);
+        var eval = risk.EvaluateEntry(LongInputs(config, state, shrunk.SizedNotionalEur, 10m, shrunk.StopDistancePct, shrunk.ProjectedOpenRiskEur, usedMarginEur: 50m));
+        Assert.True(eval.Approved);
+    }
+
     // 5. Requested leverage above the cap is clamped; effective leverage < requested.
     [Fact]
     public void Actual_leverage_is_clamped_below_requested()
