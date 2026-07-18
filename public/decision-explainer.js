@@ -28,6 +28,7 @@
     REJECT_NEGATIVE_RECENT_PRICE_ACTION: "Свежая цена движется против LONG",
     REJECT_NO_VOLUME_CONFIRMATION: "Объём не подтвердил движение",
     REJECT_NO_MOMENTUM_CONFIRMATION: "Momentum не подтвердил движение",
+    REJECT_NO_DIRECTIONAL_SCORE: "Ни LONG, ни SHORT score не прошли входной порог",
     REJECT_PRICE_EXTENDED: "Цена уже слишком далеко ушла от точки сигнала",
     REJECT_ALREADY_HOLDING: "Позиция по этой паре уже открыта",
     REJECT_ACTIVE_PAIR_FILTER: "Пара не вошла в активный набор этого цикла",
@@ -160,7 +161,8 @@
     const short = inferShortFields(decision);
     const bullishGap = number(decision.bullishEmaGapPercent);
     const emaMin = number(decision.minimumEmaGapPercent);
-    const shortThreshold = number(first(decision.longScoreThreshold, decision.shortScoreThreshold, 0.85));
+    const longThreshold = number(decision.longScoreThreshold);
+    const shortThreshold = number(first(decision.shortScoreThreshold, decision.longScoreThreshold, 0.85));
 
     if (actionName === "NO_ORDER" && side === "SHORT") {
       if (emaMin !== null && short.bearishGap !== null && short.bearishGap < emaMin) return "SHORT_EMA_NOT_CONFIRMED";
@@ -169,8 +171,17 @@
     }
     if (actionName === "NO_ORDER" && side === "LONG") {
       if (emaMin !== null && bullishGap !== null && bullishGap < emaMin) return "LONG_EMA_NOT_CONFIRMED";
-      if (number(decision.score) !== null && number(decision.longScoreThreshold) !== null && number(decision.score) < number(decision.longScoreThreshold)) return "REJECT_SCORE_BELOW_THRESHOLD";
+      if (number(decision.score) !== null && longThreshold !== null && number(decision.score) < longThreshold) return "REJECT_SCORE_BELOW_THRESHOLD";
       if (String(decision.priceActionDirection || "").includes("FALLING")) return "REJECT_NEGATIVE_RECENT_PRICE_ACTION";
+    }
+    if (actionName === "NO_ORDER" && side === "NONE") {
+      const longScore = number(decision.score);
+      if (longScore !== null && longThreshold !== null && longScore < longThreshold
+        && short.shortScore !== null && shortThreshold !== null && short.shortScore < shortThreshold) {
+        return "REJECT_NO_DIRECTIONAL_SCORE";
+      }
+      if (longScore !== null && longThreshold !== null && longScore < longThreshold) return "REJECT_SCORE_BELOW_THRESHOLD";
+      if (short.shortScore !== null && shortThreshold !== null && short.shortScore < shortThreshold) return "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD";
     }
     if (/falling snapshots/.test(all)) return "SHORT_FALLING_SNAPSHOTS_NOT_CONFIRMED";
     if (/rising snapshots/.test(all)) return "LONG_RISING_SNAPSHOTS_NOT_CONFIRMED";
@@ -209,6 +220,7 @@
     if (/HOLD/.test(actionName)) return TEXT[code] || `Позиция ${pair} остаётся открытой; нового ордера нет.`;
     if (code === "SHORT_EMA_NOT_CONFIRMED") return `SHORT не рассматривался дальше: расхождение EMA вниз ${pct(short.bearishGap)} меньше обязательного ${pct(decision.minimumEmaGapPercent)}.`;
     if (code === "LONG_EMA_NOT_CONFIRMED") return `LONG не рассматривался дальше: score прошёл, но EMA gap вверх ${pct(decision.bullishEmaGapPercent)} меньше обязательного ${pct(decision.minimumEmaGapPercent)}.`;
+    if (code === "REJECT_NO_DIRECTIONAL_SCORE") return `Нет направления для входа: LONG score ${fmt(decision.score)} ниже порога ${fmt(decision.longScoreThreshold)}, и SHORT score ${fmt(short.shortScore)} ниже порога ${fmt(first(decision.shortScoreThreshold, decision.longScoreThreshold))}.`;
     if (code === "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD") return `SHORT не рассматривался дальше: SHORT score ${fmt(short.shortScore)} ниже порога ${fmt(threshold)}. Показанный общий score к этому отказу не относится.`;
     if (code === "SHORT_DOWNSIDE_CONFIRMATION_MISSING") return `Bearish EMA была, но не хватило подтверждения вниз: нужен хотя бы один из факторов — candle momentum, повышенный объём или цена ниже trend MA.`;
     if (code && TEXT[code]) return `${TEXT[code]}. Поэтому новый ордер не отправлен.`;

@@ -105,6 +105,28 @@ function decision(overrides = {}) {
 }
 
 {
+  const result = analyze(decision({
+    pair: "BEAM/USD",
+    score: 0.5,
+    shortScore: 0.3,
+    longScoreThreshold: 0.8,
+    shortScoreThreshold: 0.85,
+    desiredPosition: "FLAT",
+    hasBullishStructure: false,
+    hasBearishStructure: false,
+    bearishEmaGapPercent: 0.066,
+    priceActionDirection: "FALLING",
+    priceActionTrendPercent: -0.073,
+    spreadPercent: 3.081,
+    entryRejectionReason: "REJECT_NO_FUTURES_SIGNAL"
+  }));
+  assert.equal(result.code, "REJECT_NO_DIRECTIONAL_SCORE");
+  assert.match(result.headline, /Ни LONG, ни SHORT/);
+  assert.match(result.summary, /LONG score 0\.50/);
+  assert.match(result.summary, /SHORT score 0\.30/);
+}
+
+{
   // Legacy records did not persist ShortScore/bearish gap; recover both from contributions.
   const result = analyze(decision({
     hasBearishStructure: true,
@@ -126,6 +148,7 @@ for (const code of [
   "LONG_EMA_NOT_CONFIRMED", "LONG_RISING_SNAPSHOTS_NOT_CONFIRMED", "LONG_SHORT_SLOPE_NOT_POSITIVE", "LONG_FRESH_TAPE_NOT_CONFIRMED",
   "LONG_ENTRY_TOO_CLOSE_TO_LOCAL_HIGH", "LONG_ENTRY_DRIFT_TOO_HIGH", "ENTRY_STALE_NEAR_HIGH",
   "REJECT_SCORE_BELOW_THRESHOLD", "REJECT_SPREAD_TOO_WIDE", "REJECT_NO_VOLUME_CONFIRMATION", "REJECT_NO_MOMENTUM_CONFIRMATION",
+  "REJECT_NO_DIRECTIONAL_SCORE",
   "REJECT_COOLDOWN", "REJECT_MAX_POSITIONS", "REJECT_DAILY_RISK", "REJECT_RISK_LIMITS", "REJECT_CORRELATION_LIMIT",
   "DESIRED_LONG", "MIN_HOLD_BLOCK", "MIN_PROFIT_BLOCK", "STOPLOSS_COOLDOWN", "HOURLY_ENTRY_LIMIT",
   "LIVE_BROKER_UNAVAILABLE", "LIVE_ORDER_REJECTED", "LIVE_ENTRY_PRICE_DEVIATION", "FILL_RECONCILIATION_PENDING",
