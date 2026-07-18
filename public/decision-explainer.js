@@ -164,6 +164,7 @@
     const longThreshold = number(decision.longScoreThreshold);
     const shortThreshold = number(first(decision.shortScoreThreshold, decision.longScoreThreshold, 0.85));
 
+    if (/holding existing exposure|already holding|existing exposure/.test(all)) return "REJECT_ALREADY_HOLDING";
     if (actionName === "NO_ORDER" && side === "SHORT") {
       if (emaMin !== null && short.bearishGap !== null && short.bearishGap < emaMin) return "SHORT_EMA_NOT_CONFIRMED";
       if (short.shortScore !== null && shortThreshold !== null && short.shortScore < shortThreshold) return "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD";
@@ -221,6 +222,7 @@
     if (code === "SHORT_EMA_NOT_CONFIRMED") return `SHORT не рассматривался дальше: расхождение EMA вниз ${pct(short.bearishGap)} меньше обязательного ${pct(decision.minimumEmaGapPercent)}.`;
     if (code === "LONG_EMA_NOT_CONFIRMED") return `LONG не рассматривался дальше: score прошёл, но EMA gap вверх ${pct(decision.bullishEmaGapPercent)} меньше обязательного ${pct(decision.minimumEmaGapPercent)}.`;
     if (code === "REJECT_NO_DIRECTIONAL_SCORE") return `Нет направления для входа: LONG score ${fmt(decision.score)} ниже порога ${fmt(decision.longScoreThreshold)}, и SHORT score ${fmt(short.shortScore)} ниже порога ${fmt(first(decision.shortScoreThreshold, decision.longScoreThreshold))}.`;
+    if (code === "REJECT_ALREADY_HOLDING") return `По ${pair} уже есть открытая позиция, поэтому бот не добавляет второй вход. Дальше эту позицию ведут TP/SL, trailing или разрешённые правила выхода.`;
     if (code === "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD") return `SHORT не рассматривался дальше: SHORT score ${fmt(short.shortScore)} ниже порога ${fmt(threshold)}. Показанный общий score к этому отказу не относится.`;
     if (code === "SHORT_DOWNSIDE_CONFIRMATION_MISSING") return `Bearish EMA была, но не хватило подтверждения вниз: нужен хотя бы один из факторов — candle momentum, повышенный объём или цена ниже trend MA.`;
     if (code && TEXT[code]) return `${TEXT[code]}. Поэтому новый ордер не отправлен.`;

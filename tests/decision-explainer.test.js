@@ -127,6 +127,25 @@ function decision(overrides = {}) {
 }
 
 {
+  const result = analyze(decision({
+    pair: "SYN/USD",
+    score: 0.65,
+    shortScore: 0.3,
+    hasBullishStructure: true,
+    bullishEmaGapPercent: 1.671,
+    dryRunAction: {
+      action: "NO_ORDER",
+      side: "LONG"
+    },
+    riskReasons: ["holding existing exposure; TP/SL and reversal rules govern this pair"]
+  }));
+  assert.equal(result.code, "REJECT_ALREADY_HOLDING");
+  assert.match(result.headline, /уже открыта/);
+  assert.match(result.summary, /уже есть открытая позиция/);
+  assert.match(result.summary, /TP\/SL/);
+}
+
+{
   // Legacy records did not persist ShortScore/bearish gap; recover both from contributions.
   const result = analyze(decision({
     hasBearishStructure: true,
@@ -148,7 +167,7 @@ for (const code of [
   "LONG_EMA_NOT_CONFIRMED", "LONG_RISING_SNAPSHOTS_NOT_CONFIRMED", "LONG_SHORT_SLOPE_NOT_POSITIVE", "LONG_FRESH_TAPE_NOT_CONFIRMED",
   "LONG_ENTRY_TOO_CLOSE_TO_LOCAL_HIGH", "LONG_ENTRY_DRIFT_TOO_HIGH", "ENTRY_STALE_NEAR_HIGH",
   "REJECT_SCORE_BELOW_THRESHOLD", "REJECT_SPREAD_TOO_WIDE", "REJECT_NO_VOLUME_CONFIRMATION", "REJECT_NO_MOMENTUM_CONFIRMATION",
-  "REJECT_NO_DIRECTIONAL_SCORE",
+  "REJECT_NO_DIRECTIONAL_SCORE", "REJECT_ALREADY_HOLDING",
   "REJECT_COOLDOWN", "REJECT_MAX_POSITIONS", "REJECT_DAILY_RISK", "REJECT_RISK_LIMITS", "REJECT_CORRELATION_LIMIT",
   "DESIRED_LONG", "MIN_HOLD_BLOCK", "MIN_PROFIT_BLOCK", "STOPLOSS_COOLDOWN", "HOURLY_ENTRY_LIMIT",
   "LIVE_BROKER_UNAVAILABLE", "LIVE_ORDER_REJECTED", "LIVE_ENTRY_PRICE_DEVIATION", "FILL_RECONCILIATION_PENDING",
