@@ -82,6 +82,29 @@ function decision(overrides = {}) {
 }
 
 {
+  const result = analyze(decision({
+    pair: "B3/USD",
+    score: 0.8,
+    longScoreThreshold: 0.8,
+    desiredPosition: "FLAT",
+    hasBullishStructure: true,
+    bullishEmaGapPercent: 0.18315018315018315,
+    minimumEmaGapPercent: 0.2,
+    priceActionDirection: "FALLING",
+    priceActionTrendPercent: -0.159,
+    entryRejectionReason: "REJECT_NO_FUTURES_SIGNAL",
+    riskReasons: ["no futures long: score 0.8 passed but EMA gap 0.183% is below required 0.2%"],
+    contributions: [
+      { name: "EMA", value: 0.25, reason: "fast EMA is above slow EMA by 0.183% but below configured minimum 0.2%; partial early-structure credit" }
+    ]
+  }));
+  assert.equal(result.code, "LONG_EMA_NOT_CONFIRMED");
+  assert.match(result.headline, /LONG EMA/);
+  assert.match(result.summary, /0\.183%/);
+  assert.match(result.summary, /0\.200%/);
+}
+
+{
   // Legacy records did not persist ShortScore/bearish gap; recover both from contributions.
   const result = analyze(decision({
     hasBearishStructure: true,
@@ -100,7 +123,7 @@ for (const code of [
   "SHORT_RANGE_UNAVAILABLE", "SHORT_PULLBACK_FROM_24H_HIGH_TOO_SMALL", "SHORT_FALLING_SNAPSHOTS_NOT_CONFIRMED",
   "SHORT_SLOPE_NOT_NEGATIVE", "SHORT_FRESH_TAPE_NOT_CONFIRMED", "SHORT_ENTRY_TOO_CLOSE_TO_LOCAL_LOW", "SHORT_ENTRY_DRIFT_TOO_HIGH",
   "LONG_24H_RANGE_UNAVAILABLE", "LONG_24H_RANGE_TOO_NARROW", "LONG_24H_RANGE_POSITION_TOO_HIGH", "LONG_REBOUND_FROM_24H_LOW_TOO_SMALL",
-  "LONG_RISING_SNAPSHOTS_NOT_CONFIRMED", "LONG_SHORT_SLOPE_NOT_POSITIVE", "LONG_FRESH_TAPE_NOT_CONFIRMED",
+  "LONG_EMA_NOT_CONFIRMED", "LONG_RISING_SNAPSHOTS_NOT_CONFIRMED", "LONG_SHORT_SLOPE_NOT_POSITIVE", "LONG_FRESH_TAPE_NOT_CONFIRMED",
   "LONG_ENTRY_TOO_CLOSE_TO_LOCAL_HIGH", "LONG_ENTRY_DRIFT_TOO_HIGH", "ENTRY_STALE_NEAR_HIGH",
   "REJECT_SCORE_BELOW_THRESHOLD", "REJECT_SPREAD_TOO_WIDE", "REJECT_NO_VOLUME_CONFIRMATION", "REJECT_NO_MOMENTUM_CONFIRMATION",
   "REJECT_COOLDOWN", "REJECT_MAX_POSITIONS", "REJECT_DAILY_RISK", "REJECT_RISK_LIMITS", "REJECT_CORRELATION_LIMIT",
