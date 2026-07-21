@@ -1,3 +1,11 @@
+## 2026-07-18-spot-live-kraken-reconciliation-and-sell-fill
+
+- Root cause of spot live diverging from the Kraken dashboard (while futures matches): the spot broker only exposed balances, so reconciliation could correct quantity and total cash but never the real cost basis, and a live SELL whose fill could not be confirmed by QueryOrders was committed at a MODELED price — recording a trade that never matched Kraken.
+- Added `ISpotBroker.GetTradeHistoryAsync` (Kraken TradesHistory) and used it to: recover a live SELL fill by ordertxid when QueryOrders has not yet reflected it, and reconcile each holding's real average cost basis (buys add quote + fee, sells reduce pro-rata). Imported and existing positions now take their entry price from trade history instead of the current last price.
+- Error-handling symmetry: a live SELL whose fill cannot be confirmed by either QueryOrders or trade history is no longer booked as a modeled close — like a BUY, it records "not executed" and lets the next balance/history reconcile correct the state, so the DB never shows a phantom or wrong-price sell.
+- A held position whose pair is not in this cycle's discovery universe is no longer removed on sight: its balance is resolved directly, so a real Kraken holding is kept (and its cost basis reconciled) instead of being dropped and re-imported at a wrong price. Trade-history calls are best-effort — any failure degrades to the prior balance-only behaviour without blocking the cycle.
+- Spot worker only; futures reconciliation, sizing, TP/SL, and execution are unchanged.
+
 ## 2026-07-18-futures-partial-collateral-entry-sizing
 
 - Futures entry sizing now shrinks a valid entry plan to the remaining free collateral before portfolio/risk gates and live execution. If the normal target (for example 40 EUR margin × 10x) does not fit, the worker tries the largest smaller notional that fits `state.CashEur` including entry taker fee and the configured account margin-utilization cap.

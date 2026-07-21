@@ -264,6 +264,64 @@ internal sealed class KrakenBroker(HttpClient httpClient, KrakenOptions options)
         }
     }
 
+    public async Task<IReadOnlyList<SpotTradeHistoryEntry>> GetTradeHistoryAsync(CancellationToken cancellationToken)
+    {
+        JsonDocument doc;
+        try
+        {
+            doc = await PostPrivateAsync("/0/private/TradesHistory", new Dictionary<string, string>(), cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException)
+        {
+            Console.WriteLine($"broker-trade-history: failed ({ex.Message})");
+            return Array.Empty<SpotTradeHistoryEntry>();
+        }
+
+        using (doc)
+        {
+            var root = doc.RootElement;
+            var errors = ReadErrors(root);
+            if (errors.Count > 0)
+            {
+                Console.WriteLine($"broker-trade-history: rejected ({string.Join(", ", errors)})");
+                return Array.Empty<SpotTradeHistoryEntry>();
+            }
+
+            if (!root.TryGetProperty("result", out var result)
+                || result.ValueKind != JsonValueKind.Object
+                || !result.TryGetProperty("trades", out var trades)
+                || trades.ValueKind != JsonValueKind.Object)
+            {
+                return Array.Empty<SpotTradeHistoryEntry>();
+            }
+
+            var entries = new List<SpotTradeHistoryEntry>();
+            foreach (var trade in trades.EnumerateObject())
+            {
+                var value = trade.Value;
+                var seconds = ReadDouble(value, "time");
+                entries.Add(new SpotTradeHistoryEntry(
+                    value.TryGetProperty("ordertxid", out var ordertxid) ? ordertxid.GetString() ?? string.Empty : string.Empty,
+                    value.TryGetProperty("pair", out var pair) ? pair.GetString() ?? string.Empty : string.Empty,
+                    value.TryGetProperty("type", out var type) ? type.GetString() ?? string.Empty : string.Empty,
+                    ReadDecimal(value, "price"),
+                    ReadDecimal(value, "vol"),
+                    ReadDecimal(value, "cost"),
+                    ReadDecimal(value, "fee"),
+                    seconds > 0d ? DateTimeOffset.FromUnixTimeMilliseconds((long)(seconds * 1000d)) : DateTimeOffset.MinValue));
+            }
+
+            return entries;
+        }
+    }
+
+    private static double ReadDouble(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value)
+        && value.ValueKind == JsonValueKind.Number
+        && value.TryGetDouble(out var parsed)
+            ? parsed
+            : 0d;
+
     private static decimal ReadDecimal(JsonElement element, string property) =>
         element.TryGetProperty(property, out var value)
         && decimal.TryParse(value.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)

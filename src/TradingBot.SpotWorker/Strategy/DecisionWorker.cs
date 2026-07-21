@@ -864,6 +864,19 @@ internal sealed class DecisionWorker(
 
         var krakenEur = ResolveKrakenBalance(balances, "EUR", "ZEUR");
 
+        // Recent trade history: the ONLY source of a spot holding's real cost basis
+        // (a balance snapshot carries none). Best-effort — an empty list falls back to
+        // the prior last-price basis, so a history outage never blocks reconciliation.
+        IReadOnlyList<SpotTradeHistoryEntry> trades = Array.Empty<SpotTradeHistoryEntry>();
+        try
+        {
+            trades = await broker!.GetTradeHistoryAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"kraken-sync: trade history unavailable ({ex.Message}); using last-price cost basis");
+        }
+
         // Kraken asset quantities for every pair in the universe. Quantities only —
         // never a EUR valuation. Valuing Kraken assets at last price while the bot
         // values positions at conservative liquidation (bid - slippage - fee) would
@@ -887,15 +900,42 @@ internal sealed class DecisionWorker(
         for (var i = state.Positions.Count - 1; i >= 0; i--)
         {
             var position = state.Positions[i];
+            // Resolve the held quantity even when the pair is not in this cycle's
+            // universe (discovery/blacklist/volume can drop it): read the balance
+            // directly so a real Kraken holding is never removed by mistake.
             if (!krakenQuantities.TryGetValue(position.Pair, out var krakenQty))
+            {
+                krakenQty = ResolveKrakenBalance(balances, KrakenBalanceKeysFromPair(position.Pair));
+            }
+
+            if (krakenQty <= 0m)
             {
                 Console.WriteLine($"kraken-sync: position {position.Pair} not found on Kraken (qty was {position.Quantity:0.########}); removing");
                 state.Positions.RemoveAt(i);
                 continue;
             }
 
+            // Real average cost basis from trade history is authoritative for entry
+            // price / notional; fall back to the incremental last-price rebase only when
+            // no matching buy history is available.
+            var costBasis = AverageCostBasisPrice(position.Pair, trades);
             var qtyDrift = krakenQty - position.Quantity;
-            if (Math.Abs(qtyDrift) > position.Quantity * 0.001m)
+            if (costBasis > 0m)
+            {
+                var previousQuantity = position.Quantity;
+                var previousNotional = position.EntryNotionalEur;
+                var previousEntry = position.EntryPrice;
+                position.Quantity = krakenQty;
+                position.EntryPrice = costBasis;
+                position.EntryNotionalEur = krakenQty * costBasis;
+                if (Math.Abs(qtyDrift) > position.Quantity * 0.001m || Math.Abs(previousEntry - costBasis) > costBasis * 0.001m)
+                {
+                    Console.WriteLine(
+                        $"kraken-sync: {position.Pair} qty {previousQuantity:0.########} → {krakenQty:0.########}, entry {previousEntry:0.######} → {costBasis:0.######} " +
+                        $"(cost basis from trade history); entryNotional {previousNotional:0.####} → {position.EntryNotionalEur:0.####}");
+                }
+            }
+            else if (Math.Abs(qtyDrift) > position.Quantity * 0.001m)
             {
                 var marketState = marketStates.FirstOrDefault(candidate =>
                     candidate.Instrument.Pair.Equals(position.Pair, StringComparison.OrdinalIgnoreCase));
@@ -924,7 +964,13 @@ internal sealed class DecisionWorker(
 
             var marketState = marketStates.FirstOrDefault(candidate =>
                 candidate.Instrument.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
-            var entryPrice = marketState?.LastPrice > 0m ? marketState.LastPrice : 0m;
+            // Prefer the real average cost basis from trade history; only fall back to
+            // the current last price when the buy is outside the returned window.
+            var costBasis = AverageCostBasisPrice(pair, trades);
+            var entryPrice = costBasis > 0m
+                ? costBasis
+                : marketState?.LastPrice > 0m ? marketState.LastPrice : 0m;
+            var basisSource = costBasis > 0m ? "trade-history cost basis" : "last price (no buy history)";
             var notional = entryPrice > 0m ? krakenQty * entryPrice : 0m;
             state.Positions.Add(new PortfolioPosition
             {
@@ -933,13 +979,13 @@ internal sealed class DecisionWorker(
                 Quantity = krakenQty,
                 EntryPrice = entryPrice,
                 EntryNotionalEur = notional,
-                LastPrice = entryPrice,
+                LastPrice = marketState?.LastPrice > 0m ? marketState.LastPrice : entryPrice,
                 MarketValueEur = notional,
                 OpenedAtUtc = utc,
                 LastActionAtUtc = utc
             });
             importedPositions++;
-            Console.WriteLine($"kraken-sync: imported missing Kraken position {pair} qty={krakenQty:0.########} notional={notional:0.##}");
+            Console.WriteLine($"kraken-sync: imported missing Kraken position {pair} qty={krakenQty:0.########} entry={entryPrice:0.######} ({basisSource}) notional={notional:0.##}");
         }
 
         // External P&L = accumulated cash drift. When this cycle had to bootstrap
@@ -1061,6 +1107,111 @@ internal sealed class DecisionWorker(
         }
 
         return 0m;
+    }
+
+    // Kraken balance keys for a held pair when only the "BASE/QUOTE" string is known
+    // (a held position whose instrument is not in this cycle's universe). Mirrors
+    // KrakenBalanceKeys but derives the base asset from the pair string alone.
+    private static string[] KrakenBalanceKeysFromPair(string pair)
+    {
+        var baseAsset = pair.Split('/')[0].Trim();
+        return new[]
+            {
+                baseAsset,
+                $"X{baseAsset}",
+                $"XX{baseAsset}",
+                baseAsset == "XDG" ? "DOGE" : string.Empty,
+                baseAsset == "DOGE" ? "XDG" : string.Empty,
+                baseAsset == "XBT" ? "BTC" : string.Empty,
+                baseAsset == "XBT" ? "XXBT" : string.Empty,
+                baseAsset == "BTC" ? "XXBT" : string.Empty
+            }
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    // Average cost basis (quote per unit) of a spot holding, reconstructed from the
+    // Kraken trade history using the average-cost method: buys add quote + fee to the
+    // basis, sells reduce it pro-rata. Returns 0 when there is no matching buy history
+    // (e.g. the holding predates the returned window) so callers keep their fallback.
+    internal static decimal AverageCostBasisPrice(string pair, IReadOnlyList<SpotTradeHistoryEntry> trades)
+    {
+        var pairTrades = trades
+            .Where(trade => SpotPairMatches(pair, trade.Pair))
+            .OrderBy(trade => trade.Time)
+            .ToList();
+        if (pairTrades.Count == 0)
+        {
+            return 0m;
+        }
+
+        decimal quantity = 0m;
+        decimal cost = 0m;
+        foreach (var trade in pairTrades)
+        {
+            if (trade.Type.Equals("buy", StringComparison.OrdinalIgnoreCase))
+            {
+                quantity += trade.Volume;
+                cost += trade.CostQuote + trade.FeeQuote;
+            }
+            else if (quantity > 0m)
+            {
+                var reduce = Math.Min(trade.Volume, quantity);
+                cost -= cost * (reduce / quantity);
+                quantity -= reduce;
+            }
+        }
+
+        return quantity > 0m ? cost / quantity : 0m;
+    }
+
+    // Aggregates the real fill of a just-submitted order from trade history by matching
+    // the order transaction id(s). Null when no matching trade is present yet.
+    internal static LiveOrderFill? FillFromOrderTxIds(IReadOnlyList<string> txIds, IReadOnlyList<SpotTradeHistoryEntry> trades)
+    {
+        if (txIds.Count == 0)
+        {
+            return null;
+        }
+
+        var matching = trades
+            .Where(trade => txIds.Contains(trade.OrderTxId, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+        if (matching.Count == 0)
+        {
+            return null;
+        }
+
+        var volume = matching.Sum(trade => trade.Volume);
+        var cost = matching.Sum(trade => trade.CostQuote);
+        var fee = matching.Sum(trade => trade.FeeQuote);
+        if (volume <= 0m || cost <= 0m)
+        {
+            return null;
+        }
+
+        return new LiveOrderFill(cost / volume, volume, cost, fee);
+    }
+
+    // Matches a bot "BASE/QUOTE" pair (or a Kraken pair name) against a Kraken trade
+    // pair, tolerating Kraken's X/Z asset-class prefixes and BTC/XBT, DOGE/XDG aliases.
+    internal static bool SpotPairMatches(string botPair, string krakenTradePair) =>
+        NormalizeKrakenPair(botPair) == NormalizeKrakenPair(krakenTradePair)
+        && NormalizeKrakenPair(botPair).Length > 0;
+
+    private static string NormalizeKrakenPair(string pair)
+    {
+        var symbol = new string((pair ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+        symbol = symbol
+            .Replace("XXBT", "BTC")
+            .Replace("XBT", "BTC")
+            .Replace("XXDG", "DOGE")
+            .Replace("XDG", "DOGE")
+            .Replace("ZEUR", "EUR")
+            .Replace("ZUSD", "USD")
+            .Replace("ZGBP", "GBP");
+        return symbol;
     }
 
     private static void PrintCandidates(string heading, IReadOnlyList<InstrumentMarketState> candidates)
@@ -1336,7 +1487,20 @@ internal sealed class DecisionWorker(
                     var liveFill = brokerOutcome.LiveFill;
                     if (brokerVerdict is not null && previewAction.Action == "WOULD_SELL" && liveFill is null)
                     {
-                        liveFill = await TryFetchLiveFillAsync(proposal.Pair, brokerOutcome.TxIds, cancellationToken);
+                        // Confirm the SELL fill from the exchange: first by order id, then
+                        // from trade history by ordertxid. A market sell must never be
+                        // booked at a MODELED price — that is exactly what makes the DB
+                        // diverge from Kraken. If neither confirms, do NOT book a phantom
+                        // close (symmetric with BUY); the next balance/history reconcile
+                        // corrects the state.
+                        liveFill = await TryFetchLiveFillAsync(proposal.Pair, brokerOutcome.TxIds, cancellationToken)
+                            ?? await TryFetchSellFillFromHistoryAsync(proposal.Pair, brokerOutcome.TxIds, cancellationToken);
+                        if (liveFill is null)
+                        {
+                            dryRunAction = BuildLiveOrderNotExecutedAction(previewAction, portfolio, $"{brokerVerdict}; sell fill unconfirmed — not booked, will reconcile from Kraken");
+                            dryRunAction.EntryExecution = brokerOutcome.Diagnostics;
+                            goto RecordDecision;
+                        }
                     }
 
                     if (brokerVerdict is not null && previewAction.Action == "WOULD_BUY" && liveFill is null)
@@ -2052,8 +2216,45 @@ internal sealed class DecisionWorker(
             }
         }
 
-        Console.WriteLine($"  !!! live-fill {pair}: could not confirm fill for txid={txid} after {LiveFillQueryAttempts} attempts; committing MODELED fill (reconcile against Kraken history)");
+        Console.WriteLine($"  live-fill {pair}: QueryOrders could not confirm txid={txid} after {LiveFillQueryAttempts} attempts; trying trade history");
         return null;
+    }
+
+    // Recovers a live SELL fill from Kraken trade history by ordertxid, for the case
+    // where QueryOrders has not yet reflected the fill. Best-effort: null on any
+    // failure or when no matching trade is present yet.
+    private async Task<LiveOrderFill?> TryFetchSellFillFromHistoryAsync(
+        string pair,
+        IReadOnlyList<string> txIds,
+        CancellationToken cancellationToken)
+    {
+        if (broker is null || txIds.Count == 0)
+        {
+            return null;
+        }
+
+        IReadOnlyList<SpotTradeHistoryEntry> trades;
+        try
+        {
+            trades = await broker.GetTradeHistoryAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  live-fill {pair}: trade-history lookup failed ({ex.Message})");
+            return null;
+        }
+
+        var fill = FillFromOrderTxIds(txIds, trades);
+        if (fill is not null)
+        {
+            Console.WriteLine($"  live-fill {pair}: recovered from trade history vol={fill.VolumeExecuted} price={fill.AveragePrice} cost={fill.CostEur:0.####} fee={fill.FeeEur:0.####}");
+        }
+        else
+        {
+            Console.WriteLine($"  !!! live-fill {pair}: sell fill still unconfirmed via trade history for txid={string.Join(",", txIds)}; not booking a modeled close");
+        }
+
+        return fill;
     }
 
     private static decimal TruncateTo(decimal value, int decimals)

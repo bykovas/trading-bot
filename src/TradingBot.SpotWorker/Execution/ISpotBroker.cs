@@ -43,7 +43,27 @@ internal interface ISpotBroker
     // fee) instead of the modeled ask/bid+slippage fill. Returns null when the
     // order is unknown or the query failed; callers fall back to the modeled fill.
     Task<BrokerOrderQuery?> QueryOrderAsync(string txid, CancellationToken cancellationToken);
+
+    // Recent executed trades from Kraken TradesHistory. Used to (a) recover a live
+    // SELL fill by its ordertxid when QueryOrders could not confirm it, and (b)
+    // reconcile the real average cost basis of a spot holding — neither of which a
+    // balance-only snapshot can provide. Best-effort: returns an empty list (never
+    // throws) when the call fails, so a history outage degrades to the prior
+    // balance-only behaviour rather than blocking the trading cycle.
+    Task<IReadOnlyList<SpotTradeHistoryEntry>> GetTradeHistoryAsync(CancellationToken cancellationToken);
 }
+
+// One executed spot trade as reported by Kraken TradesHistory. Cost and Fee are in
+// the quote currency; Pair is Kraken's canonical pair name for the trade.
+internal sealed record SpotTradeHistoryEntry(
+    string OrderTxId,
+    string Pair,
+    string Type,
+    decimal Price,
+    decimal Volume,
+    decimal CostQuote,
+    decimal FeeQuote,
+    DateTimeOffset Time);
 
 // Exchange-reported state of a single order. Cost and Fee are in the quote
 // currency (EUR for */EUR pairs); AveragePrice is the volume-weighted fill price.
