@@ -1,3 +1,10 @@
+## 2026-07-23-normalized-postgres-dual-write
+
+- Postgres persistence now dual-writes portfolio state and cycle forensic data into normalized tables alongside the existing JSON archive. New tables cover current portfolio summary, open positions, action history, pending futures orders, cycle facts, active pairs, decision facts, risk reasons, signal contributions, dry-run actions, freshness/local-high diagnostics, long-range diagnostics, entry funnel diagnostics, top candidates, missing confirmations, and excluded pairs.
+- Portfolio/cycle read paths now use the normalized tables: worker `Load()`, SQL views, API endpoints, Web SSR pages, and market-data held-pair discovery no longer read `state_json` / `record_json`. The legacy JSON columns remain write-only archive/compatibility payloads.
+- The existing `portfolio_state.state_json` and `dry_run_cycles.record_json` payloads are still written unchanged as a raw audit archive only. Trading decisions, sizing, execution, TP/SL, market snapshots, and live/virtual behavior are unchanged.
+- Historical backfill is intentionally left out of worker startup; `tools/db/backfill-normalized-postgres.sql` provides a manual one-off migration that can be validated on a database copy before filling normalized tables from legacy JSON.
+
 ## 2026-07-18-spot-live-kraken-reconciliation-and-sell-fill
 
 - Root cause of spot live diverging from the Kraken dashboard (while futures matches): the spot broker only exposed balances, so reconciliation could correct quantity and total cash but never the real cost basis, and a live SELL whose fill could not be confirmed by QueryOrders was committed at a MODELED price — recording a trade that never matched Kraken.

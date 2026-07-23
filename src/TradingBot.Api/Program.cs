@@ -36,7 +36,7 @@ app.MapGet("/api/bot-instances", async (CancellationToken cancellationToken) =>
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
         await using var command = new NpgsqlCommand(
-            "select distinct bot_instance_id from dry_run_cycles order by bot_instance_id",
+            "select distinct bot_instance_id from dry_run_cycle_records order by bot_instance_id",
             connection);
         var instances = new List<string>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -377,32 +377,34 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
         """
         select
             updated_at,
-            (state_json ->> 'cashEur')::numeric as cash_eur,
+            cash_eur,
             coalesce((
                 select sum(
                     case
-                        when (pos ->> 'leverage') is null
-                            then (pos ->> 'quantity')::numeric * (pos ->> 'lastPrice')::numeric
-                        else (pos ->> 'marketValueEur')::numeric
+                        when position.leverage is null
+                            then position.quantity * position.last_price
+                        else position.market_value_eur
                     end)
-                from jsonb_array_elements(coalesce(state_json -> 'positions', '[]'::jsonb)) as pos
+                from portfolio_position_state position
+                where position.bot_instance_id = summary.bot_instance_id
             ), 0) as positions_value_eur,
-            (state_json ->> 'cashEur')::numeric + coalesce((
+            cash_eur + coalesce((
                 select sum(
                     case
-                        when (pos ->> 'leverage') is null
-                            then (pos ->> 'quantity')::numeric * (pos ->> 'lastPrice')::numeric
-                        else (pos ->> 'marketValueEur')::numeric
+                        when position.leverage is null
+                            then position.quantity * position.last_price
+                        else position.market_value_eur
                     end)
-                from jsonb_array_elements(coalesce(state_json -> 'positions', '[]'::jsonb)) as pos
+                from portfolio_position_state position
+                where position.bot_instance_id = summary.bot_instance_id
             ), 0) as total_value_eur,
-            jsonb_array_length(coalesce(state_json -> 'positions', '[]'::jsonb)) as open_positions,
-            state_json -> 'dailyRisk' ->> 'dateUtc' as daily_risk_date_utc,
-            (state_json -> 'dailyRisk' ->> 'realizedPnlEur')::numeric as daily_realized_pnl_eur,
-            coalesce((state_json ->> 'externalPnlEur')::numeric, 0) as external_pnl_eur,
-            coalesce((state_json ->> 'positionsValueEur')::numeric, 0) as net_positions_value_eur,
-            coalesce((state_json ->> 'totalValueEur')::numeric, 0) as net_total_value_eur
-        from portfolio_state
+            open_positions,
+            daily_risk_date_utc,
+            daily_realized_pnl_eur,
+            external_pnl_eur,
+            positions_value_eur as net_positions_value_eur,
+            total_value_eur as net_total_value_eur
+        from portfolio_state_summary summary
         where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
         order by updated_at desc
         limit 1
@@ -440,32 +442,31 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
     await using var command = new NpgsqlCommand(
         """
         select
-            position ->> 'pair' as pair,
-            position ->> 'side' as side,
-            (position ->> 'quantity')::numeric as quantity,
-            (position ->> 'entryPrice')::numeric as entry_price,
-            (position ->> 'entryNotionalEur')::numeric as entry_notional_eur,
-            (position ->> 'lastPrice')::numeric as last_price,
-            (position ->> 'marketValueEur')::numeric as market_value_eur,
-            (position ->> 'unrealizedPnlEur')::numeric as unrealized_pnl_eur,
-            (position ->> 'unrealizedPnlPercent')::numeric as unrealized_pnl_percent,
-            (position ->> 'openedAtUtc')::timestamptz as opened_at_utc,
-            (position ->> 'lastActionAtUtc')::timestamptz as last_action_at_utc,
-            position ->> 'exitMode' as exit_mode,
-            (position ->> 'entryAtr')::numeric as entry_atr,
-            (position ->> 'stopLossPrice')::numeric as stop_loss_price,
-            (position ->> 'takeProfitPrice')::numeric as take_profit_price,
-            (position ->> 'leverage')::numeric as leverage,
-            (position ->> 'initialMarginEur')::numeric as initial_margin_eur,
-            (position ->> 'markPrice')::numeric as mark_price,
-            (position ->> 'liquidationPrice')::numeric as liquidation_price,
-            (position ->> 'liquidationDistancePercent')::numeric as liquidation_distance_percent,
-            (position ->> 'fundingPaidEur')::numeric as funding_paid_eur,
-            position ->> 'tpOrderState' as tp_order_state,
-            position ->> 'slOrderState' as sl_order_state
-        from portfolio_state state
-        cross join lateral jsonb_array_elements(coalesce(state.state_json -> 'positions', '[]'::jsonb)) as position
-        where (@bot_instance_id is null or state.bot_instance_id = @bot_instance_id)
+            pair,
+            side,
+            quantity,
+            entry_price,
+            entry_notional_eur,
+            last_price,
+            market_value_eur,
+            unrealized_pnl_eur,
+            unrealized_pnl_percent,
+            opened_at_utc,
+            last_action_at_utc,
+            exit_mode,
+            entry_atr,
+            stop_loss_price,
+            take_profit_price,
+            leverage,
+            initial_margin_eur,
+            mark_price,
+            liquidation_price,
+            liquidation_distance_percent,
+            funding_paid_eur,
+            tp_order_state,
+            sl_order_state
+        from portfolio_position_state position
+        where (@bot_instance_id is null or position.bot_instance_id = @bot_instance_id)
         order by market_value_eur desc, pair
         """,
         connection);
@@ -542,8 +543,8 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
             worker_image_tag,
             strategy_version,
             change_set,
-            record_json::text
-        from dry_run_cycles
+            record::text
+        from dry_run_cycle_records cycle
         where (@worker_version is null or worker_version = @worker_version)
           and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
           and (@worker_commit is null or worker_commit = @worker_commit)
@@ -553,7 +554,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
               @latest_strategy = false
               or strategy_version = (
                   select latest.strategy_version
-                  from dry_run_cycles latest
+                  from dry_run_cycle_records latest
                   where latest.strategy_version is not null
                   order by latest.utc desc, latest.cycle_id desc
                   limit 1
@@ -564,15 +565,15 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
               or (
                   strategy_version is not distinct from (
                       select latest.strategy_version
-                      from dry_run_cycles latest
-                      where latest.bot_instance_id = dry_run_cycles.bot_instance_id
+                      from dry_run_cycle_records latest
+                      where latest.bot_instance_id = cycle.bot_instance_id
                       order by latest.utc desc, latest.cycle_id desc
                       limit 1
                   )
                   and change_set is not distinct from (
                       select latest.change_set
-                      from dry_run_cycles latest
-                      where latest.bot_instance_id = dry_run_cycles.bot_instance_id
+                      from dry_run_cycle_records latest
+                      where latest.bot_instance_id = cycle.bot_instance_id
                       order by latest.utc desc, latest.cycle_id desc
                       limit 1
                   )
@@ -654,8 +655,8 @@ static async Task<CycleDetailDto?> ReadCycleDetail(
         select
             cycle_id,
             utc,
-            record_json::text
-        from dry_run_cycles
+            record::text
+        from dry_run_cycle_records
         where cycle_id = @cycle_id
         """,
         connection);
@@ -695,20 +696,20 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
                 worker_image_tag,
                 strategy_version,
                 change_set,
-                record_json
-            from dry_run_cycles
+                record
+            from dry_run_cycle_records cycle
             where utc >= @utc_start
               and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
               and exists (
                   select 1
                   from dry_run_decisions decision
-                  where decision.cycle_id = dry_run_cycles.cycle_id
+                  where decision.cycle_id = cycle.cycle_id
                     and decision.action in ('WOULD_BUY', 'WOULD_SELL', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT', 'WOULD_CLOSE')
               )
         ),
         latest_trade_meta as (
             select strategy_version, change_set
-            from dry_run_cycles
+            from dry_run_cycle_records
             where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
             order by utc desc, cycle_id desc
             limit 1
@@ -723,7 +724,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
             worker_image_tag,
             strategy_version,
             change_set,
-            record_json::text
+            record::text
         from trade_cycles
         where (
               @latest_meta = false
@@ -821,18 +822,18 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
               @latest_meta = false
               or exists (
                   select 1
-                  from dry_run_cycles cycle
+                  from dry_run_cycle_records cycle
                   where cycle.cycle_id = dry_run_decisions.cycle_id
                     and cycle.strategy_version is not distinct from (
                         select latest.strategy_version
-                        from dry_run_cycles latest
+                        from dry_run_cycle_records latest
                         where latest.bot_instance_id = cycle.bot_instance_id
                         order by latest.utc desc, latest.cycle_id desc
                         limit 1
                     )
                     and cycle.change_set is not distinct from (
                         select latest.change_set
-                        from dry_run_cycles latest
+                        from dry_run_cycle_records latest
                         where latest.bot_instance_id = cycle.bot_instance_id
                         order by latest.utc desc, latest.cycle_id desc
                         limit 1
@@ -936,18 +937,18 @@ static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
               @latest_meta = false
               or exists (
                   select 1
-                  from dry_run_cycles cycle
+                  from dry_run_cycle_records cycle
                   where cycle.cycle_id = dry_run_cycle_entry_diagnostics.cycle_id
                     and cycle.strategy_version is not distinct from (
                         select latest.strategy_version
-                        from dry_run_cycles latest
+                        from dry_run_cycle_records latest
                         where latest.bot_instance_id = cycle.bot_instance_id
                         order by latest.utc desc, latest.cycle_id desc
                         limit 1
                     )
                     and cycle.change_set is not distinct from (
                         select latest.change_set
-                        from dry_run_cycles latest
+                        from dry_run_cycle_records latest
                         where latest.bot_instance_id = cycle.bot_instance_id
                         order by latest.utc desc, latest.cycle_id desc
                         limit 1
@@ -1027,18 +1028,18 @@ static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
               @latest_meta = false
               or exists (
                   select 1
-                  from dry_run_cycles cycle
+                  from dry_run_cycle_records cycle
                   where cycle.cycle_id = market_snapshots.cycle_id
                     and cycle.strategy_version is not distinct from (
                         select latest.strategy_version
-                        from dry_run_cycles latest
+                        from dry_run_cycle_records latest
                         where latest.bot_instance_id = cycle.bot_instance_id
                         order by latest.utc desc, latest.cycle_id desc
                         limit 1
                     )
                     and cycle.change_set is not distinct from (
                         select latest.change_set
-                        from dry_run_cycles latest
+                        from dry_run_cycle_records latest
                         where latest.bot_instance_id = cycle.bot_instance_id
                         order by latest.utc desc, latest.cycle_id desc
                         limit 1
@@ -1088,7 +1089,7 @@ static async Task WriteCyclesAndSnapshotsCsv(
     await EnsureCycleMetadataColumns(connection, cancellationToken);
 
     await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), leaveOpen: true);
-    await writer.WriteLineAsync("record_type,cycle_id,utc,worker_version,worker_commit,worker_build_utc,worker_image_tag,strategy_version,change_set,pair,bid,ask,last,volume24h,change_percent,record_json");
+    await writer.WriteLineAsync("record_type,cycle_id,utc,worker_version,worker_commit,worker_build_utc,worker_image_tag,strategy_version,change_set,pair,bid,ask,last,volume24h,change_percent,record");
 
     await using (var command = new NpgsqlCommand(
         """
@@ -1101,8 +1102,8 @@ static async Task WriteCyclesAndSnapshotsCsv(
             worker_image_tag,
             strategy_version,
             change_set,
-            record_json::text
-        from dry_run_cycles
+            record::text
+        from dry_run_cycle_records
         order by utc asc, cycle_id asc
         """,
         connection))
@@ -1184,8 +1185,8 @@ static async Task<BotStatusDto> ReadBotStatus(NpgsqlConnection connection, strin
             cycle_id,
             bot_instance_id,
             utc,
-            record_json ->> 'marketDataMode'
-        from dry_run_cycles
+            record ->> 'marketDataMode'
+        from dry_run_cycle_records
         where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
         order by utc desc
         limit 1
@@ -1576,8 +1577,8 @@ partial class Program
         var cycles = new List<SimCycle>();
         await using (var cmd = new NpgsqlCommand(
             """
-            select utc, record_json::text
-            from dry_run_cycles
+            select utc, record::text
+            from dry_run_cycle_records
             where bot_instance_id = @bot
               and utc >= @cutoff
             order by utc asc
@@ -1661,7 +1662,7 @@ partial class Program
             await using var cmd = new NpgsqlCommand(
                 """
                 select cycle_id
-                from dry_run_cycles
+                from dry_run_cycle_records
                 where bot_instance_id = @bot
                   and utc >= @cutoff
                 order by utc asc

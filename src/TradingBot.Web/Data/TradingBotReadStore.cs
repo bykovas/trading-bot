@@ -27,7 +27,7 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
         {
             await using var connection = new NpgsqlConnection(ConnectionString);
             await connection.OpenAsync(cancellationToken);
-            await using var command = new NpgsqlCommand("select distinct bot_instance_id from dry_run_cycles order by bot_instance_id", connection);
+            await using var command = new NpgsqlCommand("select distinct bot_instance_id from dry_run_cycle_facts order by bot_instance_id", connection);
             var items = new List<string>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken)) items.Add(reader.GetString(0));
@@ -51,7 +51,7 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
             await using var command = new NpgsqlCommand(
                 """
                 select utc, coalesce(market_data_mode, 'unknown')
-                from dry_run_cycles
+                from dry_run_cycle_facts
                 where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
                 order by utc desc
                 limit 1
@@ -106,10 +106,38 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
             await using var connection = new NpgsqlConnection(ConnectionString);
             await connection.OpenAsync(cancellationToken);
             var items = new List<CycleListItemViewModel>();
-            var actionFilter = tradesOnly ? "and cycle_json::text ~ 'WOULD_(BUY|SELL|OPEN|CLOSE)'" : string.Empty;
+            var actionFilter = tradesOnly ? "and exists (select 1 from dry_run_actions action where action.cycle_id = cycle.cycle_id and action.action in ('WOULD_BUY', 'WOULD_SELL', 'WOULD_OPEN', 'WOULD_CLOSE', 'OPEN_LONG', 'OPEN_SHORT', 'CLOSE'))" : string.Empty;
             await using var command = new NpgsqlCommand($$"""
-                select cycle_id, bot_instance_id, utc, cycle_json, worker_version, change_set
-                from dry_run_cycles
+                select cycle_id,
+                       bot_instance_id,
+                       utc,
+                       coalesce((
+                           select action.action
+                           from dry_run_actions action
+                           where action.cycle_id = cycle.cycle_id
+                             and action.action <> 'NO_ORDER'
+                           order by action.decision_index
+                           limit 1
+                       ), 'NO_ORDER') as action,
+                       coalesce((
+                           select action.pair
+                           from dry_run_actions action
+                           where action.cycle_id = cycle.cycle_id
+                             and action.action <> 'NO_ORDER'
+                           order by action.decision_index
+                           limit 1
+                       ), '—') as pair,
+                       (
+                           select decision.score
+                           from dry_run_decision_facts decision
+                           where decision.cycle_id = cycle.cycle_id
+                           order by decision.decision_index
+                           limit 1
+                       ) as score,
+                       cycle.portfolio_value_after_eur,
+                       worker_version,
+                       change_set
+                from dry_run_cycle_facts cycle
                 where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
                 {{actionFilter}}
                 order by utc desc
@@ -121,18 +149,16 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var json = reader.GetString(3);
-                var parsed = ParseCycleJson(json);
                 items.Add(new(
                     reader.GetString(0),
                     reader.GetString(1),
                     reader.GetFieldValue<DateTimeOffset>(2),
-                    parsed.Action,
-                    parsed.Pair,
-                    parsed.Score,
-                    parsed.TotalValue,
-                    reader.IsDBNull(4) ? null : reader.GetString(4),
-                    reader.IsDBNull(5) ? null : reader.GetString(5)));
+                    reader.GetString(3),
+                    reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetDecimal(5),
+                    reader.IsDBNull(6) ? null : reader.GetDecimal(6),
+                    reader.IsDBNull(7) ? null : reader.GetString(7),
+                    reader.IsDBNull(8) ? null : reader.GetString(8)));
             }
             return new(shell, items, limit, offset, items.Count == limit ? offset + limit : null);
         }
@@ -147,12 +173,26 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
         var shell = await BuildShellAsync(botInstanceId, cancellationToken);
         await using var connection = new NpgsqlConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken);
-        await using var command = new NpgsqlCommand("select cycle_id, bot_instance_id, utc, cycle_json from dry_run_cycles where cycle_id = @cycle_id limit 1", connection);
+        await using var command = new NpgsqlCommand(
+            """
+            select cycle_id, bot_instance_id, utc
+            from dry_run_cycle_facts
+            where cycle_id = @cycle_id
+            limit 1
+            """,
+            connection);
         command.Parameters.Add("cycle_id", NpgsqlDbType.Text).Value = id;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
-        var raw = reader.GetString(3);
-        return new(shell, reader.GetString(0), reader.GetString(1), reader.GetFieldValue<DateTimeOffset>(2), PrettyJson(raw), ParseDecisions(raw));
+        var decisions = await ReadCycleDecisions(connection, id, cancellationToken);
+        var raw = JsonSerializer.Serialize(new
+        {
+            cycleId = reader.GetString(0),
+            botInstanceId = reader.GetString(1),
+            utc = reader.GetFieldValue<DateTimeOffset>(2),
+            decisions
+        }, new JsonSerializerOptions { WriteIndented = true });
+        return new(shell, reader.GetString(0), reader.GetString(1), reader.GetFieldValue<DateTimeOffset>(2), raw, decisions);
     }
 
     public async Task<PageViewModel<MarketSnapshotViewModel>> GetMarketSnapshotsAsync(string? botInstanceId, string? pair, int limit, int offset, CancellationToken cancellationToken)
@@ -203,8 +243,13 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
             await using var command = new NpgsqlCommand(
                 """
                 select count(*)::int as candidates,
-                       count(*) filter (where cycle_json::text ~ 'WOULD_(BUY|SELL|OPEN|CLOSE)')::int as trades
-                from dry_run_cycles
+                       count(*) filter (where exists (
+                           select 1
+                           from dry_run_actions action
+                           where action.cycle_id = cycle.cycle_id
+                             and action.action in ('WOULD_BUY', 'WOULD_SELL', 'WOULD_OPEN', 'WOULD_CLOSE', 'OPEN_LONG', 'OPEN_SHORT', 'CLOSE')
+                       ))::int as trades
+                from dry_run_cycle_facts cycle
                 where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
                   and utc >= now() - (@hours::text || ' hours')::interval
                 """, connection);
@@ -227,13 +272,13 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
         await using var command = new NpgsqlCommand(
             """
             select updated_at,
-                   (state_json ->> 'cashEur')::numeric,
-                   coalesce((state_json ->> 'positionsValueEur')::numeric, 0),
-                   coalesce((state_json ->> 'totalValueEur')::numeric, (state_json ->> 'cashEur')::numeric),
-                   jsonb_array_length(coalesce(state_json -> 'positions', '[]'::jsonb)),
-                   coalesce((state_json -> 'dailyRisk' ->> 'realizedPnlEur')::numeric, 0),
-                   coalesce((state_json ->> 'externalPnlEur')::numeric, 0)
-            from portfolio_state
+                   cash_eur,
+                   positions_value_eur,
+                   total_value_eur,
+                   open_positions,
+                   coalesce(daily_realized_pnl_eur, 0),
+                   external_pnl_eur
+            from portfolio_state_summary
             where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
             order by updated_at desc
             limit 1
@@ -249,11 +294,10 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
     {
         await using var command = new NpgsqlCommand(
             """
-            select pos
-            from portfolio_state ps,
-                 jsonb_array_elements(coalesce(ps.state_json -> 'positions', '[]'::jsonb)) as pos
+            select pair, side, quantity, entry_price, last_price, unrealized_pnl_eur, unrealized_pnl_percent, leverage, opened_at_utc
+            from portfolio_position_state ps
             where (@bot_instance_id is null or ps.bot_instance_id = @bot_instance_id)
-            order by ps.updated_at desc
+            order by ps.updated_at desc, market_value_eur desc
             limit 100
             """, connection);
         command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)Clean(botInstanceId) ?? DBNull.Value;
@@ -261,12 +305,55 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            using var doc = JsonDocument.Parse(reader.GetString(0));
-            var p = doc.RootElement;
             items.Add(new(
-                GetString(p, "pair"), GetString(p, "side", "LONG"), GetDec(p, "quantity"), GetDec(p, "entryPrice"), GetDec(p, "lastPrice"),
-                GetDec(p, "unrealizedPnlEur"), GetDec(p, "unrealizedPnlPercent"), GetNullableDec(p, "leverage"), GetDate(p, "openedAt") ?? GetDate(p, "entryUtc")));
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetDecimal(2),
+                reader.GetDecimal(3),
+                reader.GetDecimal(4),
+                reader.GetDecimal(5),
+                reader.GetDecimal(6),
+                GetDecimal(reader, 7),
+                reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8)));
         }
+        return items;
+    }
+
+    private static async Task<IReadOnlyList<DecisionViewModel>> ReadCycleDecisions(NpgsqlConnection connection, string cycleId, CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            """
+            select decision.pair,
+                   decision.desired_position,
+                   action.action,
+                   decision.score,
+                   action.reason,
+                   (
+                       select string_agg(reason, '; ' order by reason_index)
+                       from dry_run_decision_risk_reasons risk
+                       where risk.cycle_id = decision.cycle_id
+                         and risk.decision_index = decision.decision_index
+                   ) as risk_reason
+            from dry_run_decision_facts decision
+            join dry_run_actions action on action.cycle_id = decision.cycle_id and action.decision_index = decision.decision_index
+            where decision.cycle_id = @cycle_id
+            order by decision.decision_index
+            """,
+            connection);
+        command.Parameters.Add("cycle_id", NpgsqlDbType.Text).Value = cycleId;
+        var items = new List<DecisionViewModel>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(new(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetDecimal(3),
+                reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5)));
+        }
+
         return items;
     }
 
@@ -277,7 +364,7 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
         if (string.IsNullOrWhiteSpace(ConnectionString)) return;
         await using var connection = new NpgsqlConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken);
-        await using var command = new NpgsqlCommand("select cycle_id, bot_instance_id, utc from dry_run_cycles order by utc desc limit 10000", connection);
+        await using var command = new NpgsqlCommand("select cycle_id, bot_instance_id, utc from dry_run_cycle_facts order by utc desc limit 10000", connection);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {

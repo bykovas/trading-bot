@@ -144,15 +144,187 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
         EnsureSchema();
 
         using var connection = OpenConnection();
-        using var command = new NpgsqlCommand(
-            "select state_json::text from portfolio_state where id = @id and bot_instance_id = @bot_instance_id",
+        using var summaryCommand = new NpgsqlCommand(
+            """
+            select updated_at,
+                   cash_eur,
+                   daily_risk_date_utc,
+                   daily_realized_pnl_eur,
+                   external_pnl_eur
+            from portfolio_state_summary
+            where bot_instance_id = @bot_instance_id
+            limit 1
+            """,
             connection);
-        command.Parameters.AddWithValue("id", StateId);
-        command.Parameters.AddWithValue("bot_instance_id", botInstanceId);
-        var value = command.ExecuteScalar() as string;
-        return string.IsNullOrWhiteSpace(value)
-            ? null
-            : JsonSerializer.Deserialize<PortfolioState>(value, _jsonOptions);
+        summaryCommand.Parameters.AddWithValue("bot_instance_id", botInstanceId);
+
+        using var summaryReader = summaryCommand.ExecuteReader();
+        if (!summaryReader.Read())
+        {
+            return null;
+        }
+
+        var state = new PortfolioState
+        {
+            UpdatedAt = new DateTimeOffset(DateTime.SpecifyKind(summaryReader.GetDateTime(0), DateTimeKind.Utc)),
+            CashEur = summaryReader.GetDecimal(1),
+            DailyRisk = summaryReader.IsDBNull(2)
+                ? null
+                : new DailyRiskState
+                {
+                    DateUtc = summaryReader.GetString(2),
+                    RealizedPnlEur = summaryReader.IsDBNull(3) ? 0m : summaryReader.GetDecimal(3)
+                },
+            ExternalPnlEur = summaryReader.GetDecimal(4)
+        };
+        summaryReader.Close();
+
+        using (var command = new NpgsqlCommand(
+            """
+            select pair,
+                   side,
+                   quantity,
+                   entry_price,
+                   entry_notional_eur,
+                   last_price,
+                   market_value_eur,
+                   unrealized_pnl_eur,
+                   unrealized_pnl_percent,
+                   opened_at_utc,
+                   last_action_at_utc,
+                   peak_pnl_percent,
+                   entry_score,
+                   exit_mode,
+                   entry_atr,
+                   stop_loss_price,
+                   take_profit_price,
+                   round_trip_cost_estimate_pct,
+                   expected_funding_pct,
+                   atr_pct,
+                   stop_distance_pct,
+                   take_profit_distance_pct,
+                   exchange_stop_loss_price,
+                   exchange_take_profit_price,
+                   exchange_protection_multiplier_percent,
+                   trailing_stop_state,
+                   trailing_stop_percent,
+                   trailing_stop_order_id,
+                   trailing_activated_at_utc,
+                   low_score_cycles,
+                   leverage,
+                   initial_margin_eur,
+                   mark_price,
+                   liquidation_price,
+                   liquidation_distance_percent,
+                   funding_paid_eur,
+                   tp_order_state,
+                   sl_order_state,
+                   origin,
+                   entry_channel
+            from portfolio_position_state
+            where bot_instance_id = @bot_instance_id
+            order by position_index
+            """,
+            connection))
+        {
+            command.Parameters.AddWithValue("bot_instance_id", botInstanceId);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                state.Positions.Add(new PortfolioPosition
+                {
+                    Pair = reader.GetString(0),
+                    Side = reader.GetString(1),
+                    Quantity = reader.GetDecimal(2),
+                    EntryPrice = reader.GetDecimal(3),
+                    EntryNotionalEur = reader.GetDecimal(4),
+                    LastPrice = reader.GetDecimal(5),
+                    MarketValueEur = reader.GetDecimal(6),
+                    UnrealizedPnlEur = reader.GetDecimal(7),
+                    UnrealizedPnlPercent = reader.GetDecimal(8),
+                    OpenedAtUtc = GetNullableDateTimeOffset(reader, 9),
+                    LastActionAtUtc = GetNullableDateTimeOffset(reader, 10),
+                    PeakPnlPercent = GetNullableDecimal(reader, 11),
+                    EntryScore = GetNullableDecimal(reader, 12),
+                    ExitMode = GetNullableString(reader, 13),
+                    EntryAtr = GetNullableDecimal(reader, 14),
+                    StopLossPrice = GetNullableDecimal(reader, 15),
+                    TakeProfitPrice = GetNullableDecimal(reader, 16),
+                    RoundTripCostEstimatePct = GetNullableDecimal(reader, 17),
+                    ExpectedFundingPct = GetNullableDecimal(reader, 18),
+                    AtrPct = GetNullableDecimal(reader, 19),
+                    StopDistancePct = GetNullableDecimal(reader, 20),
+                    TakeProfitDistancePct = GetNullableDecimal(reader, 21),
+                    ExchangeStopLossPrice = GetNullableDecimal(reader, 22),
+                    ExchangeTakeProfitPrice = GetNullableDecimal(reader, 23),
+                    ExchangeProtectionMultiplierPercent = GetNullableDecimal(reader, 24),
+                    TrailingStopState = GetNullableString(reader, 25),
+                    TrailingStopPercent = GetNullableDecimal(reader, 26),
+                    TrailingStopOrderId = GetNullableString(reader, 27),
+                    TrailingActivatedAtUtc = GetNullableDateTimeOffset(reader, 28),
+                    LowScoreCycles = reader.GetInt32(29),
+                    Leverage = GetNullableDecimal(reader, 30),
+                    InitialMarginEur = GetNullableDecimal(reader, 31),
+                    MarkPrice = GetNullableDecimal(reader, 32),
+                    LiquidationPrice = GetNullableDecimal(reader, 33),
+                    LiquidationDistancePercent = GetNullableDecimal(reader, 34),
+                    FundingPaidEur = GetNullableDecimal(reader, 35),
+                    TpOrderState = GetNullableString(reader, 36),
+                    SlOrderState = GetNullableString(reader, 37),
+                    Origin = GetNullableString(reader, 38),
+                    EntryChannel = GetNullableString(reader, 39)
+                });
+            }
+        }
+
+        using (var command = new NpgsqlCommand(
+            """
+            select pair, last_buy_at_utc, last_sell_at_utc, last_stop_loss_at_utc
+            from portfolio_action_history_state
+            where bot_instance_id = @bot_instance_id
+            order by pair
+            """,
+            connection))
+        {
+            command.Parameters.AddWithValue("bot_instance_id", botInstanceId);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                state.ActionHistory.Add(new PairActionHistory
+                {
+                    Pair = reader.GetString(0),
+                    LastBuyAtUtc = GetNullableDateTimeOffset(reader, 1),
+                    LastSellAtUtc = GetNullableDateTimeOffset(reader, 2),
+                    LastStopLossAtUtc = GetNullableDateTimeOffset(reader, 3)
+                });
+            }
+        }
+
+        using (var command = new NpgsqlCommand(
+            """
+            select pair, exchange_order_id, created_at_utc, requested_quantity, submitted_limit_price
+            from pending_futures_order_state
+            where bot_instance_id = @bot_instance_id
+            order by order_index
+            """,
+            connection))
+        {
+            command.Parameters.AddWithValue("bot_instance_id", botInstanceId);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                state.PendingFuturesOrders.Add(new PendingFuturesOrder
+                {
+                    Pair = reader.GetString(0),
+                    ExchangeOrderId = GetNullableString(reader, 1),
+                    CreatedAtUtc = new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(2), DateTimeKind.Utc)),
+                    RequestedQuantity = GetNullableDecimal(reader, 3),
+                    SubmittedLimitPrice = GetNullableDecimal(reader, 4)
+                });
+            }
+        }
+
+        return state;
     }
 
     public void Save(PortfolioState state)
@@ -160,6 +332,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
         EnsureSchema();
 
         using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
         using var command = new NpgsqlCommand(
             """
             insert into portfolio_state (id, bot_instance_id, updated_at, state_json)
@@ -170,11 +343,15 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 state_json = excluded.state_json
             """,
             connection);
+        command.Transaction = transaction;
         command.Parameters.AddWithValue("id", StateId);
         command.Parameters.AddWithValue("bot_instance_id", botInstanceId);
         command.Parameters.AddWithValue("updated_at", state.UpdatedAt.UtcDateTime);
         command.Parameters.Add("state_json", NpgsqlDbType.Jsonb).Value = JsonSerializer.Serialize(state, _jsonOptions);
         command.ExecuteNonQuery();
+
+        SaveNormalizedPortfolioState(connection, transaction, state);
+        transaction.Commit();
     }
 
     public void AppendCycle(DryRunCycleRecord record)
@@ -182,6 +359,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
         EnsureSchema();
 
         using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
         using var command = new NpgsqlCommand(
             """
             insert into dry_run_cycles (
@@ -218,6 +396,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 record_json = excluded.record_json
             """,
             connection);
+        command.Transaction = transaction;
         command.Parameters.AddWithValue("cycle_id", record.CycleId);
         command.Parameters.AddWithValue("bot_instance_id", botInstanceId);
         command.Parameters.AddWithValue("utc", record.Utc.UtcDateTime);
@@ -229,6 +408,9 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
         command.Parameters.AddWithValue("change_set", record.Worker.ChangeSet);
         command.Parameters.Add("record_json", NpgsqlDbType.Jsonb).Value = JsonSerializer.Serialize(record, _jsonOptions);
         command.ExecuteNonQuery();
+
+        SaveNormalizedCycle(connection, transaction, record);
+        transaction.Commit();
     }
 
     public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots)
@@ -371,6 +553,401 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             create index if not exists ix_market_snapshots_bot_instance_utc on market_snapshots (bot_instance_id, utc desc);
             create index if not exists ix_market_snapshots_bot_pair_utc on market_snapshots (bot_instance_id, pair, utc desc, cycle_id desc);
 
+            create table if not exists portfolio_state_summary (
+                bot_instance_id text primary key,
+                state_id integer not null,
+                updated_at timestamptz not null,
+                cash_eur numeric not null,
+                positions_value_eur numeric not null,
+                total_value_eur numeric not null,
+                open_positions integer not null,
+                daily_risk_date_utc text,
+                daily_realized_pnl_eur numeric,
+                external_pnl_eur numeric not null default 0
+            );
+
+            create table if not exists portfolio_position_state (
+                bot_instance_id text not null,
+                updated_at timestamptz not null,
+                position_index integer not null,
+                pair text not null,
+                side text not null,
+                quantity numeric not null,
+                entry_price numeric not null,
+                entry_notional_eur numeric not null,
+                last_price numeric not null,
+                market_value_eur numeric not null,
+                unrealized_pnl_eur numeric not null,
+                unrealized_pnl_percent numeric not null,
+                opened_at_utc timestamptz,
+                last_action_at_utc timestamptz,
+                peak_pnl_percent numeric,
+                entry_score numeric,
+                exit_mode text,
+                entry_atr numeric,
+                stop_loss_price numeric,
+                take_profit_price numeric,
+                round_trip_cost_estimate_pct numeric,
+                expected_funding_pct numeric,
+                atr_pct numeric,
+                stop_distance_pct numeric,
+                take_profit_distance_pct numeric,
+                exchange_stop_loss_price numeric,
+                exchange_take_profit_price numeric,
+                exchange_protection_multiplier_percent numeric,
+                trailing_stop_state text,
+                trailing_stop_percent numeric,
+                trailing_stop_order_id text,
+                trailing_activated_at_utc timestamptz,
+                low_score_cycles integer not null,
+                leverage numeric,
+                initial_margin_eur numeric,
+                mark_price numeric,
+                liquidation_price numeric,
+                liquidation_distance_percent numeric,
+                funding_paid_eur numeric,
+                tp_order_state text,
+                sl_order_state text,
+                origin text,
+                entry_channel text,
+                primary key (bot_instance_id, position_index)
+            );
+
+            create index if not exists ix_portfolio_position_state_pair on portfolio_position_state (bot_instance_id, pair);
+            create index if not exists ix_portfolio_position_state_origin on portfolio_position_state (bot_instance_id, origin);
+
+            create table if not exists portfolio_action_history_state (
+                bot_instance_id text not null,
+                pair text not null,
+                last_buy_at_utc timestamptz,
+                last_sell_at_utc timestamptz,
+                last_stop_loss_at_utc timestamptz,
+                primary key (bot_instance_id, pair)
+            );
+
+            create table if not exists pending_futures_order_state (
+                bot_instance_id text not null,
+                order_index integer not null,
+                pair text not null,
+                exchange_order_id text,
+                created_at_utc timestamptz not null,
+                requested_quantity numeric,
+                submitted_limit_price numeric,
+                primary key (bot_instance_id, order_index)
+            );
+
+            create table if not exists dry_run_cycle_facts (
+                cycle_id text primary key,
+                bot_instance_id text not null,
+                bot_instance_name text not null,
+                utc timestamptz not null,
+                market_data_mode text not null,
+                ai_provider text not null,
+                worker_version text,
+                worker_commit text,
+                worker_build_utc text,
+                worker_image_tag text,
+                strategy_version text,
+                change_set text,
+                active_pairs_count integer not null,
+                decisions_count integer not null,
+                cash_before_eur numeric not null,
+                cash_after_eur numeric not null,
+                positions_value_before_eur numeric not null,
+                positions_value_after_eur numeric not null,
+                portfolio_value_before_eur numeric not null,
+                portfolio_value_after_eur numeric not null,
+                would_buy_count integer not null,
+                would_sell_count integer not null,
+                validated_order_count integer not null
+            );
+
+            create index if not exists ix_dry_run_cycle_facts_bot_utc on dry_run_cycle_facts (bot_instance_id, utc desc, cycle_id desc);
+            create index if not exists ix_dry_run_cycle_facts_change_set on dry_run_cycle_facts (change_set, utc desc);
+
+            create table if not exists dry_run_cycle_active_pairs (
+                cycle_id text not null references dry_run_cycle_facts (cycle_id) on delete cascade,
+                pair_index integer not null,
+                pair text not null,
+                primary key (cycle_id, pair_index)
+            );
+
+            create index if not exists ix_dry_run_cycle_active_pairs_pair on dry_run_cycle_active_pairs (pair, cycle_id);
+
+            create table if not exists dry_run_decision_facts (
+                cycle_id text not null references dry_run_cycle_facts (cycle_id) on delete cascade,
+                decision_index integer not null,
+                bot_instance_id text not null,
+                utc timestamptz not null,
+                pair text not null,
+                price numeric not null,
+                fast_ema numeric,
+                slow_ema numeric,
+                rsi numeric,
+                desired_position text not null,
+                score numeric not null,
+                risk_approved boolean not null,
+                broker text,
+                entry_rejection_reason text,
+                spread_percent numeric not null,
+                price_action_direction text,
+                price_action_trend_percent numeric,
+                exploratory boolean not null,
+                has_bullish_structure boolean not null,
+                ema_fully_confirmed boolean not null,
+                bullish_ema_gap_percent numeric,
+                ema_gap_velocity_percent numeric,
+                allows_short boolean not null,
+                has_bearish_structure boolean not null,
+                bearish_ema_gap_percent numeric,
+                short_score numeric,
+                long_score_threshold numeric,
+                short_score_threshold numeric,
+                minimum_ema_gap_percent numeric,
+                short_base_block_reason_code text,
+                short_base_block_reason text,
+                early_entry_eligible boolean not null,
+                early_entry_reason text,
+                early_entry_diagnostic_score numeric not null,
+                early_entry_suggested_notional_eur numeric not null,
+                primary key (cycle_id, decision_index)
+            );
+
+            create index if not exists ix_dry_run_decision_facts_bot_utc on dry_run_decision_facts (bot_instance_id, utc desc);
+            create index if not exists ix_dry_run_decision_facts_pair on dry_run_decision_facts (bot_instance_id, pair, utc desc);
+            create index if not exists ix_dry_run_decision_facts_action_pair on dry_run_decision_facts (pair, cycle_id);
+
+            create table if not exists dry_run_decision_risk_reasons (
+                cycle_id text not null,
+                decision_index integer not null,
+                reason_index integer not null,
+                reason text not null,
+                primary key (cycle_id, decision_index, reason_index),
+                foreign key (cycle_id, decision_index) references dry_run_decision_facts (cycle_id, decision_index) on delete cascade
+            );
+
+            create table if not exists dry_run_signal_contributions (
+                cycle_id text not null,
+                decision_index integer not null,
+                contribution_index integer not null,
+                name text not null,
+                value numeric not null,
+                reason text not null,
+                primary key (cycle_id, decision_index, contribution_index),
+                foreign key (cycle_id, decision_index) references dry_run_decision_facts (cycle_id, decision_index) on delete cascade
+            );
+
+            create table if not exists dry_run_actions (
+                cycle_id text not null,
+                decision_index integer not null,
+                pair text not null,
+                action text not null,
+                reason text not null,
+                hold_reason_code text,
+                exit_reason_code text,
+                desired_position text not null,
+                target_notional_eur numeric not null,
+                quantity numeric not null,
+                entry_price numeric not null,
+                last_price numeric not null,
+                fill_price numeric not null,
+                fee_eur numeric not null,
+                gross_notional_eur numeric not null,
+                net_notional_eur numeric not null,
+                cash_before_eur numeric not null,
+                cash_after_eur numeric not null,
+                portfolio_value_before_eur numeric not null,
+                portfolio_value_after_eur numeric not null,
+                fill_source text,
+                modeled_fill_price numeric,
+                modeled_fee_eur numeric,
+                round_trip_cost_estimate_pct numeric,
+                expected_funding_pct numeric,
+                atr_pct numeric,
+                stop_distance_pct numeric,
+                take_profit_distance_pct numeric,
+                open_risk_eur numeric,
+                queue_ahead_eur numeric,
+                maker_order_filled_eur numeric,
+                maker_fill_rate numeric,
+                time_to_fill_ms bigint,
+                repeg_count integer,
+                funding_state text,
+                btc_regime_state text,
+                short_allowed text,
+                requested_notional_eur numeric,
+                filled_notional_eur numeric,
+                side text,
+                reduce_only boolean,
+                leverage numeric,
+                exit_trigger_source text,
+                entry_channel text,
+                exchange_order_id text,
+                exchange_fill_timestamp timestamptz,
+                requested_margin_eur numeric,
+                requested_leverage numeric,
+                actual_initial_margin_eur numeric,
+                actual_effective_leverage numeric,
+                target_risk_eur numeric,
+                sized_notional_eur numeric,
+                required_margin_eur numeric,
+                effective_leverage numeric,
+                projected_stop_loss_eur numeric,
+                execution_cost_model text,
+                stop_source text,
+                notional_cap_reason text,
+                range_basis text,
+                close_percentile numeric,
+                recent_swing_position numeric,
+                primary key (cycle_id, decision_index),
+                foreign key (cycle_id, decision_index) references dry_run_decision_facts (cycle_id, decision_index) on delete cascade
+            );
+
+            create index if not exists ix_dry_run_actions_action_pair on dry_run_actions (action, pair);
+            create index if not exists ix_dry_run_actions_exchange_order on dry_run_actions (exchange_order_id);
+
+            create table if not exists dry_run_entry_freshness (
+                cycle_id text not null,
+                decision_index integer not null,
+                entry_freshness_position_in_24h_range_pct numeric,
+                entry_freshness_distance_from_recent_high_pct numeric,
+                entry_freshness_last_snapshot_step_pct numeric,
+                entry_freshness_short_snapshot_slope_pct numeric,
+                entry_freshness_positive_steps_in_last_3 integer,
+                entry_freshness_is_near_high boolean,
+                entry_freshness_has_fresh_upward_tape boolean,
+                entry_freshness_has_fresh_breakout boolean,
+                entry_freshness_block_reason text,
+                entry_freshness_recent_candle_momentum_pct numeric,
+                entry_distance_from_local_high_pct numeric,
+                local_high_source text,
+                breakout_buffer_pct numeric,
+                live_price_vs_signal_close_pct numeric,
+                post_fill_entry_distance_from_local_high_pct numeric,
+                post_fill_live_price_vs_signal_close_pct numeric,
+                signal_price numeric,
+                pre_submit_bid numeric,
+                pre_submit_ask numeric,
+                submitted_limit_price numeric,
+                requested_quantity numeric,
+                filled_quantity numeric,
+                average_fill_price numeric,
+                entry_deviation_from_signal_pct numeric,
+                entry_deviation_from_ask_pct numeric,
+                dip_bounce_min_score_applied numeric,
+                primary key (cycle_id, decision_index),
+                foreign key (cycle_id, decision_index) references dry_run_decision_facts (cycle_id, decision_index) on delete cascade
+            );
+
+            create table if not exists dry_run_long_range_diagnostics (
+                cycle_id text not null,
+                decision_index integer not null,
+                long_range_entry_price numeric,
+                long_range_entry_price_source text,
+                long_range_absolute_low_24h numeric,
+                long_range_absolute_high_24h numeric,
+                long_range_robust_low_24h numeric,
+                long_range_robust_high_24h numeric,
+                long_range_24h_source text,
+                long_range_24h_sample_count integer,
+                long_range_24h_position_raw numeric,
+                long_range_24h_position numeric,
+                long_range_max_position_for_long numeric,
+                long_range_distance_from_24h_low_pct numeric,
+                long_range_rising_snapshot_count integer,
+                entry_blocked_by_24h_range boolean,
+                long_range_block_reason_code text,
+                primary key (cycle_id, decision_index),
+                foreign key (cycle_id, decision_index) references dry_run_decision_facts (cycle_id, decision_index) on delete cascade
+            );
+
+            create table if not exists dry_run_cycle_entry_diagnostic_facts (
+                cycle_id text primary key references dry_run_cycle_facts (cycle_id) on delete cascade,
+                snapshot_pairs_available integer not null,
+                active_pairs_evaluated integer not null,
+                entry_pairs_evaluated integer not null,
+                price_action_ready_count integer not null,
+                score_at_least_075 integer not null,
+                score_at_least_080 integer not null,
+                score_at_least_085 integer not null,
+                score_at_least_090 integer not null,
+                hard_filter_pass_count integer not null,
+                eligible_entry_candidates integer not null,
+                chosen_pair text,
+                no_trade_reason text,
+                execution_mode text not null,
+                fill_rate numeric not null,
+                pairs_passed_spread integer not null,
+                pairs_passed_volume integer not null,
+                pairs_passed_depth integer not null,
+                open_risk_eur numeric not null,
+                btc_regime_state text not null,
+                pairs_passed_exit_depth integer not null,
+                funding_state text not null
+            );
+
+            create table if not exists dry_run_rejection_counts (
+                cycle_id text not null references dry_run_cycle_facts (cycle_id) on delete cascade,
+                reason text not null,
+                count integer not null,
+                primary key (cycle_id, reason)
+            );
+
+            create table if not exists dry_run_top_candidates (
+                cycle_id text not null references dry_run_cycle_facts (cycle_id) on delete cascade,
+                candidate_index integer not null,
+                pair text not null,
+                score numeric not null,
+                desired_position text not null,
+                spread_percent numeric not null,
+                price numeric not null,
+                bid numeric not null,
+                ask numeric not null,
+                has_bullish_structure boolean not null,
+                ema_fully_confirmed boolean not null,
+                bullish_ema_gap_percent numeric,
+                ema_gap_velocity_percent numeric,
+                early_entry_eligible boolean not null,
+                early_entry_reason text,
+                early_entry_diagnostic_score numeric not null,
+                early_entry_suggested_notional_eur numeric not null,
+                price_action_direction text not null,
+                price_action_trend_percent numeric,
+                price_action_state text not null,
+                price_action_samples_available integer not null,
+                price_action_samples_required integer not null,
+                price_action_oldest_sample_utc timestamptz,
+                price_action_newest_sample_utc timestamptz,
+                hard_filters_passed boolean not null,
+                quality_filters_passed boolean not null,
+                rejection_reason text,
+                exploratory boolean not null,
+                primary key (cycle_id, candidate_index)
+            );
+
+            create table if not exists dry_run_top_candidate_missing_confirmations (
+                cycle_id text not null,
+                candidate_index integer not null,
+                confirmation_index integer not null,
+                confirmation text not null,
+                primary key (cycle_id, candidate_index, confirmation_index),
+                foreign key (cycle_id, candidate_index) references dry_run_top_candidates (cycle_id, candidate_index) on delete cascade
+            );
+
+            create table if not exists dry_run_excluded_pairs (
+                cycle_id text not null references dry_run_cycle_facts (cycle_id) on delete cascade,
+                excluded_index integer not null,
+                pair text not null,
+                reason text not null,
+                last numeric not null,
+                change_percent numeric not null,
+                volume_rank integer,
+                est_24h_volume_eur numeric,
+                spread_percent numeric,
+                advisor_rank integer,
+                primary key (cycle_id, excluded_index)
+            );
+
             drop view if exists dry_run_cycle_entry_diagnostics;
             drop view if exists dry_run_decisions;
             drop view if exists dry_run_cycle_summary;
@@ -379,199 +956,405 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
 
             create or replace view portfolio_summary as
             select
-                id,
-                bot_instance_id,
-                updated_at,
-                (state_json ->> 'cashEur')::numeric as cash_eur,
-                (state_json ->> 'positionsValueEur')::numeric as positions_value_eur,
-                (state_json ->> 'totalValueEur')::numeric as total_value_eur,
-                jsonb_array_length(coalesce(state_json -> 'positions', '[]'::jsonb)) as open_positions,
-                state_json -> 'dailyRisk' ->> 'dateUtc' as daily_risk_date_utc,
-                (state_json -> 'dailyRisk' ->> 'realizedPnlEur')::numeric as daily_realized_pnl_eur
-            from portfolio_state;
+                summary.state_id as id,
+                summary.bot_instance_id,
+                summary.updated_at,
+                summary.cash_eur,
+                summary.positions_value_eur,
+                summary.total_value_eur,
+                summary.open_positions,
+                summary.daily_risk_date_utc,
+                summary.daily_realized_pnl_eur
+            from portfolio_state_summary summary;
 
             create or replace view portfolio_positions as
             select
-                state.id as portfolio_state_id,
-                state.bot_instance_id,
-                state.updated_at as portfolio_updated_at,
-                position ->> 'pair' as pair,
-                position ->> 'side' as side,
-                (position ->> 'quantity')::numeric as quantity,
-                (position ->> 'entryPrice')::numeric as entry_price,
-                (position ->> 'entryNotionalEur')::numeric as entry_notional_eur,
-                (position ->> 'lastPrice')::numeric as last_price,
-                (position ->> 'marketValueEur')::numeric as market_value_eur,
-                (position ->> 'unrealizedPnlEur')::numeric as unrealized_pnl_eur,
-                (position ->> 'unrealizedPnlPercent')::numeric as unrealized_pnl_percent,
-                (position ->> 'openedAtUtc')::timestamptz as opened_at_utc,
-                (position ->> 'lastActionAtUtc')::timestamptz as last_action_at_utc,
-                (position ->> 'leverage')::numeric as leverage,
-                (position ->> 'initialMarginEur')::numeric as initial_margin_eur,
-                (position ->> 'markPrice')::numeric as mark_price,
-                (position ->> 'liquidationPrice')::numeric as liquidation_price,
-                (position ->> 'liquidationDistancePercent')::numeric as liquidation_distance_percent,
-                (position ->> 'fundingPaidEur')::numeric as funding_paid_eur,
-                position ->> 'tpOrderState' as tp_order_state,
-                position ->> 'slOrderState' as sl_order_state,
-                position ->> 'entryChannel' as entry_channel
-            from portfolio_state state
-            cross join lateral jsonb_array_elements(coalesce(state.state_json -> 'positions', '[]'::jsonb)) as position;
+                summary.state_id as portfolio_state_id,
+                position.bot_instance_id,
+                position.updated_at as portfolio_updated_at,
+                position.pair,
+                position.side,
+                position.quantity,
+                position.entry_price,
+                position.entry_notional_eur,
+                position.last_price,
+                position.market_value_eur,
+                position.unrealized_pnl_eur,
+                position.unrealized_pnl_percent,
+                position.opened_at_utc,
+                position.last_action_at_utc,
+                position.leverage,
+                position.initial_margin_eur,
+                position.mark_price,
+                position.liquidation_price,
+                position.liquidation_distance_percent,
+                position.funding_paid_eur,
+                position.tp_order_state,
+                position.sl_order_state,
+                position.entry_channel
+            from portfolio_position_state position
+            join portfolio_state_summary summary on summary.bot_instance_id = position.bot_instance_id;
 
             create or replace view dry_run_cycle_summary as
             select
                 cycle.cycle_id,
                 cycle.bot_instance_id,
                 cycle.utc,
-                cycle.record_json ->> 'marketDataMode' as market_data_mode,
-                cycle.record_json ->> 'aiProvider' as ai_provider,
-                jsonb_array_length(coalesce(cycle.record_json -> 'activePairs', '[]'::jsonb)) as active_pairs_count,
-                jsonb_array_length(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decisions_count,
-                (cycle.record_json -> 'portfolioBefore' ->> 'cashEur')::numeric as cash_before_eur,
-                (cycle.record_json -> 'portfolioAfter' ->> 'cashEur')::numeric as cash_after_eur,
-                (cycle.record_json -> 'portfolioBefore' ->> 'totalValueEur')::numeric as portfolio_value_before_eur,
-                (cycle.record_json -> 'portfolioAfter' ->> 'totalValueEur')::numeric as portfolio_value_after_eur,
-                (
-                    select count(*)
-                    from jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision
-                    where decision -> 'dryRunAction' ->> 'action' = 'WOULD_BUY'
-                ) as would_buy_count,
-                (
-                    select count(*)
-                    from jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision
-                    where decision -> 'dryRunAction' ->> 'action' in ('WOULD_SELL', 'WOULD_CLOSE')
-                ) as would_sell_count,
-                (
-                    select count(*)
-                    from jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision
-                    where coalesce(decision ->> 'broker', '') like 'VALIDATED_OK%'
-                ) as validated_order_count
-            from dry_run_cycles cycle;
+                cycle.market_data_mode,
+                cycle.ai_provider,
+                cycle.active_pairs_count,
+                cycle.decisions_count,
+                cycle.cash_before_eur,
+                cycle.cash_after_eur,
+                cycle.portfolio_value_before_eur,
+                cycle.portfolio_value_after_eur,
+                cycle.would_buy_count,
+                cycle.would_sell_count,
+                cycle.validated_order_count
+            from dry_run_cycle_facts cycle;
 
             create or replace view dry_run_decisions as
             select
-                cycle.cycle_id,
-                cycle.bot_instance_id,
-                cycle.utc,
-                decision ->> 'pair' as pair,
-                decision -> 'dryRunAction' ->> 'action' as action,
-                decision ->> 'desiredPosition' as desired_position,
-                (decision ->> 'price')::numeric as price,
-                (decision ->> 'score')::numeric as score,
-                (decision ->> 'riskApproved')::boolean as risk_approved,
-                decision ->> 'broker' as broker,
-                (decision -> 'dryRunAction' ->> 'targetNotionalEur')::numeric as target_notional_eur,
-                (decision -> 'dryRunAction' ->> 'quantity')::numeric as quantity,
-                (decision -> 'dryRunAction' ->> 'fillPrice')::numeric as fill_price,
-                (decision -> 'dryRunAction' ->> 'feeEur')::numeric as fee_eur,
-                (decision -> 'dryRunAction' ->> 'cashBeforeEur')::numeric as cash_before_eur,
-                (decision -> 'dryRunAction' ->> 'cashAfterEur')::numeric as cash_after_eur,
-                (decision -> 'dryRunAction' ->> 'portfolioValueBeforeEur')::numeric as portfolio_value_before_eur,
-                (decision -> 'dryRunAction' ->> 'portfolioValueAfterEur')::numeric as portfolio_value_after_eur,
-                decision -> 'dryRunAction' ->> 'reason' as reason,
-                decision -> 'dryRunAction' ->> 'holdReasonCode' as hold_reason_code,
-                decision -> 'dryRunAction' ->> 'exitReasonCode' as exit_reason_code,
-                decision ->> 'entryRejectionReason' as entry_rejection_reason,
-                (decision ->> 'spreadPercent')::numeric as spread_percent,
-                decision ->> 'priceActionDirection' as price_action_direction,
-                (decision ->> 'priceActionTrendPercent')::numeric as price_action_trend_percent,
-                (decision ->> 'exploratory')::boolean as exploratory,
-                -- Appended after initial rollout: CREATE OR REPLACE VIEW only allows
-                -- new columns at the END, so these diagnostic-only fields stay last.
-                (decision ->> 'hasBullishStructure')::boolean as has_bullish_structure,
-                (decision ->> 'emaFullyConfirmed')::boolean as ema_fully_confirmed,
-                (decision ->> 'bullishEmaGapPercent')::numeric as bullish_ema_gap_percent,
-                (decision ->> 'emaGapVelocityPercent')::numeric as ema_gap_velocity_percent,
-                (decision ->> 'earlyEntryEligible')::boolean as early_entry_eligible,
-                decision ->> 'earlyEntryReason' as early_entry_reason,
-                (decision ->> 'earlyEntryDiagnosticScore')::numeric as early_entry_diagnostic_score,
-                (decision ->> 'earlyEntrySuggestedNotionalEur')::numeric as early_entry_suggested_notional_eur,
-                decision -> 'dryRunAction' ->> 'side' as side,
-                (decision -> 'dryRunAction' ->> 'reduceOnly')::boolean as reduce_only,
-                (decision -> 'dryRunAction' ->> 'leverage')::numeric as leverage,
-                decision -> 'dryRunAction' ->> 'exitTriggerSource' as exit_trigger_source,
-                decision -> 'dryRunAction' ->> 'fillSource' as fill_source,
-                (decision -> 'dryRunAction' ->> 'modeledFillPrice')::numeric as modeled_fill_price,
-                (decision -> 'dryRunAction' ->> 'modeledFeeEur')::numeric as modeled_fee_eur,
-                (decision -> 'dryRunAction' ->> 'entryFreshnessPositionIn24hRangePct')::numeric as entry_freshness_position_in_24h_range_pct,
-                (decision -> 'dryRunAction' ->> 'entryFreshnessDistanceFromRecentHighPct')::numeric as entry_freshness_distance_from_recent_high_pct,
-                (decision -> 'dryRunAction' ->> 'entryFreshnessLastSnapshotStepPct')::numeric as entry_freshness_last_snapshot_step_pct,
-                (decision -> 'dryRunAction' ->> 'entryFreshnessShortSnapshotSlopePct')::numeric as entry_freshness_short_snapshot_slope_pct,
-                (decision -> 'dryRunAction' ->> 'entryFreshnessPositiveStepsInLast3')::int as entry_freshness_positive_steps_in_last_3,
-                (decision -> 'dryRunAction' ->> 'entryFreshnessIsNearHigh')::boolean as entry_freshness_is_near_high,
-                (decision -> 'dryRunAction' ->> 'entryFreshnessHasFreshUpwardTape')::boolean as entry_freshness_has_fresh_upward_tape,
-                (decision -> 'dryRunAction' ->> 'entryFreshnessHasFreshBreakout')::boolean as entry_freshness_has_fresh_breakout,
-                decision -> 'dryRunAction' ->> 'entryFreshnessBlockReason' as entry_freshness_block_reason,
-                (decision -> 'dryRunAction' ->> 'signalPrice')::numeric as signal_price,
-                (decision -> 'dryRunAction' ->> 'preSubmitBid')::numeric as pre_submit_bid,
-                (decision -> 'dryRunAction' ->> 'preSubmitAsk')::numeric as pre_submit_ask,
-                (decision -> 'dryRunAction' ->> 'submittedLimitPrice')::numeric as submitted_limit_price,
-                (decision -> 'dryRunAction' ->> 'requestedQuantity')::numeric as requested_quantity,
-                (decision -> 'dryRunAction' ->> 'filledQuantity')::numeric as filled_quantity,
-                (decision -> 'dryRunAction' ->> 'averageFillPrice')::numeric as average_fill_price,
-                (decision -> 'dryRunAction' ->> 'entryDeviationFromSignalPct')::numeric as entry_deviation_from_signal_pct,
-                (decision -> 'dryRunAction' ->> 'entryDeviationFromAskPct')::numeric as entry_deviation_from_ask_pct,
-                decision -> 'dryRunAction' ->> 'exchangeOrderId' as exchange_order_id,
-                (decision -> 'dryRunAction' ->> 'exchangeFillTimestamp')::timestamptz as exchange_fill_timestamp,
-                -- Entry channel (Standard / Continuation / Breakout / DipBounce). On
-                -- open rows it labels the admitting channel; on close rows it is the
-                -- channel carried from the opened position, so realized PnL groups by
-                -- channel directly. New diagnostics append after existing columns per
-                -- CREATE OR REPLACE VIEW rules.
-                decision -> 'dryRunAction' ->> 'entryChannel' as entry_channel,
-                (decision -> 'dryRunAction' ->> 'entryDistanceFromLocalHighPct')::numeric as entry_distance_from_local_high_pct,
-                decision -> 'dryRunAction' ->> 'localHighSource' as local_high_source,
-                (decision -> 'dryRunAction' ->> 'breakoutBufferPct')::numeric as breakout_buffer_pct,
-                (decision -> 'dryRunAction' ->> 'livePriceVsSignalClosePct')::numeric as live_price_vs_signal_close_pct,
-                (decision -> 'dryRunAction' ->> 'postFillEntryDistanceFromLocalHighPct')::numeric as post_fill_entry_distance_from_local_high_pct,
-                (decision -> 'dryRunAction' ->> 'postFillLivePriceVsSignalClosePct')::numeric as post_fill_live_price_vs_signal_close_pct,
-                -- Momentum context and the relaxed dip threshold, so a losing entry's
-                -- admission conditions are fully reconstructable per channel.
-                (decision -> 'dryRunAction' ->> 'entryFreshnessRecentCandleMomentumPct')::numeric as entry_freshness_recent_candle_momentum_pct,
-                (decision -> 'dryRunAction' ->> 'dipBounceMinScoreApplied')::numeric as dip_bounce_min_score_applied,
-                -- 24h-range LONG guard diagnostics (FuturesLongRangeGuard). Appended last
-                -- per CREATE OR REPLACE VIEW rules.
-                (decision -> 'dryRunAction' ->> 'longRangeEntryPrice')::numeric as long_range_entry_price,
-                decision -> 'dryRunAction' ->> 'longRangeEntryPriceSource' as long_range_entry_price_source,
-                (decision -> 'dryRunAction' ->> 'longRangeAbsoluteLow24h')::numeric as long_range_absolute_low_24h,
-                (decision -> 'dryRunAction' ->> 'longRangeAbsoluteHigh24h')::numeric as long_range_absolute_high_24h,
-                (decision -> 'dryRunAction' ->> 'longRangeRobustLow24h')::numeric as long_range_robust_low_24h,
-                (decision -> 'dryRunAction' ->> 'longRangeRobustHigh24h')::numeric as long_range_robust_high_24h,
-                decision -> 'dryRunAction' ->> 'longRange24hSource' as long_range_24h_source,
-                (decision -> 'dryRunAction' ->> 'longRange24hSampleCount')::int as long_range_24h_sample_count,
-                (decision -> 'dryRunAction' ->> 'longRange24hPositionRaw')::numeric as long_range_24h_position_raw,
-                (decision -> 'dryRunAction' ->> 'longRange24hPosition')::numeric as long_range_24h_position,
-                (decision -> 'dryRunAction' ->> 'longRangeMaxPositionForLong')::numeric as long_range_max_position_for_long,
-                (decision -> 'dryRunAction' ->> 'longRangeDistanceFrom24hLowPct')::numeric as long_range_distance_from_24h_low_pct,
-                (decision -> 'dryRunAction' ->> 'longRangeRisingSnapshotCount')::int as long_range_rising_snapshot_count,
-                (decision -> 'dryRunAction' ->> 'entryBlockedBy24hRange')::boolean as entry_blocked_by_24h_range,
-                decision -> 'dryRunAction' ->> 'longRangeBlockReasonCode' as long_range_block_reason_code
-            from dry_run_cycles cycle
-            cross join lateral jsonb_array_elements(coalesce(cycle.record_json -> 'decisions', '[]'::jsonb)) as decision;
+                decision.cycle_id,
+                decision.bot_instance_id,
+                decision.utc,
+                decision.pair,
+                action.action,
+                decision.desired_position,
+                decision.price,
+                decision.score,
+                decision.risk_approved,
+                decision.broker,
+                action.target_notional_eur,
+                action.quantity,
+                action.fill_price,
+                action.fee_eur,
+                action.cash_before_eur,
+                action.cash_after_eur,
+                action.portfolio_value_before_eur,
+                action.portfolio_value_after_eur,
+                action.reason,
+                action.hold_reason_code,
+                action.exit_reason_code,
+                decision.entry_rejection_reason,
+                decision.spread_percent,
+                decision.price_action_direction,
+                decision.price_action_trend_percent,
+                decision.exploratory,
+                decision.has_bullish_structure,
+                decision.ema_fully_confirmed,
+                decision.bullish_ema_gap_percent,
+                decision.ema_gap_velocity_percent,
+                decision.early_entry_eligible,
+                decision.early_entry_reason,
+                decision.early_entry_diagnostic_score,
+                decision.early_entry_suggested_notional_eur,
+                action.side,
+                action.reduce_only,
+                action.leverage,
+                action.exit_trigger_source,
+                action.fill_source,
+                action.modeled_fill_price,
+                action.modeled_fee_eur,
+                freshness.entry_freshness_position_in_24h_range_pct,
+                freshness.entry_freshness_distance_from_recent_high_pct,
+                freshness.entry_freshness_last_snapshot_step_pct,
+                freshness.entry_freshness_short_snapshot_slope_pct,
+                freshness.entry_freshness_positive_steps_in_last_3,
+                freshness.entry_freshness_is_near_high,
+                freshness.entry_freshness_has_fresh_upward_tape,
+                freshness.entry_freshness_has_fresh_breakout,
+                freshness.entry_freshness_block_reason,
+                freshness.signal_price,
+                freshness.pre_submit_bid,
+                freshness.pre_submit_ask,
+                freshness.submitted_limit_price,
+                freshness.requested_quantity,
+                freshness.filled_quantity,
+                freshness.average_fill_price,
+                freshness.entry_deviation_from_signal_pct,
+                freshness.entry_deviation_from_ask_pct,
+                action.exchange_order_id,
+                action.exchange_fill_timestamp,
+                action.entry_channel,
+                freshness.entry_distance_from_local_high_pct,
+                freshness.local_high_source,
+                freshness.breakout_buffer_pct,
+                freshness.live_price_vs_signal_close_pct,
+                freshness.post_fill_entry_distance_from_local_high_pct,
+                freshness.post_fill_live_price_vs_signal_close_pct,
+                freshness.entry_freshness_recent_candle_momentum_pct,
+                freshness.dip_bounce_min_score_applied,
+                long_range.long_range_entry_price,
+                long_range.long_range_entry_price_source,
+                long_range.long_range_absolute_low_24h,
+                long_range.long_range_absolute_high_24h,
+                long_range.long_range_robust_low_24h,
+                long_range.long_range_robust_high_24h,
+                long_range.long_range_24h_source,
+                long_range.long_range_24h_sample_count,
+                long_range.long_range_24h_position_raw,
+                long_range.long_range_24h_position,
+                long_range.long_range_max_position_for_long,
+                long_range.long_range_distance_from_24h_low_pct,
+                long_range.long_range_rising_snapshot_count,
+                long_range.entry_blocked_by_24h_range,
+                long_range.long_range_block_reason_code
+            from dry_run_decision_facts decision
+            join dry_run_actions action on action.cycle_id = decision.cycle_id and action.decision_index = decision.decision_index
+            left join dry_run_entry_freshness freshness on freshness.cycle_id = decision.cycle_id and freshness.decision_index = decision.decision_index
+            left join dry_run_long_range_diagnostics long_range on long_range.cycle_id = decision.cycle_id and long_range.decision_index = decision.decision_index;
 
             create or replace view dry_run_cycle_entry_diagnostics as
             select
                 cycle.cycle_id,
                 cycle.bot_instance_id,
                 cycle.utc,
-                (cycle.record_json -> 'entryDiagnostics' ->> 'snapshotPairsAvailable')::int as snapshot_pairs_available,
-                (cycle.record_json -> 'entryDiagnostics' ->> 'activePairsEvaluated')::int as active_pairs_evaluated,
-                (cycle.record_json -> 'entryDiagnostics' ->> 'entryPairsEvaluated')::int as entry_pairs_evaluated,
-                (cycle.record_json -> 'entryDiagnostics' ->> 'scoreAtLeast075')::int as score_at_least_075,
-                (cycle.record_json -> 'entryDiagnostics' ->> 'scoreAtLeast080')::int as score_at_least_080,
-                (cycle.record_json -> 'entryDiagnostics' ->> 'scoreAtLeast085')::int as score_at_least_085,
-                (cycle.record_json -> 'entryDiagnostics' ->> 'scoreAtLeast090')::int as score_at_least_090,
-                (cycle.record_json -> 'entryDiagnostics' ->> 'hardFilterPassCount')::int as hard_filter_pass_count,
-                (cycle.record_json -> 'entryDiagnostics' ->> 'eligibleEntryCandidates')::int as eligible_entry_candidates,
-                cycle.record_json -> 'entryDiagnostics' ->> 'chosenPair' as chosen_pair,
-                cycle.record_json -> 'entryDiagnostics' ->> 'noTradeReason' as no_trade_reason,
-                cycle.record_json -> 'entryDiagnostics' -> 'rejectionCounts' as rejection_counts,
-                cycle.record_json -> 'entryDiagnostics' -> 'topCandidates' as top_candidates,
-                cycle.record_json -> 'entryDiagnostics' -> 'excludedPairs' as excluded_pairs,
-                -- Appended after initial rollout: CREATE OR REPLACE VIEW only allows
-                -- new columns at the END, so this stays last.
-                (cycle.record_json -> 'entryDiagnostics' ->> 'priceActionReadyCount')::int as price_action_ready_count
-            from dry_run_cycles cycle;
+                diagnostics.snapshot_pairs_available,
+                diagnostics.active_pairs_evaluated,
+                diagnostics.entry_pairs_evaluated,
+                diagnostics.score_at_least_075,
+                diagnostics.score_at_least_080,
+                diagnostics.score_at_least_085,
+                diagnostics.score_at_least_090,
+                diagnostics.hard_filter_pass_count,
+                diagnostics.eligible_entry_candidates,
+                diagnostics.chosen_pair,
+                diagnostics.no_trade_reason,
+                coalesce((
+                    select jsonb_object_agg(reason, count order by reason)
+                    from dry_run_rejection_counts rejection
+                    where rejection.cycle_id = cycle.cycle_id
+                ), '{}'::jsonb) as rejection_counts,
+                coalesce((
+                    select jsonb_agg(jsonb_build_object(
+                        'pair', candidate.pair,
+                        'score', candidate.score,
+                        'desiredPosition', candidate.desired_position,
+                        'spreadPercent', candidate.spread_percent,
+                        'price', candidate.price,
+                        'bid', candidate.bid,
+                        'ask', candidate.ask,
+                        'hasBullishStructure', candidate.has_bullish_structure,
+                        'emaFullyConfirmed', candidate.ema_fully_confirmed,
+                        'bullishEmaGapPercent', candidate.bullish_ema_gap_percent,
+                        'emaGapVelocityPercent', candidate.ema_gap_velocity_percent,
+                        'earlyEntryEligible', candidate.early_entry_eligible,
+                        'earlyEntryReason', candidate.early_entry_reason,
+                        'earlyEntryDiagnosticScore', candidate.early_entry_diagnostic_score,
+                        'earlyEntrySuggestedNotionalEur', candidate.early_entry_suggested_notional_eur,
+                        'priceActionDirection', candidate.price_action_direction,
+                        'priceActionTrendPercent', candidate.price_action_trend_percent,
+                        'priceActionState', candidate.price_action_state,
+                        'priceActionSamplesAvailable', candidate.price_action_samples_available,
+                        'priceActionSamplesRequired', candidate.price_action_samples_required,
+                        'priceActionOldestSampleUtc', candidate.price_action_oldest_sample_utc,
+                        'priceActionNewestSampleUtc', candidate.price_action_newest_sample_utc,
+                        'hardFiltersPassed', candidate.hard_filters_passed,
+                        'qualityFiltersPassed', candidate.quality_filters_passed,
+                        'missingConfirmations', coalesce((
+                            select jsonb_agg(missing.confirmation order by missing.confirmation_index)
+                            from dry_run_top_candidate_missing_confirmations missing
+                            where missing.cycle_id = candidate.cycle_id
+                              and missing.candidate_index = candidate.candidate_index
+                        ), '[]'::jsonb),
+                        'rejectionReason', candidate.rejection_reason,
+                        'exploratory', candidate.exploratory
+                    ) order by candidate.candidate_index)
+                    from dry_run_top_candidates candidate
+                    where candidate.cycle_id = cycle.cycle_id
+                ), '[]'::jsonb) as top_candidates,
+                coalesce((
+                    select jsonb_agg(jsonb_build_object(
+                        'pair', excluded.pair,
+                        'reason', excluded.reason,
+                        'last', excluded.last,
+                        'changePercent', excluded.change_percent,
+                        'volumeRank', excluded.volume_rank,
+                        'est24hVolumeEur', excluded.est_24h_volume_eur,
+                        'spreadPercent', excluded.spread_percent,
+                        'advisorRank', excluded.advisor_rank
+                    ) order by excluded.excluded_index)
+                    from dry_run_excluded_pairs excluded
+                    where excluded.cycle_id = cycle.cycle_id
+                ), '[]'::jsonb) as excluded_pairs,
+                diagnostics.price_action_ready_count
+            from dry_run_cycle_facts cycle
+            join dry_run_cycle_entry_diagnostic_facts diagnostics on diagnostics.cycle_id = cycle.cycle_id;
+
+            create or replace view dry_run_cycle_records as
+            select
+                cycle.cycle_id,
+                cycle.bot_instance_id,
+                cycle.utc,
+                cycle.worker_version,
+                cycle.worker_commit,
+                cycle.worker_build_utc,
+                cycle.worker_image_tag,
+                cycle.strategy_version,
+                cycle.change_set,
+                jsonb_build_object(
+                    'cycleId', cycle.cycle_id,
+                    'botInstanceId', cycle.bot_instance_id,
+                    'botInstanceName', cycle.bot_instance_name,
+                    'utc', cycle.utc,
+                    'marketDataMode', cycle.market_data_mode,
+                    'aiProvider', cycle.ai_provider,
+                    'worker', jsonb_build_object(
+                        'version', cycle.worker_version,
+                        'commit', cycle.worker_commit,
+                        'buildUtc', cycle.worker_build_utc,
+                        'imageTag', cycle.worker_image_tag,
+                        'strategyVersion', cycle.strategy_version,
+                        'changeSet', cycle.change_set
+                    ),
+                    'activePairs', coalesce((
+                        select jsonb_agg(pair.pair order by pair.pair_index)
+                        from dry_run_cycle_active_pairs pair
+                        where pair.cycle_id = cycle.cycle_id
+                    ), '[]'::jsonb),
+                    'portfolioBefore', jsonb_build_object(
+                        'cashEur', cycle.cash_before_eur,
+                        'positionsValueEur', cycle.positions_value_before_eur,
+                        'totalValueEur', cycle.portfolio_value_before_eur
+                    ),
+                    'portfolioAfter', jsonb_build_object(
+                        'cashEur', cycle.cash_after_eur,
+                        'positionsValueEur', cycle.positions_value_after_eur,
+                        'totalValueEur', cycle.portfolio_value_after_eur
+                    ),
+                    'entryDiagnostics', case
+                        when diagnostics.cycle_id is null then null
+                        else jsonb_build_object(
+                            'snapshotPairsAvailable', diagnostics.snapshot_pairs_available,
+                            'activePairsEvaluated', diagnostics.active_pairs_evaluated,
+                            'entryPairsEvaluated', diagnostics.entry_pairs_evaluated,
+                            'priceActionReadyCount', diagnostics.price_action_ready_count,
+                            'scoreAtLeast075', diagnostics.score_at_least_075,
+                            'scoreAtLeast080', diagnostics.score_at_least_080,
+                            'scoreAtLeast085', diagnostics.score_at_least_085,
+                            'scoreAtLeast090', diagnostics.score_at_least_090,
+                            'hardFilterPassCount', diagnostics.hard_filter_pass_count,
+                            'eligibleEntryCandidates', diagnostics.eligible_entry_candidates,
+                            'chosenPair', diagnostics.chosen_pair,
+                            'noTradeReason', diagnostics.no_trade_reason,
+                            'rejectionCounts', coalesce((
+                                select jsonb_object_agg(reason, count order by reason)
+                                from dry_run_rejection_counts rejection
+                                where rejection.cycle_id = cycle.cycle_id
+                            ), '{}'::jsonb),
+                            'topCandidates', coalesce((
+                                select jsonb_agg(jsonb_build_object(
+                                    'pair', candidate.pair,
+                                    'score', candidate.score,
+                                    'desiredPosition', candidate.desired_position,
+                                    'spreadPercent', candidate.spread_percent,
+                                    'price', candidate.price,
+                                    'bid', candidate.bid,
+                                    'ask', candidate.ask,
+                                    'priceActionDirection', candidate.price_action_direction,
+                                    'priceActionTrendPercent', candidate.price_action_trend_percent,
+                                    'priceActionState', candidate.price_action_state,
+                                    'hardFiltersPassed', candidate.hard_filters_passed,
+                                    'qualityFiltersPassed', candidate.quality_filters_passed,
+                                    'rejectionReason', candidate.rejection_reason,
+                                    'exploratory', candidate.exploratory
+                                ) order by candidate.candidate_index)
+                                from dry_run_top_candidates candidate
+                                where candidate.cycle_id = cycle.cycle_id
+                            ), '[]'::jsonb),
+                            'excludedPairs', coalesce((
+                                select jsonb_agg(jsonb_build_object(
+                                    'pair', excluded.pair,
+                                    'reason', excluded.reason,
+                                    'last', excluded.last,
+                                    'changePercent', excluded.change_percent,
+                                    'volumeRank', excluded.volume_rank,
+                                    'est24hVolumeEur', excluded.est_24h_volume_eur,
+                                    'spreadPercent', excluded.spread_percent,
+                                    'advisorRank', excluded.advisor_rank
+                                ) order by excluded.excluded_index)
+                                from dry_run_excluded_pairs excluded
+                                where excluded.cycle_id = cycle.cycle_id
+                            ), '[]'::jsonb)
+                        )
+                    end,
+                    'decisions', coalesce((
+                        select jsonb_agg(jsonb_build_object(
+                            'pair', decision.pair,
+                            'price', decision.price,
+                            'fastEma', decision.fast_ema,
+                            'slowEma', decision.slow_ema,
+                            'rsi', decision.rsi,
+                            'desiredPosition', decision.desired_position,
+                            'score', decision.score,
+                            'riskApproved', decision.risk_approved,
+                            'riskReasons', coalesce((
+                                select jsonb_agg(reason.reason order by reason.reason_index)
+                                from dry_run_decision_risk_reasons reason
+                                where reason.cycle_id = decision.cycle_id
+                                  and reason.decision_index = decision.decision_index
+                            ), '[]'::jsonb),
+                            'contributions', coalesce((
+                                select jsonb_agg(jsonb_build_object(
+                                    'name', contribution.name,
+                                    'value', contribution.value,
+                                    'reason', contribution.reason
+                                ) order by contribution.contribution_index)
+                                from dry_run_signal_contributions contribution
+                                where contribution.cycle_id = decision.cycle_id
+                                  and contribution.decision_index = decision.decision_index
+                            ), '[]'::jsonb),
+                            'broker', decision.broker,
+                            'entryRejectionReason', decision.entry_rejection_reason,
+                            'spreadPercent', decision.spread_percent,
+                            'priceActionDirection', decision.price_action_direction,
+                            'priceActionTrendPercent', decision.price_action_trend_percent,
+                            'exploratory', decision.exploratory,
+                            'hasBullishStructure', decision.has_bullish_structure,
+                            'emaFullyConfirmed', decision.ema_fully_confirmed,
+                            'bullishEmaGapPercent', decision.bullish_ema_gap_percent,
+                            'emaGapVelocityPercent', decision.ema_gap_velocity_percent,
+                            'earlyEntryEligible', decision.early_entry_eligible,
+                            'earlyEntryReason', decision.early_entry_reason,
+                            'earlyEntryDiagnosticScore', decision.early_entry_diagnostic_score,
+                            'earlyEntrySuggestedNotionalEur', decision.early_entry_suggested_notional_eur,
+                            'dryRunAction', jsonb_build_object(
+                                'pair', action.pair,
+                                'action', action.action,
+                                'reason', action.reason,
+                                'holdReasonCode', action.hold_reason_code,
+                                'exitReasonCode', action.exit_reason_code,
+                                'desiredPosition', action.desired_position,
+                                'targetNotionalEur', action.target_notional_eur,
+                                'quantity', action.quantity,
+                                'entryPrice', action.entry_price,
+                                'lastPrice', action.last_price,
+                                'fillPrice', action.fill_price,
+                                'feeEur', action.fee_eur,
+                                'grossNotionalEur', action.gross_notional_eur,
+                                'netNotionalEur', action.net_notional_eur,
+                                'cashBeforeEur', action.cash_before_eur,
+                                'cashAfterEur', action.cash_after_eur,
+                                'portfolioValueBeforeEur', action.portfolio_value_before_eur,
+                                'portfolioValueAfterEur', action.portfolio_value_after_eur,
+                                'fillSource', action.fill_source,
+                                'side', action.side,
+                                'reduceOnly', action.reduce_only,
+                                'leverage', action.leverage,
+                                'exitTriggerSource', action.exit_trigger_source,
+                                'entryChannel', action.entry_channel,
+                                'exchangeOrderId', action.exchange_order_id,
+                                'exchangeFillTimestamp', action.exchange_fill_timestamp
+                            )
+                        ) order by decision.decision_index)
+                        from dry_run_decision_facts decision
+                        join dry_run_actions action on action.cycle_id = decision.cycle_id and action.decision_index = decision.decision_index
+                        where decision.cycle_id = cycle.cycle_id
+                    ), '[]'::jsonb)
+                ) as record
+            from dry_run_cycle_facts cycle
+            left join dry_run_cycle_entry_diagnostic_facts diagnostics on diagnostics.cycle_id = cycle.cycle_id;
 
             -- Clean slate for the market-prefixed instance-id scheme (spot-live,
             -- spot-virtual, futures-live, futures-virtual): rows written under the
@@ -579,11 +1362,1211 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             delete from portfolio_state  where bot_instance_id in ('live', 'virtual', 'default');
             delete from dry_run_cycles   where bot_instance_id in ('live', 'virtual', 'default');
             delete from market_snapshots where bot_instance_id in ('live', 'virtual', 'default');
+            delete from portfolio_state_summary where bot_instance_id in ('live', 'virtual', 'default');
+            delete from portfolio_position_state where bot_instance_id in ('live', 'virtual', 'default');
+            delete from portfolio_action_history_state where bot_instance_id in ('live', 'virtual', 'default');
+            delete from pending_futures_order_state where bot_instance_id in ('live', 'virtual', 'default');
+            delete from dry_run_cycle_facts where bot_instance_id in ('live', 'virtual', 'default');
             """,
             connection);
         command.ExecuteNonQuery();
         _schemaReady = true;
     }
+
+    private void SaveNormalizedPortfolioState(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        PortfolioState state)
+    {
+        using (var command = new NpgsqlCommand(
+            """
+            insert into portfolio_state_summary (
+                bot_instance_id,
+                state_id,
+                updated_at,
+                cash_eur,
+                positions_value_eur,
+                total_value_eur,
+                open_positions,
+                daily_risk_date_utc,
+                daily_realized_pnl_eur,
+                external_pnl_eur)
+            values (
+                @bot_instance_id,
+                @state_id,
+                @updated_at,
+                @cash_eur,
+                @positions_value_eur,
+                @total_value_eur,
+                @open_positions,
+                @daily_risk_date_utc,
+                @daily_realized_pnl_eur,
+                @external_pnl_eur)
+            on conflict (bot_instance_id) do update set
+                state_id = excluded.state_id,
+                updated_at = excluded.updated_at,
+                cash_eur = excluded.cash_eur,
+                positions_value_eur = excluded.positions_value_eur,
+                total_value_eur = excluded.total_value_eur,
+                open_positions = excluded.open_positions,
+                daily_risk_date_utc = excluded.daily_risk_date_utc,
+                daily_realized_pnl_eur = excluded.daily_realized_pnl_eur,
+                external_pnl_eur = excluded.external_pnl_eur
+            """,
+            connection,
+            transaction))
+        {
+            Add(command, "bot_instance_id", NpgsqlDbType.Text, botInstanceId);
+            Add(command, "state_id", NpgsqlDbType.Integer, StateId);
+            Add(command, "updated_at", NpgsqlDbType.TimestampTz, state.UpdatedAt.UtcDateTime);
+            Add(command, "cash_eur", NpgsqlDbType.Numeric, state.CashEur);
+            Add(command, "positions_value_eur", NpgsqlDbType.Numeric, state.PositionsValueEur);
+            Add(command, "total_value_eur", NpgsqlDbType.Numeric, state.TotalValueEur);
+            Add(command, "open_positions", NpgsqlDbType.Integer, state.Positions.Count);
+            Add(command, "daily_risk_date_utc", NpgsqlDbType.Text, state.DailyRisk?.DateUtc);
+            Add(command, "daily_realized_pnl_eur", NpgsqlDbType.Numeric, state.DailyRisk?.RealizedPnlEur);
+            Add(command, "external_pnl_eur", NpgsqlDbType.Numeric, state.ExternalPnlEur);
+            command.ExecuteNonQuery();
+        }
+
+        Execute(connection, transaction, "delete from portfolio_position_state where bot_instance_id = @bot_instance_id",
+            ("bot_instance_id", NpgsqlDbType.Text, botInstanceId));
+        Execute(connection, transaction, "delete from portfolio_action_history_state where bot_instance_id = @bot_instance_id",
+            ("bot_instance_id", NpgsqlDbType.Text, botInstanceId));
+        Execute(connection, transaction, "delete from pending_futures_order_state where bot_instance_id = @bot_instance_id",
+            ("bot_instance_id", NpgsqlDbType.Text, botInstanceId));
+
+        for (var i = 0; i < state.Positions.Count; i++)
+        {
+            var position = state.Positions[i];
+            using var command = new NpgsqlCommand(
+                """
+                insert into portfolio_position_state (
+                    bot_instance_id,
+                    updated_at,
+                    position_index,
+                    pair,
+                    side,
+                    quantity,
+                    entry_price,
+                    entry_notional_eur,
+                    last_price,
+                    market_value_eur,
+                    unrealized_pnl_eur,
+                    unrealized_pnl_percent,
+                    opened_at_utc,
+                    last_action_at_utc,
+                    peak_pnl_percent,
+                    entry_score,
+                    exit_mode,
+                    entry_atr,
+                    stop_loss_price,
+                    take_profit_price,
+                    round_trip_cost_estimate_pct,
+                    expected_funding_pct,
+                    atr_pct,
+                    stop_distance_pct,
+                    take_profit_distance_pct,
+                    exchange_stop_loss_price,
+                    exchange_take_profit_price,
+                    exchange_protection_multiplier_percent,
+                    trailing_stop_state,
+                    trailing_stop_percent,
+                    trailing_stop_order_id,
+                    trailing_activated_at_utc,
+                    low_score_cycles,
+                    leverage,
+                    initial_margin_eur,
+                    mark_price,
+                    liquidation_price,
+                    liquidation_distance_percent,
+                    funding_paid_eur,
+                    tp_order_state,
+                    sl_order_state,
+                    origin,
+                    entry_channel)
+                values (
+                    @bot_instance_id,
+                    @updated_at,
+                    @position_index,
+                    @pair,
+                    @side,
+                    @quantity,
+                    @entry_price,
+                    @entry_notional_eur,
+                    @last_price,
+                    @market_value_eur,
+                    @unrealized_pnl_eur,
+                    @unrealized_pnl_percent,
+                    @opened_at_utc,
+                    @last_action_at_utc,
+                    @peak_pnl_percent,
+                    @entry_score,
+                    @exit_mode,
+                    @entry_atr,
+                    @stop_loss_price,
+                    @take_profit_price,
+                    @round_trip_cost_estimate_pct,
+                    @expected_funding_pct,
+                    @atr_pct,
+                    @stop_distance_pct,
+                    @take_profit_distance_pct,
+                    @exchange_stop_loss_price,
+                    @exchange_take_profit_price,
+                    @exchange_protection_multiplier_percent,
+                    @trailing_stop_state,
+                    @trailing_stop_percent,
+                    @trailing_stop_order_id,
+                    @trailing_activated_at_utc,
+                    @low_score_cycles,
+                    @leverage,
+                    @initial_margin_eur,
+                    @mark_price,
+                    @liquidation_price,
+                    @liquidation_distance_percent,
+                    @funding_paid_eur,
+                    @tp_order_state,
+                    @sl_order_state,
+                    @origin,
+                    @entry_channel)
+                """,
+                connection,
+                transaction);
+            Add(command, "bot_instance_id", NpgsqlDbType.Text, botInstanceId);
+            Add(command, "updated_at", NpgsqlDbType.TimestampTz, state.UpdatedAt.UtcDateTime);
+            Add(command, "position_index", NpgsqlDbType.Integer, i);
+            Add(command, "pair", NpgsqlDbType.Text, position.Pair);
+            Add(command, "side", NpgsqlDbType.Text, position.Side);
+            Add(command, "quantity", NpgsqlDbType.Numeric, position.Quantity);
+            Add(command, "entry_price", NpgsqlDbType.Numeric, position.EntryPrice);
+            Add(command, "entry_notional_eur", NpgsqlDbType.Numeric, position.EntryNotionalEur);
+            Add(command, "last_price", NpgsqlDbType.Numeric, position.LastPrice);
+            Add(command, "market_value_eur", NpgsqlDbType.Numeric, position.MarketValueEur);
+            Add(command, "unrealized_pnl_eur", NpgsqlDbType.Numeric, position.UnrealizedPnlEur);
+            Add(command, "unrealized_pnl_percent", NpgsqlDbType.Numeric, position.UnrealizedPnlPercent);
+            Add(command, "opened_at_utc", NpgsqlDbType.TimestampTz, Utc(position.OpenedAtUtc));
+            Add(command, "last_action_at_utc", NpgsqlDbType.TimestampTz, Utc(position.LastActionAtUtc));
+            Add(command, "peak_pnl_percent", NpgsqlDbType.Numeric, position.PeakPnlPercent);
+            Add(command, "entry_score", NpgsqlDbType.Numeric, position.EntryScore);
+            Add(command, "exit_mode", NpgsqlDbType.Text, position.ExitMode);
+            Add(command, "entry_atr", NpgsqlDbType.Numeric, position.EntryAtr);
+            Add(command, "stop_loss_price", NpgsqlDbType.Numeric, position.StopLossPrice);
+            Add(command, "take_profit_price", NpgsqlDbType.Numeric, position.TakeProfitPrice);
+            Add(command, "round_trip_cost_estimate_pct", NpgsqlDbType.Numeric, position.RoundTripCostEstimatePct);
+            Add(command, "expected_funding_pct", NpgsqlDbType.Numeric, position.ExpectedFundingPct);
+            Add(command, "atr_pct", NpgsqlDbType.Numeric, position.AtrPct);
+            Add(command, "stop_distance_pct", NpgsqlDbType.Numeric, position.StopDistancePct);
+            Add(command, "take_profit_distance_pct", NpgsqlDbType.Numeric, position.TakeProfitDistancePct);
+            Add(command, "exchange_stop_loss_price", NpgsqlDbType.Numeric, position.ExchangeStopLossPrice);
+            Add(command, "exchange_take_profit_price", NpgsqlDbType.Numeric, position.ExchangeTakeProfitPrice);
+            Add(command, "exchange_protection_multiplier_percent", NpgsqlDbType.Numeric, position.ExchangeProtectionMultiplierPercent);
+            Add(command, "trailing_stop_state", NpgsqlDbType.Text, position.TrailingStopState);
+            Add(command, "trailing_stop_percent", NpgsqlDbType.Numeric, position.TrailingStopPercent);
+            Add(command, "trailing_stop_order_id", NpgsqlDbType.Text, position.TrailingStopOrderId);
+            Add(command, "trailing_activated_at_utc", NpgsqlDbType.TimestampTz, Utc(position.TrailingActivatedAtUtc));
+            Add(command, "low_score_cycles", NpgsqlDbType.Integer, position.LowScoreCycles);
+            Add(command, "leverage", NpgsqlDbType.Numeric, position.Leverage);
+            Add(command, "initial_margin_eur", NpgsqlDbType.Numeric, position.InitialMarginEur);
+            Add(command, "mark_price", NpgsqlDbType.Numeric, position.MarkPrice);
+            Add(command, "liquidation_price", NpgsqlDbType.Numeric, position.LiquidationPrice);
+            Add(command, "liquidation_distance_percent", NpgsqlDbType.Numeric, position.LiquidationDistancePercent);
+            Add(command, "funding_paid_eur", NpgsqlDbType.Numeric, position.FundingPaidEur);
+            Add(command, "tp_order_state", NpgsqlDbType.Text, position.TpOrderState);
+            Add(command, "sl_order_state", NpgsqlDbType.Text, position.SlOrderState);
+            Add(command, "origin", NpgsqlDbType.Text, position.Origin);
+            Add(command, "entry_channel", NpgsqlDbType.Text, position.EntryChannel);
+            command.ExecuteNonQuery();
+        }
+
+        foreach (var history in state.ActionHistory)
+        {
+            using var command = new NpgsqlCommand(
+                """
+                insert into portfolio_action_history_state (
+                    bot_instance_id,
+                    pair,
+                    last_buy_at_utc,
+                    last_sell_at_utc,
+                    last_stop_loss_at_utc)
+                values (
+                    @bot_instance_id,
+                    @pair,
+                    @last_buy_at_utc,
+                    @last_sell_at_utc,
+                    @last_stop_loss_at_utc)
+                """,
+                connection,
+                transaction);
+            Add(command, "bot_instance_id", NpgsqlDbType.Text, botInstanceId);
+            Add(command, "pair", NpgsqlDbType.Text, history.Pair);
+            Add(command, "last_buy_at_utc", NpgsqlDbType.TimestampTz, Utc(history.LastBuyAtUtc));
+            Add(command, "last_sell_at_utc", NpgsqlDbType.TimestampTz, Utc(history.LastSellAtUtc));
+            Add(command, "last_stop_loss_at_utc", NpgsqlDbType.TimestampTz, Utc(history.LastStopLossAtUtc));
+            command.ExecuteNonQuery();
+        }
+
+        for (var i = 0; i < state.PendingFuturesOrders.Count; i++)
+        {
+            var order = state.PendingFuturesOrders[i];
+            using var command = new NpgsqlCommand(
+                """
+                insert into pending_futures_order_state (
+                    bot_instance_id,
+                    order_index,
+                    pair,
+                    exchange_order_id,
+                    created_at_utc,
+                    requested_quantity,
+                    submitted_limit_price)
+                values (
+                    @bot_instance_id,
+                    @order_index,
+                    @pair,
+                    @exchange_order_id,
+                    @created_at_utc,
+                    @requested_quantity,
+                    @submitted_limit_price)
+                """,
+                connection,
+                transaction);
+            Add(command, "bot_instance_id", NpgsqlDbType.Text, botInstanceId);
+            Add(command, "order_index", NpgsqlDbType.Integer, i);
+            Add(command, "pair", NpgsqlDbType.Text, order.Pair);
+            Add(command, "exchange_order_id", NpgsqlDbType.Text, order.ExchangeOrderId);
+            Add(command, "created_at_utc", NpgsqlDbType.TimestampTz, order.CreatedAtUtc.UtcDateTime);
+            Add(command, "requested_quantity", NpgsqlDbType.Numeric, order.RequestedQuantity);
+            Add(command, "submitted_limit_price", NpgsqlDbType.Numeric, order.SubmittedLimitPrice);
+            command.ExecuteNonQuery();
+        }
+    }
+
+    private void SaveNormalizedCycle(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        DryRunCycleRecord record)
+    {
+        Execute(connection, transaction, "delete from dry_run_cycle_facts where cycle_id = @cycle_id",
+            ("cycle_id", NpgsqlDbType.Text, record.CycleId));
+
+        var wouldBuyCount = record.Decisions.Count(decision => IsBuyAction(decision.DryRunAction.Action));
+        var wouldSellCount = record.Decisions.Count(decision => IsSellAction(decision.DryRunAction.Action));
+        var validatedOrderCount = record.Decisions.Count(decision =>
+            (decision.Broker ?? string.Empty).StartsWith("VALIDATED_OK", StringComparison.OrdinalIgnoreCase));
+
+        using (var command = new NpgsqlCommand(
+            """
+            insert into dry_run_cycle_facts (
+                cycle_id,
+                bot_instance_id,
+                bot_instance_name,
+                utc,
+                market_data_mode,
+                ai_provider,
+                worker_version,
+                worker_commit,
+                worker_build_utc,
+                worker_image_tag,
+                strategy_version,
+                change_set,
+                active_pairs_count,
+                decisions_count,
+                cash_before_eur,
+                cash_after_eur,
+                positions_value_before_eur,
+                positions_value_after_eur,
+                portfolio_value_before_eur,
+                portfolio_value_after_eur,
+                would_buy_count,
+                would_sell_count,
+                validated_order_count)
+            values (
+                @cycle_id,
+                @bot_instance_id,
+                @bot_instance_name,
+                @utc,
+                @market_data_mode,
+                @ai_provider,
+                @worker_version,
+                @worker_commit,
+                @worker_build_utc,
+                @worker_image_tag,
+                @strategy_version,
+                @change_set,
+                @active_pairs_count,
+                @decisions_count,
+                @cash_before_eur,
+                @cash_after_eur,
+                @positions_value_before_eur,
+                @positions_value_after_eur,
+                @portfolio_value_before_eur,
+                @portfolio_value_after_eur,
+                @would_buy_count,
+                @would_sell_count,
+                @validated_order_count)
+            """,
+            connection,
+            transaction))
+        {
+            Add(command, "cycle_id", NpgsqlDbType.Text, record.CycleId);
+            Add(command, "bot_instance_id", NpgsqlDbType.Text, botInstanceId);
+            Add(command, "bot_instance_name", NpgsqlDbType.Text, record.BotInstanceName);
+            Add(command, "utc", NpgsqlDbType.TimestampTz, record.Utc.UtcDateTime);
+            Add(command, "market_data_mode", NpgsqlDbType.Text, record.MarketDataMode);
+            Add(command, "ai_provider", NpgsqlDbType.Text, record.AiProvider);
+            Add(command, "worker_version", NpgsqlDbType.Text, record.Worker.Version);
+            Add(command, "worker_commit", NpgsqlDbType.Text, record.Worker.Commit);
+            Add(command, "worker_build_utc", NpgsqlDbType.Text, record.Worker.BuildUtc);
+            Add(command, "worker_image_tag", NpgsqlDbType.Text, record.Worker.ImageTag);
+            Add(command, "strategy_version", NpgsqlDbType.Text, record.Worker.StrategyVersion);
+            Add(command, "change_set", NpgsqlDbType.Text, record.Worker.ChangeSet);
+            Add(command, "active_pairs_count", NpgsqlDbType.Integer, record.ActivePairs.Count);
+            Add(command, "decisions_count", NpgsqlDbType.Integer, record.Decisions.Count);
+            Add(command, "cash_before_eur", NpgsqlDbType.Numeric, record.PortfolioBefore.CashEur);
+            Add(command, "cash_after_eur", NpgsqlDbType.Numeric, record.PortfolioAfter.CashEur);
+            Add(command, "positions_value_before_eur", NpgsqlDbType.Numeric, record.PortfolioBefore.PositionsValueEur);
+            Add(command, "positions_value_after_eur", NpgsqlDbType.Numeric, record.PortfolioAfter.PositionsValueEur);
+            Add(command, "portfolio_value_before_eur", NpgsqlDbType.Numeric, record.PortfolioBefore.TotalValueEur);
+            Add(command, "portfolio_value_after_eur", NpgsqlDbType.Numeric, record.PortfolioAfter.TotalValueEur);
+            Add(command, "would_buy_count", NpgsqlDbType.Integer, wouldBuyCount);
+            Add(command, "would_sell_count", NpgsqlDbType.Integer, wouldSellCount);
+            Add(command, "validated_order_count", NpgsqlDbType.Integer, validatedOrderCount);
+            command.ExecuteNonQuery();
+        }
+
+        for (var i = 0; i < record.ActivePairs.Count; i++)
+        {
+            Execute(connection, transaction,
+                """
+                insert into dry_run_cycle_active_pairs (cycle_id, pair_index, pair)
+                values (@cycle_id, @pair_index, @pair)
+                """,
+                ("cycle_id", NpgsqlDbType.Text, record.CycleId),
+                ("pair_index", NpgsqlDbType.Integer, i),
+                ("pair", NpgsqlDbType.Text, record.ActivePairs[i]));
+        }
+
+        for (var i = 0; i < record.Decisions.Count; i++)
+        {
+            SaveNormalizedDecision(connection, transaction, record, i, record.Decisions[i]);
+        }
+
+        if (record.EntryDiagnostics is not null)
+        {
+            SaveNormalizedEntryDiagnostics(connection, transaction, record.CycleId, record.EntryDiagnostics);
+        }
+    }
+
+    private void SaveNormalizedDecision(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        DryRunCycleRecord record,
+        int decisionIndex,
+        DryRunDecisionRecord decision)
+    {
+        using (var command = new NpgsqlCommand(
+            """
+            insert into dry_run_decision_facts (
+                cycle_id,
+                decision_index,
+                bot_instance_id,
+                utc,
+                pair,
+                price,
+                fast_ema,
+                slow_ema,
+                rsi,
+                desired_position,
+                score,
+                risk_approved,
+                broker,
+                entry_rejection_reason,
+                spread_percent,
+                price_action_direction,
+                price_action_trend_percent,
+                exploratory,
+                has_bullish_structure,
+                ema_fully_confirmed,
+                bullish_ema_gap_percent,
+                ema_gap_velocity_percent,
+                allows_short,
+                has_bearish_structure,
+                bearish_ema_gap_percent,
+                short_score,
+                long_score_threshold,
+                short_score_threshold,
+                minimum_ema_gap_percent,
+                short_base_block_reason_code,
+                short_base_block_reason,
+                early_entry_eligible,
+                early_entry_reason,
+                early_entry_diagnostic_score,
+                early_entry_suggested_notional_eur)
+            values (
+                @cycle_id,
+                @decision_index,
+                @bot_instance_id,
+                @utc,
+                @pair,
+                @price,
+                @fast_ema,
+                @slow_ema,
+                @rsi,
+                @desired_position,
+                @score,
+                @risk_approved,
+                @broker,
+                @entry_rejection_reason,
+                @spread_percent,
+                @price_action_direction,
+                @price_action_trend_percent,
+                @exploratory,
+                @has_bullish_structure,
+                @ema_fully_confirmed,
+                @bullish_ema_gap_percent,
+                @ema_gap_velocity_percent,
+                @allows_short,
+                @has_bearish_structure,
+                @bearish_ema_gap_percent,
+                @short_score,
+                @long_score_threshold,
+                @short_score_threshold,
+                @minimum_ema_gap_percent,
+                @short_base_block_reason_code,
+                @short_base_block_reason,
+                @early_entry_eligible,
+                @early_entry_reason,
+                @early_entry_diagnostic_score,
+                @early_entry_suggested_notional_eur)
+            """,
+            connection,
+            transaction))
+        {
+            AddDecisionIdentity(command, record, decisionIndex);
+            Add(command, "pair", NpgsqlDbType.Text, decision.Pair);
+            Add(command, "price", NpgsqlDbType.Numeric, decision.Price);
+            Add(command, "fast_ema", NpgsqlDbType.Numeric, decision.FastEma);
+            Add(command, "slow_ema", NpgsqlDbType.Numeric, decision.SlowEma);
+            Add(command, "rsi", NpgsqlDbType.Numeric, decision.Rsi);
+            Add(command, "desired_position", NpgsqlDbType.Text, decision.DesiredPosition);
+            Add(command, "score", NpgsqlDbType.Numeric, decision.Score);
+            Add(command, "risk_approved", NpgsqlDbType.Boolean, decision.RiskApproved);
+            Add(command, "broker", NpgsqlDbType.Text, decision.Broker);
+            Add(command, "entry_rejection_reason", NpgsqlDbType.Text, decision.EntryRejectionReason);
+            Add(command, "spread_percent", NpgsqlDbType.Numeric, decision.SpreadPercent);
+            Add(command, "price_action_direction", NpgsqlDbType.Text, decision.PriceActionDirection);
+            Add(command, "price_action_trend_percent", NpgsqlDbType.Numeric, decision.PriceActionTrendPercent);
+            Add(command, "exploratory", NpgsqlDbType.Boolean, decision.Exploratory);
+            Add(command, "has_bullish_structure", NpgsqlDbType.Boolean, decision.HasBullishStructure);
+            Add(command, "ema_fully_confirmed", NpgsqlDbType.Boolean, decision.EmaFullyConfirmed);
+            Add(command, "bullish_ema_gap_percent", NpgsqlDbType.Numeric, decision.BullishEmaGapPercent);
+            Add(command, "ema_gap_velocity_percent", NpgsqlDbType.Numeric, decision.EmaGapVelocityPercent);
+            Add(command, "allows_short", NpgsqlDbType.Boolean, decision.AllowsShort);
+            Add(command, "has_bearish_structure", NpgsqlDbType.Boolean, decision.HasBearishStructure);
+            Add(command, "bearish_ema_gap_percent", NpgsqlDbType.Numeric, decision.BearishEmaGapPercent);
+            Add(command, "short_score", NpgsqlDbType.Numeric, decision.ShortScore);
+            Add(command, "long_score_threshold", NpgsqlDbType.Numeric, decision.LongScoreThreshold);
+            Add(command, "short_score_threshold", NpgsqlDbType.Numeric, decision.ShortScoreThreshold);
+            Add(command, "minimum_ema_gap_percent", NpgsqlDbType.Numeric, decision.MinimumEmaGapPercent);
+            Add(command, "short_base_block_reason_code", NpgsqlDbType.Text, decision.ShortBaseBlockReasonCode);
+            Add(command, "short_base_block_reason", NpgsqlDbType.Text, decision.ShortBaseBlockReason);
+            Add(command, "early_entry_eligible", NpgsqlDbType.Boolean, decision.EarlyEntryEligible);
+            Add(command, "early_entry_reason", NpgsqlDbType.Text, decision.EarlyEntryReason);
+            Add(command, "early_entry_diagnostic_score", NpgsqlDbType.Numeric, decision.EarlyEntryDiagnosticScore);
+            Add(command, "early_entry_suggested_notional_eur", NpgsqlDbType.Numeric, decision.EarlyEntrySuggestedNotionalEur);
+            command.ExecuteNonQuery();
+        }
+
+        for (var i = 0; i < decision.RiskReasons.Count; i++)
+        {
+            Execute(connection, transaction,
+                """
+                insert into dry_run_decision_risk_reasons (cycle_id, decision_index, reason_index, reason)
+                values (@cycle_id, @decision_index, @reason_index, @reason)
+                """,
+                ("cycle_id", NpgsqlDbType.Text, record.CycleId),
+                ("decision_index", NpgsqlDbType.Integer, decisionIndex),
+                ("reason_index", NpgsqlDbType.Integer, i),
+                ("reason", NpgsqlDbType.Text, decision.RiskReasons[i]));
+        }
+
+        for (var i = 0; i < decision.Contributions.Count; i++)
+        {
+            var contribution = decision.Contributions[i];
+            Execute(connection, transaction,
+                """
+                insert into dry_run_signal_contributions (cycle_id, decision_index, contribution_index, name, value, reason)
+                values (@cycle_id, @decision_index, @contribution_index, @name, @value, @reason)
+                """,
+                ("cycle_id", NpgsqlDbType.Text, record.CycleId),
+                ("decision_index", NpgsqlDbType.Integer, decisionIndex),
+                ("contribution_index", NpgsqlDbType.Integer, i),
+                ("name", NpgsqlDbType.Text, contribution.Name),
+                ("value", NpgsqlDbType.Numeric, contribution.Value),
+                ("reason", NpgsqlDbType.Text, contribution.Reason));
+        }
+
+        SaveNormalizedAction(connection, transaction, record.CycleId, decisionIndex, decision.DryRunAction);
+        SaveNormalizedFreshness(connection, transaction, record.CycleId, decisionIndex, decision.DryRunAction);
+        SaveNormalizedLongRange(connection, transaction, record.CycleId, decisionIndex, decision.DryRunAction);
+    }
+
+    private void SaveNormalizedAction(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string cycleId,
+        int decisionIndex,
+        DryRunAction action)
+    {
+        using var command = new NpgsqlCommand(
+            """
+            insert into dry_run_actions (
+                cycle_id,
+                decision_index,
+                pair,
+                action,
+                reason,
+                hold_reason_code,
+                exit_reason_code,
+                desired_position,
+                target_notional_eur,
+                quantity,
+                entry_price,
+                last_price,
+                fill_price,
+                fee_eur,
+                gross_notional_eur,
+                net_notional_eur,
+                cash_before_eur,
+                cash_after_eur,
+                portfolio_value_before_eur,
+                portfolio_value_after_eur,
+                fill_source,
+                modeled_fill_price,
+                modeled_fee_eur,
+                round_trip_cost_estimate_pct,
+                expected_funding_pct,
+                atr_pct,
+                stop_distance_pct,
+                take_profit_distance_pct,
+                open_risk_eur,
+                queue_ahead_eur,
+                maker_order_filled_eur,
+                maker_fill_rate,
+                time_to_fill_ms,
+                repeg_count,
+                funding_state,
+                btc_regime_state,
+                short_allowed,
+                requested_notional_eur,
+                filled_notional_eur,
+                side,
+                reduce_only,
+                leverage,
+                exit_trigger_source,
+                entry_channel,
+                exchange_order_id,
+                exchange_fill_timestamp,
+                requested_margin_eur,
+                requested_leverage,
+                actual_initial_margin_eur,
+                actual_effective_leverage,
+                target_risk_eur,
+                sized_notional_eur,
+                required_margin_eur,
+                effective_leverage,
+                projected_stop_loss_eur,
+                execution_cost_model,
+                stop_source,
+                notional_cap_reason,
+                range_basis,
+                close_percentile,
+                recent_swing_position)
+            values (
+                @cycle_id,
+                @decision_index,
+                @pair,
+                @action,
+                @reason,
+                @hold_reason_code,
+                @exit_reason_code,
+                @desired_position,
+                @target_notional_eur,
+                @quantity,
+                @entry_price,
+                @last_price,
+                @fill_price,
+                @fee_eur,
+                @gross_notional_eur,
+                @net_notional_eur,
+                @cash_before_eur,
+                @cash_after_eur,
+                @portfolio_value_before_eur,
+                @portfolio_value_after_eur,
+                @fill_source,
+                @modeled_fill_price,
+                @modeled_fee_eur,
+                @round_trip_cost_estimate_pct,
+                @expected_funding_pct,
+                @atr_pct,
+                @stop_distance_pct,
+                @take_profit_distance_pct,
+                @open_risk_eur,
+                @queue_ahead_eur,
+                @maker_order_filled_eur,
+                @maker_fill_rate,
+                @time_to_fill_ms,
+                @repeg_count,
+                @funding_state,
+                @btc_regime_state,
+                @short_allowed,
+                @requested_notional_eur,
+                @filled_notional_eur,
+                @side,
+                @reduce_only,
+                @leverage,
+                @exit_trigger_source,
+                @entry_channel,
+                @exchange_order_id,
+                @exchange_fill_timestamp,
+                @requested_margin_eur,
+                @requested_leverage,
+                @actual_initial_margin_eur,
+                @actual_effective_leverage,
+                @target_risk_eur,
+                @sized_notional_eur,
+                @required_margin_eur,
+                @effective_leverage,
+                @projected_stop_loss_eur,
+                @execution_cost_model,
+                @stop_source,
+                @notional_cap_reason,
+                @range_basis,
+                @close_percentile,
+                @recent_swing_position)
+            """,
+            connection,
+            transaction);
+        Add(command, "cycle_id", NpgsqlDbType.Text, cycleId);
+        Add(command, "decision_index", NpgsqlDbType.Integer, decisionIndex);
+        Add(command, "pair", NpgsqlDbType.Text, action.Pair);
+        Add(command, "action", NpgsqlDbType.Text, action.Action);
+        Add(command, "reason", NpgsqlDbType.Text, action.Reason);
+        Add(command, "hold_reason_code", NpgsqlDbType.Text, action.HoldReasonCode);
+        Add(command, "exit_reason_code", NpgsqlDbType.Text, action.ExitReasonCode);
+        Add(command, "desired_position", NpgsqlDbType.Text, action.DesiredPosition);
+        Add(command, "target_notional_eur", NpgsqlDbType.Numeric, action.TargetNotionalEur);
+        Add(command, "quantity", NpgsqlDbType.Numeric, action.Quantity);
+        Add(command, "entry_price", NpgsqlDbType.Numeric, action.EntryPrice);
+        Add(command, "last_price", NpgsqlDbType.Numeric, action.LastPrice);
+        Add(command, "fill_price", NpgsqlDbType.Numeric, action.FillPrice);
+        Add(command, "fee_eur", NpgsqlDbType.Numeric, action.FeeEur);
+        Add(command, "gross_notional_eur", NpgsqlDbType.Numeric, action.GrossNotionalEur);
+        Add(command, "net_notional_eur", NpgsqlDbType.Numeric, action.NetNotionalEur);
+        Add(command, "cash_before_eur", NpgsqlDbType.Numeric, action.CashBeforeEur);
+        Add(command, "cash_after_eur", NpgsqlDbType.Numeric, action.CashAfterEur);
+        Add(command, "portfolio_value_before_eur", NpgsqlDbType.Numeric, action.PortfolioValueBeforeEur);
+        Add(command, "portfolio_value_after_eur", NpgsqlDbType.Numeric, action.PortfolioValueAfterEur);
+        Add(command, "fill_source", NpgsqlDbType.Text, action.FillSource);
+        Add(command, "modeled_fill_price", NpgsqlDbType.Numeric, action.ModeledFillPrice);
+        Add(command, "modeled_fee_eur", NpgsqlDbType.Numeric, action.ModeledFeeEur);
+        Add(command, "round_trip_cost_estimate_pct", NpgsqlDbType.Numeric, action.RoundTripCostEstimatePct);
+        Add(command, "expected_funding_pct", NpgsqlDbType.Numeric, action.ExpectedFundingPct);
+        Add(command, "atr_pct", NpgsqlDbType.Numeric, action.AtrPct);
+        Add(command, "stop_distance_pct", NpgsqlDbType.Numeric, action.StopDistancePct);
+        Add(command, "take_profit_distance_pct", NpgsqlDbType.Numeric, action.TakeProfitDistancePct);
+        Add(command, "open_risk_eur", NpgsqlDbType.Numeric, action.OpenRiskEur);
+        Add(command, "queue_ahead_eur", NpgsqlDbType.Numeric, action.QueueAheadEur);
+        Add(command, "maker_order_filled_eur", NpgsqlDbType.Numeric, action.MakerOrderFilledEur);
+        Add(command, "maker_fill_rate", NpgsqlDbType.Numeric, action.MakerFillRate);
+        Add(command, "time_to_fill_ms", NpgsqlDbType.Bigint, action.TimeToFillMs);
+        Add(command, "repeg_count", NpgsqlDbType.Integer, action.RepegCount);
+        Add(command, "funding_state", NpgsqlDbType.Text, action.FundingState);
+        Add(command, "btc_regime_state", NpgsqlDbType.Text, action.BtcRegimeState);
+        Add(command, "short_allowed", NpgsqlDbType.Text, action.ShortAllowed);
+        Add(command, "requested_notional_eur", NpgsqlDbType.Numeric, action.RequestedNotionalEur);
+        Add(command, "filled_notional_eur", NpgsqlDbType.Numeric, action.FilledNotionalEur);
+        Add(command, "side", NpgsqlDbType.Text, action.Side);
+        Add(command, "reduce_only", NpgsqlDbType.Boolean, action.ReduceOnly);
+        Add(command, "leverage", NpgsqlDbType.Numeric, action.Leverage);
+        Add(command, "exit_trigger_source", NpgsqlDbType.Text, action.ExitTriggerSource);
+        Add(command, "entry_channel", NpgsqlDbType.Text, action.EntryChannel);
+        Add(command, "exchange_order_id", NpgsqlDbType.Text, action.ExchangeOrderId);
+        Add(command, "exchange_fill_timestamp", NpgsqlDbType.TimestampTz, Utc(action.ExchangeFillTimestamp));
+        Add(command, "requested_margin_eur", NpgsqlDbType.Numeric, action.RequestedMarginEur);
+        Add(command, "requested_leverage", NpgsqlDbType.Numeric, action.RequestedLeverage);
+        Add(command, "actual_initial_margin_eur", NpgsqlDbType.Numeric, action.ActualInitialMarginEur);
+        Add(command, "actual_effective_leverage", NpgsqlDbType.Numeric, action.ActualEffectiveLeverage);
+        Add(command, "target_risk_eur", NpgsqlDbType.Numeric, action.TargetRiskEur);
+        Add(command, "sized_notional_eur", NpgsqlDbType.Numeric, action.SizedNotionalEur);
+        Add(command, "required_margin_eur", NpgsqlDbType.Numeric, action.RequiredMarginEur);
+        Add(command, "effective_leverage", NpgsqlDbType.Numeric, action.EffectiveLeverage);
+        Add(command, "projected_stop_loss_eur", NpgsqlDbType.Numeric, action.ProjectedStopLossEur);
+        Add(command, "execution_cost_model", NpgsqlDbType.Text, action.ExecutionCostModel);
+        Add(command, "stop_source", NpgsqlDbType.Text, action.StopSource);
+        Add(command, "notional_cap_reason", NpgsqlDbType.Text, action.NotionalCapReason);
+        Add(command, "range_basis", NpgsqlDbType.Text, action.RangeBasis);
+        Add(command, "close_percentile", NpgsqlDbType.Numeric, action.ClosePercentile);
+        Add(command, "recent_swing_position", NpgsqlDbType.Numeric, action.RecentSwingPosition);
+        command.ExecuteNonQuery();
+    }
+
+    private void SaveNormalizedFreshness(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string cycleId,
+        int decisionIndex,
+        DryRunAction action)
+    {
+        Execute(connection, transaction,
+            """
+            insert into dry_run_entry_freshness (
+                cycle_id,
+                decision_index,
+                entry_freshness_position_in_24h_range_pct,
+                entry_freshness_distance_from_recent_high_pct,
+                entry_freshness_last_snapshot_step_pct,
+                entry_freshness_short_snapshot_slope_pct,
+                entry_freshness_positive_steps_in_last_3,
+                entry_freshness_is_near_high,
+                entry_freshness_has_fresh_upward_tape,
+                entry_freshness_has_fresh_breakout,
+                entry_freshness_block_reason,
+                entry_freshness_recent_candle_momentum_pct,
+                entry_distance_from_local_high_pct,
+                local_high_source,
+                breakout_buffer_pct,
+                live_price_vs_signal_close_pct,
+                post_fill_entry_distance_from_local_high_pct,
+                post_fill_live_price_vs_signal_close_pct,
+                signal_price,
+                pre_submit_bid,
+                pre_submit_ask,
+                submitted_limit_price,
+                requested_quantity,
+                filled_quantity,
+                average_fill_price,
+                entry_deviation_from_signal_pct,
+                entry_deviation_from_ask_pct,
+                dip_bounce_min_score_applied)
+            values (
+                @cycle_id,
+                @decision_index,
+                @entry_freshness_position_in_24h_range_pct,
+                @entry_freshness_distance_from_recent_high_pct,
+                @entry_freshness_last_snapshot_step_pct,
+                @entry_freshness_short_snapshot_slope_pct,
+                @entry_freshness_positive_steps_in_last_3,
+                @entry_freshness_is_near_high,
+                @entry_freshness_has_fresh_upward_tape,
+                @entry_freshness_has_fresh_breakout,
+                @entry_freshness_block_reason,
+                @entry_freshness_recent_candle_momentum_pct,
+                @entry_distance_from_local_high_pct,
+                @local_high_source,
+                @breakout_buffer_pct,
+                @live_price_vs_signal_close_pct,
+                @post_fill_entry_distance_from_local_high_pct,
+                @post_fill_live_price_vs_signal_close_pct,
+                @signal_price,
+                @pre_submit_bid,
+                @pre_submit_ask,
+                @submitted_limit_price,
+                @requested_quantity,
+                @filled_quantity,
+                @average_fill_price,
+                @entry_deviation_from_signal_pct,
+                @entry_deviation_from_ask_pct,
+                @dip_bounce_min_score_applied)
+            """,
+            ("cycle_id", NpgsqlDbType.Text, cycleId),
+            ("decision_index", NpgsqlDbType.Integer, decisionIndex),
+            ("entry_freshness_position_in_24h_range_pct", NpgsqlDbType.Numeric, action.EntryFreshnessPositionIn24hRangePct),
+            ("entry_freshness_distance_from_recent_high_pct", NpgsqlDbType.Numeric, action.EntryFreshnessDistanceFromRecentHighPct),
+            ("entry_freshness_last_snapshot_step_pct", NpgsqlDbType.Numeric, action.EntryFreshnessLastSnapshotStepPct),
+            ("entry_freshness_short_snapshot_slope_pct", NpgsqlDbType.Numeric, action.EntryFreshnessShortSnapshotSlopePct),
+            ("entry_freshness_positive_steps_in_last_3", NpgsqlDbType.Integer, action.EntryFreshnessPositiveStepsInLast3),
+            ("entry_freshness_is_near_high", NpgsqlDbType.Boolean, action.EntryFreshnessIsNearHigh),
+            ("entry_freshness_has_fresh_upward_tape", NpgsqlDbType.Boolean, action.EntryFreshnessHasFreshUpwardTape),
+            ("entry_freshness_has_fresh_breakout", NpgsqlDbType.Boolean, action.EntryFreshnessHasFreshBreakout),
+            ("entry_freshness_block_reason", NpgsqlDbType.Text, action.EntryFreshnessBlockReason),
+            ("entry_freshness_recent_candle_momentum_pct", NpgsqlDbType.Numeric, action.EntryFreshnessRecentCandleMomentumPct),
+            ("entry_distance_from_local_high_pct", NpgsqlDbType.Numeric, action.EntryDistanceFromLocalHighPct),
+            ("local_high_source", NpgsqlDbType.Text, action.LocalHighSource),
+            ("breakout_buffer_pct", NpgsqlDbType.Numeric, action.BreakoutBufferPct),
+            ("live_price_vs_signal_close_pct", NpgsqlDbType.Numeric, action.LivePriceVsSignalClosePct),
+            ("post_fill_entry_distance_from_local_high_pct", NpgsqlDbType.Numeric, action.PostFillEntryDistanceFromLocalHighPct),
+            ("post_fill_live_price_vs_signal_close_pct", NpgsqlDbType.Numeric, action.PostFillLivePriceVsSignalClosePct),
+            ("signal_price", NpgsqlDbType.Numeric, action.SignalPrice),
+            ("pre_submit_bid", NpgsqlDbType.Numeric, action.PreSubmitBid),
+            ("pre_submit_ask", NpgsqlDbType.Numeric, action.PreSubmitAsk),
+            ("submitted_limit_price", NpgsqlDbType.Numeric, action.SubmittedLimitPrice),
+            ("requested_quantity", NpgsqlDbType.Numeric, action.RequestedQuantity),
+            ("filled_quantity", NpgsqlDbType.Numeric, action.FilledQuantity),
+            ("average_fill_price", NpgsqlDbType.Numeric, action.AverageFillPrice),
+            ("entry_deviation_from_signal_pct", NpgsqlDbType.Numeric, action.EntryDeviationFromSignalPct),
+            ("entry_deviation_from_ask_pct", NpgsqlDbType.Numeric, action.EntryDeviationFromAskPct),
+            ("dip_bounce_min_score_applied", NpgsqlDbType.Numeric, action.DipBounceMinScoreApplied));
+    }
+
+    private void SaveNormalizedLongRange(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string cycleId,
+        int decisionIndex,
+        DryRunAction action)
+    {
+        Execute(connection, transaction,
+            """
+            insert into dry_run_long_range_diagnostics (
+                cycle_id,
+                decision_index,
+                long_range_entry_price,
+                long_range_entry_price_source,
+                long_range_absolute_low_24h,
+                long_range_absolute_high_24h,
+                long_range_robust_low_24h,
+                long_range_robust_high_24h,
+                long_range_24h_source,
+                long_range_24h_sample_count,
+                long_range_24h_position_raw,
+                long_range_24h_position,
+                long_range_max_position_for_long,
+                long_range_distance_from_24h_low_pct,
+                long_range_rising_snapshot_count,
+                entry_blocked_by_24h_range,
+                long_range_block_reason_code)
+            values (
+                @cycle_id,
+                @decision_index,
+                @long_range_entry_price,
+                @long_range_entry_price_source,
+                @long_range_absolute_low_24h,
+                @long_range_absolute_high_24h,
+                @long_range_robust_low_24h,
+                @long_range_robust_high_24h,
+                @long_range_24h_source,
+                @long_range_24h_sample_count,
+                @long_range_24h_position_raw,
+                @long_range_24h_position,
+                @long_range_max_position_for_long,
+                @long_range_distance_from_24h_low_pct,
+                @long_range_rising_snapshot_count,
+                @entry_blocked_by_24h_range,
+                @long_range_block_reason_code)
+            """,
+            ("cycle_id", NpgsqlDbType.Text, cycleId),
+            ("decision_index", NpgsqlDbType.Integer, decisionIndex),
+            ("long_range_entry_price", NpgsqlDbType.Numeric, action.LongRangeEntryPrice),
+            ("long_range_entry_price_source", NpgsqlDbType.Text, action.LongRangeEntryPriceSource),
+            ("long_range_absolute_low_24h", NpgsqlDbType.Numeric, action.LongRangeAbsoluteLow24h),
+            ("long_range_absolute_high_24h", NpgsqlDbType.Numeric, action.LongRangeAbsoluteHigh24h),
+            ("long_range_robust_low_24h", NpgsqlDbType.Numeric, action.LongRangeRobustLow24h),
+            ("long_range_robust_high_24h", NpgsqlDbType.Numeric, action.LongRangeRobustHigh24h),
+            ("long_range_24h_source", NpgsqlDbType.Text, action.LongRange24hSource),
+            ("long_range_24h_sample_count", NpgsqlDbType.Integer, action.LongRange24hSampleCount),
+            ("long_range_24h_position_raw", NpgsqlDbType.Numeric, action.LongRange24hPositionRaw),
+            ("long_range_24h_position", NpgsqlDbType.Numeric, action.LongRange24hPosition),
+            ("long_range_max_position_for_long", NpgsqlDbType.Numeric, action.LongRangeMaxPositionForLong),
+            ("long_range_distance_from_24h_low_pct", NpgsqlDbType.Numeric, action.LongRangeDistanceFrom24hLowPct),
+            ("long_range_rising_snapshot_count", NpgsqlDbType.Integer, action.LongRangeRisingSnapshotCount),
+            ("entry_blocked_by_24h_range", NpgsqlDbType.Boolean, action.EntryBlockedBy24hRange),
+            ("long_range_block_reason_code", NpgsqlDbType.Text, action.LongRangeBlockReasonCode));
+    }
+
+    private void SaveNormalizedEntryDiagnostics(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string cycleId,
+        CycleEntryDiagnostics diagnostics)
+    {
+        Execute(connection, transaction,
+            """
+            insert into dry_run_cycle_entry_diagnostic_facts (
+                cycle_id,
+                snapshot_pairs_available,
+                active_pairs_evaluated,
+                entry_pairs_evaluated,
+                price_action_ready_count,
+                score_at_least_075,
+                score_at_least_080,
+                score_at_least_085,
+                score_at_least_090,
+                hard_filter_pass_count,
+                eligible_entry_candidates,
+                chosen_pair,
+                no_trade_reason,
+                execution_mode,
+                fill_rate,
+                pairs_passed_spread,
+                pairs_passed_volume,
+                pairs_passed_depth,
+                open_risk_eur,
+                btc_regime_state,
+                pairs_passed_exit_depth,
+                funding_state)
+            values (
+                @cycle_id,
+                @snapshot_pairs_available,
+                @active_pairs_evaluated,
+                @entry_pairs_evaluated,
+                @price_action_ready_count,
+                @score_at_least_075,
+                @score_at_least_080,
+                @score_at_least_085,
+                @score_at_least_090,
+                @hard_filter_pass_count,
+                @eligible_entry_candidates,
+                @chosen_pair,
+                @no_trade_reason,
+                @execution_mode,
+                @fill_rate,
+                @pairs_passed_spread,
+                @pairs_passed_volume,
+                @pairs_passed_depth,
+                @open_risk_eur,
+                @btc_regime_state,
+                @pairs_passed_exit_depth,
+                @funding_state)
+            """,
+            ("cycle_id", NpgsqlDbType.Text, cycleId),
+            ("snapshot_pairs_available", NpgsqlDbType.Integer, diagnostics.SnapshotPairsAvailable),
+            ("active_pairs_evaluated", NpgsqlDbType.Integer, diagnostics.ActivePairsEvaluated),
+            ("entry_pairs_evaluated", NpgsqlDbType.Integer, diagnostics.EntryPairsEvaluated),
+            ("price_action_ready_count", NpgsqlDbType.Integer, diagnostics.PriceActionReadyCount),
+            ("score_at_least_075", NpgsqlDbType.Integer, diagnostics.ScoreAtLeast075),
+            ("score_at_least_080", NpgsqlDbType.Integer, diagnostics.ScoreAtLeast080),
+            ("score_at_least_085", NpgsqlDbType.Integer, diagnostics.ScoreAtLeast085),
+            ("score_at_least_090", NpgsqlDbType.Integer, diagnostics.ScoreAtLeast090),
+            ("hard_filter_pass_count", NpgsqlDbType.Integer, diagnostics.HardFilterPassCount),
+            ("eligible_entry_candidates", NpgsqlDbType.Integer, diagnostics.EligibleEntryCandidates),
+            ("chosen_pair", NpgsqlDbType.Text, diagnostics.ChosenPair),
+            ("no_trade_reason", NpgsqlDbType.Text, diagnostics.NoTradeReason),
+            ("execution_mode", NpgsqlDbType.Text, diagnostics.ExecutionMode),
+            ("fill_rate", NpgsqlDbType.Numeric, diagnostics.FillRate),
+            ("pairs_passed_spread", NpgsqlDbType.Integer, diagnostics.PairsPassedSpread),
+            ("pairs_passed_volume", NpgsqlDbType.Integer, diagnostics.PairsPassedVolume),
+            ("pairs_passed_depth", NpgsqlDbType.Integer, diagnostics.PairsPassedDepth),
+            ("open_risk_eur", NpgsqlDbType.Numeric, diagnostics.OpenRiskEur),
+            ("btc_regime_state", NpgsqlDbType.Text, diagnostics.BtcRegimeState),
+            ("pairs_passed_exit_depth", NpgsqlDbType.Integer, diagnostics.PairsPassedExitDepth),
+            ("funding_state", NpgsqlDbType.Text, diagnostics.FundingState));
+
+        foreach (var item in diagnostics.RejectionCounts)
+        {
+            Execute(connection, transaction,
+                """
+                insert into dry_run_rejection_counts (cycle_id, reason, count)
+                values (@cycle_id, @reason, @count)
+                """,
+                ("cycle_id", NpgsqlDbType.Text, cycleId),
+                ("reason", NpgsqlDbType.Text, item.Key),
+                ("count", NpgsqlDbType.Integer, item.Value));
+        }
+
+        for (var i = 0; i < diagnostics.TopCandidates.Count; i++)
+        {
+            var candidate = diagnostics.TopCandidates[i];
+            Execute(connection, transaction,
+                """
+                insert into dry_run_top_candidates (
+                    cycle_id,
+                    candidate_index,
+                    pair,
+                    score,
+                    desired_position,
+                    spread_percent,
+                    price,
+                    bid,
+                    ask,
+                    has_bullish_structure,
+                    ema_fully_confirmed,
+                    bullish_ema_gap_percent,
+                    ema_gap_velocity_percent,
+                    early_entry_eligible,
+                    early_entry_reason,
+                    early_entry_diagnostic_score,
+                    early_entry_suggested_notional_eur,
+                    price_action_direction,
+                    price_action_trend_percent,
+                    price_action_state,
+                    price_action_samples_available,
+                    price_action_samples_required,
+                    price_action_oldest_sample_utc,
+                    price_action_newest_sample_utc,
+                    hard_filters_passed,
+                    quality_filters_passed,
+                    rejection_reason,
+                    exploratory)
+                values (
+                    @cycle_id,
+                    @candidate_index,
+                    @pair,
+                    @score,
+                    @desired_position,
+                    @spread_percent,
+                    @price,
+                    @bid,
+                    @ask,
+                    @has_bullish_structure,
+                    @ema_fully_confirmed,
+                    @bullish_ema_gap_percent,
+                    @ema_gap_velocity_percent,
+                    @early_entry_eligible,
+                    @early_entry_reason,
+                    @early_entry_diagnostic_score,
+                    @early_entry_suggested_notional_eur,
+                    @price_action_direction,
+                    @price_action_trend_percent,
+                    @price_action_state,
+                    @price_action_samples_available,
+                    @price_action_samples_required,
+                    @price_action_oldest_sample_utc,
+                    @price_action_newest_sample_utc,
+                    @hard_filters_passed,
+                    @quality_filters_passed,
+                    @rejection_reason,
+                    @exploratory)
+                """,
+                ("cycle_id", NpgsqlDbType.Text, cycleId),
+                ("candidate_index", NpgsqlDbType.Integer, i),
+                ("pair", NpgsqlDbType.Text, candidate.Pair),
+                ("score", NpgsqlDbType.Numeric, candidate.Score),
+                ("desired_position", NpgsqlDbType.Text, candidate.DesiredPosition),
+                ("spread_percent", NpgsqlDbType.Numeric, candidate.SpreadPercent),
+                ("price", NpgsqlDbType.Numeric, candidate.Price),
+                ("bid", NpgsqlDbType.Numeric, candidate.Bid),
+                ("ask", NpgsqlDbType.Numeric, candidate.Ask),
+                ("has_bullish_structure", NpgsqlDbType.Boolean, candidate.HasBullishStructure),
+                ("ema_fully_confirmed", NpgsqlDbType.Boolean, candidate.EmaFullyConfirmed),
+                ("bullish_ema_gap_percent", NpgsqlDbType.Numeric, candidate.BullishEmaGapPercent),
+                ("ema_gap_velocity_percent", NpgsqlDbType.Numeric, candidate.EmaGapVelocityPercent),
+                ("early_entry_eligible", NpgsqlDbType.Boolean, candidate.EarlyEntryEligible),
+                ("early_entry_reason", NpgsqlDbType.Text, candidate.EarlyEntryReason),
+                ("early_entry_diagnostic_score", NpgsqlDbType.Numeric, candidate.EarlyEntryDiagnosticScore),
+                ("early_entry_suggested_notional_eur", NpgsqlDbType.Numeric, candidate.EarlyEntrySuggestedNotionalEur),
+                ("price_action_direction", NpgsqlDbType.Text, candidate.PriceActionDirection),
+                ("price_action_trend_percent", NpgsqlDbType.Numeric, candidate.PriceActionTrendPercent),
+                ("price_action_state", NpgsqlDbType.Text, candidate.PriceActionState),
+                ("price_action_samples_available", NpgsqlDbType.Integer, candidate.PriceActionSamplesAvailable),
+                ("price_action_samples_required", NpgsqlDbType.Integer, candidate.PriceActionSamplesRequired),
+                ("price_action_oldest_sample_utc", NpgsqlDbType.TimestampTz, Utc(candidate.PriceActionOldestSampleUtc)),
+                ("price_action_newest_sample_utc", NpgsqlDbType.TimestampTz, Utc(candidate.PriceActionNewestSampleUtc)),
+                ("hard_filters_passed", NpgsqlDbType.Boolean, candidate.HardFiltersPassed),
+                ("quality_filters_passed", NpgsqlDbType.Boolean, candidate.QualityFiltersPassed),
+                ("rejection_reason", NpgsqlDbType.Text, candidate.RejectionReason),
+                ("exploratory", NpgsqlDbType.Boolean, candidate.Exploratory));
+
+            for (var confirmationIndex = 0; confirmationIndex < candidate.MissingConfirmations.Count; confirmationIndex++)
+            {
+                Execute(connection, transaction,
+                    """
+                    insert into dry_run_top_candidate_missing_confirmations (
+                        cycle_id,
+                        candidate_index,
+                        confirmation_index,
+                        confirmation)
+                    values (
+                        @cycle_id,
+                        @candidate_index,
+                        @confirmation_index,
+                        @confirmation)
+                    """,
+                    ("cycle_id", NpgsqlDbType.Text, cycleId),
+                    ("candidate_index", NpgsqlDbType.Integer, i),
+                    ("confirmation_index", NpgsqlDbType.Integer, confirmationIndex),
+                    ("confirmation", NpgsqlDbType.Text, candidate.MissingConfirmations[confirmationIndex]));
+            }
+        }
+
+        for (var i = 0; i < diagnostics.ExcludedPairs.Count; i++)
+        {
+            var excluded = diagnostics.ExcludedPairs[i];
+            Execute(connection, transaction,
+                """
+                insert into dry_run_excluded_pairs (
+                    cycle_id,
+                    excluded_index,
+                    pair,
+                    reason,
+                    last,
+                    change_percent,
+                    volume_rank,
+                    est_24h_volume_eur,
+                    spread_percent,
+                    advisor_rank)
+                values (
+                    @cycle_id,
+                    @excluded_index,
+                    @pair,
+                    @reason,
+                    @last,
+                    @change_percent,
+                    @volume_rank,
+                    @est_24h_volume_eur,
+                    @spread_percent,
+                    @advisor_rank)
+                """,
+                ("cycle_id", NpgsqlDbType.Text, cycleId),
+                ("excluded_index", NpgsqlDbType.Integer, i),
+                ("pair", NpgsqlDbType.Text, excluded.Pair),
+                ("reason", NpgsqlDbType.Text, excluded.Reason),
+                ("last", NpgsqlDbType.Numeric, excluded.Last),
+                ("change_percent", NpgsqlDbType.Numeric, excluded.ChangePercent),
+                ("volume_rank", NpgsqlDbType.Integer, excluded.VolumeRank),
+                ("est_24h_volume_eur", NpgsqlDbType.Numeric, excluded.Est24hVolumeEur),
+                ("spread_percent", NpgsqlDbType.Numeric, excluded.SpreadPercent),
+                ("advisor_rank", NpgsqlDbType.Integer, excluded.AdvisorRank));
+        }
+    }
+
+    private void AddDecisionIdentity(NpgsqlCommand command, DryRunCycleRecord record, int decisionIndex)
+    {
+        Add(command, "cycle_id", NpgsqlDbType.Text, record.CycleId);
+        Add(command, "decision_index", NpgsqlDbType.Integer, decisionIndex);
+        Add(command, "bot_instance_id", NpgsqlDbType.Text, botInstanceId);
+        Add(command, "utc", NpgsqlDbType.TimestampTz, record.Utc.UtcDateTime);
+    }
+
+    private static void Execute(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string sql,
+        params (string Name, NpgsqlDbType Type, object? Value)[] parameters)
+    {
+        using var command = new NpgsqlCommand(sql, connection, transaction);
+        foreach (var parameter in parameters)
+        {
+            Add(command, parameter.Name, parameter.Type, parameter.Value);
+        }
+
+        command.ExecuteNonQuery();
+    }
+
+    private static void Add(NpgsqlCommand command, string name, NpgsqlDbType type, object? value)
+    {
+        var parameter = command.Parameters.Add(name, type);
+        parameter.Value = value ?? DBNull.Value;
+    }
+
+    private static DateTime? Utc(DateTimeOffset? value) =>
+        value?.UtcDateTime;
+
+    private static string? GetNullableString(NpgsqlDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+
+    private static decimal? GetNullableDecimal(NpgsqlDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) ? null : reader.GetDecimal(ordinal);
+
+    private static DateTimeOffset? GetNullableDateTimeOffset(NpgsqlDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal)
+            ? null
+            : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(ordinal), DateTimeKind.Utc));
+
+    private static bool IsBuyAction(string action) =>
+        action is "WOULD_BUY" or "WOULD_OPEN" or "OPEN_LONG" or "OPEN_SHORT";
+
+    private static bool IsSellAction(string action) =>
+        action is "WOULD_SELL" or "WOULD_CLOSE" or "CLOSE";
 
     private NpgsqlConnection OpenConnection()
     {

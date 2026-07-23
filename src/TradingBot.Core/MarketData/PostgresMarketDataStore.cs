@@ -85,6 +85,55 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
 
             create index if not exists ix_market_data_cycles_venue_utc
                 on market_data_cycles (venue, utc desc);
+
+            create table if not exists portfolio_position_state (
+                bot_instance_id text not null,
+                updated_at timestamptz not null,
+                position_index integer not null,
+                pair text not null,
+                side text not null,
+                quantity numeric not null,
+                entry_price numeric not null,
+                entry_notional_eur numeric not null,
+                last_price numeric not null,
+                market_value_eur numeric not null,
+                unrealized_pnl_eur numeric not null,
+                unrealized_pnl_percent numeric not null,
+                opened_at_utc timestamptz,
+                last_action_at_utc timestamptz,
+                peak_pnl_percent numeric,
+                entry_score numeric,
+                exit_mode text,
+                entry_atr numeric,
+                stop_loss_price numeric,
+                take_profit_price numeric,
+                round_trip_cost_estimate_pct numeric,
+                expected_funding_pct numeric,
+                atr_pct numeric,
+                stop_distance_pct numeric,
+                take_profit_distance_pct numeric,
+                exchange_stop_loss_price numeric,
+                exchange_take_profit_price numeric,
+                exchange_protection_multiplier_percent numeric,
+                trailing_stop_state text,
+                trailing_stop_percent numeric,
+                trailing_stop_order_id text,
+                trailing_activated_at_utc timestamptz,
+                low_score_cycles integer not null default 0,
+                leverage numeric,
+                initial_margin_eur numeric,
+                mark_price numeric,
+                liquidation_price numeric,
+                liquidation_distance_percent numeric,
+                funding_paid_eur numeric,
+                tp_order_state text,
+                sl_order_state text,
+                origin text,
+                entry_channel text,
+                primary key (bot_instance_id, position_index)
+            );
+
+            create index if not exists ix_portfolio_position_state_pair on portfolio_position_state (bot_instance_id, pair);
             """,
             connection);
         command.ExecuteNonQuery();
@@ -353,11 +402,10 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
         using var connection = OpenConnection();
         using var command = new NpgsqlCommand(
             """
-            select distinct position ->> 'pair' as pair
-            from portfolio_state
-            cross join lateral jsonb_array_elements(coalesce(state_json -> 'positions', '[]'::jsonb)) as position
+            select distinct pair
+            from portfolio_position_state
             where bot_instance_id like @prefix
-              and coalesce(position ->> 'pair', '') <> ''
+              and coalesce(pair, '') <> ''
             """,
             connection);
         command.Parameters.AddWithValue("prefix", $"{prefix}%");
