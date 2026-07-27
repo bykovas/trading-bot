@@ -148,6 +148,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             """
             select updated_at,
                    cash_eur,
+                   cash_quote_value,
+                   cash_quote_currency,
                    daily_risk_date_utc,
                    daily_realized_pnl_eur,
                    external_pnl_eur
@@ -168,14 +170,16 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
         {
             UpdatedAt = new DateTimeOffset(DateTime.SpecifyKind(summaryReader.GetDateTime(0), DateTimeKind.Utc)),
             CashEur = summaryReader.GetDecimal(1),
-            DailyRisk = summaryReader.IsDBNull(2)
+            CashQuoteValue = summaryReader.IsDBNull(2) ? null : summaryReader.GetDecimal(2),
+            CashQuoteCurrency = summaryReader.IsDBNull(3) ? null : summaryReader.GetString(3),
+            DailyRisk = summaryReader.IsDBNull(4)
                 ? null
                 : new DailyRiskState
                 {
-                    DateUtc = summaryReader.GetString(2),
-                    RealizedPnlEur = summaryReader.IsDBNull(3) ? 0m : summaryReader.GetDecimal(3)
+                    DateUtc = summaryReader.GetString(4),
+                    RealizedPnlEur = summaryReader.IsDBNull(5) ? 0m : summaryReader.GetDecimal(5)
                 },
-            ExternalPnlEur = summaryReader.GetDecimal(4)
+            ExternalPnlEur = summaryReader.GetDecimal(6)
         };
         summaryReader.Close();
 
@@ -551,6 +555,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 state_id integer not null,
                 updated_at timestamptz not null,
                 cash_eur numeric not null,
+                cash_quote_value numeric,
+                cash_quote_currency text,
                 positions_value_eur numeric not null,
                 total_value_eur numeric not null,
                 open_positions integer not null,
@@ -608,6 +614,10 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
 
             create index if not exists ix_portfolio_position_state_pair on portfolio_position_state (bot_instance_id, pair);
             create index if not exists ix_portfolio_position_state_origin on portfolio_position_state (bot_instance_id, origin);
+
+            alter table portfolio_state_summary
+                add column if not exists cash_quote_value numeric,
+                add column if not exists cash_quote_currency text;
 
             create table if not exists portfolio_action_history_state (
                 bot_instance_id text not null,
@@ -965,6 +975,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 summary.bot_instance_id,
                 summary.updated_at,
                 summary.cash_eur,
+                summary.cash_quote_value,
+                summary.cash_quote_currency,
                 summary.positions_value_eur,
                 summary.total_value_eur,
                 summary.open_positions,
@@ -1139,6 +1151,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 state_id,
                 updated_at,
                 cash_eur,
+                cash_quote_value,
+                cash_quote_currency,
                 positions_value_eur,
                 total_value_eur,
                 open_positions,
@@ -1150,6 +1164,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 @state_id,
                 @updated_at,
                 @cash_eur,
+                @cash_quote_value,
+                @cash_quote_currency,
                 @positions_value_eur,
                 @total_value_eur,
                 @open_positions,
@@ -1160,6 +1176,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 state_id = excluded.state_id,
                 updated_at = excluded.updated_at,
                 cash_eur = excluded.cash_eur,
+                cash_quote_value = excluded.cash_quote_value,
+                cash_quote_currency = excluded.cash_quote_currency,
                 positions_value_eur = excluded.positions_value_eur,
                 total_value_eur = excluded.total_value_eur,
                 open_positions = excluded.open_positions,
@@ -1174,6 +1192,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             Add(command, "state_id", NpgsqlDbType.Integer, StateId);
             Add(command, "updated_at", NpgsqlDbType.TimestampTz, state.UpdatedAt.UtcDateTime);
             Add(command, "cash_eur", NpgsqlDbType.Numeric, state.CashEur);
+            Add(command, "cash_quote_value", NpgsqlDbType.Numeric, state.CashQuoteValue);
+            Add(command, "cash_quote_currency", NpgsqlDbType.Text, state.CashQuoteCurrency);
             Add(command, "positions_value_eur", NpgsqlDbType.Numeric, state.PositionsValueEur);
             Add(command, "total_value_eur", NpgsqlDbType.Numeric, state.TotalValueEur);
             Add(command, "open_positions", NpgsqlDbType.Integer, state.Positions.Count);

@@ -206,6 +206,36 @@ public sealed class KrakenFuturesBrokerTests
         Assert.Contains("order_id=sl-1", handler.Body);
     }
 
+    [Fact]
+    public async Task Get_accounts_treats_flex_multi_collateral_account_as_usd()
+    {
+        var handler = new CapturingHandler("""
+            {
+              "result": "success",
+              "accounts": {
+                "flex": {
+                  "type": "multiCollateralMarginAccount",
+                  "portfolioValue": 72.68,
+                  "availableMargin": 72.68
+                }
+              }
+            }
+            """);
+        using var client = new HttpClient(handler);
+        var broker = new KrakenFuturesBroker(client, new KrakenOptions
+        {
+            BaseUrl = "https://futures.kraken.test",
+            ApiKey = "public",
+            ApiSecret = Convert.ToBase64String(Encoding.UTF8.GetBytes("secret"))
+        });
+
+        var account = Assert.Single(await broker.GetAccountsAsync(CancellationToken.None));
+
+        Assert.Equal("USD", account.Currency);
+        Assert.Equal(72.68m, account.MarginBalance);
+        Assert.Equal(72.68m, account.AvailableMargin);
+    }
+
     private static string ExpectedAuthent(string endpointPath, string nonce, string postData, string secret)
     {
         var payload = Encoding.UTF8.GetBytes(postData + nonce + endpointPath);

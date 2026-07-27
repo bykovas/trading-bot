@@ -4,6 +4,8 @@ public sealed class PortfolioState
 {
     public DateTimeOffset UpdatedAt { get; set; }
     public decimal CashEur { get; set; }
+    public decimal? CashQuoteValue { get; set; }
+    public string? CashQuoteCurrency { get; set; }
     public List<PortfolioPosition> Positions { get; set; } = new();
 
     // Per-pair record of the most recent buy/sell timestamps, used to enforce
@@ -28,6 +30,8 @@ public sealed class PortfolioState
     {
         UpdatedAt = UpdatedAt,
         CashEur = CashEur,
+        CashQuoteValue = CashQuoteValue,
+        CashQuoteCurrency = CashQuoteCurrency,
         Positions = Positions.Select(position => position.Clone()).ToList(),
         ActionHistory = ActionHistory.Select(history => history.Clone()).ToList(),
         PendingFuturesOrders = PendingFuturesOrders.Select(order => order.Clone()).ToList(),

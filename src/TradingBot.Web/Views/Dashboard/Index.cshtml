@@ -1,10 +1,15 @@
 @model DashboardViewModel
-@{ ViewData["Title"] = "Portfolio"; ViewData["PageTitle"] = "Portfolio"; }
+@{
+  ViewData["Title"] = "Portfolio"; ViewData["PageTitle"] = "Portfolio";
+  var cashQuote = Model.Summary?.CashQuoteValue is { } quoteValue && !string.IsNullOrWhiteSpace(Model.Summary.CashQuoteCurrency)
+    ? $" ({CurrencySymbol(Model.Summary.CashQuoteCurrency)}{quoteValue:0.00})"
+    : "";
+}
 <main class="page">
   @await Html.PartialAsync("_ShellHeader", Model.Shell)
   @await Html.PartialAsync("_Notice", Model.Notice ?? "")
   <section class="metric-grid">
-    <article class="metric"><span>Cash</span><b class="num">€@(Model.Summary?.CashEur.ToString("0.00") ?? "—")</b></article>
+    <article class="metric"><span>Cash</span><b class="num">€@(Model.Summary?.CashEur.ToString("0.00") ?? "—")</b><small class="metric-sub">@cashQuote</small></article>
     <article class="metric"><span>Positions</span><b class="num">€@(Model.Summary?.PositionsValueEur.ToString("0.00") ?? "—")</b></article>
     <article class="metric"><span>Total</span><b class="num">€@(Model.Summary?.TotalValueEur.ToString("0.00") ?? "—")</b></article>
     <article class="metric"><span>Open</span><b class="num">@(Model.Summary?.OpenPositions.ToString() ?? "—")</b></article>
@@ -20,3 +25,13 @@
     </div>
   </section>
 </main>
+
+@functions {
+  private static string CurrencySymbol(string currency) =>
+    currency.ToUpperInvariant() switch
+    {
+      "USD" or "USDC" or "USDT" => "$",
+      "EUR" => "€",
+      _ => currency.ToUpperInvariant() + " "
+    };
+}

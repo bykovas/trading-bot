@@ -268,10 +268,14 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
 
     private static async Task<PortfolioSummaryViewModel?> ReadSummary(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
     {
+        await EnsurePortfolioSummaryDisplayColumns(connection, cancellationToken);
+
         await using var command = new NpgsqlCommand(
             """
             select updated_at,
                    cash_eur,
+                   cash_quote_value,
+                   cash_quote_currency,
                    positions_value_eur,
                    total_value_eur,
                    open_positions,
@@ -285,8 +289,29 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
         command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)Clean(botInstanceId) ?? DBNull.Value;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken)
-            ? new(reader.GetDateTime(0), reader.GetDecimal(1), reader.GetDecimal(2), reader.GetDecimal(3), reader.GetInt32(4), reader.GetDecimal(5), reader.GetDecimal(6))
+            ? new(
+                reader.GetDateTime(0),
+                reader.GetDecimal(1),
+                reader.IsDBNull(2) ? null : reader.GetDecimal(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.GetDecimal(4),
+                reader.GetDecimal(5),
+                reader.GetInt32(6),
+                reader.GetDecimal(7),
+                reader.GetDecimal(8))
             : null;
+    }
+
+    private static async Task EnsurePortfolioSummaryDisplayColumns(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            """
+            alter table portfolio_state_summary
+                add column if not exists cash_quote_value numeric,
+                add column if not exists cash_quote_currency text
+            """,
+            connection);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<IReadOnlyList<PortfolioPositionViewModel>> ReadPositions(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)

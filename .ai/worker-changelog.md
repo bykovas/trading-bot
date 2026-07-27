@@ -1,3 +1,9 @@
+## 2026-07-27-futures-live-collateral-eur-display
+
+- Futures live Kraken reconciliation now treats USD/USDC/USDT `availableMargin` as quote-currency collateral and converts it to EUR via Kraken `EUR/USD` before writing `PortfolioState.CashEur`. This stops the dashboard and EUR-denominated sizing from treating USD values as EUR.
+- Portfolio summary persistence now stores optional `cash_quote_value` / `cash_quote_currency` alongside `cash_eur`, so UI/API can display the Kraken-like EUR amount with the original USD available amount in parentheses.
+- If EUR/USD conversion is unavailable, the worker keeps the prior fallback (uses the numeric available value) and logs the conversion failure explicitly.
+
 ## 2026-07-27-futures-virtual-budget-125
 
 - Futures virtual default starting collateral is now EUR 125 so a fresh virtual ledger restarts with the requested larger sandbox budget. Spot virtual remains EUR 75.

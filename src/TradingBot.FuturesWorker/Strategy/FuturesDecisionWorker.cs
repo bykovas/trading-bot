@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace TradingBot.FuturesWorker;
 
 // Dry-run futures cycle loop (blueprint phase 4): fetch market data, score with
@@ -22,6 +24,7 @@ internal sealed class FuturesDecisionWorker(
     private readonly WorkerBuildInfo _buildInfo = WorkerBuildInfo.FromEnvironment();
     private readonly IReadOnlyDictionary<string, string> _pairToCorrelationGroup =
         CorrelationRiskResolver.BuildPairToGroup(config.CorrelationRisk);
+    private static readonly HttpClient FxHttpClient = new();
 
     // Rolling per-pair light snapshot history feeding the anti-lag price-action
     // guard (same mechanism as the spot worker). In-memory; hydrated on startup
@@ -1207,10 +1210,12 @@ internal sealed class FuturesDecisionWorker(
             .ToDictionary(instrument => instrument.KrakenPair, StringComparer.OrdinalIgnoreCase);
         var markByPair = lightStates.ToDictionary(state => state.Instrument.Pair, state => state.LastPrice, StringComparer.OrdinalIgnoreCase);
 
-        var available = accounts.Sum(account => account.AvailableMargin);
-        if (available > 0m)
+        var collateral = await ConvertFuturesAvailableCollateralToEurAsync(accounts, cancellationToken);
+        if (collateral.AvailableEur > 0m)
         {
-            state.CashEur = available;
+            state.CashEur = collateral.AvailableEur;
+            state.CashQuoteValue = collateral.AvailableUsd > 0m ? collateral.AvailableUsd : null;
+            state.CashQuoteCurrency = collateral.AvailableUsd > 0m ? "USD" : null;
         }
 
         var imported = new List<PortfolioPosition>();
@@ -1293,8 +1298,98 @@ internal sealed class FuturesDecisionWorker(
         state.PendingFuturesOrders.RemoveAll(order =>
             imported.Any(position => position.Pair.Equals(order.Pair, StringComparison.OrdinalIgnoreCase)));
         state.UpdatedAt = utc;
-        Console.WriteLine($"futures-kraken-sync: accounts={accounts.Count} remotePositions={positions.Count} openOrders={openOrders.Count} trackedPositions={state.Positions.Count} previousTracked={before} availableMargin={state.CashEur:0.####}");
+        var quoteText = state.CashQuoteValue is { } quote
+            ? $" ({quote:0.####} {state.CashQuoteCurrency})"
+            : "";
+        Console.WriteLine($"futures-kraken-sync: accounts={accounts.Count} remotePositions={positions.Count} openOrders={openOrders.Count} trackedPositions={state.Positions.Count} previousTracked={before} availableCollateral={state.CashEur:0.####} EUR{quoteText}");
     }
+
+    private static async Task<FuturesCollateralTotals> ConvertFuturesAvailableCollateralToEurAsync(
+        IReadOnlyList<FuturesAccountBalance> accounts,
+        CancellationToken cancellationToken)
+    {
+        var eur = 0m;
+        var usd = 0m;
+        decimal? usdToEur = null;
+
+        foreach (var account in accounts)
+        {
+            var currency = NormalizeCurrency(account.Currency);
+            if (account.AvailableMargin <= 0m)
+            {
+                continue;
+            }
+
+            if (currency is "EUR")
+            {
+                eur += account.AvailableMargin;
+                continue;
+            }
+
+            if (currency is "USD" or "USDC" or "USDT")
+            {
+                usd += account.AvailableMargin;
+                usdToEur ??= await FetchUsdToEurRateAsync(cancellationToken);
+                eur += usdToEur is { } rate
+                    ? account.AvailableMargin * rate
+                    : account.AvailableMargin;
+                continue;
+            }
+
+            // Unknown collateral units are rare for this account. Keep them visible
+            // instead of dropping buying power, but make the fallback explicit in logs.
+            eur += account.AvailableMargin;
+            Console.WriteLine($"futures-kraken-sync: unknown collateral currency '{account.Currency}', treating available {account.AvailableMargin:0.####} as EUR");
+        }
+
+        return new FuturesCollateralTotals(eur, usd);
+    }
+
+    private static async Task<decimal?> FetchUsdToEurRateAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await FxHttpClient.GetAsync(
+                "https://api.kraken.com/0/public/Ticker?assetVersion=1&pair=EUR/USD",
+                cancellationToken);
+            response.EnsureSuccessStatusCode();
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            if (!doc.RootElement.TryGetProperty("result", out var result)
+                || !result.TryGetProperty("EUR/USD", out var ticker)
+                || !ticker.TryGetProperty("c", out var close)
+                || close.ValueKind != JsonValueKind.Array
+                || close.GetArrayLength() == 0
+                || !decimal.TryParse(close[0].GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var eurUsd)
+                || eurUsd <= 0m)
+            {
+                Console.WriteLine("futures-kraken-sync: EUR/USD ticker missing; keeping USD available collateral without conversion");
+                return null;
+            }
+
+            return 1m / eurUsd;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            Console.WriteLine($"futures-kraken-sync: EUR/USD conversion unavailable ({ex.Message}); keeping USD available collateral without conversion");
+            return null;
+        }
+    }
+
+    private static string NormalizeCurrency(string currency)
+    {
+        var normalized = currency.Trim().ToUpperInvariant();
+        return normalized switch
+        {
+            "ZEUR" => "EUR",
+            "ZUSD" => "USD",
+            "USD.M" => "USD",
+            "EUR.M" => "EUR",
+            _ => normalized
+        };
+    }
+
+    private sealed record FuturesCollateralTotals(decimal AvailableEur, decimal AvailableUsd);
 
     private async Task<ImportedTpSlState> EnsureExchangeProtectionOrdersAsync(
         InstrumentOptions instrument,

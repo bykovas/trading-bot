@@ -359,6 +359,8 @@ static TradeWindow LocalYesterdayStartUtc()
 
 static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
 {
+    await EnsurePortfolioSummaryDisplayColumns(connection, cancellationToken);
+
     // Positions value / total value are marked to LAST price (exchange parity) rather
     // than the worker's conservative liquidation value (bid - slippage - fee), so the
     // dashboard reconciles with what Kraken shows. Spot positions are valued at
@@ -370,6 +372,8 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
         select
             updated_at,
             cash_eur,
+            cash_quote_value,
+            cash_quote_currency,
             coalesce((
                 select sum(
                     case
@@ -411,22 +415,36 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
     }
 
     var todayUtc = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-    var dailyRiskDate = reader.IsDBNull(5) ? todayUtc : reader.GetString(5);
-    var dailyRealizedPnl = dailyRiskDate == todayUtc && !reader.IsDBNull(6)
-        ? reader.GetDecimal(6)
+    var dailyRiskDate = reader.IsDBNull(7) ? todayUtc : reader.GetString(7);
+    var dailyRealizedPnl = dailyRiskDate == todayUtc && !reader.IsDBNull(8)
+        ? reader.GetDecimal(8)
         : 0m;
 
     return new PortfolioSummaryDto(
         reader.GetDateTime(0),
         reader.GetDecimal(1),
-        reader.GetDecimal(2),
-        reader.GetDecimal(3),
-        reader.GetInt32(4),
+        reader.IsDBNull(2) ? null : reader.GetDecimal(2),
+        reader.IsDBNull(3) ? null : reader.GetString(3),
+        reader.GetDecimal(4),
+        reader.GetDecimal(5),
+        reader.GetInt32(6),
         todayUtc,
         dailyRealizedPnl,
-        reader.IsDBNull(7) ? 0m : reader.GetDecimal(7),
-        reader.IsDBNull(8) ? 0m : reader.GetDecimal(8),
-        reader.IsDBNull(9) ? 0m : reader.GetDecimal(9));
+        reader.IsDBNull(9) ? 0m : reader.GetDecimal(9),
+        reader.IsDBNull(10) ? 0m : reader.GetDecimal(10),
+        reader.IsDBNull(11) ? 0m : reader.GetDecimal(11));
+}
+
+static async Task EnsurePortfolioSummaryDisplayColumns(NpgsqlConnection connection, CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand(
+        """
+        alter table portfolio_state_summary
+            add column if not exists cash_quote_value numeric,
+            add column if not exists cash_quote_currency text
+        """,
+        connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
 static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
@@ -1567,6 +1585,8 @@ internal sealed record EntryBlackoutStatus(
 internal sealed record PortfolioSummaryDto(
     DateTime UpdatedAt,
     decimal CashEur,
+    decimal? CashQuoteValue,
+    string? CashQuoteCurrency,
     decimal PositionsValueEur,
     decimal TotalValueEur,
     int OpenPositions,

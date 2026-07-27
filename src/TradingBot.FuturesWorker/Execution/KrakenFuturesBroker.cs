@@ -35,6 +35,9 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
             var value = account.Value;
             var currency = GetString(value, "currency")
                 ?? GetString(value, "unit")
+                ?? (GetString(value, "type")?.Equals("multiCollateralMarginAccount", StringComparison.OrdinalIgnoreCase) == true
+                    ? "USD"
+                    : null)
                 ?? account.Name;
             var marginBalance = GetDecimal(value, "marginBalance")
                 ?? GetDecimal(value, "balanceValue")

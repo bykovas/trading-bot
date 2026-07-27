@@ -17,6 +17,8 @@ public sealed record DashboardViewModel(ShellViewModel Shell, PortfolioSummaryVi
 public sealed record PortfolioSummaryViewModel(
     DateTime UpdatedAt,
     decimal CashEur,
+    decimal? CashQuoteValue,
+    string? CashQuoteCurrency,
     decimal PositionsValueEur,
     decimal TotalValueEur,
     int OpenPositions,
