@@ -446,17 +446,17 @@
 
     <section class="grid" aria-label="Portfolio summary">
       <div class="metric">
-        <div class="label">Total value</div>
+        <div id="total-label" class="label">Total value</div>
         <div id="total-value" class="value gold">--</div>
         <div id="total-value-net" class="subvalue">Cash + open positions</div>
       </div>
       <div class="metric">
-        <div class="label">Cash</div>
+        <div id="cash-label" class="label">Cash</div>
         <div id="cash" class="value">--</div>
         <div id="cash-quote" class="subvalue">Available EUR</div>
       </div>
       <div class="metric">
-        <div class="label">Positions value</div>
+        <div id="positions-label" class="label">Positions value</div>
         <div id="positions-value" class="value">--</div>
         <div id="open-positions" class="subvalue">-- open positions</div>
       </div>
@@ -546,10 +546,13 @@
     const els = {
       statusDot: document.getElementById("status-dot"),
       statusText: document.getElementById("status-text"),
+      totalLabel: document.getElementById("total-label"),
       totalValue: document.getElementById("total-value"),
       totalValueNet: document.getElementById("total-value-net"),
+      cashLabel: document.getElementById("cash-label"),
       cash: document.getElementById("cash"),
       cashQuote: document.getElementById("cash-quote"),
+      positionsLabel: document.getElementById("positions-label"),
       positionsValue: document.getElementById("positions-value"),
       openPositions: document.getElementById("open-positions"),
       dailyPnl: document.getElementById("daily-pnl"),
@@ -583,6 +586,28 @@
           ? "€"
           : `${normalized} `;
       return `${symbol}${numeric.toFixed(2)}`;
+    }
+
+    function quoteFromEur(eurValue, summary) {
+      const eurNumeric = Number(eurValue);
+      const cashEur = Number(summary?.cashEur);
+      const quoteValue = Number(summary?.cashQuoteValue);
+      const quoteCurrency = summary?.cashQuoteCurrency;
+      if (!Number.isFinite(eurNumeric) || !Number.isFinite(cashEur) || !Number.isFinite(quoteValue) || !quoteCurrency || cashEur <= 0) {
+        return "";
+      }
+      return quoteMoney(eurNumeric * quoteValue / cashEur, quoteCurrency);
+    }
+
+    function isFuturesBot() {
+      return currentBotInstance.startsWith("futures-");
+    }
+
+    function renderSummaryLabels() {
+      const futures = isFuturesBot();
+      els.totalLabel.textContent = futures ? "Futures equity" : "Total value";
+      els.cashLabel.textContent = futures ? "Available margin" : "Cash";
+      els.positionsLabel.textContent = futures ? "Open position equity" : "Positions value";
     }
 
     function number(value) {
@@ -694,12 +719,13 @@
     function render(data) {
       const summary = data.summary;
       setWarning(data.warning);
+      renderSummaryLabels();
 
       if (!summary) {
         els.totalValue.textContent = "--";
         els.totalValueNet.textContent = "Cash + open positions";
         els.cash.textContent = "--";
-        els.cashQuote.textContent = "Available EUR";
+        els.cashQuote.textContent = isFuturesBot() ? "Kraken futures collateral" : "Available EUR";
         els.positionsValue.textContent = "--";
         els.openPositions.textContent = "0 open positions";
         els.dailyPnl.textContent = "--";
@@ -712,12 +738,18 @@
       }
 
       els.totalValue.textContent = money(summary.totalValueEur);
-      els.totalValueNet.textContent = `${money(summary.netTotalValueEur)} net after fees`;
+      const netQuote = quoteFromEur(summary.netTotalValueEur, summary);
+      els.totalValueNet.textContent = netQuote
+        ? `${money(summary.netTotalValueEur)} net after fees (${netQuote})`
+        : `${money(summary.netTotalValueEur)} net after fees`;
       els.cash.textContent = money(summary.cashEur);
       const cashQuote = quoteMoney(summary.cashQuoteValue, summary.cashQuoteCurrency);
-      els.cashQuote.textContent = cashQuote ? `Available EUR (${cashQuote})` : "Available EUR";
+      els.cashQuote.textContent = cashQuote
+        ? `${isFuturesBot() ? "Kraken futures collateral" : "Available EUR"} (${cashQuote})`
+        : (isFuturesBot() ? "Kraken futures collateral" : "Available EUR");
       els.positionsValue.textContent = money(summary.positionsValueEur);
-      els.openPositions.textContent = `${summary.openPositions} open position${summary.openPositions === 1 ? "" : "s"}`;
+      const positionsQuote = Number(summary.openPositions) > 0 ? quoteFromEur(summary.positionsValueEur, summary) : "";
+      els.openPositions.textContent = `${summary.openPositions} open position${summary.openPositions === 1 ? "" : "s"}${positionsQuote ? ` (${positionsQuote})` : ""}`;
       els.dailyPnl.textContent = signedMoney(summary.dailyRealizedPnlEur ?? 0);
       els.dailyPnl.className = `value ${pnlClass(summary.dailyRealizedPnlEur ?? 0)}`;
       els.dailyDate.textContent = summary.dailyRiskDateUtc ? `${summary.dailyRiskDateUtc} risk day` : "risk day";
