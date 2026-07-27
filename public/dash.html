@@ -453,7 +453,7 @@
       <div class="metric">
         <div class="label">Cash</div>
         <div id="cash" class="value">--</div>
-        <div class="subvalue">Available EUR</div>
+        <div id="cash-quote" class="subvalue">Available EUR</div>
       </div>
       <div class="metric">
         <div class="label">Positions value</div>
@@ -549,6 +549,7 @@
       totalValue: document.getElementById("total-value"),
       totalValueNet: document.getElementById("total-value-net"),
       cash: document.getElementById("cash"),
+      cashQuote: document.getElementById("cash-quote"),
       positionsValue: document.getElementById("positions-value"),
       openPositions: document.getElementById("open-positions"),
       dailyPnl: document.getElementById("daily-pnl"),
@@ -570,6 +571,18 @@
 
     function money(value) {
       return Number.isFinite(Number(value)) ? eur.format(Number(value)) : "--";
+    }
+
+    function quoteMoney(value, currency) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || !currency) return "";
+      const normalized = String(currency).toUpperCase();
+      const symbol = normalized === "USD" || normalized === "USDC" || normalized === "USDT"
+        ? "$"
+        : normalized === "EUR"
+          ? "€"
+          : `${normalized} `;
+      return `${symbol}${numeric.toFixed(2)}`;
     }
 
     function number(value) {
@@ -686,6 +699,7 @@
         els.totalValue.textContent = "--";
         els.totalValueNet.textContent = "Cash + open positions";
         els.cash.textContent = "--";
+        els.cashQuote.textContent = "Available EUR";
         els.positionsValue.textContent = "--";
         els.openPositions.textContent = "0 open positions";
         els.dailyPnl.textContent = "--";
@@ -700,6 +714,8 @@
       els.totalValue.textContent = money(summary.totalValueEur);
       els.totalValueNet.textContent = `${money(summary.netTotalValueEur)} net after fees`;
       els.cash.textContent = money(summary.cashEur);
+      const cashQuote = quoteMoney(summary.cashQuoteValue, summary.cashQuoteCurrency);
+      els.cashQuote.textContent = cashQuote ? `Available EUR (${cashQuote})` : "Available EUR";
       els.positionsValue.textContent = money(summary.positionsValueEur);
       els.openPositions.textContent = `${summary.openPositions} open position${summary.openPositions === 1 ? "" : "s"}`;
       els.dailyPnl.textContent = signedMoney(summary.dailyRealizedPnlEur ?? 0);
