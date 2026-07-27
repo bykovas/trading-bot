@@ -335,19 +335,17 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
         using var transaction = connection.BeginTransaction();
         using var command = new NpgsqlCommand(
             """
-            insert into portfolio_state (id, bot_instance_id, updated_at, state_json)
-            values (@id, @bot_instance_id, @updated_at, @state_json)
+            insert into portfolio_state (id, bot_instance_id, updated_at)
+            values (@id, @bot_instance_id, @updated_at)
             on conflict (id) do update set
                 bot_instance_id = excluded.bot_instance_id,
-                updated_at = excluded.updated_at,
-                state_json = excluded.state_json
+                updated_at = excluded.updated_at
             """,
             connection);
         command.Transaction = transaction;
         command.Parameters.AddWithValue("id", StateId);
         command.Parameters.AddWithValue("bot_instance_id", botInstanceId);
         command.Parameters.AddWithValue("updated_at", state.UpdatedAt.UtcDateTime);
-        command.Parameters.Add("state_json", NpgsqlDbType.Jsonb).Value = JsonSerializer.Serialize(state, _jsonOptions);
         command.ExecuteNonQuery();
 
         SaveNormalizedPortfolioState(connection, transaction, state);
@@ -371,8 +369,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 worker_build_utc,
                 worker_image_tag,
                 strategy_version,
-                change_set,
-                record_json)
+                change_set)
             values (
                 @cycle_id,
                 @bot_instance_id,
@@ -382,8 +379,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 @worker_build_utc,
                 @worker_image_tag,
                 @strategy_version,
-                @change_set,
-                @record_json)
+                @change_set)
             on conflict (cycle_id) do update set
                 utc = excluded.utc,
                 bot_instance_id = excluded.bot_instance_id,
@@ -392,8 +388,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 worker_build_utc = excluded.worker_build_utc,
                 worker_image_tag = excluded.worker_image_tag,
                 strategy_version = excluded.strategy_version,
-                change_set = excluded.change_set,
-                record_json = excluded.record_json
+                change_set = excluded.change_set
             """,
             connection);
         command.Transaction = transaction;
@@ -406,7 +401,6 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
         command.Parameters.AddWithValue("worker_image_tag", record.Worker.ImageTag);
         command.Parameters.AddWithValue("strategy_version", record.Worker.StrategyVersion);
         command.Parameters.AddWithValue("change_set", record.Worker.ChangeSet);
-        command.Parameters.Add("record_json", NpgsqlDbType.Jsonb).Value = JsonSerializer.Serialize(record, _jsonOptions);
         command.ExecuteNonQuery();
 
         SaveNormalizedCycle(connection, transaction, record);
@@ -492,8 +486,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             create table if not exists portfolio_state (
                 id integer primary key,
                 bot_instance_id text not null default 'default',
-                updated_at timestamptz not null,
-                state_json jsonb not null
+                updated_at timestamptz not null
             );
 
             alter table portfolio_state
@@ -514,8 +507,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             create table if not exists dry_run_cycles (
                 cycle_id text primary key,
                 bot_instance_id text not null default 'default',
-                utc timestamptz not null,
-                record_json jsonb not null
+                utc timestamptz not null
             );
 
             alter table dry_run_cycles
@@ -552,6 +544,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             create index if not exists ix_market_snapshots_cycle_id on market_snapshots (cycle_id);
             create index if not exists ix_market_snapshots_bot_instance_utc on market_snapshots (bot_instance_id, utc desc);
             create index if not exists ix_market_snapshots_bot_pair_utc on market_snapshots (bot_instance_id, pair, utc desc, cycle_id desc);
+            create index if not exists ix_market_snapshots_cycle_pair on market_snapshots (cycle_id, pair);
 
             create table if not exists portfolio_state_summary (
                 bot_instance_id text primary key,
@@ -664,6 +657,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
 
             create index if not exists ix_dry_run_cycle_facts_bot_utc on dry_run_cycle_facts (bot_instance_id, utc desc, cycle_id desc);
             create index if not exists ix_dry_run_cycle_facts_change_set on dry_run_cycle_facts (change_set, utc desc);
+            create index if not exists ix_dry_run_cycle_facts_strategy_utc on dry_run_cycle_facts (strategy_version, utc desc, cycle_id desc);
+            create index if not exists ix_dry_run_cycle_facts_bot_meta_utc on dry_run_cycle_facts (bot_instance_id, strategy_version, change_set, utc desc, cycle_id desc);
 
             create table if not exists dry_run_cycle_active_pairs (
                 cycle_id text not null references dry_run_cycle_facts (cycle_id) on delete cascade,
@@ -673,6 +668,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             );
 
             create index if not exists ix_dry_run_cycle_active_pairs_pair on dry_run_cycle_active_pairs (pair, cycle_id);
+            create index if not exists ix_dry_run_cycle_active_pairs_cycle_pair on dry_run_cycle_active_pairs (cycle_id, pair_index);
 
             create table if not exists dry_run_decision_facts (
                 cycle_id text not null references dry_run_cycle_facts (cycle_id) on delete cascade,
@@ -716,6 +712,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             create index if not exists ix_dry_run_decision_facts_bot_utc on dry_run_decision_facts (bot_instance_id, utc desc);
             create index if not exists ix_dry_run_decision_facts_pair on dry_run_decision_facts (bot_instance_id, pair, utc desc);
             create index if not exists ix_dry_run_decision_facts_action_pair on dry_run_decision_facts (pair, cycle_id);
+            create index if not exists ix_dry_run_decision_facts_cycle_pair on dry_run_decision_facts (cycle_id, pair);
+            create index if not exists ix_dry_run_decision_facts_bot_cycle on dry_run_decision_facts (bot_instance_id, cycle_id);
 
             create table if not exists dry_run_decision_risk_reasons (
                 cycle_id text not null,
@@ -805,6 +803,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
 
             create index if not exists ix_dry_run_actions_action_pair on dry_run_actions (action, pair);
             create index if not exists ix_dry_run_actions_exchange_order on dry_run_actions (exchange_order_id);
+            create index if not exists ix_dry_run_actions_action_cycle on dry_run_actions (action, cycle_id);
 
             create table if not exists dry_run_entry_freshness (
                 cycle_id text not null,
@@ -948,11 +947,17 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 primary key (cycle_id, excluded_index)
             );
 
+            create index if not exists ix_dry_run_excluded_pairs_cycle_pair on dry_run_excluded_pairs (cycle_id, pair);
+
+            drop view if exists dry_run_cycle_records;
             drop view if exists dry_run_cycle_entry_diagnostics;
             drop view if exists dry_run_decisions;
             drop view if exists dry_run_cycle_summary;
             drop view if exists portfolio_positions;
             drop view if exists portfolio_summary;
+
+            alter table portfolio_state drop column if exists state_json;
+            alter table dry_run_cycles drop column if exists record_json;
 
             create or replace view portfolio_summary as
             select
@@ -1104,257 +1109,6 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             join dry_run_actions action on action.cycle_id = decision.cycle_id and action.decision_index = decision.decision_index
             left join dry_run_entry_freshness freshness on freshness.cycle_id = decision.cycle_id and freshness.decision_index = decision.decision_index
             left join dry_run_long_range_diagnostics long_range on long_range.cycle_id = decision.cycle_id and long_range.decision_index = decision.decision_index;
-
-            create or replace view dry_run_cycle_entry_diagnostics as
-            select
-                cycle.cycle_id,
-                cycle.bot_instance_id,
-                cycle.utc,
-                diagnostics.snapshot_pairs_available,
-                diagnostics.active_pairs_evaluated,
-                diagnostics.entry_pairs_evaluated,
-                diagnostics.score_at_least_075,
-                diagnostics.score_at_least_080,
-                diagnostics.score_at_least_085,
-                diagnostics.score_at_least_090,
-                diagnostics.hard_filter_pass_count,
-                diagnostics.eligible_entry_candidates,
-                diagnostics.chosen_pair,
-                diagnostics.no_trade_reason,
-                coalesce((
-                    select jsonb_object_agg(reason, count order by reason)
-                    from dry_run_rejection_counts rejection
-                    where rejection.cycle_id = cycle.cycle_id
-                ), '{}'::jsonb) as rejection_counts,
-                coalesce((
-                    select jsonb_agg(jsonb_build_object(
-                        'pair', candidate.pair,
-                        'score', candidate.score,
-                        'desiredPosition', candidate.desired_position,
-                        'spreadPercent', candidate.spread_percent,
-                        'price', candidate.price,
-                        'bid', candidate.bid,
-                        'ask', candidate.ask,
-                        'hasBullishStructure', candidate.has_bullish_structure,
-                        'emaFullyConfirmed', candidate.ema_fully_confirmed,
-                        'bullishEmaGapPercent', candidate.bullish_ema_gap_percent,
-                        'emaGapVelocityPercent', candidate.ema_gap_velocity_percent,
-                        'earlyEntryEligible', candidate.early_entry_eligible,
-                        'earlyEntryReason', candidate.early_entry_reason,
-                        'earlyEntryDiagnosticScore', candidate.early_entry_diagnostic_score,
-                        'earlyEntrySuggestedNotionalEur', candidate.early_entry_suggested_notional_eur,
-                        'priceActionDirection', candidate.price_action_direction,
-                        'priceActionTrendPercent', candidate.price_action_trend_percent,
-                        'priceActionState', candidate.price_action_state,
-                        'priceActionSamplesAvailable', candidate.price_action_samples_available,
-                        'priceActionSamplesRequired', candidate.price_action_samples_required,
-                        'priceActionOldestSampleUtc', candidate.price_action_oldest_sample_utc,
-                        'priceActionNewestSampleUtc', candidate.price_action_newest_sample_utc,
-                        'hardFiltersPassed', candidate.hard_filters_passed,
-                        'qualityFiltersPassed', candidate.quality_filters_passed,
-                        'missingConfirmations', coalesce((
-                            select jsonb_agg(missing.confirmation order by missing.confirmation_index)
-                            from dry_run_top_candidate_missing_confirmations missing
-                            where missing.cycle_id = candidate.cycle_id
-                              and missing.candidate_index = candidate.candidate_index
-                        ), '[]'::jsonb),
-                        'rejectionReason', candidate.rejection_reason,
-                        'exploratory', candidate.exploratory
-                    ) order by candidate.candidate_index)
-                    from dry_run_top_candidates candidate
-                    where candidate.cycle_id = cycle.cycle_id
-                ), '[]'::jsonb) as top_candidates,
-                coalesce((
-                    select jsonb_agg(jsonb_build_object(
-                        'pair', excluded.pair,
-                        'reason', excluded.reason,
-                        'last', excluded.last,
-                        'changePercent', excluded.change_percent,
-                        'volumeRank', excluded.volume_rank,
-                        'est24hVolumeEur', excluded.est_24h_volume_eur,
-                        'spreadPercent', excluded.spread_percent,
-                        'advisorRank', excluded.advisor_rank
-                    ) order by excluded.excluded_index)
-                    from dry_run_excluded_pairs excluded
-                    where excluded.cycle_id = cycle.cycle_id
-                ), '[]'::jsonb) as excluded_pairs,
-                diagnostics.price_action_ready_count
-            from dry_run_cycle_facts cycle
-            join dry_run_cycle_entry_diagnostic_facts diagnostics on diagnostics.cycle_id = cycle.cycle_id;
-
-            create or replace view dry_run_cycle_records as
-            select
-                cycle.cycle_id,
-                cycle.bot_instance_id,
-                cycle.utc,
-                cycle.worker_version,
-                cycle.worker_commit,
-                cycle.worker_build_utc,
-                cycle.worker_image_tag,
-                cycle.strategy_version,
-                cycle.change_set,
-                jsonb_build_object(
-                    'cycleId', cycle.cycle_id,
-                    'botInstanceId', cycle.bot_instance_id,
-                    'botInstanceName', cycle.bot_instance_name,
-                    'utc', cycle.utc,
-                    'marketDataMode', cycle.market_data_mode,
-                    'aiProvider', cycle.ai_provider,
-                    'worker', jsonb_build_object(
-                        'version', cycle.worker_version,
-                        'commit', cycle.worker_commit,
-                        'buildUtc', cycle.worker_build_utc,
-                        'imageTag', cycle.worker_image_tag,
-                        'strategyVersion', cycle.strategy_version,
-                        'changeSet', cycle.change_set
-                    ),
-                    'activePairs', coalesce((
-                        select jsonb_agg(pair.pair order by pair.pair_index)
-                        from dry_run_cycle_active_pairs pair
-                        where pair.cycle_id = cycle.cycle_id
-                    ), '[]'::jsonb),
-                    'portfolioBefore', jsonb_build_object(
-                        'cashEur', cycle.cash_before_eur,
-                        'positionsValueEur', cycle.positions_value_before_eur,
-                        'totalValueEur', cycle.portfolio_value_before_eur
-                    ),
-                    'portfolioAfter', jsonb_build_object(
-                        'cashEur', cycle.cash_after_eur,
-                        'positionsValueEur', cycle.positions_value_after_eur,
-                        'totalValueEur', cycle.portfolio_value_after_eur
-                    ),
-                    'entryDiagnostics', case
-                        when diagnostics.cycle_id is null then null
-                        else jsonb_build_object(
-                            'snapshotPairsAvailable', diagnostics.snapshot_pairs_available,
-                            'activePairsEvaluated', diagnostics.active_pairs_evaluated,
-                            'entryPairsEvaluated', diagnostics.entry_pairs_evaluated,
-                            'priceActionReadyCount', diagnostics.price_action_ready_count,
-                            'scoreAtLeast075', diagnostics.score_at_least_075,
-                            'scoreAtLeast080', diagnostics.score_at_least_080,
-                            'scoreAtLeast085', diagnostics.score_at_least_085,
-                            'scoreAtLeast090', diagnostics.score_at_least_090,
-                            'hardFilterPassCount', diagnostics.hard_filter_pass_count,
-                            'eligibleEntryCandidates', diagnostics.eligible_entry_candidates,
-                            'chosenPair', diagnostics.chosen_pair,
-                            'noTradeReason', diagnostics.no_trade_reason,
-                            'rejectionCounts', coalesce((
-                                select jsonb_object_agg(reason, count order by reason)
-                                from dry_run_rejection_counts rejection
-                                where rejection.cycle_id = cycle.cycle_id
-                            ), '{}'::jsonb),
-                            'topCandidates', coalesce((
-                                select jsonb_agg(jsonb_build_object(
-                                    'pair', candidate.pair,
-                                    'score', candidate.score,
-                                    'desiredPosition', candidate.desired_position,
-                                    'spreadPercent', candidate.spread_percent,
-                                    'price', candidate.price,
-                                    'bid', candidate.bid,
-                                    'ask', candidate.ask,
-                                    'priceActionDirection', candidate.price_action_direction,
-                                    'priceActionTrendPercent', candidate.price_action_trend_percent,
-                                    'priceActionState', candidate.price_action_state,
-                                    'hardFiltersPassed', candidate.hard_filters_passed,
-                                    'qualityFiltersPassed', candidate.quality_filters_passed,
-                                    'rejectionReason', candidate.rejection_reason,
-                                    'exploratory', candidate.exploratory
-                                ) order by candidate.candidate_index)
-                                from dry_run_top_candidates candidate
-                                where candidate.cycle_id = cycle.cycle_id
-                            ), '[]'::jsonb),
-                            'excludedPairs', coalesce((
-                                select jsonb_agg(jsonb_build_object(
-                                    'pair', excluded.pair,
-                                    'reason', excluded.reason,
-                                    'last', excluded.last,
-                                    'changePercent', excluded.change_percent,
-                                    'volumeRank', excluded.volume_rank,
-                                    'est24hVolumeEur', excluded.est_24h_volume_eur,
-                                    'spreadPercent', excluded.spread_percent,
-                                    'advisorRank', excluded.advisor_rank
-                                ) order by excluded.excluded_index)
-                                from dry_run_excluded_pairs excluded
-                                where excluded.cycle_id = cycle.cycle_id
-                            ), '[]'::jsonb)
-                        )
-                    end,
-                    'decisions', coalesce((
-                        select jsonb_agg(jsonb_build_object(
-                            'pair', decision.pair,
-                            'price', decision.price,
-                            'fastEma', decision.fast_ema,
-                            'slowEma', decision.slow_ema,
-                            'rsi', decision.rsi,
-                            'desiredPosition', decision.desired_position,
-                            'score', decision.score,
-                            'riskApproved', decision.risk_approved,
-                            'riskReasons', coalesce((
-                                select jsonb_agg(reason.reason order by reason.reason_index)
-                                from dry_run_decision_risk_reasons reason
-                                where reason.cycle_id = decision.cycle_id
-                                  and reason.decision_index = decision.decision_index
-                            ), '[]'::jsonb),
-                            'contributions', coalesce((
-                                select jsonb_agg(jsonb_build_object(
-                                    'name', contribution.name,
-                                    'value', contribution.value,
-                                    'reason', contribution.reason
-                                ) order by contribution.contribution_index)
-                                from dry_run_signal_contributions contribution
-                                where contribution.cycle_id = decision.cycle_id
-                                  and contribution.decision_index = decision.decision_index
-                            ), '[]'::jsonb),
-                            'broker', decision.broker,
-                            'entryRejectionReason', decision.entry_rejection_reason,
-                            'spreadPercent', decision.spread_percent,
-                            'priceActionDirection', decision.price_action_direction,
-                            'priceActionTrendPercent', decision.price_action_trend_percent,
-                            'exploratory', decision.exploratory,
-                            'hasBullishStructure', decision.has_bullish_structure,
-                            'emaFullyConfirmed', decision.ema_fully_confirmed,
-                            'bullishEmaGapPercent', decision.bullish_ema_gap_percent,
-                            'emaGapVelocityPercent', decision.ema_gap_velocity_percent,
-                            'earlyEntryEligible', decision.early_entry_eligible,
-                            'earlyEntryReason', decision.early_entry_reason,
-                            'earlyEntryDiagnosticScore', decision.early_entry_diagnostic_score,
-                            'earlyEntrySuggestedNotionalEur', decision.early_entry_suggested_notional_eur,
-                            'dryRunAction', jsonb_build_object(
-                                'pair', action.pair,
-                                'action', action.action,
-                                'reason', action.reason,
-                                'holdReasonCode', action.hold_reason_code,
-                                'exitReasonCode', action.exit_reason_code,
-                                'desiredPosition', action.desired_position,
-                                'targetNotionalEur', action.target_notional_eur,
-                                'quantity', action.quantity,
-                                'entryPrice', action.entry_price,
-                                'lastPrice', action.last_price,
-                                'fillPrice', action.fill_price,
-                                'feeEur', action.fee_eur,
-                                'grossNotionalEur', action.gross_notional_eur,
-                                'netNotionalEur', action.net_notional_eur,
-                                'cashBeforeEur', action.cash_before_eur,
-                                'cashAfterEur', action.cash_after_eur,
-                                'portfolioValueBeforeEur', action.portfolio_value_before_eur,
-                                'portfolioValueAfterEur', action.portfolio_value_after_eur,
-                                'fillSource', action.fill_source,
-                                'side', action.side,
-                                'reduceOnly', action.reduce_only,
-                                'leverage', action.leverage,
-                                'exitTriggerSource', action.exit_trigger_source,
-                                'entryChannel', action.entry_channel,
-                                'exchangeOrderId', action.exchange_order_id,
-                                'exchangeFillTimestamp', action.exchange_fill_timestamp
-                            )
-                        ) order by decision.decision_index)
-                        from dry_run_decision_facts decision
-                        join dry_run_actions action on action.cycle_id = decision.cycle_id and action.decision_index = decision.decision_index
-                        where decision.cycle_id = cycle.cycle_id
-                    ), '[]'::jsonb)
-                ) as record
-            from dry_run_cycle_facts cycle
-            left join dry_run_cycle_entry_diagnostic_facts diagnostics on diagnostics.cycle_id = cycle.cycle_id;
 
             -- Clean slate for the market-prefixed instance-id scheme (spot-live,
             -- spot-virtual, futures-live, futures-virtual): rows written under the

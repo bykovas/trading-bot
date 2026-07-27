@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using System.Text;
 using Npgsql;
 using NpgsqlTypes;
 using TradingBot.Core.Common;
@@ -36,7 +35,7 @@ app.MapGet("/api/bot-instances", async (CancellationToken cancellationToken) =>
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
         await using var command = new NpgsqlCommand(
-            "select distinct bot_instance_id from dry_run_cycle_records order by bot_instance_id",
+            "select distinct bot_instance_id from dry_run_cycle_facts order by bot_instance_id",
             connection);
         var instances = new List<string>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -334,18 +333,11 @@ app.MapGet("/api/simulate", async (
     }
 });
 
-app.MapGet("/api/export/cycles-and-snapshots.csv", (IConfiguration configuration, CancellationToken cancellationToken) =>
+app.MapGet("/api/export/cycles-and-snapshots.csv", () =>
 {
-    var connectionString = GetConnectionString(configuration);
-    if (string.IsNullOrWhiteSpace(connectionString))
-    {
-        return Results.Problem("TRADINGBOT_DATABASE_CONNECTION_STRING is not configured.");
-    }
-
-    return Results.Stream(
-        stream => WriteCyclesAndSnapshotsCsv(stream, connectionString, cancellationToken),
-        "text/csv; charset=utf-8",
-        $"trading-bot-cycles-snapshots-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.csv");
+    return Results.Problem(
+        "CSV export is disabled while reports use normalized database tables.",
+        statusCode: StatusCodes.Status410Gone);
 });
 
 app.Run();
@@ -543,8 +535,17 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
             worker_image_tag,
             strategy_version,
             change_set,
-            record::text
-        from dry_run_cycle_records cycle
+            bot_instance_name,
+            market_data_mode,
+            ai_provider,
+            active_pairs_count,
+            cash_before_eur,
+            positions_value_before_eur,
+            portfolio_value_before_eur,
+            cash_after_eur,
+            positions_value_after_eur,
+            portfolio_value_after_eur
+        from dry_run_cycle_facts cycle
         where (@worker_version is null or worker_version = @worker_version)
           and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
           and (@worker_commit is null or worker_commit = @worker_commit)
@@ -554,7 +555,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
               @latest_strategy = false
               or strategy_version = (
                   select latest.strategy_version
-                  from dry_run_cycle_records latest
+                  from dry_run_cycle_facts latest
                   where latest.strategy_version is not null
                   order by latest.utc desc, latest.cycle_id desc
                   limit 1
@@ -565,14 +566,14 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
               or (
                   strategy_version is not distinct from (
                       select latest.strategy_version
-                      from dry_run_cycle_records latest
+                      from dry_run_cycle_facts latest
                       where latest.bot_instance_id = cycle.bot_instance_id
                       order by latest.utc desc, latest.cycle_id desc
                       limit 1
                   )
                   and change_set is not distinct from (
                       select latest.change_set
-                      from dry_run_cycle_records latest
+                      from dry_run_cycle_facts latest
                       where latest.bot_instance_id = cycle.bot_instance_id
                       order by latest.utc desc, latest.cycle_id desc
                       limit 1
@@ -597,7 +598,6 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
     while (await reader.ReadAsync(cancellationToken))
     {
-        using var document = JsonDocument.Parse(reader.GetString(9));
         cycles.Add(new CycleRawDto(
             reader.GetString(0),
             reader.GetString(1),
@@ -608,9 +608,29 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
             ReadNullableString(reader, 6),
             ReadNullableString(reader, 7),
             ReadNullableString(reader, 8),
-            document.RootElement.Clone()));
+            new CycleRecordDto(
+                reader.GetString(0),
+                reader.GetString(1),
+                ReadNullableString(reader, 9) ?? reader.GetString(1),
+                reader.GetDateTime(2),
+                ReadNullableString(reader, 10) ?? string.Empty,
+                ReadNullableString(reader, 11) ?? string.Empty,
+                new CycleWorkerDto(
+                    ReadNullableString(reader, 3),
+                    ReadNullableString(reader, 4),
+                    ReadNullableString(reader, 5),
+                    ReadNullableString(reader, 6),
+                    ReadNullableString(reader, 7),
+                    ReadNullableString(reader, 8)),
+                reader.GetInt32(12),
+                new CyclePortfolioSnapshotDto(reader.GetDecimal(13), reader.GetDecimal(14), reader.GetDecimal(15)),
+                new CyclePortfolioSnapshotDto(reader.GetDecimal(16), reader.GetDecimal(17), reader.GetDecimal(18)),
+                Array.Empty<string>(),
+                Array.Empty<CycleDecisionRecordDto>())));
     }
 
+    await reader.DisposeAsync();
+    await HydrateCycleRecords(connection, cycles, cancellationToken);
     return cycles;
 }
 
@@ -637,9 +657,24 @@ static async Task EnsureCycleMetadataColumns(NpgsqlConnection connection, Cancel
         create index if not exists ix_dry_run_cycles_bot_instance_utc_cycle on dry_run_cycles (bot_instance_id, utc desc, cycle_id desc);
         create index if not exists ix_market_snapshots_bot_instance_utc on market_snapshots (bot_instance_id, utc desc);
         create index if not exists ix_market_snapshots_bot_pair_utc on market_snapshots (bot_instance_id, pair, utc desc, cycle_id desc);
+        create index if not exists ix_market_snapshots_cycle_pair on market_snapshots (cycle_id, pair);
         create index if not exists ix_dry_run_cycles_worker_commit on dry_run_cycles (worker_commit, utc desc);
         create index if not exists ix_dry_run_cycles_strategy_version on dry_run_cycles (strategy_version, utc desc);
         create index if not exists ix_dry_run_cycles_change_set on dry_run_cycles (change_set, utc desc);
+        create index if not exists ix_dry_run_cycle_facts_bot_utc on dry_run_cycle_facts (bot_instance_id, utc desc, cycle_id desc);
+        create index if not exists ix_dry_run_cycle_facts_strategy_utc on dry_run_cycle_facts (strategy_version, utc desc, cycle_id desc);
+        create index if not exists ix_dry_run_cycle_facts_bot_meta_utc on dry_run_cycle_facts (bot_instance_id, strategy_version, change_set, utc desc, cycle_id desc);
+        create index if not exists ix_dry_run_cycle_active_pairs_cycle_pair on dry_run_cycle_active_pairs (cycle_id, pair_index);
+        create index if not exists ix_dry_run_decision_facts_bot_utc on dry_run_decision_facts (bot_instance_id, utc desc);
+        create index if not exists ix_dry_run_decision_facts_pair on dry_run_decision_facts (bot_instance_id, pair, utc desc);
+        create index if not exists ix_dry_run_decision_facts_cycle_pair on dry_run_decision_facts (cycle_id, pair);
+        create index if not exists ix_dry_run_decision_facts_bot_cycle on dry_run_decision_facts (bot_instance_id, cycle_id);
+        create index if not exists ix_dry_run_actions_action_cycle on dry_run_actions (action, cycle_id);
+        create index if not exists ix_dry_run_excluded_pairs_cycle_pair on dry_run_excluded_pairs (cycle_id, pair);
+
+        drop view if exists dry_run_cycle_records;
+        alter table portfolio_state drop column if exists state_json;
+        alter table dry_run_cycles drop column if exists record_json;
         """,
         connection);
     await command.ExecuteNonQueryAsync(cancellationToken);
@@ -655,8 +690,24 @@ static async Task<CycleDetailDto?> ReadCycleDetail(
         select
             cycle_id,
             utc,
-            record::text
-        from dry_run_cycle_records
+            bot_instance_id,
+            bot_instance_name,
+            market_data_mode,
+            ai_provider,
+            worker_version,
+            worker_commit,
+            worker_build_utc,
+            worker_image_tag,
+            strategy_version,
+            change_set,
+            active_pairs_count,
+            cash_before_eur,
+            positions_value_before_eur,
+            portfolio_value_before_eur,
+            cash_after_eur,
+            positions_value_after_eur,
+            portfolio_value_after_eur
+        from dry_run_cycle_facts
         where cycle_id = @cycle_id
         """,
         connection);
@@ -668,11 +719,44 @@ static async Task<CycleDetailDto?> ReadCycleDetail(
         return null;
     }
 
-    using var document = JsonDocument.Parse(reader.GetString(2));
-    return new CycleDetailDto(
+    var detailCycleId = reader.GetString(0);
+    var detailUtc = reader.GetDateTime(1);
+    var cycle = new CycleRawDto(
         reader.GetString(0),
+        reader.GetString(2),
         reader.GetDateTime(1),
-        document.RootElement.Clone());
+        ReadNullableString(reader, 6),
+        ReadNullableString(reader, 7),
+        ReadNullableString(reader, 8),
+        ReadNullableString(reader, 9),
+        ReadNullableString(reader, 10),
+        ReadNullableString(reader, 11),
+        new CycleRecordDto(
+        reader.GetString(0),
+        reader.GetString(2),
+        ReadNullableString(reader, 3) ?? reader.GetString(2),
+        reader.GetDateTime(1),
+        ReadNullableString(reader, 4) ?? string.Empty,
+        ReadNullableString(reader, 5) ?? string.Empty,
+        new CycleWorkerDto(
+            ReadNullableString(reader, 6),
+            ReadNullableString(reader, 7),
+            ReadNullableString(reader, 8),
+            ReadNullableString(reader, 9),
+            ReadNullableString(reader, 10),
+            ReadNullableString(reader, 11)),
+        reader.GetInt32(12),
+        new CyclePortfolioSnapshotDto(reader.GetDecimal(13), reader.GetDecimal(14), reader.GetDecimal(15)),
+        new CyclePortfolioSnapshotDto(reader.GetDecimal(16), reader.GetDecimal(17), reader.GetDecimal(18)),
+        Array.Empty<string>(),
+        Array.Empty<CycleDecisionRecordDto>()));
+    await reader.DisposeAsync();
+    var hydrated = new List<CycleRawDto> { cycle };
+    await HydrateCycleRecords(connection, hydrated, cancellationToken);
+    return new CycleDetailDto(
+        detailCycleId,
+        detailUtc,
+        hydrated[0].Record);
 }
 
 static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
@@ -696,8 +780,17 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
                 worker_image_tag,
                 strategy_version,
                 change_set,
-                record
-            from dry_run_cycle_records cycle
+                bot_instance_name,
+                market_data_mode,
+                ai_provider,
+                active_pairs_count,
+                cash_before_eur,
+                positions_value_before_eur,
+                portfolio_value_before_eur,
+                cash_after_eur,
+                positions_value_after_eur,
+                portfolio_value_after_eur
+            from dry_run_cycle_facts cycle
             where utc >= @utc_start
               and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
               and exists (
@@ -709,7 +802,7 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
         ),
         latest_trade_meta as (
             select strategy_version, change_set
-            from dry_run_cycle_records
+            from dry_run_cycle_facts
             where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
             order by utc desc, cycle_id desc
             limit 1
@@ -724,7 +817,16 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
             worker_image_tag,
             strategy_version,
             change_set,
-            record::text
+            bot_instance_name,
+            market_data_mode,
+            ai_provider,
+            active_pairs_count,
+            cash_before_eur,
+            positions_value_before_eur,
+            portfolio_value_before_eur,
+            cash_after_eur,
+            positions_value_after_eur,
+            portfolio_value_after_eur
         from trade_cycles
         where (
               @latest_meta = false
@@ -749,7 +851,6 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
     while (await reader.ReadAsync(cancellationToken))
     {
-        using var document = JsonDocument.Parse(reader.GetString(9));
         cycles.Add(new CycleRawDto(
             reader.GetString(0),
             reader.GetString(1),
@@ -760,10 +861,279 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadTradeCycles(
             ReadNullableString(reader, 6),
             ReadNullableString(reader, 7),
             ReadNullableString(reader, 8),
-            document.RootElement.Clone()));
+            new CycleRecordDto(
+                reader.GetString(0),
+                reader.GetString(1),
+                ReadNullableString(reader, 9) ?? reader.GetString(1),
+                reader.GetDateTime(2),
+                ReadNullableString(reader, 10) ?? string.Empty,
+                ReadNullableString(reader, 11) ?? string.Empty,
+                new CycleWorkerDto(
+                    ReadNullableString(reader, 3),
+                    ReadNullableString(reader, 4),
+                    ReadNullableString(reader, 5),
+                    ReadNullableString(reader, 6),
+                    ReadNullableString(reader, 7),
+                    ReadNullableString(reader, 8)),
+                reader.GetInt32(12),
+                new CyclePortfolioSnapshotDto(reader.GetDecimal(13), reader.GetDecimal(14), reader.GetDecimal(15)),
+                new CyclePortfolioSnapshotDto(reader.GetDecimal(16), reader.GetDecimal(17), reader.GetDecimal(18)),
+                Array.Empty<string>(),
+                Array.Empty<CycleDecisionRecordDto>())));
     }
 
+    await reader.DisposeAsync();
+    await HydrateCycleRecords(connection, cycles, cancellationToken);
     return cycles;
+}
+
+static async Task HydrateCycleRecords(
+    NpgsqlConnection connection,
+    IList<CycleRawDto> cycles,
+    CancellationToken cancellationToken)
+{
+    if (cycles.Count == 0)
+    {
+        return;
+    }
+
+    var cycleIds = cycles.Select(cycle => cycle.CycleId).Distinct(StringComparer.Ordinal).ToArray();
+    var activePairs = cycleIds.ToDictionary(id => id, _ => new List<string>(), StringComparer.Ordinal);
+    await using (var command = new NpgsqlCommand(
+        """
+        select cycle_id, pair
+        from dry_run_cycle_active_pairs
+        where cycle_id = any(@cycle_ids)
+        order by cycle_id, pair_index
+        """,
+        connection))
+    {
+        command.Parameters.Add("cycle_ids", NpgsqlDbType.Array | NpgsqlDbType.Text).Value = cycleIds;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (activePairs.TryGetValue(reader.GetString(0), out var pairs))
+            {
+                pairs.Add(reader.GetString(1));
+            }
+        }
+    }
+
+    var riskReasons = new Dictionary<(string CycleId, int DecisionIndex), List<string>>();
+    await using (var command = new NpgsqlCommand(
+        """
+        select cycle_id, decision_index, reason
+        from dry_run_decision_risk_reasons
+        where cycle_id = any(@cycle_ids)
+        order by cycle_id, decision_index, reason_index
+        """,
+        connection))
+    {
+        command.Parameters.Add("cycle_ids", NpgsqlDbType.Array | NpgsqlDbType.Text).Value = cycleIds;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var key = (reader.GetString(0), reader.GetInt32(1));
+            if (!riskReasons.TryGetValue(key, out var reasons))
+            {
+                reasons = new List<string>();
+                riskReasons[key] = reasons;
+            }
+
+            reasons.Add(reader.GetString(2));
+        }
+    }
+
+    var contributions = new Dictionary<(string CycleId, int DecisionIndex), List<SignalContributionDto>>();
+    await using (var command = new NpgsqlCommand(
+        """
+        select cycle_id, decision_index, name, value, reason
+        from dry_run_signal_contributions
+        where cycle_id = any(@cycle_ids)
+        order by cycle_id, decision_index, contribution_index
+        """,
+        connection))
+    {
+        command.Parameters.Add("cycle_ids", NpgsqlDbType.Array | NpgsqlDbType.Text).Value = cycleIds;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var key = (reader.GetString(0), reader.GetInt32(1));
+            if (!contributions.TryGetValue(key, out var items))
+            {
+                items = new List<SignalContributionDto>();
+                contributions[key] = items;
+            }
+
+            items.Add(new SignalContributionDto(reader.GetString(2), reader.GetDecimal(3), reader.GetString(4)));
+        }
+    }
+
+    var decisions = cycleIds.ToDictionary(id => id, _ => new List<CycleDecisionRecordDto>(), StringComparer.Ordinal);
+    await using (var command = new NpgsqlCommand(
+        """
+        select
+            decision.cycle_id,
+            decision.decision_index,
+            decision.bot_instance_id,
+            decision.utc,
+            decision.pair,
+            decision.price,
+            decision.fast_ema,
+            decision.slow_ema,
+            decision.rsi,
+            decision.desired_position,
+            decision.score,
+            decision.risk_approved,
+            decision.broker,
+            decision.entry_rejection_reason,
+            decision.spread_percent,
+            decision.price_action_direction,
+            decision.price_action_trend_percent,
+            decision.exploratory,
+            decision.has_bullish_structure,
+            decision.ema_fully_confirmed,
+            decision.bullish_ema_gap_percent,
+            decision.ema_gap_velocity_percent,
+            decision.early_entry_eligible,
+            decision.early_entry_reason,
+            decision.early_entry_diagnostic_score,
+            decision.early_entry_suggested_notional_eur,
+            action.pair,
+            action.action,
+            action.reason,
+            action.hold_reason_code,
+            action.exit_reason_code,
+            action.desired_position,
+            action.target_notional_eur,
+            action.quantity,
+            action.entry_price,
+            action.last_price,
+            action.fill_price,
+            action.fee_eur,
+            action.gross_notional_eur,
+            action.net_notional_eur,
+            action.cash_before_eur,
+            action.cash_after_eur,
+            action.portfolio_value_before_eur,
+            action.portfolio_value_after_eur,
+            action.fill_source,
+            action.side,
+            action.reduce_only,
+            action.leverage,
+            action.exit_trigger_source,
+            action.entry_channel,
+            action.exchange_order_id,
+            action.exchange_fill_timestamp,
+            action.modeled_fill_price,
+            action.modeled_fee_eur,
+            action.stop_distance_pct,
+            action.take_profit_distance_pct,
+            action.open_risk_eur,
+            action.funding_state,
+            action.requested_margin_eur,
+            action.requested_leverage,
+            action.sized_notional_eur,
+            action.required_margin_eur,
+            action.effective_leverage
+        from dry_run_decision_facts decision
+        join dry_run_actions action on action.cycle_id = decision.cycle_id and action.decision_index = decision.decision_index
+        where decision.cycle_id = any(@cycle_ids)
+        order by decision.cycle_id, decision.decision_index
+        """,
+        connection))
+    {
+        command.Parameters.Add("cycle_ids", NpgsqlDbType.Array | NpgsqlDbType.Text).Value = cycleIds;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var cycleId = reader.GetString(0);
+            var decisionIndex = reader.GetInt32(1);
+            var key = (cycleId, decisionIndex);
+            if (!decisions.TryGetValue(cycleId, out var cycleDecisions))
+            {
+                continue;
+            }
+
+            cycleDecisions.Add(new CycleDecisionRecordDto(
+                decisionIndex,
+                reader.GetString(4),
+                reader.GetDecimal(5),
+                GetNullableDecimal(reader, 6),
+                GetNullableDecimal(reader, 7),
+                GetNullableDecimal(reader, 8),
+                reader.GetString(9),
+                reader.GetDecimal(10),
+                reader.GetBoolean(11),
+                riskReasons.TryGetValue(key, out var reasons) ? reasons : Array.Empty<string>(),
+                contributions.TryGetValue(key, out var contributionItems) ? contributionItems : Array.Empty<SignalContributionDto>(),
+                ReadNullableString(reader, 12),
+                ReadNullableString(reader, 13),
+                reader.GetDecimal(14),
+                ReadNullableString(reader, 15),
+                GetNullableDecimal(reader, 16),
+                reader.GetBoolean(17),
+                reader.GetBoolean(18),
+                reader.GetBoolean(19),
+                GetNullableDecimal(reader, 20),
+                GetNullableDecimal(reader, 21),
+                reader.GetBoolean(22),
+                ReadNullableString(reader, 23),
+                reader.GetDecimal(24),
+                reader.GetDecimal(25),
+                new CycleActionRecordDto(
+                    reader.GetString(26),
+                    reader.GetString(27),
+                    reader.GetString(28),
+                    ReadNullableString(reader, 29),
+                    ReadNullableString(reader, 30),
+                    reader.GetString(31),
+                    GetNullableDecimal(reader, 32),
+                    GetNullableDecimal(reader, 33),
+                    GetNullableDecimal(reader, 34),
+                    GetNullableDecimal(reader, 35),
+                    GetNullableDecimal(reader, 36),
+                    GetNullableDecimal(reader, 37),
+                    GetNullableDecimal(reader, 38),
+                    GetNullableDecimal(reader, 39),
+                    GetNullableDecimal(reader, 40),
+                    GetNullableDecimal(reader, 41),
+                    GetNullableDecimal(reader, 42),
+                    GetNullableDecimal(reader, 43),
+                    ReadNullableString(reader, 44),
+                    ReadNullableString(reader, 45),
+                    reader.IsDBNull(46) ? null : reader.GetBoolean(46),
+                    GetNullableDecimal(reader, 47),
+                    ReadNullableString(reader, 48),
+                    ReadNullableString(reader, 49),
+                    ReadNullableString(reader, 50),
+                    reader.IsDBNull(51) ? null : reader.GetFieldValue<DateTimeOffset>(51),
+                    GetNullableDecimal(reader, 52),
+                    GetNullableDecimal(reader, 53),
+                    GetNullableDecimal(reader, 54),
+                    GetNullableDecimal(reader, 55),
+                    GetNullableDecimal(reader, 56),
+                    ReadNullableString(reader, 57),
+                    GetNullableDecimal(reader, 58),
+                    GetNullableDecimal(reader, 59),
+                    GetNullableDecimal(reader, 60),
+                    GetNullableDecimal(reader, 61),
+                    GetNullableDecimal(reader, 62))));
+        }
+    }
+
+    for (var i = 0; i < cycles.Count; i++)
+    {
+        var cycle = cycles[i];
+        cycles[i] = cycle with
+        {
+            Record = cycle.Record with
+            {
+                ActivePairs = activePairs.TryGetValue(cycle.CycleId, out var pairs) ? pairs : Array.Empty<string>(),
+                Decisions = decisions.TryGetValue(cycle.CycleId, out var cycleDecisions) ? cycleDecisions : Array.Empty<CycleDecisionRecordDto>()
+            }
+        };
+    }
 }
 
 static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
@@ -822,18 +1192,18 @@ static async Task<IReadOnlyList<DecisionSummaryDto>> ReadDecisions(
               @latest_meta = false
               or exists (
                   select 1
-                  from dry_run_cycle_records cycle
+                  from dry_run_cycle_facts cycle
                   where cycle.cycle_id = dry_run_decisions.cycle_id
                     and cycle.strategy_version is not distinct from (
                         select latest.strategy_version
-                        from dry_run_cycle_records latest
+                        from dry_run_cycle_facts latest
                         where latest.bot_instance_id = cycle.bot_instance_id
                         order by latest.utc desc, latest.cycle_id desc
                         limit 1
                     )
                     and cycle.change_set is not distinct from (
                         select latest.change_set
-                        from dry_run_cycle_records latest
+                        from dry_run_cycle_facts latest
                         where latest.bot_instance_id = cycle.bot_instance_id
                         order by latest.utc desc, latest.cycle_id desc
                         limit 1
@@ -926,29 +1296,26 @@ static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
             eligible_entry_candidates,
             chosen_pair,
             no_trade_reason,
-            rejection_counts::text,
-            top_candidates::text,
-            excluded_pairs::text,
             price_action_ready_count
-        from dry_run_cycle_entry_diagnostics
+        from dry_run_cycle_entry_diagnostic_facts
         where (@cycle_id is null or cycle_id = @cycle_id)
           and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
           and (
               @latest_meta = false
               or exists (
                   select 1
-                  from dry_run_cycle_records cycle
-                  where cycle.cycle_id = dry_run_cycle_entry_diagnostics.cycle_id
+                  from dry_run_cycle_facts cycle
+                  where cycle.cycle_id = dry_run_cycle_entry_diagnostic_facts.cycle_id
                     and cycle.strategy_version is not distinct from (
                         select latest.strategy_version
-                        from dry_run_cycle_records latest
+                        from dry_run_cycle_facts latest
                         where latest.bot_instance_id = cycle.bot_instance_id
                         order by latest.utc desc, latest.cycle_id desc
                         limit 1
                     )
                     and cycle.change_set is not distinct from (
                         select latest.change_set
-                        from dry_run_cycle_records latest
+                        from dry_run_cycle_facts latest
                         where latest.bot_instance_id = cycle.bot_instance_id
                         order by latest.utc desc, latest.cycle_id desc
                         limit 1
@@ -984,10 +1351,10 @@ static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
             GetNullableInt(reader, 11),
             reader.IsDBNull(12) ? null : reader.GetString(12),
             reader.IsDBNull(13) ? null : reader.GetString(13),
-            ParseJsonOrNull(reader, 14),
-            ParseJsonOrNull(reader, 15),
-            ParseJsonOrNull(reader, 16),
-            GetNullableInt(reader, 17)));
+            new Dictionary<string, int>(),
+            Array.Empty<CycleTopCandidateDto>(),
+            Array.Empty<CycleExcludedPairDto>(),
+            GetNullableInt(reader, 14)));
     }
 
     return items;
@@ -995,9 +1362,6 @@ static async Task<IReadOnlyList<CycleEntryDiagnosticsDto>> ReadEntryDiagnostics(
 
 static int? GetNullableInt(NpgsqlDataReader reader, int ordinal) =>
     reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
-
-static JsonElement? ParseJsonOrNull(NpgsqlDataReader reader, int ordinal) =>
-    reader.IsDBNull(ordinal) ? null : JsonDocument.Parse(reader.GetString(ordinal)).RootElement.Clone();
 
 static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
     NpgsqlConnection connection,
@@ -1028,18 +1392,18 @@ static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
               @latest_meta = false
               or exists (
                   select 1
-                  from dry_run_cycle_records cycle
+                  from dry_run_cycle_facts cycle
                   where cycle.cycle_id = market_snapshots.cycle_id
                     and cycle.strategy_version is not distinct from (
                         select latest.strategy_version
-                        from dry_run_cycle_records latest
+                        from dry_run_cycle_facts latest
                         where latest.bot_instance_id = cycle.bot_instance_id
                         order by latest.utc desc, latest.cycle_id desc
                         limit 1
                     )
                     and cycle.change_set is not distinct from (
                         select latest.change_set
-                        from dry_run_cycle_records latest
+                        from dry_run_cycle_facts latest
                         where latest.bot_instance_id = cycle.bot_instance_id
                         order by latest.utc desc, latest.cycle_id desc
                         limit 1
@@ -1079,97 +1443,6 @@ static async Task<IReadOnlyList<MarketSnapshotDto>> ReadMarketSnapshots(
 static string? NormalizePairFilter(string? pair) =>
     string.IsNullOrWhiteSpace(pair) ? null : pair.Trim().ToUpperInvariant();
 
-static async Task WriteCyclesAndSnapshotsCsv(
-    Stream stream,
-    string connectionString,
-    CancellationToken cancellationToken)
-{
-    await using var connection = new NpgsqlConnection(connectionString);
-    await connection.OpenAsync(cancellationToken);
-    await EnsureCycleMetadataColumns(connection, cancellationToken);
-
-    await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), leaveOpen: true);
-    await writer.WriteLineAsync("record_type,cycle_id,utc,worker_version,worker_commit,worker_build_utc,worker_image_tag,strategy_version,change_set,pair,bid,ask,last,volume24h,change_percent,record");
-
-    await using (var command = new NpgsqlCommand(
-        """
-        select
-            cycle_id,
-            utc,
-            worker_version,
-            worker_commit,
-            worker_build_utc,
-            worker_image_tag,
-            strategy_version,
-            change_set,
-            record::text
-        from dry_run_cycle_records
-        order by utc asc, cycle_id asc
-        """,
-        connection))
-    await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
-    {
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            await writer.WriteLineAsync(string.Join(',', new[]
-            {
-                CsvText("cycle"),
-                CsvText(reader.GetString(0)),
-                CsvText(FormatUtc(reader.GetDateTime(1))),
-                CsvText(ReadNullableString(reader, 2)),
-                CsvText(ReadNullableString(reader, 3)),
-                CsvText(ReadNullableString(reader, 4)),
-                CsvText(ReadNullableString(reader, 5)),
-                CsvText(ReadNullableString(reader, 6)),
-                CsvText(ReadNullableString(reader, 7)),
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                CsvText(reader.GetString(8))
-            }));
-        }
-    }
-
-    await using (var command = new NpgsqlCommand(
-        """
-        select cycle_id, utc, pair, bid, ask, last, volume24h, change_percent
-        from market_snapshots
-        order by utc asc, cycle_id asc, pair asc
-        """,
-        connection))
-    await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
-    {
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            await writer.WriteLineAsync(string.Join(',', new[]
-            {
-                CsvText("market_snapshot"),
-                CsvText(reader.GetString(0)),
-                CsvText(FormatUtc(reader.GetDateTime(1))),
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                CsvText(reader.GetString(2)),
-                CsvDecimal(reader.GetDecimal(3)),
-                CsvDecimal(reader.GetDecimal(4)),
-                CsvDecimal(reader.GetDecimal(5)),
-                CsvDecimal(reader.GetDecimal(6)),
-                CsvDecimal(reader.GetDecimal(7)),
-                ""
-            }));
-        }
-    }
-}
-
-static string FormatUtc(DateTime value) =>
-    DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("O", CultureInfo.InvariantCulture);
-
 static string? Clean(string? value) =>
     string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -1185,8 +1458,8 @@ static async Task<BotStatusDto> ReadBotStatus(NpgsqlConnection connection, strin
             cycle_id,
             bot_instance_id,
             utc,
-            record ->> 'marketDataMode'
-        from dry_run_cycle_records
+            market_data_mode
+        from dry_run_cycle_facts
         where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
         order by utc desc
         limit 1
@@ -1247,14 +1520,6 @@ static EntryBlackoutStatus BotEntryBlackout(string? botInstanceId, DateTimeOffse
     botInstanceId?.StartsWith("spot-", StringComparison.OrdinalIgnoreCase) == true
         ? SpotEntryBlackout(nowUtc)
         : EntryBlackoutStatus.NotConfigured();
-
-static string CsvDecimal(decimal value) => CsvText(value.ToString(CultureInfo.InvariantCulture));
-
-static string CsvText(string? value)
-{
-    value ??= string.Empty;
-    return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
-}
 
 internal sealed record PortfolioResponse(
     DateTimeOffset Utc,
@@ -1384,7 +1649,106 @@ internal sealed record CycleRawDto(
     string? WorkerImageTag,
     string? StrategyVersion,
     string? ChangeSet,
-    JsonElement Record);
+    CycleRecordDto Record);
+
+internal sealed record CycleRecordDto(
+    string CycleId,
+    string BotInstanceId,
+    string BotInstanceName,
+    DateTime Utc,
+    string MarketDataMode,
+    string AiProvider,
+    CycleWorkerDto Worker,
+    int ActivePairsCount,
+    CyclePortfolioSnapshotDto PortfolioBefore,
+    CyclePortfolioSnapshotDto PortfolioAfter,
+    IReadOnlyList<string> ActivePairs,
+    IReadOnlyList<CycleDecisionRecordDto> Decisions);
+
+internal sealed record CycleWorkerDto(
+    string? Version,
+    string? Commit,
+    string? BuildUtc,
+    string? ImageTag,
+    string? StrategyVersion,
+    string? ChangeSet);
+
+internal sealed record CyclePortfolioSnapshotDto(
+    decimal CashEur,
+    decimal PositionsValueEur,
+    decimal TotalValueEur);
+
+internal sealed record CycleDecisionRecordDto(
+    int DecisionIndex,
+    string Pair,
+    decimal Price,
+    decimal? FastEma,
+    decimal? SlowEma,
+    decimal? Rsi,
+    string DesiredPosition,
+    decimal Score,
+    bool RiskApproved,
+    IReadOnlyList<string> RiskReasons,
+    IReadOnlyList<SignalContributionDto> Contributions,
+    string? Broker,
+    string? EntryRejectionReason,
+    decimal SpreadPercent,
+    string? PriceActionDirection,
+    decimal? PriceActionTrendPercent,
+    bool Exploratory,
+    bool HasBullishStructure,
+    bool EmaFullyConfirmed,
+    decimal? BullishEmaGapPercent,
+    decimal? EmaGapVelocityPercent,
+    bool EarlyEntryEligible,
+    string? EarlyEntryReason,
+    decimal EarlyEntryDiagnosticScore,
+    decimal EarlyEntrySuggestedNotionalEur,
+    CycleActionRecordDto DryRunAction);
+
+internal sealed record SignalContributionDto(
+    string Name,
+    decimal Value,
+    string Reason);
+
+internal sealed record CycleActionRecordDto(
+    string Pair,
+    string Action,
+    string Reason,
+    string? HoldReasonCode,
+    string? ExitReasonCode,
+    string DesiredPosition,
+    decimal? TargetNotionalEur,
+    decimal? Quantity,
+    decimal? EntryPrice,
+    decimal? LastPrice,
+    decimal? FillPrice,
+    decimal? FeeEur,
+    decimal? GrossNotionalEur,
+    decimal? NetNotionalEur,
+    decimal? CashBeforeEur,
+    decimal? CashAfterEur,
+    decimal? PortfolioValueBeforeEur,
+    decimal? PortfolioValueAfterEur,
+    string? FillSource,
+    string? Side,
+    bool? ReduceOnly,
+    decimal? Leverage,
+    string? ExitTriggerSource,
+    string? EntryChannel,
+    string? ExchangeOrderId,
+    DateTimeOffset? ExchangeFillTimestamp,
+    decimal? ModeledFillPrice,
+    decimal? ModeledFeeEur,
+    decimal? StopDistancePct,
+    decimal? TakeProfitDistancePct,
+    decimal? OpenRiskEur,
+    string? FundingState,
+    decimal? RequestedMarginEur,
+    decimal? RequestedLeverage,
+    decimal? SizedNotionalEur,
+    decimal? RequiredMarginEur,
+    decimal? EffectiveLeverage);
 
 internal sealed record CycleQueryFilters(
     string? WorkerVersion,
@@ -1398,7 +1762,7 @@ internal sealed record CycleQueryFilters(
 internal sealed record CycleDetailDto(
     string CycleId,
     DateTime Utc,
-    JsonElement Record);
+    CycleRecordDto Record);
 
 internal sealed record DecisionSummaryDto(
     string CycleId,
@@ -1455,10 +1819,28 @@ internal sealed record CycleEntryDiagnosticsDto(
     int? EligibleEntryCandidates,
     string? ChosenPair,
     string? NoTradeReason,
-    JsonElement? RejectionCounts,
-    JsonElement? TopCandidates,
-    JsonElement? ExcludedPairs,
+    IReadOnlyDictionary<string, int> RejectionCounts,
+    IReadOnlyList<CycleTopCandidateDto> TopCandidates,
+    IReadOnlyList<CycleExcludedPairDto> ExcludedPairs,
     int? PriceActionReadyCount);
+
+internal sealed record CycleTopCandidateDto(
+    string Pair,
+    decimal Score,
+    string DesiredPosition,
+    decimal SpreadPercent,
+    decimal Price,
+    string? RejectionReason);
+
+internal sealed record CycleExcludedPairDto(
+    string Pair,
+    string Reason,
+    decimal Last,
+    decimal ChangePercent,
+    int? VolumeRank,
+    decimal? Est24hVolumeEur,
+    decimal? SpreadPercent,
+    int? AdvisorRank);
 
 internal sealed record MarketSnapshotDto(
     string CycleId,
@@ -1573,13 +1955,15 @@ partial class Program
     {
         var cutoff = DateTimeOffset.UtcNow.AddHours(-sim.LastHours);
 
-        // Load cycles with decisions
+        // Load cycles with decisions.
         var cycles = new List<SimCycle>();
+        var cycleIdMap = new Dictionary<string, int>();
         await using (var cmd = new NpgsqlCommand(
             """
-            select utc, record::text
-            from dry_run_cycle_records
-            where bot_instance_id = @bot
+            select cycle.cycle_id, cycle.utc, coalesce(diagnostics.btc_regime_state, '')
+            from dry_run_cycle_facts cycle
+            left join dry_run_cycle_entry_diagnostic_facts diagnostics on diagnostics.cycle_id = cycle.cycle_id
+            where cycle.bot_instance_id = @bot
               and utc >= @cutoff
             order by utc asc
             """, connection))
@@ -1590,89 +1974,97 @@ partial class Program
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var utc = DateTime.SpecifyKind(reader.GetDateTime(0), DateTimeKind.Utc);
+                var cycleId = reader.GetString(0);
+                var utc = DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc);
                 var utcStr = utc.ToString("O", CultureInfo.InvariantCulture);
                 var timestampMs = new DateTimeOffset(utc).ToUnixTimeMilliseconds();
-
-                using var doc = JsonDocument.Parse(reader.GetString(1));
-                var root = doc.RootElement;
-
-                var regime = "UNKNOWN";
-                if (root.TryGetProperty("entryDiagnostics", out var ed) &&
-                    ed.TryGetProperty("btcRegimeState", out var regProp))
-                {
-                    regime = ParseRegimeState(regProp.GetString());
-                }
-
-                var decisions = new List<SimDecision>();
-                var prices = new Dictionary<string, double>();
-
-                if (root.TryGetProperty("decisions", out var decs))
-                {
-                    foreach (var d in decs.EnumerateArray())
-                    {
-                        var pair = d.TryGetProperty("pair", out var pp) ? pp.GetString() ?? "" : "";
-                        var price = d.TryGetProperty("price", out var pr) && pr.TryGetDouble(out var prv) ? prv : 0;
-                        var score = d.TryGetProperty("score", out var sc) && sc.TryGetDouble(out var scv) ? scv : 0;
-                        var spread = d.TryGetProperty("spreadPercent", out var sp) && sp.TryGetDouble(out var spv) ? spv : 99;
-                        var rejReason = d.TryGetProperty("entryRejectionReason", out var rr) ? rr.GetString() : null;
-
-                        string? action = null, reason = null, corrGroup = null;
-                        if (d.TryGetProperty("dryRunAction", out var dra))
-                        {
-                            action = dra.TryGetProperty("action", out var ac) ? ac.GetString() : null;
-                            reason = dra.TryGetProperty("reason", out var rs) ? rs.GetString() : null;
-                            corrGroup = dra.TryGetProperty("correlationGroup", out var cg) ? cg.GetString() : null;
-                        }
-
-                        if (price > 0) prices[pair] = price;
-                        decisions.Add(new SimDecision
-                        {
-                            Pair = pair, Price = price, Score = score, SpreadPercent = spread,
-                            EntryRejectionReason = rejReason, Action = action, Reason = reason,
-                            CorrelationGroup = corrGroup
-                        });
-                    }
-                }
-
-                // Also extract excluded pairs prices from entryDiagnostics
-                if (root.TryGetProperty("entryDiagnostics", out var ed2) &&
-                    ed2.TryGetProperty("excludedPairs", out var exPairs))
-                {
-                    foreach (var ep in exPairs.EnumerateArray())
-                    {
-                        var epPair = ep.TryGetProperty("pair", out var epp) ? epp.GetString() ?? "" : "";
-                        var epLast = ep.TryGetProperty("last", out var epl) && epl.TryGetDouble(out var eplv) ? eplv : 0;
-                        if (epLast > 0 && !prices.ContainsKey(epPair)) prices[epPair] = epLast;
-                    }
-                }
-
+                cycleIdMap[cycleId] = cycles.Count;
                 cycles.Add(new SimCycle
                 {
                     Utc = utcStr, TimestampMs = timestampMs,
-                    Regime = regime, Decisions = decisions, Prices = prices
+                    Regime = ParseRegimeState(reader.IsDBNull(2) ? null : reader.GetString(2)),
+                    Decisions = new List<SimDecision>(),
+                    Prices = new Dictionary<string, double>()
                 });
             }
         }
 
-        // Build cycle_id -> cycle index mapping for snapshot price matching
-        var cycleIdMap = new Dictionary<string, int>();
+        // Load normalized decisions/actions for those cycles.
         {
-            int idx = 0;
             await using var cmd = new NpgsqlCommand(
                 """
-                select cycle_id
-                from dry_run_cycle_records
-                where bot_instance_id = @bot
-                  and utc >= @cutoff
-                order by utc asc
+                select
+                    cycle.cycle_id,
+                    decision.pair,
+                    decision.price,
+                    decision.score,
+                    decision.spread_percent,
+                    decision.entry_rejection_reason,
+                    action.action,
+                    action.reason,
+                    action.correlation_group
+                from dry_run_cycle_facts cycle
+                join dry_run_decision_facts decision on decision.cycle_id = cycle.cycle_id
+                join dry_run_actions action on action.cycle_id = decision.cycle_id and action.decision_index = decision.decision_index
+                where cycle.bot_instance_id = @bot
+                  and cycle.utc >= @cutoff
+                order by cycle.utc asc, decision.decision_index asc
                 """, connection);
             cmd.Parameters.AddWithValue("bot", sim.BotInstanceId);
             cmd.Parameters.Add("cutoff", NpgsqlDbType.TimestampTz).Value = cutoff;
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                cycleIdMap[reader.GetString(0)] = idx++;
+                if (!cycleIdMap.TryGetValue(reader.GetString(0), out var ci) || ci >= cycles.Count)
+                {
+                    continue;
+                }
+
+                var pair = reader.GetString(1);
+                var price = (double)reader.GetDecimal(2);
+                if (price > 0)
+                {
+                    cycles[ci].Prices[pair] = price;
+                }
+
+                cycles[ci].Decisions.Add(new SimDecision
+                {
+                    Pair = pair,
+                    Price = price,
+                    Score = (double)reader.GetDecimal(3),
+                    SpreadPercent = reader.IsDBNull(4) ? 99 : (double)reader.GetDecimal(4),
+                    EntryRejectionReason = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    Action = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    Reason = reader.IsDBNull(7) ? null : reader.GetString(7),
+                    CorrelationGroup = reader.IsDBNull(8) ? null : reader.GetString(8)
+                });
+            }
+        }
+
+        // Also keep prices for pairs that were excluded before detailed decisions.
+        {
+            await using var cmd = new NpgsqlCommand(
+                """
+                select excluded.cycle_id, excluded.pair, excluded.last
+                from dry_run_excluded_pairs excluded
+                join dry_run_cycle_facts cycle on cycle.cycle_id = excluded.cycle_id
+                where cycle.bot_instance_id = @bot
+                  and cycle.utc >= @cutoff
+                """, connection);
+            cmd.Parameters.AddWithValue("bot", sim.BotInstanceId);
+            cmd.Parameters.Add("cutoff", NpgsqlDbType.TimestampTz).Value = cutoff;
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (cycleIdMap.TryGetValue(reader.GetString(0), out var ci) && ci < cycles.Count)
+                {
+                    var pair = reader.GetString(1);
+                    var last = (double)reader.GetDecimal(2);
+                    if (last > 0 && !cycles[ci].Prices.ContainsKey(pair))
+                    {
+                        cycles[ci].Prices[pair] = last;
+                    }
+                }
             }
         }
 

@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
@@ -357,95 +356,9 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
         return items;
     }
 
-    public async Task WriteCyclesCsvAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        await using var writer = new StreamWriter(stream, leaveOpen: true);
-        await writer.WriteLineAsync("cycle_id,bot_instance_id,utc");
-        if (string.IsNullOrWhiteSpace(ConnectionString)) return;
-        await using var connection = new NpgsqlConnection(ConnectionString);
-        await connection.OpenAsync(cancellationToken);
-        await using var command = new NpgsqlCommand("select cycle_id, bot_instance_id, utc from dry_run_cycle_facts order by utc desc limit 10000", connection);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            await writer.WriteLineAsync($"{Csv(reader.GetString(0))},{Csv(reader.GetString(1))},{reader.GetFieldValue<DateTimeOffset>(2):O}");
-        }
-    }
-
-    private static (string Action, string Pair, decimal? Score, decimal? TotalValue) ParseCycleJson(string json)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            var decisions = FindArray(root, "decisions");
-            if (decisions.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var d in decisions.EnumerateArray())
-                {
-                    var action = GetString(d, "action", GetString(d, "executionAction", "NO_ORDER"));
-                    if (action != "NO_ORDER") return (action, GetString(d, "pair"), GetNullableDec(d, "score"), FindDecimal(root, "totalValueEur"));
-                }
-            }
-            return ("NO_ORDER", "—", null, FindDecimal(root, "totalValueEur"));
-        }
-        catch { return ("UNKNOWN", "—", null, null); }
-    }
-
-    private static IReadOnlyList<DecisionViewModel> ParseDecisions(string json)
-    {
-        var items = new List<DecisionViewModel>();
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var decisions = FindArray(doc.RootElement, "decisions");
-            if (decisions.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var d in decisions.EnumerateArray())
-                {
-                    items.Add(new(GetString(d, "pair"), GetString(d, "desired", GetString(d, "desiredPosition")), GetString(d, "action", GetString(d, "executionAction")), GetNullableDec(d, "score"), GetString(d, "reason"), GetString(d, "riskReason")));
-                }
-            }
-        }
-        catch { }
-        return items;
-    }
-
-    private static JsonElement FindArray(JsonElement root, string name)
-    {
-        if (root.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var prop in root.EnumerateObject())
-            {
-                if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.Array) return prop.Value;
-                var nested = FindArray(prop.Value, name);
-                if (nested.ValueKind == JsonValueKind.Array) return nested;
-            }
-        }
-        return default;
-    }
-
-    private static decimal? FindDecimal(JsonElement root, string name)
-    {
-        if (root.ValueKind != JsonValueKind.Object) return null;
-        foreach (var prop in root.EnumerateObject())
-        {
-            if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase)) return GetNullableDec(root, prop.Name);
-            var nested = FindDecimal(prop.Value, name);
-            if (nested is not null) return nested;
-        }
-        return null;
-    }
-
     private static bool IsMissingSchema(PostgresException ex) => ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedObject or PostgresErrorCodes.UndefinedColumn;
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static decimal? GetDecimal(NpgsqlDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetDecimal(ordinal);
     private static string DataLabel(string mode) => mode switch { "kraken" => "Kraken data", "kraken-futures" => "Kraken Futures data", "database" => "Database data", "sample" => "Sample data", _ => "Data unknown" };
     private static string AgeLabel(double seconds) => seconds < 60 ? $"{Math.Round(seconds)}s" : $"{Math.Round(seconds / 60)}m";
-    private static string Csv(string s) => $"\"{s.Replace("\"", "\"\"")}\"";
-    private static string PrettyJson(string json) { try { return JsonSerializer.Serialize(JsonDocument.Parse(json), new JsonSerializerOptions { WriteIndented = true }); } catch { return json; } }
-    private static string GetString(JsonElement e, string name, string fallback = "") => e.TryGetProperty(name, out var v) && v.ValueKind != JsonValueKind.Null ? v.ToString() : fallback;
-    private static decimal GetDec(JsonElement e, string name) => GetNullableDec(e, name) ?? 0m;
-    private static decimal? GetNullableDec(JsonElement e, string name) => e.TryGetProperty(name, out var v) && decimal.TryParse(v.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var d) ? d : null;
-    private static DateTimeOffset? GetDate(JsonElement e, string name) => e.TryGetProperty(name, out var v) && DateTimeOffset.TryParse(v.ToString(), out var d) ? d : null;
 }

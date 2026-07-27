@@ -1,9 +1,15 @@
-## 2026-07-23-normalized-postgres-dual-write
+## 2026-07-27-futures-virtual-budget-125
 
-- Postgres persistence now dual-writes portfolio state and cycle forensic data into normalized tables alongside the existing JSON archive. New tables cover current portfolio summary, open positions, action history, pending futures orders, cycle facts, active pairs, decision facts, risk reasons, signal contributions, dry-run actions, freshness/local-high diagnostics, long-range diagnostics, entry funnel diagnostics, top candidates, missing confirmations, and excluded pairs.
-- Portfolio/cycle read paths now use the normalized tables: worker `Load()`, SQL views, API endpoints, Web SSR pages, and market-data held-pair discovery no longer read `state_json` / `record_json`. The legacy JSON columns remain write-only archive/compatibility payloads.
-- The existing `portfolio_state.state_json` and `dry_run_cycles.record_json` payloads are still written unchanged as a raw audit archive only. Trading decisions, sizing, execution, TP/SL, market snapshots, and live/virtual behavior are unchanged.
-- Historical backfill is intentionally left out of worker startup; `tools/db/backfill-normalized-postgres.sql` provides a manual one-off migration that can be validated on a database copy before filling normalized tables from legacy JSON.
+- Futures virtual default starting collateral is now EUR 125 so a fresh virtual ledger restarts with the requested larger sandbox budget. Spot virtual remains EUR 75.
+- Trading decisions, sizing, execution, TP/SL, and live bot behavior are unchanged.
+
+## 2026-07-23-normalized-postgres-json-removal
+
+- Postgres persistence now writes portfolio state and cycle forensic data only into normalized tables. The legacy `portfolio_state.state_json` and `dry_run_cycles.record_json` archive columns are no longer written and are dropped automatically during schema initialization.
+- Removed the `dry_run_cycle_records` compatibility view and moved remaining API cycle/status/simulation paths to normalized cycle, decision, action, diagnostic, excluded-pair, and snapshot tables. The public cycle/trade pages still receive the expected `record.activePairs` and `record.decisions` shape, but it is assembled from normalized rows instead of database JSON.
+- Added indexes for current cycle, decision, action, active-pair, excluded-pair, and market snapshot API filters so latest-meta views, trade-cycle scans, pair lookups, and hydrated cycle records do not fall back to broad table scans.
+- Disabled the CSV export endpoints in API/Web while reporting moves to normalized tables, and removed obsolete JSON-export/backfill analysis scripts that depended on `record_json`.
+- Trading decisions, sizing, execution, TP/SL, market snapshots, and live/virtual behavior are unchanged.
 
 ## 2026-07-18-spot-live-kraken-reconciliation-and-sell-fill
 
