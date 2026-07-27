@@ -1,3 +1,11 @@
+## 2026-07-28-futures-long-entry-zone-antichase
+
+- Futures LONG entry range guarding now separates low-range reclaim entries from mid/upper-range chase protection. In the low zone (`Freshness.AntiChaseMinRangePositionPct` default 35), local-high and signal-drift anti-chase diagnostics are still recorded but no longer veto the entry by themselves.
+- Added low-zone confirmation quorum via `Freshness.LowRangeMinConfirmations` default 2: a low-range LONG needs at least 2 of fresh upward tape, sufficient recent candle momentum, positive last snapshot step, and a green last closed 15m candle. The existing `MinReboundFrom24hLowPct` falling-knife guard remains hard in every zone.
+- Signal drift protection now scales with volatility: the effective drift cap is `max(MaxEntryDriftFromSignalPct, DriftAtrMultiple * atrPct)`, with `Freshness.DriftAtrMultiple` default 0.25 and ATR computed from the latest closed 15m candles.
+- `RequiredRisingSnapshotCount` and `RequirePositiveShortSlope` remain diagnostic/backward-compatible settings but are no longer independent LONG vetoes, because fresh tape already strictly implies their intent.
+- Added SQL/view diagnostics for LONG zone, anti-chase application, confirmation counts, effective drift cap, and ATR percent. SHORT logic, scoring thresholds, sizing, leverage, TP/SL, execution, reconciliation, and dead-man switch behavior are unchanged.
+
 ## 2026-07-27-futures-live-collateral-eur-display
 
 - Futures live Kraken reconciliation now treats USD/USDC/USDT `availableMargin` as quote-currency collateral and converts it to EUR via Kraken `EUR/USD` before writing `PortfolioState.CashEur`. This stops the dashboard and EUR-denominated sizing from treating USD values as EUR.

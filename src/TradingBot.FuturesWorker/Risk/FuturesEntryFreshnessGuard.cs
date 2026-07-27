@@ -101,18 +101,12 @@ internal static class FuturesEntryFreshnessGuard
             && signalDrift > thresholds.MaxEntryDriftFromSignalPct
             && !freshBreakout;
         var blocked = staleContinuation
-            || (isNearHigh && !freshContinuationTape && !freshBreakout)
-            || localExecutionOverextended
-            || chasedSignal;
+            || (isNearHigh && !freshContinuationTape && !freshBreakout);
         var momentumNote = !candleMomentumOk && tape.HasFreshUpwardTape
             ? $"; fresh micro-tape ignored because {thresholds.ContinuationCandleMomentumLookback}-candle momentum {candleMomentumPct:0.###}% < {thresholds.MinContinuationCandleMomentumPct:0.###}%"
             : string.Empty;
         var reason = blocked
-            ? localExecutionOverextended
-                ? $"entry local-high chase: executable entry price is {entryDistanceFromLocalHighPct:0.###}% below {localHighSource} high, threshold {thresholds.MaxEntryDistanceFromLocalHighPct:0.###}%, breakout buffer {thresholds.BreakoutMinAboveRecentHighPct:0.###}% was not confirmed by {thresholds.BreakoutHoldSnapshotCount} snapshots"
-                : chasedSignal
-                    ? $"entry chased signal: executable entry price drifted +{livePriceVsSignalClosePct:0.###}% from signal close, max {thresholds.MaxEntryDriftFromSignalPct:0.###}%, breakout not confirmed"
-                : isNearHigh
+            ? isNearHigh
                 ? $"entry stale near high: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.NearHighMin24hRangePositionPct:0.###}%, distance from recent high {distanceFromRecentHighPct:0.###}% <= {thresholds.NearHighMaxDistanceFromRecentHighPct:0.###}%, short tape slope {tape.ShortSnapshotSlopePct:0.###}% is not fresh{momentumNote}"
                 : upperRangeZone && freshContinuationTape
                 ? $"entry upper-range continuation: 24h range position {range.PositionIn24hRangePct:0.###}% >= {thresholds.MaxContinuationRangePositionPct:0.###}%, fresh tape is not sufficient near the daily high — only a confirmed breakout may enter{momentumNote}"

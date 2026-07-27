@@ -3,7 +3,7 @@ namespace TradingBot.FuturesWorker;
 // LONG entry context + anti-knife checks. The old hard veto
 // "24h wick position > Max24hRangePositionForLong" is removed: wick mid-range
 // (e.g. reclaim 100 after spikes 10–150) is diagnostic only. Late-entry protection
-// stays in FuturesEntryFreshnessGuard (local-high, drift, continuation/breakout).
+// lives here because it needs the primary range zone.
 //
 // This guard still:
 //   - computes close-percentile / recent-swing / wick-24h diagnostics (rangeBasis);
@@ -17,6 +17,7 @@ internal static class FuturesLongRangeGuard
     public const string ShortSlopeNotPositive = "LONG_SHORT_SLOPE_NOT_POSITIVE";
     public const string RisingSnapshotsNotConfirmed = "LONG_RISING_SNAPSHOTS_NOT_CONFIRMED";
     public const string FreshTapeNotConfirmed = "LONG_FRESH_TAPE_NOT_CONFIRMED";
+    public const string UpperRangeFreshTapeNotEnough = "LONG_UPPER_RANGE_FRESH_TAPE_NOT_ENOUGH";
     public const string EntryTooCloseToLocalHigh = "LONG_ENTRY_TOO_CLOSE_TO_LOCAL_HIGH";
     public const string EntryDriftTooHigh = "LONG_ENTRY_DRIFT_TOO_HIGH";
 
@@ -66,12 +67,22 @@ internal static class FuturesLongRangeGuard
             : swing.PositionPct is not null ? RangeBasisRecentSwing
             : RangeBasisWick24h;
         var primaryPosition = closePercentile ?? swing.PositionPct ?? clampedWickPosition;
+        var zone = ZoneOf(primaryPosition, thresholds);
+        var antiChaseApplied = primaryPosition is not { } position
+            || position >= thresholds.AntiChaseMinRangePositionPct;
+        var confirmations = CountLowRangeConfirmations(marketState, freshness, thresholds);
+        var requiredConfirmations = thresholds.LowRangeMinConfirmations;
+        var atrPct = CalculateAtrPct(marketState.Candles, entryPrice);
+        var effectiveMaxDriftPct = atrPct is { } atr
+            ? Math.Max(thresholds.MaxEntryDriftFromSignalPct, thresholds.DriftAtrMultiple * atr)
+            : thresholds.MaxEntryDriftFromSignalPct;
 
         LongRangeResult Blocked(string code, string reason) => Build(
             blocked: true, code, reason,
             entryPrice, entryPriceSource, wickRange,
             rawWickPosition, clampedWickPosition, distanceFromLowPct,
-            freshness, thresholds, rangeBasis, closePercentile, swing.PositionPct, primaryPosition);
+            freshness, thresholds, rangeBasis, closePercentile, swing.PositionPct, primaryPosition,
+            zone, antiChaseApplied, confirmations, requiredConfirmations, effectiveMaxDriftPct, atrPct);
 
         // Wick mid-range is NEVER a hard veto (reclaim after wide spikes must pass).
         // Still require computable entry + anti-knife confirmation.
@@ -87,31 +98,28 @@ internal static class FuturesLongRangeGuard
                 $"long blocked: rebound from 24h low {rebound:0.###}% < required {thresholds.MinReboundFrom24hLowPct:0.###}% (entry {entryPrice:0.######}, 24h low {absoluteLow:0.######})");
         }
 
-        if (freshness.PositiveStepsInLast3 < thresholds.RequiredRisingSnapshotCount)
+        if (zone == "UPPER" && freshness.HasFreshUpwardTape && !freshness.HasFreshBreakout)
         {
-            return Blocked(RisingSnapshotsNotConfirmed,
-                $"long blocked: rising snapshots {freshness.PositiveStepsInLast3} < required {thresholds.RequiredRisingSnapshotCount}");
+            return Blocked(UpperRangeFreshTapeNotEnough,
+                $"long blocked: upper-range continuation at {primaryPosition:0.###}% of primary range; fresh tape is not sufficient without confirmed breakout");
         }
 
-        if (thresholds.RequirePositiveShortSlope && freshness.ShortSnapshotSlopePct is not { } slope)
+        if (zone == "LOW")
         {
-            return Blocked(ShortSlopeNotPositive,
-                "long blocked: short snapshot slope is unavailable (insufficient tape)");
+            if (confirmations < requiredConfirmations)
+            {
+                return Blocked(FreshTapeNotConfirmed,
+                    $"long blocked: low-range confirmations {confirmations}/{requiredConfirmations} below required minimum");
+            }
         }
-
-        if (thresholds.RequirePositiveShortSlope && freshness.ShortSnapshotSlopePct <= 0m)
-        {
-            return Blocked(ShortSlopeNotPositive,
-                $"long blocked: short snapshot slope {freshness.ShortSnapshotSlopePct:0.###}% is not positive");
-        }
-
-        if (thresholds.RequireFreshTapeForLowRangeLong && !freshness.HasFreshUpwardTape)
+        else if (thresholds.RequireFreshTapeForLowRangeLong && !freshness.HasFreshUpwardTape)
         {
             return Blocked(FreshTapeNotConfirmed,
                 "long blocked: fresh upward tape not confirmed (rising snapshots and candle momentum did not both hold)");
         }
 
-        if (freshness.EntryDistanceFromLocalHighPct is { } localHighDistance
+        if (antiChaseApplied
+            && freshness.EntryDistanceFromLocalHighPct is { } localHighDistance
             && localHighDistance <= thresholds.MaxEntryDistanceFromLocalHighPct
             && !freshness.HasFreshBreakout)
         {
@@ -119,19 +127,21 @@ internal static class FuturesLongRangeGuard
                 $"long blocked: entry {localHighDistance:0.###}% below {freshness.LocalHighSource} high (min {thresholds.MaxEntryDistanceFromLocalHighPct:0.###}%), no confirmed breakout");
         }
 
-        if (freshness.LivePriceVsSignalClosePct is { } drift
-            && drift > thresholds.MaxEntryDriftFromSignalPct
+        if (antiChaseApplied
+            && freshness.LivePriceVsSignalClosePct is { } drift
+            && drift > effectiveMaxDriftPct
             && !freshness.HasFreshBreakout)
         {
             return Blocked(EntryDriftTooHigh,
-                $"long blocked: executable entry drifted +{drift:0.###}% from signal close (max {thresholds.MaxEntryDriftFromSignalPct:0.###}%), no confirmed breakout");
+                $"long blocked: executable entry drifted +{drift:0.###}% from signal close (max {effectiveMaxDriftPct:0.###}%), no confirmed breakout");
         }
 
         return Build(
             blocked: false, null, null,
             entryPrice, entryPriceSource, wickRange,
             rawWickPosition, clampedWickPosition, distanceFromLowPct,
-            freshness, thresholds, rangeBasis, closePercentile, swing.PositionPct, primaryPosition);
+            freshness, thresholds, rangeBasis, closePercentile, swing.PositionPct, primaryPosition,
+            zone, antiChaseApplied, confirmations, requiredConfirmations, effectiveMaxDriftPct, atrPct);
     }
 
     private static LongRangeResult Build(
@@ -149,7 +159,13 @@ internal static class FuturesLongRangeGuard
         string rangeBasis,
         decimal? closePercentile,
         decimal? recentSwingPosition,
-        decimal? primaryPosition) =>
+        decimal? primaryPosition,
+        string zone,
+        bool antiChaseApplied,
+        int confirmationsMet,
+        int confirmationsRequired,
+        decimal effectiveMaxDriftPct,
+        decimal? atrPct) =>
         new(
             Evaluated: true, Blocked: blocked, BlockReasonCode: code, BlockReason: reason,
             EntryPrice: entryPrice, EntryPriceSource: entryPriceSource,
@@ -169,7 +185,76 @@ internal static class FuturesLongRangeGuard
             RangeBasis: rangeBasis,
             ClosePercentile: closePercentile,
             RecentSwingPosition: recentSwingPosition,
-            PrimaryRangePosition: primaryPosition);
+            PrimaryRangePosition: primaryPosition,
+            Zone: zone,
+            AntiChaseApplied: antiChaseApplied,
+            ConfirmationsMet: confirmationsMet,
+            ConfirmationsRequired: confirmationsRequired,
+            EffectiveMaxDriftPct: effectiveMaxDriftPct,
+            AtrPct: atrPct);
+
+    private static string ZoneOf(decimal? primaryPosition, FuturesFreshnessOptions thresholds)
+    {
+        if (primaryPosition is not { } position)
+        {
+            return "MID";
+        }
+
+        if (position < thresholds.AntiChaseMinRangePositionPct)
+        {
+            return "LOW";
+        }
+
+        return position >= thresholds.MaxContinuationRangePositionPct ? "UPPER" : "MID";
+    }
+
+    private static int CountLowRangeConfirmations(
+        InstrumentMarketState marketState,
+        EntryFreshnessResult freshness,
+        FuturesFreshnessOptions thresholds)
+    {
+        var confirmations = 0;
+        if (freshness.HasFreshUpwardTape)
+        {
+            confirmations++;
+        }
+
+        if (freshness.RecentCandleMomentumPct is { } momentum && momentum >= thresholds.MinContinuationCandleMomentumPct)
+        {
+            confirmations++;
+        }
+
+        if (freshness.LastSnapshotStepPct is > 0m)
+        {
+            confirmations++;
+        }
+
+        if (LastClosedCandleIsGreen(marketState.Candles))
+        {
+            confirmations++;
+        }
+
+        return confirmations;
+    }
+
+    private static bool LastClosedCandleIsGreen(IReadOnlyList<Candle> candles)
+    {
+        if (candles.Count == 0)
+        {
+            return false;
+        }
+
+        var candle = candles[^1];
+        return candle.Close > candle.Open;
+    }
+
+    private static decimal? CalculateAtrPct(IReadOnlyList<Candle> candles, decimal entryPrice)
+    {
+        var atr = AtrIndicator.CalculateLatestClosedAtr(candles, 14);
+        return atr is > 0m && entryPrice > 0m
+            ? atr.Value / entryPrice * 100m
+            : null;
+    }
 
     private static (decimal Price, string Source) ExecutableEntryPrice(InstrumentMarketState marketState)
     {
@@ -323,7 +408,13 @@ internal sealed record LongRangeResult(
     string RangeBasis = "NONE",
     decimal? ClosePercentile = null,
     decimal? RecentSwingPosition = null,
-    decimal? PrimaryRangePosition = null)
+    decimal? PrimaryRangePosition = null,
+    string Zone = "MID",
+    bool AntiChaseApplied = true,
+    int ConfirmationsMet = 0,
+    int ConfirmationsRequired = 0,
+    decimal? EffectiveMaxDriftPct = null,
+    decimal? AtrPct = null)
 {
     public static readonly LongRangeResult NotEvaluated = new(
         Evaluated: false, Blocked: false, BlockReasonCode: null, BlockReason: null,

@@ -333,6 +333,12 @@ public sealed class DryRunAction
     public int? LongRangeRisingSnapshotCount { get; set; }
     public bool? EntryBlockedBy24hRange { get; set; }
     public string? LongRangeBlockReasonCode { get; set; }
+    public string? LongRangeZone { get; set; }
+    public bool? LongRangeAntiChaseApplied { get; set; }
+    public int? LongRangeConfirmationsMet { get; set; }
+    public int? LongRangeConfirmationsRequired { get; set; }
+    public decimal? LongRangeEffectiveMaxDriftPct { get; set; }
+    public decimal? LongRangeAtrPct { get; set; }
 
     public decimal? EntryDistanceFromLocalHighPct { get; set; }
     public string? LocalHighSource { get; set; }

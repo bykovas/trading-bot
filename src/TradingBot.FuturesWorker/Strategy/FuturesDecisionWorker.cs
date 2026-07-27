@@ -330,7 +330,7 @@ internal sealed class FuturesDecisionWorker(
                     if (longRange is { Evaluated: true })
                     {
                         Console.WriteLine(
-                            $"LONG_RANGE pair={pair} entry={longRange.EntryPrice:0.######}({longRange.EntryPriceSource}) rangeSrc={longRange.Range24hSource} robustLow={longRange.RobustLow24h:0.######} robustHigh={longRange.RobustHigh24h:0.######} pos={longRange.Range24hPosition:0.###} max={longRange.Max24hRangePositionForLong:0.###} rebound={longRange.DistanceFrom24hLowPct:0.###} rising={longRange.RisingSnapshotCount} slope={longRange.ShortSlopePct:0.###} freshTape={longRange.FreshTape} blocked={longRange.Blocked} reason={longRange.BlockReasonCode ?? "-"}");
+                            $"LONG_RANGE pair={pair} entry={longRange.EntryPrice:0.######}({longRange.EntryPriceSource}) rangeSrc={longRange.Range24hSource} robustLow={longRange.RobustLow24h:0.######} robustHigh={longRange.RobustHigh24h:0.######} pos={longRange.Range24hPosition:0.###} max={longRange.Max24hRangePositionForLong:0.###} rebound={longRange.DistanceFrom24hLowPct:0.###} rising={longRange.RisingSnapshotCount} slope={longRange.ShortSlopePct:0.###} freshTape={longRange.FreshTape} zone={longRange.Zone} antiChase={longRange.AntiChaseApplied} confirmations={longRange.ConfirmationsMet}/{longRange.ConfirmationsRequired} effMaxDrift={longRange.EffectiveMaxDriftPct:0.###} blocked={longRange.Blocked} reason={longRange.BlockReasonCode ?? "-"}");
                     }
 
                     // Authoritative SHORT entry gate — mirror of the LONG range/freshness
@@ -2047,6 +2047,12 @@ internal sealed class FuturesDecisionWorker(
         action.LongRangeRisingSnapshotCount = longRange.RisingSnapshotCount;
         action.EntryBlockedBy24hRange = longRange.Blocked;
         action.LongRangeBlockReasonCode = longRange.BlockReasonCode;
+        action.LongRangeZone = longRange.Zone;
+        action.LongRangeAntiChaseApplied = longRange.AntiChaseApplied;
+        action.LongRangeConfirmationsMet = longRange.ConfirmationsMet;
+        action.LongRangeConfirmationsRequired = longRange.ConfirmationsRequired;
+        action.LongRangeEffectiveMaxDriftPct = longRange.EffectiveMaxDriftPct;
+        action.LongRangeAtrPct = longRange.AtrPct;
         action.RangeBasis = longRange.RangeBasis;
         action.ClosePercentile = longRange.ClosePercentile;
         action.RecentSwingPosition = longRange.RecentSwingPosition;

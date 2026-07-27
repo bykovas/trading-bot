@@ -163,7 +163,7 @@ public sealed class FuturesEntryFreshnessGuardTests
     }
 
     [Fact]
-    public void Inj_fixture_blocks_continuation_long_at_local_execution_high()
+    public void Inj_fixture_reports_local_execution_high_without_blocking_in_freshness_guard()
     {
         var result = FuturesEntryFreshnessGuard.Evaluate(
             InjMarket(),
@@ -178,7 +178,8 @@ public sealed class FuturesEntryFreshnessGuardTests
         Assert.True(result.EntryDistanceFromLocalHighPct <= 0.12m);
         Assert.True(result.LivePriceVsSignalClosePct > 0.10m);
         Assert.Equal("last-2-closed-15m", result.LocalHighSource);
-        Assert.Contains("local-high chase", result.BlockReason);
+        Assert.DoesNotContain("local-high chase", result.BlockReason);
+        Assert.DoesNotContain("chased signal", result.BlockReason);
     }
 
     [Fact]
@@ -198,17 +199,17 @@ public sealed class FuturesEntryFreshnessGuardTests
     }
 
     [Fact]
-    public void Executable_price_drift_from_signal_close_blocks_chasing()
+    public void Executable_price_drift_from_signal_close_is_reported_by_freshness_guard()
     {
         var result = FuturesEntryFreshnessGuard.Evaluate(
-            Market(100m, recentHigh: 101m, low24: 80m, quoteLast: 100.20m),
+            Market(100m, recentHigh: 112m, low24: 80m, quoteLast: 100.20m),
             Observations(99.90m, 100.05m, 100.20m),
             FuturesDesiredExposure.Long,
             Thresholds());
 
-        Assert.True(result.Blocked);
+        Assert.False(result.Blocked);
         Assert.True(result.LivePriceVsSignalClosePct > 0.10m);
-        Assert.Contains("chased signal", result.BlockReason);
+        Assert.Null(result.BlockReason);
     }
 
     [Fact]

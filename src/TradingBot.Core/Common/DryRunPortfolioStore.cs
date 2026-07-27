@@ -866,6 +866,12 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 long_range_rising_snapshot_count integer,
                 entry_blocked_by_24h_range boolean,
                 long_range_block_reason_code text,
+                zone text,
+                anti_chase_applied boolean,
+                confirmations_met integer,
+                confirmations_required integer,
+                effective_max_drift_pct numeric,
+                atr_pct numeric,
                 primary key (cycle_id, decision_index),
                 foreign key (cycle_id, decision_index) references dry_run_decision_facts (cycle_id, decision_index) on delete cascade
             );
@@ -958,6 +964,14 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             );
 
             create index if not exists ix_dry_run_excluded_pairs_cycle_pair on dry_run_excluded_pairs (cycle_id, pair);
+
+            alter table dry_run_long_range_diagnostics
+                add column if not exists zone text,
+                add column if not exists anti_chase_applied boolean,
+                add column if not exists confirmations_met integer,
+                add column if not exists confirmations_required integer,
+                add column if not exists effective_max_drift_pct numeric,
+                add column if not exists atr_pct numeric;
 
             drop view if exists dry_run_cycle_records;
             drop view if exists dry_run_cycle_entry_diagnostics;
@@ -1116,7 +1130,13 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 long_range.long_range_distance_from_24h_low_pct,
                 long_range.long_range_rising_snapshot_count,
                 long_range.entry_blocked_by_24h_range,
-                long_range.long_range_block_reason_code
+                long_range.long_range_block_reason_code,
+                long_range.zone,
+                long_range.anti_chase_applied,
+                long_range.confirmations_met,
+                long_range.confirmations_required,
+                long_range.effective_max_drift_pct,
+                long_range.atr_pct
             from dry_run_decision_facts decision
             join dry_run_actions action on action.cycle_id = decision.cycle_id and action.decision_index = decision.decision_index
             left join dry_run_entry_freshness freshness on freshness.cycle_id = decision.cycle_id and freshness.decision_index = decision.decision_index
@@ -2008,7 +2028,13 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 long_range_distance_from_24h_low_pct,
                 long_range_rising_snapshot_count,
                 entry_blocked_by_24h_range,
-                long_range_block_reason_code)
+                long_range_block_reason_code,
+                zone,
+                anti_chase_applied,
+                confirmations_met,
+                confirmations_required,
+                effective_max_drift_pct,
+                atr_pct)
             values (
                 @cycle_id,
                 @decision_index,
@@ -2026,7 +2052,13 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 @long_range_distance_from_24h_low_pct,
                 @long_range_rising_snapshot_count,
                 @entry_blocked_by_24h_range,
-                @long_range_block_reason_code)
+                @long_range_block_reason_code,
+                @zone,
+                @anti_chase_applied,
+                @confirmations_met,
+                @confirmations_required,
+                @effective_max_drift_pct,
+                @atr_pct)
             """,
             ("cycle_id", NpgsqlDbType.Text, cycleId),
             ("decision_index", NpgsqlDbType.Integer, decisionIndex),
@@ -2044,7 +2076,13 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             ("long_range_distance_from_24h_low_pct", NpgsqlDbType.Numeric, action.LongRangeDistanceFrom24hLowPct),
             ("long_range_rising_snapshot_count", NpgsqlDbType.Integer, action.LongRangeRisingSnapshotCount),
             ("entry_blocked_by_24h_range", NpgsqlDbType.Boolean, action.EntryBlockedBy24hRange),
-            ("long_range_block_reason_code", NpgsqlDbType.Text, action.LongRangeBlockReasonCode));
+            ("long_range_block_reason_code", NpgsqlDbType.Text, action.LongRangeBlockReasonCode),
+            ("zone", NpgsqlDbType.Text, action.LongRangeZone),
+            ("anti_chase_applied", NpgsqlDbType.Boolean, action.LongRangeAntiChaseApplied),
+            ("confirmations_met", NpgsqlDbType.Integer, action.LongRangeConfirmationsMet),
+            ("confirmations_required", NpgsqlDbType.Integer, action.LongRangeConfirmationsRequired),
+            ("effective_max_drift_pct", NpgsqlDbType.Numeric, action.LongRangeEffectiveMaxDriftPct),
+            ("atr_pct", NpgsqlDbType.Numeric, action.LongRangeAtrPct));
     }
 
     private void SaveNormalizedEntryDiagnostics(

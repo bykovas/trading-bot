@@ -1,3 +1,4 @@
+using System.Reflection;
 using Xunit;
 
 namespace TradingBot.FuturesWorker.Tests;
@@ -51,43 +52,159 @@ public sealed class FuturesLongRangeGuardTests
     }
 
     [Fact]
-    public void Entry_near_local_high_without_breakout_is_blocked()
+    public void Low_zone_with_two_confirmations_and_price_near_local_high_is_allowed()
     {
         var result = FuturesLongRangeGuard.Evaluate(
-            RangeMarket(low: 50m, high: 150m, ask: 70m, candleCount: 5),
-            Freshness(risingSteps: 2, slope: 0.4m, freshTape: true, localHighDistance: 0.05m, drift: 0.02m, breakout: false),
-            FuturesDesiredExposure.Long,
-            Thresholds());
-
-        Assert.True(result.Blocked);
-        Assert.Equal(FuturesLongRangeGuard.EntryTooCloseToLocalHigh, result.BlockReasonCode);
-    }
-
-    [Fact]
-    public void Confirmed_breakout_may_pass_above_legacy_30_percent_wick_band()
-    {
-        var result = FuturesLongRangeGuard.Evaluate(
-            RangeMarket(low: 50m, high: 150m, ask: 130m, candleCount: 5),
-            Freshness(risingSteps: 2, slope: 0.5m, freshTape: true, localHighDistance: 0.05m, drift: 0.20m, breakout: true),
+            PercentileMarket(entryPrice: 20m, lastCandleGreen: false),
+            Freshness(freshTape: true, lastStep: -0.1m, momentum: 0.2m, localHighDistance: 0.05m, drift: 0.20m, breakout: false),
             FuturesDesiredExposure.Long,
             Thresholds());
 
         Assert.True(result.Evaluated);
         Assert.False(result.Blocked);
-        Assert.True(result.Range24hPosition is > 30m);
+        Assert.Equal("LOW", result.Zone);
+        Assert.False(result.AntiChaseApplied);
+        Assert.Equal(2, result.ConfirmationsMet);
+        Assert.Equal(2, result.ConfirmationsRequired);
+    }
+
+    [Fact]
+    public void Low_zone_with_one_confirmation_is_blocked()
+    {
+        var result = FuturesLongRangeGuard.Evaluate(
+            PercentileMarket(entryPrice: 20m, lastCandleGreen: false),
+            Freshness(freshTape: true, lastStep: -0.1m, momentum: -0.1m),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.True(result.Blocked);
+        Assert.Equal(FuturesLongRangeGuard.FreshTapeNotConfirmed, result.BlockReasonCode);
+        Assert.Equal("LOW", result.Zone);
+        Assert.Equal(1, result.ConfirmationsMet);
+    }
+
+    [Fact]
+    public void Low_zone_without_required_rebound_from_24h_low_is_blocked()
+    {
+        var result = FuturesLongRangeGuard.Evaluate(
+            ReboundMarket(low: 100m, high: 140m, ask: 100.10m),
+            Freshness(freshTape: true, lastStep: 0.1m, momentum: 0.2m),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.True(result.Blocked);
+        Assert.Equal(FuturesLongRangeGuard.ReboundTooSmall, result.BlockReasonCode);
+        Assert.True(result.DistanceFrom24hLowPct < Thresholds().MinReboundFrom24hLowPct);
+    }
+
+    [Fact]
+    public void Mid_zone_entry_near_local_high_without_breakout_is_blocked()
+    {
+        var result = FuturesLongRangeGuard.Evaluate(
+            PercentileMarket(entryPrice: 50m),
+            Freshness(freshTape: true, localHighDistance: 0.05m, drift: 0.02m, breakout: false),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.True(result.Blocked);
+        Assert.Equal(FuturesLongRangeGuard.EntryTooCloseToLocalHigh, result.BlockReasonCode);
+        Assert.Equal("MID", result.Zone);
+        Assert.True(result.AntiChaseApplied);
+    }
+
+    [Fact]
+    public void Upper_zone_with_fresh_tape_without_breakout_is_blocked()
+    {
+        var result = FuturesLongRangeGuard.Evaluate(
+            PercentileMarket(entryPrice: 85m),
+            Freshness(freshTape: true, localHighDistance: 1m, drift: 0.02m, breakout: false),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.True(result.Blocked);
+        Assert.Equal(FuturesLongRangeGuard.UpperRangeFreshTapeNotEnough, result.BlockReasonCode);
+        Assert.Equal("UPPER", result.Zone);
+    }
+
+    [Fact]
+    public void Upper_zone_with_confirmed_breakout_is_allowed()
+    {
+        var result = FuturesLongRangeGuard.Evaluate(
+            PercentileMarket(entryPrice: 85m),
+            Freshness(freshTape: true, localHighDistance: -0.05m, drift: 0.20m, breakout: true),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.True(result.Evaluated);
+        Assert.False(result.Blocked);
+        Assert.Equal("UPPER", result.Zone);
+    }
+
+    [Fact]
+    public void Drift_limit_scales_with_atr()
+    {
+        var highAtr = FuturesLongRangeGuard.Evaluate(
+            AtrMarket(entryPrice: 50m, atrWidthPct: 3.0m),
+            Freshness(freshTape: true, localHighDistance: 1m, drift: 0.20m, breakout: false),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+        var lowAtr = FuturesLongRangeGuard.Evaluate(
+            AtrMarket(entryPrice: 50m, atrWidthPct: 0.2m),
+            Freshness(freshTape: true, localHighDistance: 1m, drift: 0.20m, breakout: false),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.False(highAtr.Blocked);
+        Assert.True(highAtr.EffectiveMaxDriftPct > 0.20m);
+        Assert.True(lowAtr.Blocked);
+        Assert.Equal(FuturesLongRangeGuard.EntryDriftTooHigh, lowAtr.BlockReasonCode);
+        Assert.Equal(0.10m, lowAtr.EffectiveMaxDriftPct);
+    }
+
+    [Fact]
+    public void Short_side_is_not_evaluated_by_long_range_guard()
+    {
+        var result = FuturesLongRangeGuard.Evaluate(
+            PercentileMarket(entryPrice: 50m),
+            Freshness(freshTape: true, localHighDistance: 0.05m, drift: 0.20m),
+            FuturesDesiredExposure.Short,
+            Thresholds());
+
+        Assert.False(result.Evaluated);
+        Assert.False(result.Blocked);
+    }
+
+    [Fact]
+    public void Invalid_freshness_config_values_reset_to_defaults()
+    {
+        var config = new FuturesBotConfiguration
+        {
+            Freshness = new FuturesFreshnessOptions
+            {
+                AntiChaseMinRangePositionPct = 120m,
+                LowRangeMinConfirmations = 9,
+                DriftAtrMultiple = -1m
+            }
+        };
+
+        InvokeNormalize(config);
+
+        Assert.Equal(35m, config.Freshness.AntiChaseMinRangePositionPct);
+        Assert.Equal(2, config.Freshness.LowRangeMinConfirmations);
+        Assert.Equal(0.25m, config.Freshness.DriftAtrMultiple);
     }
 
     [Fact]
     public void Lower_range_but_still_falling_is_blocked()
     {
         var result = FuturesLongRangeGuard.Evaluate(
-            RangeMarket(low: 50m, high: 150m, ask: 70m, candleCount: 5),
-            Freshness(risingSteps: 0, slope: -0.3m, freshTape: false),
+            PercentileMarket(entryPrice: 20m, lastCandleGreen: false),
+            Freshness(risingSteps: 0, slope: -0.3m, freshTape: false, lastStep: -0.1m, momentum: -0.1m),
             FuturesDesiredExposure.Long,
             Thresholds());
 
         Assert.True(result.Blocked);
-        Assert.Equal(FuturesLongRangeGuard.RisingSnapshotsNotConfirmed, result.BlockReasonCode);
+        Assert.Equal(FuturesLongRangeGuard.FreshTapeNotConfirmed, result.BlockReasonCode);
     }
 
     [Fact]
@@ -109,13 +226,15 @@ public sealed class FuturesLongRangeGuardTests
         int risingSteps = 2,
         decimal slope = 0.2m,
         bool freshTape = true,
+        decimal lastStep = 0.1m,
+        decimal momentum = 0.2m,
         decimal localHighDistance = 1.0m,
         decimal drift = 0.02m,
         bool breakout = false) =>
         new(
             PositionIn24hRangePct: 20m,
             DistanceFromRecentHighPct: 1m,
-            LastSnapshotStepPct: 0.1m,
+            LastSnapshotStepPct: lastStep,
             ShortSnapshotSlopePct: slope,
             PositiveStepsInLast3: risingSteps,
             IsNearHigh: false,
@@ -126,7 +245,77 @@ public sealed class FuturesLongRangeGuardTests
             EntryDistanceFromLocalHighPct: localHighDistance,
             LocalHighSource: "LOCAL_HIGH",
             LivePriceVsSignalClosePct: drift,
-            RecentCandleMomentumPct: 0.2m);
+            RecentCandleMomentumPct: momentum);
+
+    private static void InvokeNormalize(FuturesBotConfiguration config)
+    {
+        var method = typeof(FuturesBotConfiguration).GetMethod("Normalize", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method!.Invoke(config, null);
+    }
+
+    private static InstrumentMarketState PercentileMarket(decimal entryPrice, bool lastCandleGreen = true)
+    {
+        var candles = new List<Candle>();
+        for (var i = 1; i <= 96; i++)
+        {
+            var close = (decimal)i;
+            candles.Add(Candle(close, high: close + 1m, low: close - 1m, i));
+        }
+
+        candles[^1] = lastCandleGreen
+            ? new Candle(candles[^1].OpenTime, entryPrice - 0.2m, entryPrice + 1m, entryPrice - 1m, entryPrice, 1000m, 1)
+            : new Candle(candles[^1].OpenTime, entryPrice + 0.2m, entryPrice + 1m, entryPrice - 1m, entryPrice, 1000m, 1);
+
+        return new InstrumentMarketState
+        {
+            Instrument = new InstrumentOptions { Pair = "TEST/USD", KrakenPair = "PF_TESTUSD", Enabled = true },
+            Candles = candles,
+            Quote = new Quote(entryPrice - 0.01m, entryPrice, entryPrice, 1_000_000m, MarkPrice: entryPrice)
+        };
+    }
+
+    private static InstrumentMarketState ReboundMarket(decimal low, decimal high, decimal ask)
+    {
+        var candles = new List<Candle>();
+        for (var i = 0; i < 96; i++)
+        {
+            var close = i == 95 ? ask : low + 1m;
+            candles.Add(Candle(close, high: high, low: low, i));
+        }
+
+        return new InstrumentMarketState
+        {
+            Instrument = new InstrumentOptions { Pair = "REBOUND/USD", KrakenPair = "PF_REBOUNDUSD", Enabled = true },
+            Candles = candles,
+            Quote = new Quote(ask - 0.01m, ask, ask, 1_000_000m, MarkPrice: ask)
+        };
+    }
+
+    private static InstrumentMarketState AtrMarket(decimal entryPrice, decimal atrWidthPct)
+    {
+        var halfWidth = entryPrice * atrWidthPct / 100m / 2m;
+        var candles = new List<Candle>();
+        for (var i = 0; i < 20; i++)
+        {
+            var low = i == 0 ? entryPrice - 1m : entryPrice - halfWidth;
+            candles.Add(new Candle(
+                T.AddMinutes(15 * i),
+                entryPrice,
+                entryPrice + halfWidth,
+                low,
+                entryPrice,
+                1000m,
+                1));
+        }
+
+        return new InstrumentMarketState
+        {
+            Instrument = new InstrumentOptions { Pair = "ATR/USD", KrakenPair = "PF_ATRUSD", Enabled = true },
+            Candles = candles,
+            Quote = new Quote(entryPrice - 0.01m, entryPrice, entryPrice, 1_000_000m, MarkPrice: entryPrice)
+        };
+    }
 
     private static InstrumentMarketState RangeMarket(decimal low, decimal high, decimal ask, int candleCount)
     {

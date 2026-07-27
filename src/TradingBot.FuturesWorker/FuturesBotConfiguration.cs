@@ -125,6 +125,9 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_MAX_ENTRY_DISTANCE_FROM_LOCAL_HIGH_PERCENT", value => config.Freshness.MaxEntryDistanceFromLocalHighPct = ParseDecimal(value, config.Freshness.MaxEntryDistanceFromLocalHighPct));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_BREAKOUT_HOLD_SNAPSHOT_COUNT", value => config.Freshness.BreakoutHoldSnapshotCount = ParseInt(value, config.Freshness.BreakoutHoldSnapshotCount));
         SetIfPresent("TRADINGBOT_FUTURES_FRESHNESS_MAX_ENTRY_DRIFT_FROM_SIGNAL_PERCENT", value => config.Freshness.MaxEntryDriftFromSignalPct = ParseDecimal(value, config.Freshness.MaxEntryDriftFromSignalPct));
+        SetIfPresent("TRADINGBOT_FUTURES_ANTI_CHASE_MIN_RANGE_POSITION_PERCENT", value => config.Freshness.AntiChaseMinRangePositionPct = ParseDecimal(value, config.Freshness.AntiChaseMinRangePositionPct));
+        SetIfPresent("TRADINGBOT_FUTURES_LOW_RANGE_MIN_CONFIRMATIONS", value => config.Freshness.LowRangeMinConfirmations = ParseInt(value, config.Freshness.LowRangeMinConfirmations));
+        SetIfPresent("TRADINGBOT_FUTURES_DRIFT_ATR_MULTIPLE", value => config.Freshness.DriftAtrMultiple = ParseDecimal(value, config.Freshness.DriftAtrMultiple));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_ENABLED", value => config.Dip.Enabled = ParseBool(value, config.Dip.Enabled));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_NEAR_LOW_MAX_24H_RANGE_POSITION_PERCENT", value => config.Dip.NearLowMax24hRangePositionPct = ParseDecimal(value, config.Dip.NearLowMax24hRangePositionPct));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_MIN_SCORE", value => config.Dip.MinScore = ParseDecimal(value, config.Dip.MinScore));
@@ -245,6 +248,23 @@ internal sealed class FuturesBotConfiguration
         Freshness.MaxEntryDistanceFromLocalHighPct = Math.Clamp(Freshness.MaxEntryDistanceFromLocalHighPct <= 0m ? 0.12m : Freshness.MaxEntryDistanceFromLocalHighPct, 0m, 2m);
         Freshness.BreakoutHoldSnapshotCount = Math.Clamp(Freshness.BreakoutHoldSnapshotCount <= 0 ? 2 : Freshness.BreakoutHoldSnapshotCount, 1, Freshness.FreshTapeSnapshotCount);
         Freshness.MaxEntryDriftFromSignalPct = Math.Clamp(Freshness.MaxEntryDriftFromSignalPct <= 0m ? 0.10m : Freshness.MaxEntryDriftFromSignalPct, 0m, 2m);
+        if (Freshness.AntiChaseMinRangePositionPct < 0m || Freshness.AntiChaseMinRangePositionPct > 100m)
+        {
+            Console.WriteLine($"config-validation: Freshness.AntiChaseMinRangePositionPct={Freshness.AntiChaseMinRangePositionPct} is out of [0,100]; reset to 35.");
+            Freshness.AntiChaseMinRangePositionPct = 35m;
+        }
+
+        if (Freshness.LowRangeMinConfirmations < 1 || Freshness.LowRangeMinConfirmations > 4)
+        {
+            Console.WriteLine($"config-validation: Freshness.LowRangeMinConfirmations={Freshness.LowRangeMinConfirmations} is out of [1,4]; reset to 2.");
+            Freshness.LowRangeMinConfirmations = 2;
+        }
+
+        if (Freshness.DriftAtrMultiple < 0m || Freshness.DriftAtrMultiple > 5m)
+        {
+            Console.WriteLine($"config-validation: Freshness.DriftAtrMultiple={Freshness.DriftAtrMultiple} is out of [0,5]; reset to 0.25.");
+            Freshness.DriftAtrMultiple = 0.25m;
+        }
 
         // Dip-bounce channel: near-low zone is the lower band of the 24h range; the
         // relaxed entry score must stay below the firm long bar or the channel is a
@@ -494,6 +514,9 @@ internal sealed class FuturesFreshnessOptions
     public decimal MaxEntryDistanceFromLocalHighPct { get; set; } = 0.12m;
     public int BreakoutHoldSnapshotCount { get; set; } = 2;
     public decimal MaxEntryDriftFromSignalPct { get; set; } = 0.10m;
+    public decimal AntiChaseMinRangePositionPct { get; set; } = 35m;
+    public int LowRangeMinConfirmations { get; set; } = 2;
+    public decimal DriftAtrMultiple { get; set; } = 0.25m;
 
     // LONG context/anti-knife gate (FuturesLongRangeGuard). Wick 24h position is
     // diagnostic only — mid-range reclaim after wide spikes is allowed. Late-entry
