@@ -349,9 +349,24 @@ internal sealed class FuturesDecisionWorker(
                             $"SHORT_ENTRY pair={pair} entry={shortEntry.EntryPrice:0.######}({shortEntry.EntryPriceSource}) rangeSrc={shortEntry.Range24hSource} robustLow={shortEntry.RobustLow24h:0.######} robustHigh={shortEntry.RobustHigh24h:0.######} pos={shortEntry.Range24hPosition:0.###} min={shortEntry.Min24hRangePositionForShort:0.###} pullback={shortEntry.DistanceFrom24hHighPct:0.###} falling={shortEntry.FallingSnapshotCount} slope={shortEntry.ShortSlopePct:0.###} freshTape={shortEntry.FreshTape} breakdown={shortEntry.HasFreshBreakdown} blocked={shortEntry.Blocked} reason={shortEntry.BlockReasonCode ?? "-"}");
                     }
 
-                    // Gate precedence: side range/anti-knife guard first (its reasons are the
-                    // most specific), then the freshness guard, then the quality gate.
-                    var freshnessGate = qualityGate.Approved && longRange is { Blocked: true }
+                    // Relative strength versus BTC over the shared candle lookback. It is
+                    // ALWAYS measured and recorded; it only vetoes when the operator turns
+                    // Regime.RelativeStrengthGateEnabled on, so shipping this changes no
+                    // entry behaviour until the recorded data justifies enabling it.
+                    var relativeStrength = RelativeStrengthPct(freshness, btcRegime);
+                    var relativeStrengthBlock = EvaluateRelativeStrengthGate(longRange, freshness, btcRegime, relativeStrength);
+                    if (relativeStrengthBlock is not null)
+                    {
+                        Console.WriteLine(
+                            $"LONG_RELATIVE_STRENGTH pair={pair} pairMomentum={freshness?.RecentCandleMomentumPct:0.###}% btcMomentum={btcRegime.RecentChangePct:0.###}% relative={relativeStrength:0.###}% min={config.Regime.MinRelativeStrengthPct:0.###}% blocked=true");
+                    }
+
+                    // Gate precedence: relative strength (only when enabled), then the side
+                    // range/anti-knife guard (its reasons are the most specific), then the
+                    // freshness guard, then the quality gate.
+                    var freshnessGate = qualityGate.Approved && relativeStrengthBlock is not null
+                        ? new RiskEvaluation(false, new[] { relativeStrengthBlock })
+                        : qualityGate.Approved && longRange is { Blocked: true }
                         ? new RiskEvaluation(false, new[] { longRange.BlockReason ?? "long blocked by 24h range guard" })
                         : qualityGate.Approved && shortEntry is { Blocked: true }
                             ? new RiskEvaluation(false, new[] { shortEntry.BlockReason ?? "short blocked by range guard" })
@@ -405,6 +420,9 @@ internal sealed class FuturesDecisionWorker(
                         {
                             AttachLongRangeDiagnostics(fill.Action, longRange);
                         }
+
+                        fill.Action.BtcRecentChangePct = btcRegime.RecentChangePct;
+                        fill.Action.RelativeStrengthPct = relativeStrength;
 
                         if (shortEntry is { Evaluated: true })
                         {
@@ -481,6 +499,9 @@ internal sealed class FuturesDecisionWorker(
                         fill.Action.HoldReasonCode = longRange.BlockReasonCode;
                     }
                 }
+
+                fill.Action.BtcRecentChangePct = btcRegime.RecentChangePct;
+                fill.Action.RelativeStrengthPct = RelativeStrengthPct(freshness, btcRegime);
             }
 
             decisions.Add(BuildDecisionRecord(marketState, indicators, signal, fill, riskApproved, riskReasons, priceAction));
@@ -2030,6 +2051,43 @@ internal sealed class FuturesDecisionWorker(
         action.PostFillLivePriceVsSignalClosePct = freshness.PostFillLivePriceVsSignalClosePct;
     }
 
+    // Pair momentum minus BTC momentum over the shared candle lookback. Null when either
+    // side is unavailable, so a missing measurement never masquerades as weakness.
+    internal static decimal? RelativeStrengthPct(EntryFreshnessResult? freshness, BtcRegimeState btcRegime) =>
+        freshness?.RecentCandleMomentumPct is { } pairMomentum && btcRegime.RecentChangePct is { } btcMomentum
+            ? pairMomentum - btcMomentum
+            : null;
+
+    // Veto for a LOW-zone long taken while the BTC regime blocks longs: the pair must be
+    // rising on its own AND outperforming BTC, otherwise it is just drifting with a
+    // market-wide selloff. Returns null (no veto) whenever the gate is disabled, the
+    // entry is not a low-zone long, the regime allows longs, or the data is missing —
+    // an unmeasurable pair is never blocked on suspicion.
+    private string? EvaluateRelativeStrengthGate(
+        LongRangeResult? longRange,
+        EntryFreshnessResult? freshness,
+        BtcRegimeState btcRegime,
+        decimal? relativeStrengthPct)
+    {
+        if (!config.Regime.RelativeStrengthGateEnabled
+            || longRange is not { Evaluated: true, Zone: "LOW" }
+            || !btcRegime.BlocksLongsDueToRegime
+            || relativeStrengthPct is not { } relative
+            || freshness?.RecentCandleMomentumPct is not { } pairMomentum)
+        {
+            return null;
+        }
+
+        if (pairMomentum <= 0m)
+        {
+            return $"long blocked: low-range entry while BTC regime blocks longs and the pair is not rising on its own ({pairMomentum:0.###}% over the momentum lookback)";
+        }
+
+        return relative < config.Regime.MinRelativeStrengthPct
+            ? $"long blocked: low-range entry while BTC regime blocks longs and relative strength {relative:0.###}% (pair {pairMomentum:0.###}% vs BTC {btcRegime.RecentChangePct:0.###}%) is below the required {config.Regime.MinRelativeStrengthPct:0.###}%"
+            : null;
+    }
+
     private static void AttachLongRangeDiagnostics(DryRunAction action, LongRangeResult longRange)
     {
         action.LongRangeEntryPrice = longRange.EntryPrice;
@@ -2230,11 +2288,22 @@ internal sealed class FuturesDecisionWorker(
         var crash = drawdown <= -config.Regime.BtcCrashPct;
         var allowsLongs = !belowMa && !crash;
         var allowsShortRegime = belowMa && downSlope && drawdown > -config.Shorts.MaxChaseDrawdownPct;
+        // BTC change over the same lookback the pair momentum uses, so relative strength
+        // ("this pair is flying while the market bleeds") is measurable per decision.
+        var btcLookback = Math.Max(1, config.Freshness.ContinuationCandleMomentumLookback);
+        decimal? btcRecentChangePct = null;
+        if (closes.Count > btcLookback)
+        {
+            var reference = closes[^(btcLookback + 1)];
+            btcRecentChangePct = reference > 0m ? (close - reference) / reference * 100m : null;
+        }
+
         return new BtcRegimeState(
             allowsLongs,
             allowsShortRegime,
             !allowsLongs,
-            $"close={close:0.####} ma{config.Regime.BtcTrendMa}={ma:0.####} slope={slope:0.####} drawdown{config.Regime.BtcCrashLookback}={drawdown:0.###}% allowsLongs={allowsLongs} allowsShorts={allowsShortRegime}");
+            $"close={close:0.####} ma{config.Regime.BtcTrendMa}={ma:0.####} slope={slope:0.####} drawdown{config.Regime.BtcCrashLookback}={drawdown:0.###}% btcChange{btcLookback}={btcRecentChangePct:0.###}% allowsLongs={allowsLongs} allowsShorts={allowsShortRegime}",
+            btcRecentChangePct);
     }
 
     private (bool Allowed, string? Reason) EvaluateShortGate(FuturesDesiredExposure desired, TechnicalSignal signal, BtcRegimeState btcRegime)

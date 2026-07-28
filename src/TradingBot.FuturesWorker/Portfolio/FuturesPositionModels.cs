@@ -44,7 +44,11 @@ internal sealed record BtcRegimeState(
     bool AllowsLongs,
     bool AllowsShorts,
     bool BlocksLongsDueToRegime,
-    string Description);
+    string Description,
+    // BTC's own recent change over the same candle lookback the pair momentum uses, so
+    // a pair can be compared against the market instead of only against zero. Null when
+    // the regime could not be computed.
+    decimal? RecentChangePct = null);
 
 internal static class FuturesMath
 {

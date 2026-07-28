@@ -130,6 +130,8 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_DRIFT_ATR_MULTIPLE", value => config.Freshness.DriftAtrMultiple = ParseDecimal(value, config.Freshness.DriftAtrMultiple));
         SetIfPresent("TRADINGBOT_FUTURES_LOW_RANGE_REQUIRE_STRONG_CONFIRMATION", value => config.Freshness.LowRangeRequireStrongConfirmation = ParseBool(value, config.Freshness.LowRangeRequireStrongConfirmation));
         SetIfPresent("TRADINGBOT_FUTURES_SHORT_ANTI_CHASE_MAX_RANGE_POSITION_PERCENT", value => config.Shorts.AntiChaseMaxRangePositionPct = ParseDecimal(value, config.Shorts.AntiChaseMaxRangePositionPct));
+        SetIfPresent("TRADINGBOT_FUTURES_RELATIVE_STRENGTH_GATE_ENABLED", value => config.Regime.RelativeStrengthGateEnabled = ParseBool(value, config.Regime.RelativeStrengthGateEnabled));
+        SetIfPresent("TRADINGBOT_FUTURES_MIN_RELATIVE_STRENGTH_PERCENT", value => config.Regime.MinRelativeStrengthPct = ParseDecimal(value, config.Regime.MinRelativeStrengthPct));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_ENABLED", value => config.Dip.Enabled = ParseBool(value, config.Dip.Enabled));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_NEAR_LOW_MAX_24H_RANGE_POSITION_PERCENT", value => config.Dip.NearLowMax24hRangePositionPct = ParseDecimal(value, config.Dip.NearLowMax24hRangePositionPct));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_MIN_SCORE", value => config.Dip.MinScore = ParseDecimal(value, config.Dip.MinScore));
@@ -267,6 +269,8 @@ internal sealed class FuturesBotConfiguration
             Console.WriteLine($"config-validation: Freshness.DriftAtrMultiple={Freshness.DriftAtrMultiple} is out of [0,5]; reset to 0.25.");
             Freshness.DriftAtrMultiple = 0.25m;
         }
+
+        Regime.MinRelativeStrengthPct = Math.Clamp(Regime.MinRelativeStrengthPct, 0m, 100m);
 
         if (Shorts.AntiChaseMaxRangePositionPct < 0m || Shorts.AntiChaseMaxRangePositionPct > 100m)
         {
@@ -648,6 +652,21 @@ internal sealed class FuturesRegimeOptions
     public decimal BtcCrashPct { get; set; } = 2.0m;
     public decimal LongOverrideMinScore { get; set; } = 0.85m;
     public decimal ShortOverrideMinScore { get; set; } = 0.85m;
+
+    // Relative-strength gate for LOW-zone longs while the BTC regime blocks longs.
+    // The point is to separate "this pair is genuinely flying while the market bleeds"
+    // (a scalp worth taking) from "this pair is merely drifting down with everything
+    // else" (a bounce inside a market-wide selloff).
+    //
+    // SHIPPED DISABLED ON PURPOSE. Relative strength is measured and recorded on every
+    // decision, but it vetoes nothing until this flag is turned on, so current entry
+    // behaviour is byte-for-byte unchanged. Turn it on only after the recorded data
+    // shows it actually separates winners from losers.
+    public bool RelativeStrengthGateEnabled { get; set; }
+
+    // Minimum outperformance versus BTC over the shared candle lookback, in percent.
+    // Only consulted when RelativeStrengthGateEnabled is true.
+    public decimal MinRelativeStrengthPct { get; set; } = 0.5m;
 }
 
 internal sealed class FuturesShortOptions

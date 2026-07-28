@@ -331,6 +331,13 @@ public sealed class DryRunAction
     public decimal? LongRangeMaxPositionForLong { get; set; }
     public decimal? LongRangeDistanceFrom24hLowPct { get; set; }
     public int? LongRangeRisingSnapshotCount { get; set; }
+    // Market-relative strength at decision time: the pair's own momentum minus BTC's over
+    // the same candle lookback. Recorded on every decision even while the relative-strength
+    // gate is disabled, so the "is this pair flying or just drifting with the selloff?"
+    // question can be answered from history before any veto is switched on.
+    public decimal? BtcRecentChangePct { get; set; }
+    public decimal? RelativeStrengthPct { get; set; }
+
     public bool? EntryBlockedBy24hRange { get; set; }
     public string? LongRangeBlockReasonCode { get; set; }
     public string? LongRangeZone { get; set; }

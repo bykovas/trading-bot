@@ -1,3 +1,11 @@
+## 2026-07-28-futures-relative-strength-measurement
+
+- Measures market-relative strength on every futures decision: the pair's own candle momentum minus BTC's over the same lookback (`Regime` now carries BTC's recent change). This is the difference between "this pair is genuinely flying while the market bleeds" (a scalp worth taking) and "this pair is merely drifting down with everything else".
+- The veto that uses it SHIPS DISABLED (`Regime.RelativeStrengthGateEnabled` = false, `Regime.MinRelativeStrengthPct` = 0.5). Entry behaviour is unchanged: nothing is blocked that was not blocked before. When enabled, it only applies to a LOW-zone long taken while the BTC regime blocks longs, and requires the pair to be rising on its own AND outperforming BTC; an unmeasurable pair is never blocked on suspicion.
+- Rationale for shipping it off: the evidence is genuinely split. Two low-zone longs (TIA, SUSHI) closed by signal flip at about -1.24% each, but two others opened in the same falling market (ADA, POL) are in profit, with ADA up 0.72% on a day the pair itself is down 3.5%. Tightening the filter on two losses while two winners are open would be fitting to four trades.
+- Diagnostics persisted per decision (`btc_recent_change_pct`, `relative_strength_pct`) with an explicit `alter table ... add column if not exists` migration, so the question can be answered from history before any veto is switched on.
+- Not changed: entry/exit thresholds, sizing, leverage, TP/SL, the signal-flip exit, or SHORT logic.
+
 ## 2026-07-28-futures-live-ledger-wording
 
 - Wording only, no behaviour change: the futures virtual ledger backs BOTH modes — on a live instance it mirrors real, exchange-confirmed Kraken fills, on a dry-run instance it simulates them. Its open/close reason text hardcoded the word "virtual", so a real IOC fill was journalled as `live Kraken Futures IOC accepted id=... status=placed; open virtual long: notional EUR 149.91 ...`, which reads as if no money moved. The reason text now drops "virtual" on a live instance and keeps it on a dry-run one.

@@ -866,6 +866,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 long_range_rising_snapshot_count integer,
                 entry_blocked_by_24h_range boolean,
                 long_range_block_reason_code text,
+                btc_recent_change_pct numeric,
+                relative_strength_pct numeric,
                 zone text,
                 anti_chase_applied boolean,
                 confirmations_met integer,
@@ -875,6 +877,13 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 primary key (cycle_id, decision_index),
                 foreign key (cycle_id, decision_index) references dry_run_decision_facts (cycle_id, decision_index) on delete cascade
             );
+
+            -- "create table if not exists" never adds columns to an already-created
+            -- table, so new diagnostics need an explicit migration or the insert fails
+            -- on a live database.
+            alter table dry_run_long_range_diagnostics
+                add column if not exists btc_recent_change_pct numeric,
+                add column if not exists relative_strength_pct numeric;
 
             create table if not exists dry_run_cycle_entry_diagnostic_facts (
                 cycle_id text primary key references dry_run_cycle_facts (cycle_id) on delete cascade,
@@ -1131,6 +1140,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 long_range.long_range_rising_snapshot_count,
                 long_range.entry_blocked_by_24h_range,
                 long_range.long_range_block_reason_code,
+                long_range.btc_recent_change_pct,
+                long_range.relative_strength_pct,
                 long_range.zone,
                 long_range.anti_chase_applied,
                 long_range.confirmations_met,
@@ -2029,6 +2040,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 long_range_rising_snapshot_count,
                 entry_blocked_by_24h_range,
                 long_range_block_reason_code,
+                btc_recent_change_pct,
+                relative_strength_pct,
                 zone,
                 anti_chase_applied,
                 confirmations_met,
@@ -2053,6 +2066,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 @long_range_rising_snapshot_count,
                 @entry_blocked_by_24h_range,
                 @long_range_block_reason_code,
+                @btc_recent_change_pct,
+                @relative_strength_pct,
                 @zone,
                 @anti_chase_applied,
                 @confirmations_met,
@@ -2077,6 +2092,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             ("long_range_rising_snapshot_count", NpgsqlDbType.Integer, action.LongRangeRisingSnapshotCount),
             ("entry_blocked_by_24h_range", NpgsqlDbType.Boolean, action.EntryBlockedBy24hRange),
             ("long_range_block_reason_code", NpgsqlDbType.Text, action.LongRangeBlockReasonCode),
+            ("btc_recent_change_pct", NpgsqlDbType.Numeric, action.BtcRecentChangePct),
+            ("relative_strength_pct", NpgsqlDbType.Numeric, action.RelativeStrengthPct),
             ("zone", NpgsqlDbType.Text, action.LongRangeZone),
             ("anti_chase_applied", NpgsqlDbType.Boolean, action.LongRangeAntiChaseApplied),
             ("confirmations_met", NpgsqlDbType.Integer, action.LongRangeConfirmationsMet),
