@@ -234,7 +234,10 @@ for (const code of ["LONG_LOW_RANGE_STRONG_CONFIRMATION_MISSING", "LONG_UPPER_RA
     ["exit depth unavailable/below EUR 2000.00", "REJECT_EXIT_DEPTH"],
     ["correlation group DEFI position cap 1 reached", "REJECT_CORRELATION_LIMIT"],
     ["entry blackout active: 360m after 22:00 UTC", "REJECT_ENTRY_BLACKOUT"],
-    ["fill reconciliation pending for this pair; duplicate entry blocked", "REJECT_DUPLICATE_ENTRY_PENDING"]
+    ["fill reconciliation pending for this pair; duplicate entry blocked", "REJECT_DUPLICATE_ENTRY_PENDING"],
+    ["short score 0.80 below 0.85", "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD"],
+    ["pair bearish signal not confirmed", "SHORT_DOWNSIDE_CONFIRMATION_MISSING"],
+    ["close=1.2 ma50=1.3 slope=-0.01 drawdown4=-1.2% allowsLongs=False allowsShorts=False", "REJECT_MARKET_REGIME"]
   ];
   for (const [reason, expected] of cases) {
     const result = analyze(decision({

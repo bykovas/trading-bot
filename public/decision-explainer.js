@@ -283,6 +283,11 @@
     if (/quote volume/.test(all)) return "REJECT_LOW_LIQUIDITY";
     if (/fill reconciliation pending/.test(all)) return "REJECT_DUPLICATE_ENTRY_PENDING";
     if (/entry blackout/.test(all)) return "REJECT_ENTRY_BLACKOUT";
+    // Short-gate texts. These must precede the generic "score ... below" pattern, which
+    // would otherwise report them as a plain long-score rejection.
+    if (/short score\s+[\d.]+\s+(below|is below)/.test(all)) return "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD";
+    if (/bearish signal not confirmed|none of downside momentum/.test(all)) return "SHORT_DOWNSIDE_CONFIRMATION_MISSING";
+    if (/allowslongs=|allowsshorts=/.test(all)) return "REJECT_MARKET_REGIME";
     if (/spread/.test(all)) return "REJECT_SPREAD_TOO_WIDE";
     if (/position slots|max futures positions/.test(all)) return "REJECT_MAX_POSITIONS";
     if (/correlation/.test(all)) return "REJECT_CORRELATION_LIMIT";
