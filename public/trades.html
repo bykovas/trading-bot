@@ -850,6 +850,10 @@
 
     function futuresOpenExplanation(decision, action, contribs) {
       const side = action.side || decision.side || "LONG";
+      // A live instance commits an exchange-confirmed fill (fillSource REAL*); only a
+      // dry-run instance books a simulated one. Calling a real Kraken position
+      // "virtual" reads as if no money moved, so the wording follows the fill source.
+      const kind = /^REAL/i.test(String(action.fillSource || "")) ? "реальный" : "виртуальный";
       if (side === "SHORT") {
         const shortParts = [];
         const momentum = contribs.get("ShortMomentum");
@@ -858,10 +862,10 @@
         if (momentum && Number(momentum.value) > 0) shortParts.push("downside momentum подтвердил движение");
         if (volume && Number(volume.value) > 0) shortParts.push("volume подтвердил short setup");
         if (trend && Number(trend.value) > 0) shortParts.push("цена ниже trend filter");
-        return `Открыл virtual futures SHORT. ${shortParts.length ? `Основание: ${shortParts.join(", ")}.` : "Подробности сигнала смотри в contributions."}`;
+        return `Открыл ${kind} futures SHORT. ${shortParts.length ? `Основание: ${shortParts.join(", ")}.` : "Подробности сигнала смотри в contributions."}`;
       }
 
-      return buyExplanation(decision, action, contribs).replace("Купил", "Открыл virtual futures LONG");
+      return buyExplanation(decision, action, contribs).replace("Купил", `Открыл ${kind} futures LONG`);
     }
 
     function parseRealizedPnl(reason) {

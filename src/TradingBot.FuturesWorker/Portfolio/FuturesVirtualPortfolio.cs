@@ -14,6 +14,12 @@ internal sealed class FuturesVirtualPortfolio(
 
     public IDryRunPortfolioStore Store => store;
 
+    // This ledger backs BOTH modes: on a live instance it mirrors real Kraken fills, on a
+    // dry-run instance it simulates them. Labelling a real, exchange-confirmed position
+    // "virtual" reads as if no money moved, so the wording follows the instance mode.
+    private string LedgerOpenLabel => config.Futures.LiveTradingEnabled ? "open" : "open virtual";
+    private string LedgerCloseLabel => config.Futures.LiveTradingEnabled ? "close" : "close virtual";
+
     public PortfolioState Load() =>
         store.Load() ?? new PortfolioState
         {
@@ -179,7 +185,7 @@ internal sealed class FuturesVirtualPortfolio(
 
         var action = BaseAction(pair, side == "SHORT" ? "WOULD_OPEN_SHORT" : "WOULD_OPEN_LONG",
             string.IsNullOrEmpty(reason)
-                ? $"open virtual {side.ToLowerInvariant()}: notional EUR {notionalEur:0.####}, margin EUR {initialMargin:0.####}, fee EUR {fee:0.####} ({FuturesExecutionCostModel.TakerIocRoundTrip}), fill {fillPrice:0.####}, leverage {leverage:0.#}x"
+                ? $"{LedgerOpenLabel} {side.ToLowerInvariant()}: notional EUR {notionalEur:0.####}, margin EUR {initialMargin:0.####}, fee EUR {fee:0.####} ({FuturesExecutionCostModel.TakerIocRoundTrip}), fill {fillPrice:0.####}, leverage {leverage:0.#}x"
                 : reason);
         action.Side = side;
         action.ReduceOnly = false;
@@ -260,7 +266,7 @@ internal sealed class FuturesVirtualPortfolio(
                 : string.Empty;
 
         var action = BaseAction(position.Pair, "WOULD_CLOSE",
-            $"{reason}: close virtual {position.Side.ToLowerInvariant()}, entry {position.EntryPrice:0.########}, fill {fillPrice:0.########}, realized PnL EUR {pnl:0.####} ({realizedPct:0.####}%){levelText}, fee EUR {fee:0.####}");
+            $"{reason}: {LedgerCloseLabel} {position.Side.ToLowerInvariant()}, entry {position.EntryPrice:0.########}, fill {fillPrice:0.########}, realized PnL EUR {pnl:0.####} ({realizedPct:0.####}%){levelText}, fee EUR {fee:0.####}");
         action.Side = position.Side;
         action.ReduceOnly = true;
         action.Leverage = position.Leverage;
