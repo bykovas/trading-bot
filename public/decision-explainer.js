@@ -22,7 +22,33 @@
     LONG_FRESH_TAPE_NOT_CONFIRMED: "Рост не подтверждён одновременно snapshots и свечами",
     LONG_ENTRY_TOO_CLOSE_TO_LOCAL_HIGH: "Слишком поздно покупать возле локального high",
     LONG_ENTRY_DRIFT_TOO_HIGH: "Цена уже слишком далеко выросла после сигнала",
+    LONG_UPPER_RANGE_FRESH_TAPE_NOT_ENOUGH: "Верх диапазона: одной свежей ленты мало, нужен подтверждённый пробой",
+    LONG_LOW_RANGE_STRONG_CONFIRMATION_MISSING: "Отскок не подтверждён: нет ни свежей ленты, ни моментума по свечам",
     ENTRY_STALE_NEAR_HIGH: "Сигнал устарел: цена уже ушла к локальному high",
+    REJECT_ENTRY_STALE_NEAR_HIGH: "Сигнал устарел: цена уже ушла к локальному high",
+    REJECT_FUTURES_RISK: "Futures-вход отклонён risk-проверкой",
+    ENTRY_BLACKOUT: "Сейчас действует временный запрет новых входов",
+    ENTRY_INVALID_SPREAD: "Bid/ask отсутствует или некорректен — spread не проверить",
+    ENTRY_INVALID_REFERENCE_PRICE: "Нет свежей цены для безопасного входа",
+    ENTRY_ATR_MISSING: "Не удалось посчитать ATR — волатильность неизвестна",
+    ENTRY_ATR_STALE: "Последняя свеча устарела для этого таймфрейма",
+    ENTRY_COST_INVALID: "Не удалось оценить издержки полного круга сделки",
+    ENTRY_EXITS_INVALID: "Не удалось рассчитать корректные уровни выхода",
+    ENTRY_VOLUME: "Суточный объём ниже минимума",
+    ENTRY_DEPTH: "Недостаточно глубины стакана для входа",
+    ENTRY_DEPTH_MISSING: "Нет данных о глубине стакана",
+    ENTRY_EXIT_DEPTH: "Не хватает глубины на аварийный выход из позиции",
+    ENTRY_OPEN_RISK_CAP: "Суммарный открытый риск превысил бы лимит",
+    ENTRY_OPEN_RISK_UNSAFE: "Открытый риск нельзя посчитать безопасно",
+    MAX_POSITIONS: "Все слоты позиций уже заняты",
+    CYCLE_POSITION_LIMIT: "В этом цикле уже открыт допустимый максимум позиций",
+    EXPLORATORY_RANK: "Кандидат не вошёл в допустимый exploratory rank",
+    EARLY_ENTRY_RANK: "Ранний сигнал недостаточно высоко в рейтинге кандидатов",
+    MARKET_REGIME: "Рыночный режим не разрешает этот вход",
+    LIVE_FALLBACK_REJECTED_RISK: "Резервный taker-ордер отклонён risk-проверкой",
+    LIVE_FALLBACK_REJECTED_SLIPPAGE: "Резервный taker-ордер отклонён: проскальзывание выше лимита",
+    LIVE_FALLBACK_REJECTED_SPREAD: "Резервный taker-ордер отклонён: spread слишком широкий",
+    LIVE_FALLBACK_REJECTED_STALE_QUOTE: "Резервный taker-ордер отклонён: котировка устарела",
     REJECT_SCORE_BELOW_THRESHOLD: "Score ниже входного порога",
     REJECT_SPREAD_TOO_WIDE: "Spread слишком широкий",
     REJECT_NEGATIVE_RECENT_PRICE_ACTION: "Свежая цена движется против LONG",
@@ -87,7 +113,18 @@
     SELL_POST_ENTRY_ADVERSE: "Позиция закрыта: сразу после входа рынок пошёл против неё",
     SELL_KILL_SWITCH: "Позиция закрыта аварийным kill switch",
     SELL_EMERGENCY_RISK: "Позиция закрыта аварийным risk-правилом",
-    SELL_BROKER_SAFETY: "Позиция закрыта защитным правилом broker safety"
+    SELL_BROKER_SAFETY: "Позиция закрыта защитным правилом broker safety",
+    MAX_HOLD_HEALTHY_HOLD: "Время удержания истекло, но позиция в плюсе — оставлена открытой",
+    MAX_MARGIN: "Размер ограничен лимитом маржи на позицию",
+    MAX_NOTIONAL: "Размер ограничен лимитом ноционала на позицию"
+  };
+
+  // Entry channel that admitted a position, recorded on every open/close row.
+  const CHANNEL = {
+    Standard: "Обычный вход",
+    Continuation: "Продолжение движения",
+    Breakout: "Подтверждённый пробой",
+    DipBounce: "Отскок от низа диапазона"
   };
 
   const first = (...values) => values.find(value => value !== null && value !== undefined && String(value).trim() !== "");
@@ -139,9 +176,14 @@
     return "NONE";
   }
 
+  // Codes come from several layers and the raw one is not always the most specific:
+  // a portfolio hold code (ENTRY_VOLUME) and its mapped rejection (REJECT_LOW_LIQUIDITY)
+  // can both be present. Prefer the first candidate that actually has a translation, so
+  // a raw low-level code never wins over an explained one; fall back to the first
+  // non-empty candidate when nothing is translated yet.
   function explicitCode(decision) {
     const action = getAction(decision);
-    return first(
+    const candidates = [
       action.exitReasonCode,
       action.holdReasonCode,
       action.shortEntryBlockReasonCode,
@@ -150,7 +192,17 @@
       action.entryRejectionReason,
       decision.entryRejectionReason,
       action.correlationRejectedReason
-    );
+    ].filter(value => value !== null && value !== undefined && String(value).trim() !== "")
+      .map(value => String(value).trim());
+
+    return candidates.find(candidate => TEXT[candidate]) || candidates[0] || null;
+  }
+
+  // Last-resort readable label for a code that has no translation yet, so the page
+  // shows "Long foo bar" instead of a bare LONG_FOO_BAR token.
+  function humanize(code) {
+    const text = String(code || "").replace(/^REJECT_/, "").replace(/_/g, " ").trim().toLowerCase();
+    return text === "" ? "" : text.charAt(0).toUpperCase() + text.slice(1);
   }
 
   function fallbackCode(decision) {
@@ -226,6 +278,7 @@
     if (code === "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD") return `SHORT не рассматривался дальше: SHORT score ${fmt(short.shortScore)} ниже порога ${fmt(threshold)}. Показанный общий score к этому отказу не относится.`;
     if (code === "SHORT_DOWNSIDE_CONFIRMATION_MISSING") return `Bearish EMA была, но не хватило подтверждения вниз: нужен хотя бы один из факторов — candle momentum, повышенный объём или цена ниже trend MA.`;
     if (code && TEXT[code]) return `${TEXT[code]}. Поэтому новый ордер не отправлен.`;
+    if (code) return `${humanize(code)}. Поэтому новый ордер не отправлен.`;
     return side === "NONE" ? "Нет подтверждённого направления для нового входа." : `Кандидат ${side} остановлен до отправки ордера.`;
   }
 
@@ -248,6 +301,8 @@
     if (pa) add("Свежая цена", `${pa} ${pct(first(decision.priceActionTrendPercent, action.priceActionTrendPercent))}`, side === "SHORT" && String(pa).includes("RISING") ? "warn" : "neutral");
     const range = number(first(action.longRange24hPosition, action.closePercentile));
     if (range !== null) add("Позиция в диапазоне", pct(range), "neutral");
+    const channel = first(action.entryChannel, decision.entryChannel);
+    if (channel) add("Канал входа", CHANNEL[channel] || channel, "info");
     return items;
   }
 
@@ -264,7 +319,8 @@
     const code = codeOf(decision);
     return {
       code,
-      headline: (code && TEXT[code]) || (candidateSide(decision) === "NONE" ? "Нет сигнала для входа" : "Вход остановлен проверкой"),
+      headline: (code && TEXT[code]) || (code && humanize(code))
+        || (candidateSide(decision) === "NONE" ? "Нет сигнала для входа" : "Вход остановлен проверкой"),
       summary: summary(decision, code),
       side: candidateSide(decision),
       facts: facts(decision),
@@ -272,5 +328,5 @@
     };
   }
 
-  root.DecisionExplainer = { analyze, codeOf, candidateSide, reasonParts, translations: TEXT };
+  root.DecisionExplainer = { analyze, codeOf, candidateSide, reasonParts, humanize, translations: TEXT, channels: CHANNEL };
 })(typeof window !== "undefined" ? window : globalThis);

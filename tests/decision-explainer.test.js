@@ -166,6 +166,14 @@ for (const code of [
   "LONG_24H_RANGE_UNAVAILABLE", "LONG_24H_RANGE_TOO_NARROW", "LONG_24H_RANGE_POSITION_TOO_HIGH", "LONG_REBOUND_FROM_24H_LOW_TOO_SMALL",
   "LONG_EMA_NOT_CONFIRMED", "LONG_RISING_SNAPSHOTS_NOT_CONFIRMED", "LONG_SHORT_SLOPE_NOT_POSITIVE", "LONG_FRESH_TAPE_NOT_CONFIRMED",
   "LONG_ENTRY_TOO_CLOSE_TO_LOCAL_HIGH", "LONG_ENTRY_DRIFT_TOO_HIGH", "ENTRY_STALE_NEAR_HIGH",
+  "LONG_UPPER_RANGE_FRESH_TAPE_NOT_ENOUGH", "LONG_LOW_RANGE_STRONG_CONFIRMATION_MISSING",
+  "REJECT_ENTRY_STALE_NEAR_HIGH", "REJECT_FUTURES_RISK",
+  "ENTRY_BLACKOUT", "ENTRY_INVALID_SPREAD", "ENTRY_INVALID_REFERENCE_PRICE", "ENTRY_ATR_MISSING", "ENTRY_ATR_STALE",
+  "ENTRY_COST_INVALID", "ENTRY_EXITS_INVALID", "ENTRY_VOLUME", "ENTRY_DEPTH", "ENTRY_DEPTH_MISSING", "ENTRY_EXIT_DEPTH",
+  "ENTRY_OPEN_RISK_CAP", "ENTRY_OPEN_RISK_UNSAFE", "MAX_POSITIONS", "CYCLE_POSITION_LIMIT",
+  "EXPLORATORY_RANK", "EARLY_ENTRY_RANK", "MARKET_REGIME",
+  "LIVE_FALLBACK_REJECTED_RISK", "LIVE_FALLBACK_REJECTED_SLIPPAGE", "LIVE_FALLBACK_REJECTED_SPREAD",
+  "LIVE_FALLBACK_REJECTED_STALE_QUOTE",
   "REJECT_SCORE_BELOW_THRESHOLD", "REJECT_SPREAD_TOO_WIDE", "REJECT_NO_VOLUME_CONFIRMATION", "REJECT_NO_MOMENTUM_CONFIRMATION",
   "REJECT_NO_DIRECTIONAL_SCORE", "REJECT_ALREADY_HOLDING",
   "REJECT_COOLDOWN", "REJECT_MAX_POSITIONS", "REJECT_DAILY_RISK", "REJECT_RISK_LIMITS", "REJECT_CORRELATION_LIMIT",
@@ -186,6 +194,42 @@ for (const code of [
     page.indexOf("renderDecisionRows(latest)") < page.indexOf("const errorFeed = await errorsPromise"),
     "latest cards must render before the secondary error feed finishes"
   );
+}
+
+// A raw low-level hold code must not win over the translated rejection mapped from it.
+{
+  const result = analyze(decision({
+    dryRunAction: { action: "NO_ORDER", holdReasonCode: "ENTRY_VOLUME", entryRejectionReason: "REJECT_LOW_LIQUIDITY" }
+  }));
+  assert.ok(translations[result.code], `explained code expected, got ${result.code}`);
+  assert.doesNotMatch(result.headline, /_/, "headline must not expose a raw code token");
+}
+
+// Every guard code reaching the page is explained, and both new guard codes resolve.
+for (const code of ["LONG_LOW_RANGE_STRONG_CONFIRMATION_MISSING", "LONG_UPPER_RANGE_FRESH_TAPE_NOT_ENOUGH"]) {
+  const result = analyze(decision({ dryRunAction: { action: "NO_ORDER", longRangeBlockReasonCode: code } }));
+  assert.equal(result.code, code);
+  assert.equal(result.headline, translations[code]);
+  assert.doesNotMatch(result.headline, /_/);
+}
+
+// An unknown/future code still renders readable text instead of a bare token.
+{
+  const result = analyze(decision({
+    dryRunAction: { action: "NO_ORDER", holdReasonCode: "LONG_SOME_FUTURE_RULE" }
+  }));
+  assert.equal(result.headline, "Long some future rule");
+  assert.match(result.summary, /Long some future rule/);
+}
+
+// Entry channel is surfaced in human form.
+{
+  const result = analyze(decision({
+    dryRunAction: { action: "WOULD_OPEN_LONG", side: "LONG", entryChannel: "DipBounce" }
+  }));
+  const channel = result.facts.find(item => item.label === "Канал входа");
+  assert.ok(channel, "entry channel fact expected");
+  assert.equal(channel.value, "Отскок от низа диапазона");
 }
 
 console.log("decision-explainer tests passed");
