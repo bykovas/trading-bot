@@ -1,3 +1,9 @@
+## 2026-07-28-futures-live-ledger-wording
+
+- Wording only, no behaviour change: the futures virtual ledger backs BOTH modes — on a live instance it mirrors real, exchange-confirmed Kraken fills, on a dry-run instance it simulates them. Its open/close reason text hardcoded the word "virtual", so a real IOC fill was journalled as `live Kraken Futures IOC accepted id=... status=placed; open virtual long: notional EUR 149.91 ...`, which reads as if no money moved. The reason text now drops "virtual" on a live instance and keeps it on a dry-run one.
+- The trades journal page derives the same wording from the committed fill source (`REAL*` → "реальный", otherwise "виртуальный") instead of hardcoding it.
+- Not changed: sizing, leverage, TP/SL, entry guards, reconciliation, or any decision logic — only the human-readable reason strings.
+
 ## 2026-07-28-futures-strong-confirmation-and-short-zone-antichase
 
 - Low-range LONG entries now require at least one STRUCTURAL confirmation on top of the count. The four low-range confirmations are not equally strong: a fresh upward tape and the multi-candle momentum are structural, while a single positive snapshot step and a single green candle are one-observation signals that a dead-cat bounce also produces. Without this rule the default `LowRangeMinConfirmations` (2) could be met by the two weakest signals alone while the tape was not fresh and multi-candle momentum was negative — exactly the falling-knife shape the dip channel was built to avoid. New `Freshness.LowRangeRequireStrongConfirmation` (default true), env `TRADINGBOT_FUTURES_LOW_RANGE_REQUIRE_STRONG_CONFIRMATION`, new block reason `LONG_LOW_RANGE_STRONG_CONFIRMATION_MISSING`.
