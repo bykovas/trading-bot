@@ -84,6 +84,74 @@ public sealed class FuturesLongRangeGuardTests
     }
 
     [Fact]
+    public void Low_zone_two_weak_confirmations_without_a_strong_one_is_blocked()
+    {
+        // Dead-cat bounce: one positive snapshot step + one green candle satisfy the
+        // count, but the tape is not fresh and multi-candle momentum is negative.
+        var result = FuturesLongRangeGuard.Evaluate(
+            PercentileMarket(entryPrice: 20m, lastCandleGreen: true),
+            Freshness(freshTape: false, lastStep: 0.1m, momentum: -0.4m),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.True(result.Blocked);
+        Assert.Equal(FuturesLongRangeGuard.StrongConfirmationMissing, result.BlockReasonCode);
+        Assert.Equal("LOW", result.Zone);
+        Assert.Equal(2, result.ConfirmationsMet); // count satisfied, strength not
+    }
+
+    [Fact]
+    public void Low_zone_two_confirmations_including_candle_momentum_passes()
+    {
+        // Same count, but one of them is structural (multi-candle momentum), so the
+        // reversal is confirmed even without a fresh tape.
+        var result = FuturesLongRangeGuard.Evaluate(
+            PercentileMarket(entryPrice: 20m, lastCandleGreen: false),
+            Freshness(freshTape: false, lastStep: 0.1m, momentum: 0.4m),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.False(result.Blocked);
+        Assert.Equal("LOW", result.Zone);
+        Assert.Equal(2, result.ConfirmationsMet);
+    }
+
+    [Fact]
+    public void Disabled_relaxation_still_blocks_a_peak_entry()
+    {
+        // LongRangeGuardEnabled only switches off the low-range relaxation: the upper
+        // range must stay breakout-only, otherwise one flag disables peak protection.
+        var thresholds = Thresholds();
+        thresholds.LongRangeGuardEnabled = false;
+        var result = FuturesLongRangeGuard.Evaluate(
+            PercentileMarket(entryPrice: 85m),
+            Freshness(freshTape: true, breakout: false),
+            FuturesDesiredExposure.Long,
+            thresholds);
+
+        Assert.True(result.Evaluated);
+        Assert.True(result.Blocked);
+        Assert.Equal(FuturesLongRangeGuard.UpperRangeFreshTapeNotEnough, result.BlockReasonCode);
+    }
+
+    [Fact]
+    public void Disabled_relaxation_applies_anti_chase_in_the_low_zone()
+    {
+        // With the relaxation off, a LOW zone behaves like MID: anti-chase applies again.
+        var thresholds = Thresholds();
+        thresholds.LongRangeGuardEnabled = false;
+        var result = FuturesLongRangeGuard.Evaluate(
+            PercentileMarket(entryPrice: 20m),
+            Freshness(freshTape: true, localHighDistance: 0.05m, breakout: false),
+            FuturesDesiredExposure.Long,
+            thresholds);
+
+        Assert.True(result.Blocked);
+        Assert.Equal(FuturesLongRangeGuard.EntryTooCloseToLocalHigh, result.BlockReasonCode);
+        Assert.True(result.AntiChaseApplied);
+    }
+
+    [Fact]
     public void Low_zone_without_required_rebound_from_24h_low_is_blocked()
     {
         var result = FuturesLongRangeGuard.Evaluate(

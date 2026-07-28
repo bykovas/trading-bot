@@ -37,10 +37,15 @@ internal static class FuturesShortEntryGuard
         FuturesShortOptions shorts,
         FuturesFreshnessOptions freshness)
     {
-        if (desired != FuturesDesiredExposure.Short || !shorts.RangeGuardEnabled)
+        if (desired != FuturesDesiredExposure.Short)
         {
             return ShortEntryResult.NotEvaluated;
         }
+
+        // Mirror of the LONG guard: RangeGuardEnabled toggles the zone-scoped RELAXATION
+        // only. The protective vetoes (pullback, fresh tape, local-low, drift) always run,
+        // so one flag cannot disable every short-side late-entry protection at once.
+        var relaxationEnabled = shorts.RangeGuardEnabled;
 
         var (entryPrice, entryPriceSource) = ExecutableEntryPrice(marketState);
         var wickRange = FuturesLongRangeGuard.Compute24hRange(marketState.Candles, freshness.RobustRangeMinSampleCount);
@@ -103,31 +108,43 @@ internal static class FuturesShortEntryGuard
                 $"short blocked: pullback from 24h high {pullback:0.###}% < required {shorts.MinPullbackFrom24hHighPct:0.###}% (entry {entryPrice:0.######}, 24h high {absoluteHigh:0.######})");
         }
 
-        if (tape.FallingSteps < shorts.RequiredFallingSnapshotCount)
+        if (shorts.RequireFreshTapeForHighRangeShort)
         {
-            return Blocked(FallingSnapshotsNotConfirmed,
-                $"short blocked: falling snapshots {tape.FallingSteps} < required {shorts.RequiredFallingSnapshotCount}");
+            // Fresh downward tape already implies "falling steps >= tape minimum" and a
+            // negative slope, so those are diagnostics here rather than separate vetoes
+            // standing earlier in the chain and swallowing the rejection statistics.
+            if (!freshDownwardTape)
+            {
+                return Blocked(FreshTapeNotConfirmed,
+                    "short blocked: fresh downward tape not confirmed (falling snapshots and candle momentum did not both hold)");
+            }
+        }
+        else
+        {
+            // Fresh tape switched off: fall back to the weaker vetoes it implies so the
+            // tape is never left completely unchecked.
+            if (tape.FallingSteps < shorts.RequiredFallingSnapshotCount)
+            {
+                return Blocked(FallingSnapshotsNotConfirmed,
+                    $"short blocked: falling snapshots {tape.FallingSteps} < required {shorts.RequiredFallingSnapshotCount}");
+            }
+
+            if (shorts.RequireNegativeShortSlope && tape.ShortSlopePct is not < 0m)
+            {
+                return Blocked(SlopeNotNegative,
+                    $"short blocked: short snapshot slope {tape.ShortSlopePct:0.###}% is not negative");
+            }
         }
 
-        if (shorts.RequireNegativeShortSlope && tape.ShortSlopePct is not { } slope)
-        {
-            return Blocked(SlopeNotNegative,
-                "short blocked: short snapshot slope is unavailable (insufficient tape)");
-        }
+        // Anti-chase for a short only makes sense in the lower part of the range: near the
+        // 24h HIGH there is nothing to chase downwards, and requiring the entry to be far
+        // above the local low there contradicts the fresh-downward-tape requirement.
+        var antiChaseApplied = !relaxationEnabled
+            || primaryPosition is not { } position
+            || position <= shorts.AntiChaseMaxRangePositionPct;
 
-        if (shorts.RequireNegativeShortSlope && tape.ShortSlopePct >= 0m)
-        {
-            return Blocked(SlopeNotNegative,
-                $"short blocked: short snapshot slope {tape.ShortSlopePct:0.###}% is not negative");
-        }
-
-        if (shorts.RequireFreshTapeForHighRangeShort && !freshDownwardTape)
-        {
-            return Blocked(FreshTapeNotConfirmed,
-                "short blocked: fresh downward tape not confirmed (falling snapshots and candle momentum did not both hold)");
-        }
-
-        if (entryDistanceAboveLocalLowPct is { } aboveLocalLow
+        if (antiChaseApplied
+            && entryDistanceAboveLocalLowPct is { } aboveLocalLow
             && aboveLocalLow <= freshness.MaxEntryDistanceFromLocalHighPct
             && !freshBreakdown)
         {
@@ -135,7 +152,8 @@ internal static class FuturesShortEntryGuard
                 $"short blocked: entry {aboveLocalLow:0.###}% above {localLow.Source} low (min {freshness.MaxEntryDistanceFromLocalHighPct:0.###}%), no confirmed breakdown");
         }
 
-        if (driftBelowSignalPct is { } drift
+        if (antiChaseApplied
+            && driftBelowSignalPct is { } drift
             && drift > freshness.MaxEntryDriftFromSignalPct
             && !freshBreakdown)
         {

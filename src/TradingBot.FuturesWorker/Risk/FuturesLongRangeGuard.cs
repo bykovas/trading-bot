@@ -18,6 +18,7 @@ internal static class FuturesLongRangeGuard
     public const string RisingSnapshotsNotConfirmed = "LONG_RISING_SNAPSHOTS_NOT_CONFIRMED";
     public const string FreshTapeNotConfirmed = "LONG_FRESH_TAPE_NOT_CONFIRMED";
     public const string UpperRangeFreshTapeNotEnough = "LONG_UPPER_RANGE_FRESH_TAPE_NOT_ENOUGH";
+    public const string StrongConfirmationMissing = "LONG_LOW_RANGE_STRONG_CONFIRMATION_MISSING";
     public const string EntryTooCloseToLocalHigh = "LONG_ENTRY_TOO_CLOSE_TO_LOCAL_HIGH";
     public const string EntryDriftTooHigh = "LONG_ENTRY_DRIFT_TOO_HIGH";
 
@@ -35,10 +36,16 @@ internal static class FuturesLongRangeGuard
         FuturesDesiredExposure desired,
         FuturesFreshnessOptions thresholds)
     {
-        if (desired != FuturesDesiredExposure.Long || !thresholds.LongRangeGuardEnabled)
+        if (desired != FuturesDesiredExposure.Long)
         {
             return LongRangeResult.NotEvaluated;
         }
+
+        // LongRangeGuardEnabled toggles the low-range RELAXATION only, never the
+        // protective vetoes. Late-entry protection (upper-range breakout rule,
+        // local-high, drift) has no other owner since the freshness guard stopped
+        // vetoing, so a single flag must not be able to switch it all off.
+        var relaxationEnabled = thresholds.LongRangeGuardEnabled;
 
         var (entryPrice, entryPriceSource) = ExecutableEntryPrice(marketState);
         var wickRange = Compute24hRange(marketState.Candles, thresholds.RobustRangeMinSampleCount);
@@ -68,9 +75,17 @@ internal static class FuturesLongRangeGuard
             : RangeBasisWick24h;
         var primaryPosition = closePercentile ?? swing.PositionPct ?? clampedWickPosition;
         var zone = ZoneOf(primaryPosition, thresholds);
-        var antiChaseApplied = primaryPosition is not { } position
+        // With the relaxation disabled a LOW zone behaves like MID: strict fresh tape and
+        // anti-chase everywhere, i.e. the pre-relaxation behaviour.
+        if (!relaxationEnabled && zone == "LOW")
+        {
+            zone = "MID";
+        }
+
+        var antiChaseApplied = !relaxationEnabled
+            || primaryPosition is not { } position
             || position >= thresholds.AntiChaseMinRangePositionPct;
-        var confirmations = CountLowRangeConfirmations(marketState, freshness, thresholds);
+        var (confirmations, hasStrongConfirmation) = CountLowRangeConfirmations(marketState, freshness, thresholds);
         var requiredConfirmations = thresholds.LowRangeMinConfirmations;
         var atrPct = CalculateAtrPct(marketState.Candles, entryPrice);
         var effectiveMaxDriftPct = atrPct is { } atr
@@ -111,11 +126,38 @@ internal static class FuturesLongRangeGuard
                 return Blocked(FreshTapeNotConfirmed,
                     $"long blocked: low-range confirmations {confirmations}/{requiredConfirmations} below required minimum");
             }
+
+            // The count alone can be met by the two single-observation signals (one
+            // positive snapshot step + one green candle) while the structural ones are
+            // absent — a dead-cat bounce inside a downtrend. Require at least one
+            // structural confirmation: fresh upward tape or multi-candle momentum.
+            if (thresholds.LowRangeRequireStrongConfirmation && !hasStrongConfirmation)
+            {
+                return Blocked(StrongConfirmationMissing,
+                    $"long blocked: low-range confirmations {confirmations}/{requiredConfirmations} met, but neither a fresh upward tape nor {thresholds.ContinuationCandleMomentumLookback}-candle momentum >= {thresholds.MinContinuationCandleMomentumPct:0.###}% confirmed the reversal");
+            }
         }
         else if (thresholds.RequireFreshTapeForLowRangeLong && !freshness.HasFreshUpwardTape)
         {
             return Blocked(FreshTapeNotConfirmed,
                 "long blocked: fresh upward tape not confirmed (rising snapshots and candle momentum did not both hold)");
+        }
+        else if (!thresholds.RequireFreshTapeForLowRangeLong)
+        {
+            // Fresh tape is the gate that implies rising snapshots and a positive slope.
+            // When it is switched off, fall back to those weaker vetoes so turning the
+            // flag off cannot leave the tape completely unchecked.
+            if (freshness.PositiveStepsInLast3 < thresholds.RequiredRisingSnapshotCount)
+            {
+                return Blocked(RisingSnapshotsNotConfirmed,
+                    $"long blocked: rising snapshots {freshness.PositiveStepsInLast3} < required {thresholds.RequiredRisingSnapshotCount}");
+            }
+
+            if (thresholds.RequirePositiveShortSlope && freshness.ShortSnapshotSlopePct is not > 0m)
+            {
+                return Blocked(ShortSlopeNotPositive,
+                    $"long blocked: short snapshot slope {freshness.ShortSnapshotSlopePct:0.###}% is not positive");
+            }
         }
 
         if (antiChaseApplied
@@ -208,20 +250,27 @@ internal static class FuturesLongRangeGuard
         return position >= thresholds.MaxContinuationRangePositionPct ? "UPPER" : "MID";
     }
 
-    private static int CountLowRangeConfirmations(
+    // Counts the low-range reversal confirmations and reports whether at least one of
+    // them is STRUCTURAL. Structural = fresh upward tape (3 snapshots) or multi-candle
+    // momentum; the remaining two (a single positive snapshot step, a single green
+    // candle) are one-observation signals that a dead-cat bounce also produces.
+    private static (int Confirmations, bool HasStrong) CountLowRangeConfirmations(
         InstrumentMarketState marketState,
         EntryFreshnessResult freshness,
         FuturesFreshnessOptions thresholds)
     {
         var confirmations = 0;
+        var hasStrong = false;
         if (freshness.HasFreshUpwardTape)
         {
             confirmations++;
+            hasStrong = true;
         }
 
         if (freshness.RecentCandleMomentumPct is { } momentum && momentum >= thresholds.MinContinuationCandleMomentumPct)
         {
             confirmations++;
+            hasStrong = true;
         }
 
         if (freshness.LastSnapshotStepPct is > 0m)
@@ -234,7 +283,7 @@ internal static class FuturesLongRangeGuard
             confirmations++;
         }
 
-        return confirmations;
+        return (confirmations, hasStrong);
     }
 
     private static bool LastClosedCandleIsGreen(IReadOnlyList<Candle> candles)

@@ -128,6 +128,8 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_ANTI_CHASE_MIN_RANGE_POSITION_PERCENT", value => config.Freshness.AntiChaseMinRangePositionPct = ParseDecimal(value, config.Freshness.AntiChaseMinRangePositionPct));
         SetIfPresent("TRADINGBOT_FUTURES_LOW_RANGE_MIN_CONFIRMATIONS", value => config.Freshness.LowRangeMinConfirmations = ParseInt(value, config.Freshness.LowRangeMinConfirmations));
         SetIfPresent("TRADINGBOT_FUTURES_DRIFT_ATR_MULTIPLE", value => config.Freshness.DriftAtrMultiple = ParseDecimal(value, config.Freshness.DriftAtrMultiple));
+        SetIfPresent("TRADINGBOT_FUTURES_LOW_RANGE_REQUIRE_STRONG_CONFIRMATION", value => config.Freshness.LowRangeRequireStrongConfirmation = ParseBool(value, config.Freshness.LowRangeRequireStrongConfirmation));
+        SetIfPresent("TRADINGBOT_FUTURES_SHORT_ANTI_CHASE_MAX_RANGE_POSITION_PERCENT", value => config.Shorts.AntiChaseMaxRangePositionPct = ParseDecimal(value, config.Shorts.AntiChaseMaxRangePositionPct));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_ENABLED", value => config.Dip.Enabled = ParseBool(value, config.Dip.Enabled));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_NEAR_LOW_MAX_24H_RANGE_POSITION_PERCENT", value => config.Dip.NearLowMax24hRangePositionPct = ParseDecimal(value, config.Dip.NearLowMax24hRangePositionPct));
         SetIfPresent("TRADINGBOT_FUTURES_DIP_BOUNCE_MIN_SCORE", value => config.Dip.MinScore = ParseDecimal(value, config.Dip.MinScore));
@@ -264,6 +266,12 @@ internal sealed class FuturesBotConfiguration
         {
             Console.WriteLine($"config-validation: Freshness.DriftAtrMultiple={Freshness.DriftAtrMultiple} is out of [0,5]; reset to 0.25.");
             Freshness.DriftAtrMultiple = 0.25m;
+        }
+
+        if (Shorts.AntiChaseMaxRangePositionPct < 0m || Shorts.AntiChaseMaxRangePositionPct > 100m)
+        {
+            Console.WriteLine($"config-validation: Shorts.AntiChaseMaxRangePositionPct={Shorts.AntiChaseMaxRangePositionPct} is out of [0,100]; reset to 65.");
+            Shorts.AntiChaseMaxRangePositionPct = 65m;
         }
 
         // Dip-bounce channel: near-low zone is the lower band of the 24h range; the
@@ -518,6 +526,14 @@ internal sealed class FuturesFreshnessOptions
     public int LowRangeMinConfirmations { get; set; } = 2;
     public decimal DriftAtrMultiple { get; set; } = 0.25m;
 
+    // Low-range confirmations are not equally strong: a fresh upward tape (3 snapshots)
+    // and the multi-candle momentum are structural, while a single positive snapshot
+    // step and a single green candle are one-observation signals. Without this rule the
+    // required count can be met by the two weakest signals alone, which is exactly the
+    // shape of a dead-cat bounce inside a downtrend. When enabled, at least one of the
+    // two structural confirmations must be present on top of the count.
+    public bool LowRangeRequireStrongConfirmation { get; set; } = true;
+
     // LONG context/anti-knife gate (FuturesLongRangeGuard). Wick 24h position is
     // diagnostic only — mid-range reclaim after wide spikes is allowed. Late-entry
     // protection is FuturesEntryFreshnessGuard. Percent fields: 0.20 == 0.20%.
@@ -646,6 +662,13 @@ internal sealed class FuturesShortOptions
     // are shared with Freshness (same magnitudes, mirrored direction). Percent fields:
     // 0.20 == 0.20%.
     public bool RangeGuardEnabled { get; set; } = true;
+
+    // Mirror of Freshness.AntiChaseMinRangePositionPct (35) for the short side: anti-chase
+    // (too close to the local LOW, drifted too far BELOW the signal) only makes sense in
+    // the lower part of the range. At the TOP of the range there is nothing to chase
+    // downwards, so above this position the two vetoes do not apply. Default 65 = the
+    // mirror of the long threshold. Percent position in the primary range, 0..100.
+    public decimal AntiChaseMaxRangePositionPct { get; set; } = 65m;
 
     // Diagnostic band for labeling (mirror of Max24hRangePositionForLong=30): a healthy
     // short usually sits in the UPPER band of the range, so this is a MIN position. Not a

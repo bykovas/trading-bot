@@ -87,14 +87,34 @@ public sealed class FuturesShortEntryGuardTests
     }
 
     [Fact]
-    public void Rising_tape_is_blocked_as_falling_snapshots_not_confirmed()
+    public void Rising_tape_is_blocked_as_fresh_tape_not_confirmed()
     {
+        // Fresh downward tape is now the single tape gate: it already implies the
+        // falling-step count and a negative slope, so a rising tape is reported once.
         var market = DecliningMarket(bid: 100m, localLow: 99.5m);
         var result = FuturesShortEntryGuard.Evaluate(
             market,
             FallingTape(99.8m, 99.9m, 100m),
             FuturesDesiredExposure.Short,
             Shorts(),
+            Freshness());
+
+        Assert.True(result.Blocked);
+        Assert.Equal(FuturesShortEntryGuard.FreshTapeNotConfirmed, result.BlockReasonCode);
+    }
+
+    [Fact]
+    public void Falling_snapshot_veto_still_applies_when_fresh_tape_gate_is_off()
+    {
+        // With the fresh-tape gate disabled the weaker vetoes it implies must take over,
+        // so switching the flag off cannot leave the tape unchecked.
+        var shorts = Shorts();
+        shorts.RequireFreshTapeForHighRangeShort = false;
+        var result = FuturesShortEntryGuard.Evaluate(
+            DecliningMarket(bid: 100m, localLow: 99.5m),
+            FallingTape(99.8m, 99.9m, 100m),
+            FuturesDesiredExposure.Short,
+            shorts,
             Freshness());
 
         Assert.True(result.Blocked);
@@ -130,7 +150,7 @@ public sealed class FuturesShortEntryGuardTests
     }
 
     [Fact]
-    public void Not_evaluated_for_long_or_when_disabled()
+    public void Not_evaluated_for_long_but_protections_survive_a_disabled_relaxation()
     {
         var market = DecliningMarket(bid: 100m, localLow: 99.5m);
         var forLong = FuturesShortEntryGuard.Evaluate(
@@ -138,10 +158,49 @@ public sealed class FuturesShortEntryGuardTests
             FuturesDesiredExposure.Long, Shorts(), Freshness());
         Assert.False(forLong.Evaluated);
 
+        // RangeGuardEnabled=false switches off the zone-scoped relaxation only: the
+        // protective vetoes must still run, so the guard is evaluated.
         var disabled = FuturesShortEntryGuard.Evaluate(
             market, FallingTape(100.3m, 100.15m, 100m),
             FuturesDesiredExposure.Short, new FuturesShortOptions { RangeGuardEnabled = false }, Freshness());
-        Assert.False(disabled.Evaluated);
+        Assert.True(disabled.Evaluated);
+    }
+
+    [Fact]
+    public void Short_near_local_low_high_in_range_is_not_blocked_by_anti_chase()
+    {
+        // Rollover from the top: the bid sits just above the 2-candle local low, but the
+        // entry is still in the UPPER part of the range — there is nothing to chase
+        // downwards there, so anti-chase must not veto this short.
+        var shorts = Shorts();
+        shorts.AntiChaseMaxRangePositionPct = 10m; // entry is above this -> anti-chase off
+        var result = FuturesShortEntryGuard.Evaluate(
+            DecliningMarket(bid: 100m, localLow: 99.95m),
+            FallingTape(100.3m, 100.15m, 100m),
+            FuturesDesiredExposure.Short,
+            shorts,
+            Freshness());
+
+        Assert.True(result.Evaluated);
+        Assert.False(result.Blocked);
+    }
+
+    [Fact]
+    public void Short_near_local_low_low_in_range_is_still_blocked_by_anti_chase()
+    {
+        // Same geometry but the entry is inside the anti-chase band: selling into a
+        // local low without a confirmed breakdown stays blocked.
+        var shorts = Shorts();
+        shorts.AntiChaseMaxRangePositionPct = 100m; // anti-chase applies everywhere
+        var result = FuturesShortEntryGuard.Evaluate(
+            DecliningMarket(bid: 100m, localLow: 99.95m),
+            FallingTape(100.3m, 100.15m, 100m),
+            FuturesDesiredExposure.Short,
+            shorts,
+            Freshness());
+
+        Assert.True(result.Blocked);
+        Assert.Equal(FuturesShortEntryGuard.EntryTooCloseToLocalLow, result.BlockReasonCode);
     }
 
     // Value ~100 with a 150 wick high (large pullback), recent bars declining, and the
