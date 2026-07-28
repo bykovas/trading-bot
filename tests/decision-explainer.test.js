@@ -222,6 +222,37 @@ for (const code of ["LONG_LOW_RANGE_STRONG_CONFIRMATION_MISSING", "LONG_UPPER_RA
   assert.match(result.summary, /Long some future rule/);
 }
 
+// A catch-all risk verdict must never win over the concrete gate reason.
+{
+  const cases = [
+    ["liquidation distance 5.20% below minimum 8.00%", "REJECT_LIQUIDATION_DISTANCE"],
+    ["margin utilization 92.10% would exceed cap 80.00%", "REJECT_MARGIN_UTILIZATION"],
+    ["open risk EUR 12.5000 exceeds cap EUR 9.0000", "REJECT_OPEN_RISK_CAP"],
+    ["funding rate 0.0450% is adverse for long above cap 0.0300%", "REJECT_FUNDING_ADVERSE"],
+    ["exit depth unavailable/below EUR 2000.00", "REJECT_EXIT_DEPTH"],
+    ["correlation group DEFI position cap 1 reached", "REJECT_CORRELATION_LIMIT"],
+    ["entry blackout active: 360m after 22:00 UTC", "REJECT_ENTRY_BLACKOUT"],
+    ["fill reconciliation pending for this pair; duplicate entry blocked", "REJECT_DUPLICATE_ENTRY_PENDING"]
+  ];
+  for (const [reason, expected] of cases) {
+    const result = analyze(decision({
+      riskReasons: [reason],
+      dryRunAction: { action: "NO_ORDER", entryRejectionReason: "REJECT_FUTURES_RISK" }
+    }));
+    assert.equal(result.code, expected, `"${reason}" should resolve to ${expected}, got ${result.code}`);
+    assert.ok(translations[result.code], `missing translation for ${result.code}`);
+  }
+}
+
+// When only the catch-all code exists, the summary must still carry the gate text.
+{
+  const result = analyze(decision({
+    riskReasons: ["some risk manager reason without a known pattern"],
+    dryRunAction: { action: "NO_ORDER", entryRejectionReason: "REJECT_FUTURES_RISK" }
+  }));
+  assert.match(result.summary, /some risk manager reason without a known pattern/);
+}
+
 // Entry channel is surfaced in human form.
 {
   const result = analyze(decision({

@@ -27,6 +27,12 @@
     ENTRY_STALE_NEAR_HIGH: "Сигнал устарел: цена уже ушла к локальному high",
     REJECT_ENTRY_STALE_NEAR_HIGH: "Сигнал устарел: цена уже ушла к локальному high",
     REJECT_FUTURES_RISK: "Futures-вход отклонён risk-проверкой",
+    REJECT_LIQUIDATION_DISTANCE: "Ликвидация слишком близко для этого плеча",
+    REJECT_MARGIN_UTILIZATION: "Не хватает свободной маржи: лимит утилизации счёта",
+    REJECT_OPEN_RISK_CAP: "Суммарный открытый риск превысил бы лимит",
+    REJECT_FUNDING_ADVERSE: "Funding-ставка невыгодна для этого направления",
+    REJECT_EXIT_DEPTH: "Не хватает глубины стакана на выход из позиции",
+    REJECT_DUPLICATE_ENTRY_PENDING: "По этой паре ещё не подтверждён предыдущий ордер",
     ENTRY_BLACKOUT: "Сейчас действует временный запрет новых входов",
     ENTRY_INVALID_SPREAD: "Bid/ask отсутствует или некорректен — spread не проверить",
     ENTRY_INVALID_REFERENCE_PRICE: "Нет свежей цены для безопасного входа",
@@ -240,6 +246,17 @@
     if (/rising snapshots/.test(all)) return "LONG_RISING_SNAPSHOTS_NOT_CONFIRMED";
     if (/local low/.test(all)) return "SHORT_ENTRY_TOO_CLOSE_TO_LOCAL_LOW";
     if (/local high/.test(all)) return "LONG_ENTRY_TOO_CLOSE_TO_LOCAL_HIGH";
+    // Specific futures risk blocks. These must be matched BEFORE the broad
+    // margin/notional/open-risk pattern below, which would otherwise swallow them
+    // into a generic "risk limits" message.
+    if (/liquidation distance/.test(all)) return "REJECT_LIQUIDATION_DISTANCE";
+    if (/margin utilization/.test(all)) return "REJECT_MARGIN_UTILIZATION";
+    if (/open risk/.test(all)) return "REJECT_OPEN_RISK_CAP";
+    if (/funding rate/.test(all)) return "REJECT_FUNDING_ADVERSE";
+    if (/exit depth/.test(all)) return "REJECT_EXIT_DEPTH";
+    if (/quote volume/.test(all)) return "REJECT_LOW_LIQUIDITY";
+    if (/fill reconciliation pending/.test(all)) return "REJECT_DUPLICATE_ENTRY_PENDING";
+    if (/entry blackout/.test(all)) return "REJECT_ENTRY_BLACKOUT";
     if (/spread/.test(all)) return "REJECT_SPREAD_TOO_WIDE";
     if (/position slots|max futures positions/.test(all)) return "REJECT_MAX_POSITIONS";
     if (/correlation/.test(all)) return "REJECT_CORRELATION_LIMIT";
@@ -252,12 +269,23 @@
     return null;
   }
 
+  // Catch-all codes the workers emit when no specific hold code was set. They are
+  // translated (so nothing renders raw) but they say nothing on their own, so a
+  // concrete reason derived from the gate text must always win over them.
+  const GENERIC = new Set(["REJECT_NO_FUTURES_SIGNAL", "REJECT_FUTURES_RISK", "REJECT_RISK_LIMITS"]);
+
   function codeOf(decision) {
     const code = explicitCode(decision);
     const fallback = fallbackCode(decision);
-    if (code === "REJECT_NO_FUTURES_SIGNAL" && fallback) return fallback;
+    if (code && GENERIC.has(code) && fallback && !GENERIC.has(fallback)) return fallback;
     if (code && TEXT[code]) return code;
     return fallback || (code ? String(code) : null);
+  }
+
+  // First gate reason that is real prose rather than a bare CODE_TOKEN, used to give a
+  // generic verdict some substance instead of "отклонён risk-проверкой" and nothing else.
+  function concreteReason(decision) {
+    return reasonParts(decision).find(part => !/^[A-Z][A-Z0-9_]*$/.test(part.trim())) || null;
   }
 
   function summary(decision, code) {
@@ -277,6 +305,13 @@
     if (code === "REJECT_ALREADY_HOLDING") return `По ${pair} уже есть открытая позиция, поэтому бот не добавляет второй вход. Дальше эту позицию ведут TP/SL, trailing или разрешённые правила выхода.`;
     if (code === "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD") return `SHORT не рассматривался дальше: SHORT score ${fmt(short.shortScore)} ниже порога ${fmt(threshold)}. Показанный общий score к этому отказу не относится.`;
     if (code === "SHORT_DOWNSIDE_CONFIRMATION_MISSING") return `Bearish EMA была, но не хватило подтверждения вниз: нужен хотя бы один из факторов — candle momentum, повышенный объём или цена ниже trend MA.`;
+    // A generic verdict on its own explains nothing: always show which gate spoke.
+    if (code && GENERIC.has(code)) {
+      const detail = concreteReason(decision);
+      return detail
+        ? `${TEXT[code] || humanize(code)}: ${detail}`
+        : `${TEXT[code] || humanize(code)}. Конкретная причина не записана в решении.`;
+    }
     if (code && TEXT[code]) return `${TEXT[code]}. Поэтому новый ордер не отправлен.`;
     if (code) return `${humanize(code)}. Поэтому новый ордер не отправлен.`;
     return side === "NONE" ? "Нет подтверждённого направления для нового входа." : `Кандидат ${side} остановлен до отправки ордера.`;
