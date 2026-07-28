@@ -171,6 +171,32 @@
     };
   }
 
+  // Entry thresholds per direction. A threshold is only usable when it is a positive
+  // number: printing "below threshold 0.00" next to a score of 0.70 is worse than
+  // printing no threshold at all.
+  const longThresholdOf = decision => {
+    const value = number(decision.longScoreThreshold);
+    return value !== null && value > 0 ? value : null;
+  };
+  const shortThresholdOf = decision => {
+    const value = number(first(decision.shortScoreThreshold, decision.longScoreThreshold));
+    return value !== null && value > 0 ? value : null;
+  };
+  const belowThresholdText = (score, threshold) =>
+    threshold !== null && number(score) !== null && number(score) < threshold
+      ? `${fmt(score)} ниже порога ${fmt(threshold)}`
+      : `${fmt(score)} не прошёл входной порог`;
+
+  // Both-direction verdict for a cycle that opened nothing. This is the answer to
+  // "does it even consider LONG?": both scores and both thresholds, always.
+  function bothSidesText(decision) {
+    const short = inferShortFields(decision);
+    const longPart = `LONG ${belowThresholdText(decision.score, longThresholdOf(decision))}`;
+    return short.shortScore === null
+      ? longPart
+      : `${longPart}; SHORT ${belowThresholdText(short.shortScore, shortThresholdOf(decision))}`;
+  }
+
   function candidateSide(decision) {
     const action = getAction(decision);
     const explicit = String(first(action.side, decision.side, decision.desiredPosition, action.desiredPosition, "")).toUpperCase();
@@ -301,9 +327,9 @@
     if (/HOLD/.test(actionName)) return TEXT[code] || `Позиция ${pair} остаётся открытой; нового ордера нет.`;
     if (code === "SHORT_EMA_NOT_CONFIRMED") return `SHORT не рассматривался дальше: расхождение EMA вниз ${pct(short.bearishGap)} меньше обязательного ${pct(decision.minimumEmaGapPercent)}.`;
     if (code === "LONG_EMA_NOT_CONFIRMED") return `LONG не рассматривался дальше: score прошёл, но EMA gap вверх ${pct(decision.bullishEmaGapPercent)} меньше обязательного ${pct(decision.minimumEmaGapPercent)}.`;
-    if (code === "REJECT_NO_DIRECTIONAL_SCORE") return `Нет направления для входа: LONG score ${fmt(decision.score)} ниже порога ${fmt(decision.longScoreThreshold)}, и SHORT score ${fmt(short.shortScore)} ниже порога ${fmt(first(decision.shortScoreThreshold, decision.longScoreThreshold))}.`;
+    if (code === "REJECT_NO_DIRECTIONAL_SCORE") return `Нет направления для входа: ${bothSidesText(decision)}.`;
     if (code === "REJECT_ALREADY_HOLDING") return `По ${pair} уже есть открытая позиция, поэтому бот не добавляет второй вход. Дальше эту позицию ведут TP/SL, trailing или разрешённые правила выхода.`;
-    if (code === "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD") return `SHORT не рассматривался дальше: SHORT score ${fmt(short.shortScore)} ниже порога ${fmt(threshold)}. Показанный общий score к этому отказу не относится.`;
+    if (code === "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD") return `Ни одно направление не прошло: ${bothSidesText(decision)}.`;
     if (code === "SHORT_DOWNSIDE_CONFIRMATION_MISSING") return `Bearish EMA была, но не хватило подтверждения вниз: нужен хотя бы один из факторов — candle momentum, повышенный объём или цена ниже trend MA.`;
     // A generic verdict on its own explains nothing: always show which gate spoke.
     if (code && GENERIC.has(code)) {
@@ -327,8 +353,20 @@
       items.push({ label, value: String(value), state, detail });
     };
     add("Кандидат", side === "NONE" ? "нет" : side, side === "NONE" ? "neutral" : "info");
-    add("LONG score", fmt(decision.score), number(decision.score) >= number(decision.longScoreThreshold) ? "pass" : "neutral");
-    if (short.hasBearish || short.shortScore !== null) add("SHORT score", fmt(short.shortScore), short.allowsShort ? "pass" : "fail");
+    // Always show BOTH directions with their thresholds, so a bearish tape can never
+    // look like the bot only ever thought about SHORT.
+    const longThreshold = longThresholdOf(decision);
+    const shortThreshold = shortThresholdOf(decision);
+    add(
+      "LONG score",
+      longThreshold === null ? fmt(decision.score) : `${fmt(decision.score)} / порог ${fmt(longThreshold)}`,
+      longThreshold !== null && number(decision.score) >= longThreshold ? "pass" : "neutral");
+    if (short.hasBearish || short.shortScore !== null) {
+      add(
+        "SHORT score",
+        shortThreshold === null ? fmt(short.shortScore) : `${fmt(short.shortScore)} / порог ${fmt(shortThreshold)}`,
+        short.allowsShort ? "pass" : "fail");
+    }
     if (short.bearishGap !== null) add("EMA вниз", pct(short.bearishGap), number(decision.minimumEmaGapPercent) !== null && short.bearishGap < number(decision.minimumEmaGapPercent) ? "fail" : "pass");
     const spread = number(first(decision.spreadPercent, action.spreadPercent));
     if (spread !== null) add("Spread", pct(spread), "neutral");

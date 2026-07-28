@@ -1053,7 +1053,14 @@ static async Task HydrateCycleRecords(
             action.requested_leverage,
             action.sized_notional_eur,
             action.required_margin_eur,
-            action.effective_leverage
+            action.effective_leverage,
+            -- Appended last and uniquely aliased so they can be read by name without
+            -- shifting any of the positional ordinals above.
+            decision.short_score as d_short_score,
+            decision.long_score_threshold as d_long_score_threshold,
+            decision.short_score_threshold as d_short_score_threshold,
+            decision.has_bearish_structure as d_has_bearish_structure,
+            decision.allows_short as d_allows_short
         from dry_run_decision_facts decision
         join dry_run_actions action on action.cycle_id = decision.cycle_id and action.decision_index = decision.decision_index
         where decision.cycle_id = any(@cycle_ids)
@@ -1136,7 +1143,12 @@ static async Task HydrateCycleRecords(
                     GetNullableDecimal(reader, 59),
                     GetNullableDecimal(reader, 60),
                     GetNullableDecimal(reader, 61),
-                    GetNullableDecimal(reader, 62))));
+                    GetNullableDecimal(reader, 62)),
+                GetNullableDecimal(reader, reader.GetOrdinal("d_short_score")),
+                GetNullableDecimal(reader, reader.GetOrdinal("d_long_score_threshold")),
+                GetNullableDecimal(reader, reader.GetOrdinal("d_short_score_threshold")),
+                reader.GetBoolean(reader.GetOrdinal("d_has_bearish_structure")),
+                reader.GetBoolean(reader.GetOrdinal("d_allows_short"))));
         }
     }
 
@@ -1724,7 +1736,15 @@ internal sealed record CycleDecisionRecordDto(
     string? EarlyEntryReason,
     decimal EarlyEntryDiagnosticScore,
     decimal EarlyEntrySuggestedNotionalEur,
-    CycleActionRecordDto DryRunAction);
+    CycleActionRecordDto DryRunAction,
+    // Both-direction context. Without these the dashboard had to guess the SHORT side
+    // by parsing contribution text and could not show either entry threshold, which is
+    // why cards claimed "SHORT score 0.70 below threshold 0.00" and never explained LONG.
+    decimal? ShortScore = null,
+    decimal? LongScoreThreshold = null,
+    decimal? ShortScoreThreshold = null,
+    bool HasBearishStructure = false,
+    bool AllowsShort = false);
 
 internal sealed record SignalContributionDto(
     string Name,

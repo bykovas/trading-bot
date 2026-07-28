@@ -49,8 +49,10 @@ function decision(overrides = {}) {
     shortBaseBlockReasonCode: "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD"
   }));
   assert.equal(result.code, "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD");
-  assert.match(result.summary, /SHORT score 0\.75/);
-  assert.match(result.summary, /общий score к этому отказу не относится/);
+  // The verdict now states BOTH directions with their thresholds instead of only the
+  // short side plus a disclaimer about the displayed score.
+  assert.match(result.summary, /SHORT 0\.75 ниже порога 0\.85/);
+  assert.match(result.summary, /LONG 0\.15 ниже порога 0\.85/);
 }
 
 {
@@ -122,8 +124,8 @@ function decision(overrides = {}) {
   }));
   assert.equal(result.code, "REJECT_NO_DIRECTIONAL_SCORE");
   assert.match(result.headline, /Ни LONG, ни SHORT/);
-  assert.match(result.summary, /LONG score 0\.50/);
-  assert.match(result.summary, /SHORT score 0\.30/);
+  assert.match(result.summary, /LONG 0\.50 ниже порога/);
+  assert.match(result.summary, /SHORT 0\.30 ниже порога/);
 }
 
 {
@@ -251,6 +253,38 @@ for (const code of ["LONG_LOW_RANGE_STRONG_CONFIRMATION_MISSING", "LONG_UPPER_RA
     dryRunAction: { action: "NO_ORDER", entryRejectionReason: "REJECT_FUTURES_RISK" }
   }));
   assert.match(result.summary, /some risk manager reason without a known pattern/);
+}
+
+// A verdict must never contradict itself: 0.70 is not "below 0.00".
+{
+  const result = analyze(decision({
+    score: 0.15,
+    shortScore: 0.70,
+    hasBearishStructure: true,
+    dryRunAction: { action: "NO_ORDER", entryRejectionReason: "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD" }
+  }));
+  assert.doesNotMatch(result.summary, /ниже порога 0\.00/, "must not print a zero threshold");
+  assert.match(result.summary, /LONG/, "the LONG side must always be explained too");
+  assert.match(result.summary, /SHORT/);
+}
+
+// With real thresholds present both directions are stated with their bars.
+{
+  const result = analyze(decision({
+    score: 0.15,
+    shortScore: 0.70,
+    longScoreThreshold: 0.8,
+    shortScoreThreshold: 0.85,
+    hasBearishStructure: true,
+    dryRunAction: { action: "NO_ORDER", entryRejectionReason: "SHORT_SCORE_BELOW_SIGNAL_THRESHOLD" }
+  }));
+  assert.match(result.summary, /LONG 0\.15 ниже порога 0\.80/);
+  assert.match(result.summary, /SHORT 0\.70 ниже порога 0\.85/);
+
+  const longFact = result.facts.find(item => item.label === "LONG score");
+  const shortFact = result.facts.find(item => item.label === "SHORT score");
+  assert.equal(longFact.value, "0.15 / порог 0.80");
+  assert.equal(shortFact.value, "0.70 / порог 0.85");
 }
 
 // Entry channel is surfaced in human form.
