@@ -43,11 +43,41 @@ public sealed class FuturesRelativeStrengthTests
     }
 
     [Fact]
-    public void Relative_strength_gate_ships_disabled()
+    public void Relative_strength_gate_code_default_is_off_as_a_safe_fallback()
     {
-        // The whole point of this rollout: measurement only, no behaviour change until
-        // the recorded data justifies switching the veto on.
+        // appsettings turns the gate ON; the code default stays OFF so a config that
+        // omits the section can never silently start vetoing entries.
         Assert.False(new FuturesRegimeOptions().RelativeStrengthGateEnabled);
         Assert.Equal(0.5m, new FuturesRegimeOptions().MinRelativeStrengthPct);
+    }
+
+    [Fact]
+    public void Short_entry_threshold_matches_the_scorer_and_survives_normalize()
+    {
+        // The short score is structurally capped at 0.80 in a real downtrend: the base
+        // bearish-EMA credit plus calm volatility, downside momentum and price-below-trend
+        // reach 0.80, while both RSI bonuses require an OVERHEATED RSI that a falling
+        // market does not produce. A gate above 0.80 is therefore unreachable, which is
+        // why zero shorts fired across 14k+ bearish candidates. The scorer already admits
+        // shorts at MinimumLongScore (0.80), so the entry gate must not sit above it.
+        var config = new FuturesBotConfiguration
+        {
+            Strategy = new StrategyOptions { MinimumLongScore = 0.80m },
+            Shorts = new FuturesShortOptions { MinShortScore = 0.80m }
+        };
+        InvokeNormalize(config);
+
+        Assert.Equal(0.80m, config.Shorts.MinShortScore);
+        Assert.True(config.Shorts.MinShortScore <= config.Strategy.MinimumLongScore,
+            "a short entry gate above the scorer's own admission bar is unreachable");
+    }
+
+    private static void InvokeNormalize(FuturesBotConfiguration config)
+    {
+        var method = typeof(FuturesBotConfiguration).GetMethod(
+            "Normalize",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method!.Invoke(config, null);
     }
 }
