@@ -480,6 +480,101 @@ public sealed class FuturesDeadManSwitchTests
     }
 
     [Fact]
+    public async Task Live_reconciliation_preserves_existing_exchange_trailing_stop()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
+        var config = new FuturesBotConfiguration
+        {
+            BotInstance = new BotInstanceOptions { Id = "futures-live", Name = "test" },
+            Futures = new FuturesOptions
+            {
+                LiveTradingEnabled = true,
+                DefaultLeverage = 10m,
+                MaxLeverage = 10m,
+                DeadManSwitchSeconds = 240
+            },
+            TpSl = new TpSlOptions
+            {
+                Enabled = true,
+                TakeProfitPercent = 4m,
+                StopLossPercent = 2m,
+                TrailingStopPercent = 2m
+            },
+            Worker = new WorkerOptions { RunOnce = true, LoopIntervalSeconds = 120 },
+            Kraken = new KrakenOptions { MarketDataMode = "sample" },
+            Trading = new TradingOptions { MaxActiveInstruments = 3, TimeframeMinutes = 5 },
+            DryRun = new DryRunOptions { OutputDirectory = outputDirectory },
+            CandidateUniverse =
+            [
+                new InstrumentOptions
+                {
+                    Pair = "ADA/USD",
+                    KrakenPair = "PF_ADAUSD",
+                    PriceDecimals = 4,
+                    Enabled = true
+                }
+            ]
+        };
+        InvokeNormalize(config);
+
+        var broker = new RecordingFuturesBroker(
+        [
+            new FuturesOpenPosition("PF_ADAUSD", "LONG", 100m, 0.4m, 0.42m, 10m)
+        ])
+        {
+            OpenOrders =
+            [
+                new FuturesOpenOrder("trail-1", "PF_ADAUSD", "sell", "trailing_stop", 100m, null, true, 2m)
+            ]
+        };
+        var worker = new FuturesDecisionWorker(
+            config,
+            new SampleMarketDataSource(),
+            new IndicatorEngine(),
+            new LongShortStrategy(config),
+            new MarginRiskManager(config),
+            new FuturesVirtualPortfolio(config, new FileDryRunPortfolioStore(config.DryRun)),
+            new TpSlOrchestrator(config),
+            broker);
+
+        var state = new PortfolioState { CashEur = 100m };
+        state.Positions.Add(new PortfolioPosition
+        {
+            Pair = "ADA/USD",
+            Side = "LONG",
+            Origin = PositionOrigins.Bot,
+            TpOrderState = "EXCHANGE_OPEN",
+            SlOrderState = "EXCHANGE_OPEN",
+            StopLossPrice = 0.392m,
+            TakeProfitPrice = 0.416m,
+            ExchangeStopLossPrice = 0.384m,
+            ExchangeTakeProfitPrice = 0.432m
+        });
+
+        var method = typeof(FuturesDecisionWorker).GetMethod("ReconcileWithKrakenAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = (Task)method.Invoke(worker, new object?[]
+        {
+            state,
+            config.CandidateUniverse,
+            Array.Empty<InstrumentMarketState>(),
+            DateTimeOffset.UtcNow,
+            CancellationToken.None
+        })!;
+        await task;
+
+        var position = Assert.Single(state.Positions);
+        Assert.Equal("CANCELLED", position.TpOrderState);
+        Assert.Equal("CANCELLED", position.SlOrderState);
+        Assert.Equal("EXCHANGE_OPEN", position.TrailingStopState);
+        Assert.Equal(2m, position.TrailingStopPercent);
+        Assert.Equal("trail-1", position.TrailingStopOrderId);
+        Assert.Equal(0, broker.TriggerOrderCallCount);
+        Assert.Empty(broker.CancelledOrders);
+        Assert.Empty(broker.TrailingOrders);
+    }
+
+    [Fact]
     public async Task Live_reconciliation_rounds_exchange_tpsl_to_price_precision()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
@@ -546,6 +641,118 @@ public sealed class FuturesDeadManSwitchTests
         Assert.Equal(241.79272145m, position.TakeProfitPrice);
         Assert.Equal(225.37m, position.ExchangeStopLossPrice);
         Assert.Equal(248.83m, position.ExchangeTakeProfitPrice);
+    }
+
+    [Fact]
+    public async Task Fast_exit_check_journals_live_trailing_activation_without_closing_position()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
+        var config = new FuturesBotConfiguration
+        {
+            BotInstance = new BotInstanceOptions { Id = "futures-live", Name = "test" },
+            Futures = new FuturesOptions
+            {
+                LiveTradingEnabled = true,
+                DefaultLeverage = 10m,
+                MaxLeverage = 10m,
+                FastExitCheckSeconds = 10
+            },
+            TpSl = new TpSlOptions
+            {
+                Enabled = true,
+                TakeProfitPercent = 4m,
+                StopLossPercent = 2m,
+                TrailingStopPercent = 2m
+            },
+            Worker = new WorkerOptions { LoopIntervalSeconds = 120 },
+            Kraken = new KrakenOptions { MarketDataMode = "sample" },
+            DryRun = new DryRunOptions { OutputDirectory = outputDirectory },
+            CandidateUniverse =
+            [
+                new InstrumentOptions
+                {
+                    Pair = "HYPE/USD",
+                    KrakenPair = "PF_HYPEUSD",
+                    Enabled = true
+                }
+            ]
+        };
+        InvokeNormalize(config);
+
+        var store = new FileDryRunPortfolioStore(config.DryRun);
+        store.Save(new PortfolioState
+        {
+            CashEur = 100m,
+            Positions =
+            [
+                new PortfolioPosition
+                {
+                    Pair = "HYPE/USD",
+                    Side = "LONG",
+                    Origin = PositionOrigins.Bot,
+                    Quantity = 5.3m,
+                    EntryPrice = 60m,
+                    EntryNotionalEur = 318m,
+                    InitialMarginEur = 31.8m,
+                    LastPrice = 60m,
+                    MarkPrice = 60m,
+                    Leverage = 10m,
+                    StopLossPrice = 58.8m,
+                    TakeProfitPrice = 62.4m,
+                    ExchangeStopLossPrice = 57.6m,
+                    ExchangeTakeProfitPrice = 64.8m,
+                    SlOrderState = "EXCHANGE_OPEN",
+                    TpOrderState = "EXCHANGE_OPEN",
+                    OpenedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5)
+                }
+            ]
+        });
+
+        var broker = new RecordingFuturesBroker(
+        [
+            new FuturesOpenPosition("PF_HYPEUSD", "LONG", 5.3m, 60m, 62.5m, 10m)
+        ])
+        {
+            OpenOrders =
+            [
+                new FuturesOpenOrder("sl-1", "PF_HYPEUSD", "sell", "stop_loss", 5.3m, 57.6m, true),
+                new FuturesOpenOrder("tp-1", "PF_HYPEUSD", "sell", "take_profit", 5.3m, 64.8m, true)
+            ],
+            TickerQuote = new FuturesTickerQuote("PF_HYPEUSD", 62.5m, 62.6m, 62.5m, 62.5m, DateTimeOffset.UtcNow)
+        };
+        var worker = new FuturesDecisionWorker(
+            config,
+            new FixedLightMarketDataSource(62.5m),
+            new IndicatorEngine(),
+            new LongShortStrategy(config),
+            new MarginRiskManager(config),
+            new FuturesVirtualPortfolio(config, store),
+            new TpSlOrchestrator(config),
+            broker);
+
+        await worker.RunFastExitCheckAsync(CancellationToken.None);
+
+        Assert.Contains("sl-1", broker.CancelledOrders);
+        Assert.Contains("tp-1", broker.CancelledOrders);
+        var trailing = Assert.Single(broker.TrailingOrders);
+        Assert.Equal("PF_HYPEUSD", trailing.Symbol);
+        Assert.Equal("sell", trailing.Side);
+
+        var saved = store.Load();
+        var position = Assert.Single(saved!.Positions);
+        Assert.Equal("EXCHANGE_OPEN", position.TrailingStopState);
+        Assert.Equal("CANCELLED", position.TpOrderState);
+        Assert.Equal("CANCELLED", position.SlOrderState);
+
+        var eventsPath = Path.Combine(outputDirectory, config.DryRun.EventsFile);
+        var line = Assert.Single(File.ReadAllLines(eventsPath));
+        using var doc = JsonDocument.Parse(line);
+        var decision = Assert.Single(doc.RootElement.GetProperty("decisions").EnumerateArray());
+        var action = decision.GetProperty("dryRunAction");
+        Assert.Equal("WOULD_HOLD", action.GetProperty("action").GetString());
+        Assert.Equal("TRAILING_ACTIVATED", action.GetProperty("holdReasonCode").GetString());
+        Assert.Equal("LONG", action.GetProperty("desiredPosition").GetString());
+        Assert.Contains("activated reduce-only trailing stop", action.GetProperty("reason").GetString());
     }
 
     [Fact]

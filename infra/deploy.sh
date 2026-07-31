@@ -54,6 +54,7 @@ SPOT_WORKER_IMAGE_TAG="${SPOT_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 FUTURES_WORKER_IMAGE_TAG="${FUTURES_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 MARKET_DATA_WORKER_IMAGE_TAG="${MARKET_DATA_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 TRAEFIK_NETWORK="${TRAEFIK_NETWORK:-traefik}"
+POSTGRES_BIND_HOST="${POSTGRES_BIND_HOST:-127.0.0.1}"
 
 echo "Deploying stack '${PROJECT_NAME}' to ${DEPLOY_DIR}"
 echo "  ui     = ${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
@@ -269,21 +270,35 @@ export FUTURES_WORKER_IMAGE_TAG
 export MARKET_DATA_WORKER_IMAGE_NAME
 export MARKET_DATA_WORKER_IMAGE_TAG
 export TRAEFIK_NETWORK
+export POSTGRES_BIND_HOST
 
 docker compose \
   -p "${PROJECT_NAME}" \
   -f "${COMPOSE_FILE}" \
   pull
 
-docker compose \
-  -p "${PROJECT_NAME}" \
-  -f "${COMPOSE_FILE}" \
-  up -d --remove-orphans
+if [ "${POSTGRES_BIND_HOST}" != "127.0.0.1" ] && [ "${POSTGRES_BIND_HOST}" != "localhost" ] && [ "${POSTGRES_BIND_HOST}" != "0.0.0.0" ]; then
+  echo "Waiting for Postgres bind address ${POSTGRES_BIND_HOST} before starting database."
+  for attempt in $(seq 1 60); do
+    if ip -br addr | awk '{print $3}' | tr ' ' '\n' | grep -q "^${POSTGRES_BIND_HOST}/"; then
+      echo "Postgres bind address ${POSTGRES_BIND_HOST} is present."
+      break
+    fi
 
+    if [ "${attempt}" -eq 60 ]; then
+      echo "ERROR: Postgres bind address ${POSTGRES_BIND_HOST} is not present; refusing to half-start the stack."
+      exit 1
+    fi
+
+    sleep 2
+  done
+fi
+
+echo "Starting database first."
 docker compose \
   -p "${PROJECT_NAME}" \
   -f "${COMPOSE_FILE}" \
-  ps
+  up -d database
 
 run_healthcheck_with_retries() {
   local description="$1"
@@ -308,33 +323,41 @@ run_healthcheck_with_retries() {
   return 1
 }
 
-# Database health: Postgres must be ready before the worker can persist dry-run state.
-run_healthcheck_with_retries "trading-bot-db container" 30 2 \
-  docker compose \
-    -p "${PROJECT_NAME}" \
-    -f "${COMPOSE_FILE}" \
-    exec -T database pg_isready -U tradingbot -d tradingbot
+database_ready_check() {
+  docker run --rm --network "${PROJECT_NAME}_default" postgres:16-alpine \
+    pg_isready -h database -p 5432 -U tradingbot -d tradingbot >/dev/null
+}
+
+# Database health: check the real compose-network DNS alias instead of docker
+# exec'ing into Postgres. This still works on hosts where Docker exec healthchecks
+# are broken by runtime/seccomp issues.
+run_healthcheck_with_retries "database DNS and Postgres readiness" 45 2 database_ready_check
+
+echo "Starting application services after database readiness."
+docker compose \
+  -p "${PROJECT_NAME}" \
+  -f "${COMPOSE_FILE}" \
+  up -d --remove-orphans
+
+docker compose \
+  -p "${PROJECT_NAME}" \
+  -f "${COMPOSE_FILE}" \
+  ps
 
 # UI health: nginx must answer over HTTP.
 run_healthcheck_with_retries "trading-bot-ui container" 30 2 \
-  docker compose \
-    -p "${PROJECT_NAME}" \
-    -f "${COMPOSE_FILE}" \
-    exec -T ui wget -q -O /tmp/trading-bot-ui-healthcheck.html http://127.0.0.1/
+  docker run --rm --network container:trading-bot-ui busybox:1.36 \
+    wget -q -O /dev/null http://127.0.0.1/
 
 # Web health: MVC preview must answer inside the compose network.
 run_healthcheck_with_retries "trading-bot-web container" 30 2 \
-  docker compose \
-    -p "${PROJECT_NAME}" \
-    -f "${COMPOSE_FILE}" \
-    exec -T ui wget -q -O - http://trading-bot-web:8080/web/
+  docker run --rm --network container:trading-bot-ui busybox:1.36 \
+    wget -q -O /dev/null http://trading-bot-web:8080/web/
 
 # API health: read-only HTTP API must answer inside the compose network.
 run_healthcheck_with_retries "trading-bot-api container" 30 2 \
-  docker compose \
-    -p "${PROJECT_NAME}" \
-    -f "${COMPOSE_FILE}" \
-    exec -T ui wget -q -O - http://trading-bot-api:8080/api/health
+  docker run --rm --network container:trading-bot-ui busybox:1.36 \
+    wget -q -O /dev/null http://trading-bot-api:8080/api/health
 
 # Worker health: workers have no HTTP endpoint, so verify both containers are running.
 for WORKER_CONTAINER in trading-bot-spot-worker-live trading-bot-spot-worker-virtual trading-bot-futures-worker-live trading-bot-futures-worker-virtual; do

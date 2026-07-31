@@ -565,6 +565,7 @@ internal sealed class FuturesDecisionWorker(
         var portfolioBefore = state.Clone();
         var decisions = new List<DryRunDecisionRecord>();
         var closed = 0;
+        var recorded = 0;
         foreach (var held in state.Positions.ToList())
         {
             if (!stateByPair.TryGetValue(held.Pair, out var marketState))
@@ -601,16 +602,24 @@ internal sealed class FuturesDecisionWorker(
                 fill.Action.ExitReasonCode = "SELL_MAX_HOLD";
             }
 
-            if (fill?.PositionClosed == true)
+            if (fill is not null)
             {
-                closed++;
                 decisions.Add(BuildFastExitDecisionRecord(marketState, fill));
-                Console.WriteLine($"futures fast-exit-check: closed {held.Pair} reason={fill.Action.ExitReasonCode ?? fill.Action.Reason}");
+                recorded++;
+                if (fill.PositionClosed)
+                {
+                    closed++;
+                    Console.WriteLine($"futures fast-exit-check: closed {held.Pair} reason={fill.Action.ExitReasonCode ?? fill.Action.Reason}");
+                }
+                else
+                {
+                    Console.WriteLine($"futures fast-exit-check: recorded {held.Pair} action={fill.Action.Action} reason={fill.Action.HoldReasonCode ?? fill.Action.Reason}");
+                }
             }
         }
 
         portfolio.Save(state);
-        if (closed > 0)
+        if (recorded > 0)
         {
             portfolio.Store.AppendCycle(new DryRunCycleRecord
             {
@@ -627,7 +636,7 @@ internal sealed class FuturesDecisionWorker(
                 PortfolioAfter = state.Clone(),
                 EntryDiagnostics = null
             });
-            Console.WriteLine($"futures fast-exit-check: closed={closed} remainingPositions={state.Positions.Count}");
+            Console.WriteLine($"futures fast-exit-check: recorded={recorded} closed={closed} remainingPositions={state.Positions.Count}");
         }
     }
 
@@ -693,6 +702,13 @@ internal sealed class FuturesDecisionWorker(
             && IsBotOwnedFuturesPosition(held))
         {
             var trailing = await ActivateTrailingStopAsync(held, instrument, cancellationToken);
+            var trailingSucceeded = TrailingActivationSucceeded(trailing);
+            if (!trailingSucceeded)
+            {
+                held.TpOrderState = trigger.PreviousTpOrderState;
+                held.SlOrderState = trigger.PreviousSlOrderState;
+            }
+
             var desired = held.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase)
                 ? FuturesDesiredExposure.Short
                 : FuturesDesiredExposure.Long;
@@ -704,7 +720,7 @@ internal sealed class FuturesDecisionWorker(
                 0m,
                 held.Leverage ?? 1m,
                 reason: trailing);
-            hold.Action.HoldReasonCode = trailing.Contains("activated", StringComparison.OrdinalIgnoreCase)
+            hold.Action.HoldReasonCode = trailingSucceeded
                 ? "TRAILING_ACTIVATED"
                 : "TRAILING_ACTIVATION_FAILED";
             hold.Action.ExitTriggerSource = trigger.TriggerSource;
@@ -742,7 +758,7 @@ internal sealed class FuturesDecisionWorker(
         CancellationToken cancellationToken,
         string reasonPrefix = "working take-profit reached",
         bool requireBothProtectionOrders = false,
-        (FuturesOpenOrder? StopLossOrder, FuturesOpenOrder? TakeProfitOrder)? knownProtection = null)
+        (FuturesOpenOrder? StopLossOrder, FuturesOpenOrder? TakeProfitOrder, FuturesOpenOrder? TrailingStopOrder)? knownProtection = null)
     {
         if (broker?.IsConfigured != true)
         {
@@ -803,7 +819,7 @@ internal sealed class FuturesDecisionWorker(
     private async Task TryActivateExternalTrailingStopAsync(
         PortfolioPosition position,
         InstrumentOptions instrument,
-        (FuturesOpenOrder? StopLossOrder, FuturesOpenOrder? TakeProfitOrder) protection,
+        (FuturesOpenOrder? StopLossOrder, FuturesOpenOrder? TakeProfitOrder, FuturesOpenOrder? TrailingStopOrder) protection,
         CancellationToken cancellationToken)
     {
         if (!config.TpSl.Enabled
@@ -1257,7 +1273,7 @@ internal sealed class FuturesDecisionWorker(
             var pnl = FuturesMath.UnrealizedPnlEur(remote.Side, remote.EntryPrice, mark, remote.Size);
             var existing = state.Positions.FirstOrDefault(position => position.Pair.Equals(instrument.Pair, StringComparison.OrdinalIgnoreCase));
             var protectionOrders = FindProtectionOrders(openOrders, remote.Symbol, remote.Side);
-            var tpSl = ImportedTpSl(existing, remote.Side, remote.EntryPrice, protectionOrders.StopLossOrder, protectionOrders.TakeProfitOrder);
+            var tpSl = ImportedTpSl(existing, remote.Side, remote.EntryPrice, protectionOrders.StopLossOrder, protectionOrders.TakeProfitOrder, protectionOrders.TrailingStopOrder);
             tpSl = await EnsureExchangeProtectionOrdersAsync(
                 instrument,
                 remote,
@@ -1493,10 +1509,23 @@ internal sealed class FuturesDecisionWorker(
         string side,
         decimal entryPrice,
         FuturesOpenOrder? existingStopLoss,
-        FuturesOpenOrder? existingTakeProfit)
+        FuturesOpenOrder? existingTakeProfit,
+        FuturesOpenOrder? existingTrailingStop)
     {
         var stopDistancePct = config.TpSl.StopLossPercent;
         var takeProfitDistancePct = config.TpSl.TakeProfitPercent;
+        var trailingStopState = existingTrailingStop is not null
+            ? "EXCHANGE_OPEN"
+            : existing?.TrailingStopState;
+        var trailingStopPercent = existingTrailingStop?.TrailingStopPercent is > 0m
+            ? existingTrailingStop.TrailingStopPercent
+            : existing?.TrailingStopPercent ?? (existingTrailingStop is not null ? config.TpSl.TrailingStopPercent : null);
+        var trailingStopOrderId = existingTrailingStop is not null
+            ? existingTrailingStop.OrderId
+            : existing?.TrailingStopOrderId;
+        var trailingActivatedAtUtc = existingTrailingStop is not null
+            ? existing?.TrailingActivatedAtUtc
+            : existing?.TrailingActivatedAtUtc;
 
         if (!config.TpSl.Enabled || entryPrice <= 0m || stopDistancePct <= 0m || takeProfitDistancePct <= 0m)
         {
@@ -1510,10 +1539,10 @@ internal sealed class FuturesDecisionWorker(
                 existing?.ExchangeStopLossPrice,
                 existing?.ExchangeTakeProfitPrice,
                 existing?.ExchangeProtectionMultiplierPercent,
-                existing?.TrailingStopState,
-                existing?.TrailingStopPercent,
-                existing?.TrailingStopOrderId,
-                existing?.TrailingActivatedAtUtc);
+                trailingStopState,
+                trailingStopPercent,
+                trailingStopOrderId,
+                trailingActivatedAtUtc);
         }
 
         var isShort = side.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
@@ -1551,8 +1580,12 @@ internal sealed class FuturesDecisionWorker(
                 : ExchangeProtectionPrice(entryPrice, side, isTakeProfit: true);
 
         return new ImportedTpSlState(
-            existingTakeProfit is not null ? "EXCHANGE_OPEN" : existing?.TpOrderState ?? "SIMULATED_OPEN",
-            existingStopLoss is not null ? "EXCHANGE_OPEN" : existing?.SlOrderState ?? "SIMULATED_OPEN",
+            trailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true
+                ? "CANCELLED"
+                : existingTakeProfit is not null ? "EXCHANGE_OPEN" : existing?.TpOrderState ?? "SIMULATED_OPEN",
+            trailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true
+                ? "CANCELLED"
+                : existingStopLoss is not null ? "EXCHANGE_OPEN" : existing?.SlOrderState ?? "SIMULATED_OPEN",
             decimal.Round(stopLossPrice, 8),
             decimal.Round(takeProfitPrice, 8),
             effectiveStopDistancePct,
@@ -1560,10 +1593,10 @@ internal sealed class FuturesDecisionWorker(
             decimal.Round(exchangeStopLossPrice, 8),
             decimal.Round(exchangeTakeProfitPrice, 8),
             config.TpSl.ExchangeProtectionMultiplierPercent,
-            existing?.TrailingStopState,
-            existing?.TrailingStopPercent,
-            existing?.TrailingStopOrderId,
-            existing?.TrailingActivatedAtUtc);
+            trailingStopState,
+            trailingStopPercent,
+            trailingStopOrderId,
+            trailingActivatedAtUtc);
     }
 
     private static decimal DistancePct(decimal entryPrice, decimal price) =>
@@ -1571,7 +1604,7 @@ internal sealed class FuturesDecisionWorker(
             ? 0m
             : decimal.Round(Math.Abs(price - entryPrice) / entryPrice * 100m, 6);
 
-    private static (FuturesOpenOrder? StopLossOrder, FuturesOpenOrder? TakeProfitOrder) FindProtectionOrders(
+    private static (FuturesOpenOrder? StopLossOrder, FuturesOpenOrder? TakeProfitOrder, FuturesOpenOrder? TrailingStopOrder) FindProtectionOrders(
         IReadOnlyList<FuturesOpenOrder> openOrders,
         string symbol,
         string positionSide)
@@ -1584,7 +1617,8 @@ internal sealed class FuturesDecisionWorker(
             .ToList();
         var stop = matching.FirstOrDefault(order => IsStopLossOrder(order.OrderType));
         var takeProfit = matching.FirstOrDefault(order => IsTakeProfitOrder(order.OrderType));
-        return (stop, takeProfit);
+        var trailingStop = matching.FirstOrDefault(order => IsTrailingStopOrder(order.OrderType));
+        return (stop, takeProfit, trailingStop);
     }
 
     private static bool IsStopLossOrder(string orderType) =>
@@ -1597,6 +1631,15 @@ internal sealed class FuturesDecisionWorker(
         orderType.Equals("take_profit", StringComparison.OrdinalIgnoreCase)
         || orderType.Equals("takeprofit", StringComparison.OrdinalIgnoreCase)
         || orderType.Equals("take-profit", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTrailingStopOrder(string orderType) =>
+        orderType.Equals("trailing_stop", StringComparison.OrdinalIgnoreCase)
+        || orderType.Equals("trailingstop", StringComparison.OrdinalIgnoreCase)
+        || orderType.Equals("trailing-stop", StringComparison.OrdinalIgnoreCase);
+
+    private static bool TrailingActivationSucceeded(string result) =>
+        result.Contains("activated reduce-only trailing", StringComparison.OrdinalIgnoreCase)
+        || result.Contains("trailing stop already active", StringComparison.OrdinalIgnoreCase);
 
     private static string CloseSide(string positionSide) =>
         positionSide.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? "buy" : "sell";
@@ -2429,7 +2472,9 @@ internal sealed class FuturesDecisionWorker(
         FastEma = null,
         SlowEma = null,
         Rsi = null,
-        DesiredPosition = "FLAT",
+        DesiredPosition = string.IsNullOrWhiteSpace(fill.Action.DesiredPosition)
+            ? "FLAT"
+            : fill.Action.DesiredPosition,
         Score = 0m,
         RiskApproved = true,
         RiskReasons = new[] { "fast held-position exit check" },

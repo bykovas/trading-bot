@@ -295,6 +295,7 @@ internal sealed class FuturesVirtualPortfolio(
     private FuturesFillResult Hold(PortfolioState state, PortfolioPosition position, string reason)
     {
         var action = BaseAction(position.Pair, "WOULD_HOLD", reason);
+        action.DesiredPosition = position.Side;
         action.Side = position.Side;
         action.Leverage = position.Leverage;
         action.Quantity = position.Quantity;

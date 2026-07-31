@@ -6,7 +6,13 @@ namespace TradingBot.FuturesWorker;
 // can actually be reduced, not a stale candle/last value.
 internal sealed class TpSlOrchestrator(FuturesBotConfiguration config)
 {
-    public sealed record TpSlTrigger(string Pair, string Kind, decimal TriggerPrice, string TriggerSource);
+    public sealed record TpSlTrigger(
+        string Pair,
+        string Kind,
+        decimal TriggerPrice,
+        string TriggerSource,
+        string? PreviousTpOrderState = null,
+        string? PreviousSlOrderState = null);
 
     public TpSlTrigger? Evaluate(
         PortfolioPosition position,
@@ -45,9 +51,11 @@ internal sealed class TpSlOrchestrator(FuturesBotConfiguration config)
             var stopHit = isShort ? price >= stop : price <= stop;
             if (stopHit)
             {
+                var previousTpOrderState = position.TpOrderState;
+                var previousSlOrderState = position.SlOrderState;
                 position.SlOrderState = "TRIGGERED";
                 position.TpOrderState = position.TpOrderState == "SIMULATED_OPEN" ? "CANCELLED" : position.TpOrderState;
-                return new TpSlTrigger(position.Pair, "STOP_LOSS", stop, priceSource);
+                return new TpSlTrigger(position.Pair, "STOP_LOSS", stop, priceSource, previousTpOrderState, previousSlOrderState);
             }
         }
 
@@ -56,9 +64,11 @@ internal sealed class TpSlOrchestrator(FuturesBotConfiguration config)
             var takeHit = isShort ? price <= take : price >= take;
             if (takeHit)
             {
+                var previousTpOrderState = position.TpOrderState;
+                var previousSlOrderState = position.SlOrderState;
                 position.TpOrderState = "TRIGGERED";
                 position.SlOrderState = position.SlOrderState == "SIMULATED_OPEN" ? "CANCELLED" : position.SlOrderState;
-                return new TpSlTrigger(position.Pair, "TAKE_PROFIT", take, priceSource);
+                return new TpSlTrigger(position.Pair, "TAKE_PROFIT", take, priceSource, previousTpOrderState, previousSlOrderState);
             }
         }
 

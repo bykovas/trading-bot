@@ -16,8 +16,8 @@ services:
     env_file:
       - /opt/trading-bot/web/.env
     depends_on:
-      database:
-        condition: service_healthy
+      db-ready:
+        condition: service_completed_successfully
     networks:
       - default
       - traefik
@@ -29,8 +29,8 @@ services:
     env_file:
       - /opt/trading-bot/api/.env
     depends_on:
-      database:
-        condition: service_healthy
+      db-ready:
+        condition: service_completed_successfully
     networks:
       - default
       - traefik
@@ -42,8 +42,8 @@ services:
     env_file:
       - /opt/trading-bot/spot/live/.env
     depends_on:
-      database:
-        condition: service_healthy
+      db-ready:
+        condition: service_completed_successfully
     # Runtime config, secrets, data, and logs are instance-specific.
     volumes:
       - /opt/trading-bot/spot/live/appsettings.json:/app/appsettings.json:ro
@@ -57,8 +57,8 @@ services:
     env_file:
       - /opt/trading-bot/spot/virtual/.env
     depends_on:
-      database:
-        condition: service_healthy
+      db-ready:
+        condition: service_completed_successfully
     # Virtual worker is forced non-live by /opt/trading-bot/spot/virtual/.env.
     volumes:
       - /opt/trading-bot/spot/virtual/appsettings.json:/app/appsettings.json:ro
@@ -72,8 +72,8 @@ services:
     env_file:
       - /opt/trading-bot/futures/live/.env
     depends_on:
-      database:
-        condition: service_healthy
+      db-ready:
+        condition: service_completed_successfully
     # Futures live execution is gated by /opt/trading-bot/futures/live/.env.
     volumes:
       - /opt/trading-bot/futures/live/appsettings.json:/app/appsettings.json:ro
@@ -87,8 +87,8 @@ services:
     env_file:
       - /opt/trading-bot/futures/virtual/.env
     depends_on:
-      database:
-        condition: service_healthy
+      db-ready:
+        condition: service_completed_successfully
     volumes:
       - /opt/trading-bot/futures/virtual/appsettings.json:/app/appsettings.json:ro
       - /opt/trading-bot/futures/virtual/data:/app/data
@@ -101,8 +101,8 @@ services:
     env_file:
       - /opt/trading-bot/market-data/.env
     depends_on:
-      database:
-        condition: service_healthy
+      db-ready:
+        condition: service_completed_successfully
     volumes:
       - /opt/trading-bot/market-data/appsettings.json:/app/appsettings.json:ro
       - /opt/trading-bot/market-data/logs:/app/logs
@@ -116,16 +116,23 @@ services:
     environment:
       POSTGRES_DB: tradingbot
       POSTGRES_USER: tradingbot
-    # Expose Postgres only on the VPN interface, not on public interfaces.
+    # Expose Postgres only on a non-public interface. The default localhost bind
+    # keeps database startup independent from late VPN interface creation; set
+    # POSTGRES_BIND_HOST=10.8.0.1 only on hosts that guarantee wg0 is up first.
     ports:
-      - "10.8.0.1:5432:5432"
+      - "${POSTGRES_BIND_HOST:-127.0.0.1}:5432:5432"
     volumes:
       - /opt/trading-bot/database:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tradingbot -d tradingbot"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
+
+  db-ready:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      database:
+        condition: service_started
+    command: ["sh", "-c", "until pg_isready -h database -p 5432 -U tradingbot -d tradingbot; do sleep 2; done"]
+    networks:
+      - default
 
 networks:
   traefik:

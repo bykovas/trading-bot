@@ -121,7 +121,8 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
                 orderType,
                 unfilledSize,
                 GetDecimal(item, "stopPrice") ?? GetDecimal(item, "triggerPrice"),
-                GetBool(item, "reduceOnly") || GetBool(item, "reduce_only")));
+                GetBool(item, "reduceOnly") || GetBool(item, "reduce_only"),
+                GetDecimal(item, "trailingStopMaxDeviation") ?? GetDecimal(item, "maxDeviation")));
         }
 
         return orders;

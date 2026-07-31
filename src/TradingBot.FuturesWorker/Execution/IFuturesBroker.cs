@@ -75,7 +75,8 @@ internal sealed record FuturesOpenOrder(
     string OrderType,
     decimal UnfilledSize,
     decimal? StopPrice,
-    bool ReduceOnly);
+    bool ReduceOnly,
+    decimal? TrailingStopPercent = null);
 
 internal sealed record FuturesTickerQuote(string Symbol, decimal Bid, decimal Ask, decimal Last, decimal? MarkPrice, DateTimeOffset TimestampUtc);
 
