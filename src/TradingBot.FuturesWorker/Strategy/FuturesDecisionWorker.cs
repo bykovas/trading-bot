@@ -130,19 +130,15 @@ internal sealed class FuturesDecisionWorker(
 
         var portfolioBefore = state.Clone();
 
-        // Held pairs are always evaluated; new-entry candidates come from the
-        // discovered universe capped by MaxActiveInstruments. Strong movers are
-        // ranked ahead of pure-volume leaders so fresh futures runners are not
-        // hidden behind BTC/ETH-sized books.
+        // Held pairs are always evaluated; new-entry candidates first use the
+        // normal MaxActiveInstruments ranking, then missing force-included pairs
+        // are appended so core markets do not crowd out fresh movers.
         var heldPairs = state.Positions.Select(position => position.Pair).ToHashSet();
-        var active = lightStates
-            .OrderByDescending(candidate => heldPairs.Contains(candidate.Instrument.Pair))
-            .ThenByDescending(IsStrongMoverActiveCandidate)
-            .ThenByDescending(candidate => Math.Abs(candidate.ChangePercent))
-            .ThenByDescending(candidate => candidate.LastVolume * candidate.LastPrice)
-            .Take(Math.Max(config.Trading.MaxActiveInstruments, heldPairs.Count))
-            .Select(candidate => candidate.Instrument)
-            .ToList();
+        var active = SelectActiveInstruments(
+            lightStates,
+            heldPairs,
+            config.UniverseDiscovery.ForceInclude,
+            config.Trading).ToList();
         var btcInstrument = universe.FirstOrDefault(instrument => instrument.Pair.Equals(config.Regime.BtcPair, StringComparison.OrdinalIgnoreCase));
         if (btcInstrument is not null && active.All(instrument => !instrument.Pair.Equals(btcInstrument.Pair, StringComparison.OrdinalIgnoreCase)))
         {
@@ -644,11 +640,50 @@ internal sealed class FuturesDecisionWorker(
         marketState.Quote?.MarkPrice
         ?? marketState.LastPrice;
 
-    private bool IsStrongMoverActiveCandidate(InstrumentMarketState state)
+    internal static IReadOnlyList<InstrumentOptions> SelectActiveInstruments(
+        IReadOnlyList<InstrumentMarketState> lightStates,
+        IReadOnlySet<string> heldPairs,
+        IReadOnlyList<string> forceIncludePairs,
+        TradingOptions trading)
+    {
+        var forceIncluded = forceIncludePairs
+            .Where(pair => !string.IsNullOrWhiteSpace(pair))
+            .Select(pair => pair.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var selected = lightStates
+            .OrderByDescending(candidate => heldPairs.Contains(candidate.Instrument.Pair))
+            .ThenByDescending(candidate => IsStrongMoverActiveCandidate(candidate, trading))
+            .ThenByDescending(candidate => Math.Abs(candidate.ChangePercent))
+            .ThenByDescending(candidate => candidate.LastVolume * candidate.LastPrice)
+            .Take(Math.Max(trading.MaxActiveInstruments, heldPairs.Count))
+            .Select(candidate => candidate.Instrument)
+            .ToList();
+
+        var selectedPairs = selected
+            .Select(instrument => instrument.Pair)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var state in lightStates.Where(state => IsForceIncludedActiveCandidate(state, forceIncluded)))
+        {
+            if (selectedPairs.Add(state.Instrument.Pair))
+            {
+                selected.Add(state.Instrument);
+            }
+        }
+
+        return selected;
+    }
+
+    private static bool IsForceIncludedActiveCandidate(InstrumentMarketState state, IReadOnlySet<string> forceIncluded) =>
+        forceIncluded.Contains(state.Instrument.Pair)
+        || forceIncluded.Contains(state.Instrument.KrakenPair);
+
+    private static bool IsStrongMoverActiveCandidate(InstrumentMarketState state, TradingOptions trading)
     {
         var notionalVolume = state.LastVolume * state.LastPrice;
-        return Math.Abs(state.ChangePercent) >= config.Trading.StrongMoverMinChangePercent
-            && notionalVolume >= config.Trading.StrongMoverMinDailyVolumeEur;
+        return Math.Abs(state.ChangePercent) >= trading.StrongMoverMinChangePercent
+            && notionalVolume >= trading.StrongMoverMinDailyVolumeEur;
     }
 
     // Best-effort warm-up hydration from persisted market snapshots, so the

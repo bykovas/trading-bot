@@ -1,3 +1,9 @@
+## 2026-07-31-futures-force-include-active-universe
+
+- Futures active selection now treats `UniverseDiscovery.ForceInclude` as a true detailed-evaluation guarantee, not only as a discovery fallback. The worker still selects the normal `Trading.MaxActiveInstruments` set first using the existing held-position / strong-mover / absolute-change / volume ranking, then appends any missing force-included pairs. Core pairs such as ETH therefore cannot disappear from `cycle-decisions` just because their 24h move is quiet, and force-included pairs do not crowd out the normal top movers.
+- Futures and market-data appsettings now share the same 40-pair Kraken Futures force list: XBT, ETH, SOL, XRP, HYPE, DOGE, ADA, SUI, ZEC, LINK, AVAX, NEAR, XLM, BNB, LTC, BCH, AAVE, TAO, INJ, ENA, ONDO, UNI, TRX, DOT, ATOM, FIL, ARB, OP, POL, CRV, HBAR, LDO, XMR, PEPE, WIF, SHIB, BONK, PENGU, APT, and ALGO. The names were verified against the live futures `instrument_registry`.
+- Not changed: scoring thresholds, LONG/SHORT entry guards, anti-chase logic, sizing, leverage, TP/SL, Kraken execution, reconciliation, or dead-man switch settings.
+
 ## 2026-07-31-futures-trailing-reconciliation-and-db-first-deploy
 
 - Futures live fast-exit checks now persist non-closing TP events such as `TRAILING_ACTIVATED` / `TRAILING_ACTIVATION_FAILED` into the cycle journal. A bot-owned live position that reaches working TP and arms a Kraken trailing stop is now visible in the decisions/trades UI instead of disappearing because the position stayed open.
