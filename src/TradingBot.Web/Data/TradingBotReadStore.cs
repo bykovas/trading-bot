@@ -273,14 +273,14 @@ public sealed class TradingBotReadStore(IConfiguration configuration)
         await using var command = new NpgsqlCommand(
             """
             select updated_at,
-                   cash_eur,
-                   cash_quote_value,
+                   round(cash_eur, 8) as cash_eur,
+                   round(cash_quote_value, 8) as cash_quote_value,
                    cash_quote_currency,
-                   positions_value_eur,
-                   total_value_eur,
+                   round(positions_value_eur, 8) as positions_value_eur,
+                   round(total_value_eur, 8) as total_value_eur,
                    open_positions,
-                   coalesce(daily_realized_pnl_eur, 0),
-                   external_pnl_eur
+                   round(coalesce(daily_realized_pnl_eur, 0), 8),
+                   round(external_pnl_eur, 8)
             from portfolio_state_summary
             where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
             order by updated_at desc

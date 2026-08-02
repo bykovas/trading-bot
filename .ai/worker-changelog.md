@@ -1,3 +1,9 @@
+## 2026-08-02-futures-small-2x-sizing-and-portfolio-api-rounding
+
+- Futures appsettings now target small entries: `Futures.TargetMarginEur`=5, `Futures.DefaultLeverage`/`MaxLeverage`=2x, `Futures.MaxNotionalEur`=10, `Futures.MaxTotalNotionalEur`=30, `Futures.MaxMarginPerPositionEur`=5, and `CorrelationRisk.MaxExposureEurPerGroup`=10. `Risk.TargetRiskEur`=0.3 / `MaxConcurrentOpenRisk`=0.9 keep accepted stops from shrinking below the 10 EUR notional cap while still bounding three configured slots.
+- Portfolio API/Web summary reads now round display numerics to 8 decimal places in SQL before Npgsql maps them to C# decimals. This prevents long-scale Postgres numeric values from making `/api/portfolio` return 500 while leaving stored ledger precision unchanged.
+- Not changed: entry scoring, LONG/SHORT guards, TP/SL percentages, trailing-stop handoff, Kraken reconciliation, universe selection, or dead-man switch behavior.
+
 ## 2026-07-31-futures-force-include-active-universe
 
 - Futures active selection now treats `UniverseDiscovery.ForceInclude` as a true detailed-evaluation guarantee, not only as a discovery fallback. The worker still selects the normal `Trading.MaxActiveInstruments` set first using the existing held-position / strong-mover / absolute-change / volume ranking, then appends any missing force-included pairs. Core pairs such as ETH therefore cannot disappear from `cycle-decisions` just because their 24h move is quiet, and force-included pairs do not crowd out the normal top movers.

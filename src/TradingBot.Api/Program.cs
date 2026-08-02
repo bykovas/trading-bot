@@ -371,10 +371,10 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
         """
         select
             updated_at,
-            cash_eur,
-            cash_quote_value,
+            round(cash_eur, 8) as cash_eur,
+            round(cash_quote_value, 8) as cash_quote_value,
             cash_quote_currency,
-            coalesce((
+            round(coalesce((
                 select sum(
                     case
                         when position.leverage is null
@@ -383,8 +383,8 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
                     end)
                 from portfolio_position_state position
                 where position.bot_instance_id = summary.bot_instance_id
-            ), 0) as positions_value_eur,
-            cash_eur + coalesce((
+            ), 0), 8) as positions_value_eur,
+            round(cash_eur + coalesce((
                 select sum(
                     case
                         when position.leverage is null
@@ -393,13 +393,13 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
                     end)
                 from portfolio_position_state position
                 where position.bot_instance_id = summary.bot_instance_id
-            ), 0) as total_value_eur,
+            ), 0), 8) as total_value_eur,
             open_positions,
             daily_risk_date_utc,
-            daily_realized_pnl_eur,
-            external_pnl_eur,
-            positions_value_eur as net_positions_value_eur,
-            total_value_eur as net_total_value_eur
+            round(daily_realized_pnl_eur, 8) as daily_realized_pnl_eur,
+            round(external_pnl_eur, 8) as external_pnl_eur,
+            round(positions_value_eur, 8) as net_positions_value_eur,
+            round(total_value_eur, 8) as net_total_value_eur
         from portfolio_state_summary summary
         where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
         order by updated_at desc
