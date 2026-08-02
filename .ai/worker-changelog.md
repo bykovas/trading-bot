@@ -2,7 +2,8 @@
 
 - Futures appsettings now target small entries: `Futures.TargetMarginEur`=5, `Futures.DefaultLeverage`/`MaxLeverage`=2x, `Futures.MaxNotionalEur`=10, `Futures.MaxTotalNotionalEur`=30, `Futures.MaxMarginPerPositionEur`=5, and `CorrelationRisk.MaxExposureEurPerGroup`=10. `Risk.TargetRiskEur`=0.3 / `MaxConcurrentOpenRisk`=0.9 keep accepted stops from shrinking below the 10 EUR notional cap while still bounding three configured slots.
 - Portfolio API/Web summary reads now round display numerics to 8 decimal places in SQL before Npgsql maps them to C# decimals. This prevents long-scale Postgres numeric values from making `/api/portfolio` return 500 while leaving stored ledger precision unchanged.
-- Not changed: entry scoring, LONG/SHORT guards, TP/SL percentages, trailing-stop handoff, Kraken reconciliation, universe selection, or dead-man switch behavior.
+- Kraken Futures reconciliation now preserves the exchange-reported leverage for existing remote positions instead of clamping it to the new-entry `Futures.MaxLeverage` cap. Lowering the entry cap to 2x therefore cannot inflate already-open 10x positions in the UI ledger.
+- Not changed: entry scoring, LONG/SHORT guards, TP/SL percentages, trailing-stop handoff, universe selection, or dead-man switch behavior.
 
 ## 2026-07-31-futures-force-include-active-universe
 

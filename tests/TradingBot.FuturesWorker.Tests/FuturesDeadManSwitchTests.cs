@@ -83,8 +83,8 @@ public sealed class FuturesDeadManSwitchTests
             Futures = new FuturesOptions
             {
                 LiveTradingEnabled = true,
-                DefaultLeverage = 10m,
-                MaxLeverage = 10m,
+                DefaultLeverage = 2m,
+                MaxLeverage = 2m,
                 DeadManSwitchSeconds = 240
             },
             TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 3m, StopLossPercent = 2m },
@@ -395,6 +395,7 @@ public sealed class FuturesDeadManSwitchTests
         Assert.True(trailing.ReduceOnly);
         var position = Assert.Single(state.Positions);
         Assert.Equal(PositionOrigins.KrakenSync, position.Origin);
+        Assert.Equal(10m, position.Leverage);
         Assert.Equal("CANCELLED", position.TpOrderState);
         Assert.Equal("CANCELLED", position.SlOrderState);
         Assert.Equal("EXCHANGE_OPEN", position.TrailingStopState);

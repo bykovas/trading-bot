@@ -1302,7 +1302,12 @@ internal sealed class FuturesDecisionWorker(
             var mark = remote.MarkPrice > 0m
                 ? remote.MarkPrice
                 : markByPair.GetValueOrDefault(instrument.Pair, remote.EntryPrice);
-            var leverage = Math.Clamp(remote.Leverage <= 0m ? config.Futures.DefaultLeverage : remote.Leverage, 1m, config.Futures.MaxLeverage);
+            // MaxLeverage is an entry cap, not a historical truth filter. A position that
+            // already exists on Kraken must be booked with the exchange-reported leverage;
+            // otherwise lowering the new-entry cap corrupts synced margin/value math.
+            var leverage = remote.Leverage <= 0m
+                ? Math.Clamp(config.Futures.DefaultLeverage, 1m, config.Futures.MaxLeverage)
+                : Math.Max(1m, remote.Leverage);
             var notional = remote.EntryPrice * remote.Size;
             var initialMargin = leverage <= 0m ? notional : notional / leverage;
             var pnl = FuturesMath.UnrealizedPnlEur(remote.Side, remote.EntryPrice, mark, remote.Size);
