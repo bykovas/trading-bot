@@ -251,7 +251,9 @@ public sealed class FuturesLongRangeGuardTests
             {
                 AntiChaseMinRangePositionPct = 120m,
                 LowRangeMinConfirmations = 9,
-                DriftAtrMultiple = -1m
+                DriftAtrMultiple = -1m,
+                UpperBreakoutMinFollowThroughPct = 9m,
+                MidRangeReclaimMinPriceActionTrendPct = -1m
             }
         };
 
@@ -260,6 +262,8 @@ public sealed class FuturesLongRangeGuardTests
         Assert.Equal(35m, config.Freshness.AntiChaseMinRangePositionPct);
         Assert.Equal(2, config.Freshness.LowRangeMinConfirmations);
         Assert.Equal(0.25m, config.Freshness.DriftAtrMultiple);
+        Assert.Equal(0.60m, config.Freshness.UpperBreakoutMinFollowThroughPct);
+        Assert.Equal(0.50m, config.Freshness.MidRangeReclaimMinPriceActionTrendPct);
     }
 
     [Fact]

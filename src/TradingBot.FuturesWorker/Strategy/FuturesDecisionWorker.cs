@@ -357,15 +357,26 @@ internal sealed class FuturesDecisionWorker(
                             $"LONG_RELATIVE_STRENGTH pair={pair} pairMomentum={freshness?.RecentCandleMomentumPct:0.###}% btcMomentum={btcRegime.RecentChangePct:0.###}% relative={relativeStrength:0.###}% min={config.Regime.MinRelativeStrengthPct:0.###}% blocked=true");
                     }
 
+                    var followThroughGate = qualityGate.Approved && relativeStrengthBlock is null && longRange is { Blocked: false }
+                        ? FuturesLongFollowThroughGate.Evaluate(desired, longRange, freshness, priceAction, config.Freshness)
+                        : new RiskEvaluation(true, new[] { "long follow-through gate skipped" });
+                    if (!followThroughGate.Approved)
+                    {
+                        Console.WriteLine(
+                            $"LONG_FOLLOW_THROUGH pair={pair} zone={longRange?.Zone ?? "-"} breakout={freshness?.HasFreshBreakout} candleMom={freshness?.RecentCandleMomentumPct:0.###} priceAction={priceAction?.TrendPercent:0.###} blocked=true reason={followThroughGate.Reasons.FirstOrDefault() ?? "-"}");
+                    }
+
                     // Gate precedence: relative strength (only when enabled), then the side
-                    // range/anti-knife guard (its reasons are the most specific), then the
-                    // freshness guard, then the quality gate.
+                    // range/anti-knife guard (its reasons are the most specific), then
+                    // follow-through quality, then the freshness guard, then the quality gate.
                     var freshnessGate = qualityGate.Approved && relativeStrengthBlock is not null
                         ? new RiskEvaluation(false, new[] { relativeStrengthBlock })
                         : qualityGate.Approved && longRange is { Blocked: true }
                         ? new RiskEvaluation(false, new[] { longRange.BlockReason ?? "long blocked by 24h range guard" })
                         : qualityGate.Approved && shortEntry is { Blocked: true }
                             ? new RiskEvaluation(false, new[] { shortEntry.BlockReason ?? "short blocked by range guard" })
+                        : qualityGate.Approved && !followThroughGate.Approved
+                            ? followThroughGate
                         : qualityGate.Approved && freshness is { Blocked: true }
                             ? new RiskEvaluation(false, new[] { freshness.BlockReason ?? "entry stale near high" })
                             : qualityGate;

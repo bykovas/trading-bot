@@ -129,6 +129,8 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_LOW_RANGE_MIN_CONFIRMATIONS", value => config.Freshness.LowRangeMinConfirmations = ParseInt(value, config.Freshness.LowRangeMinConfirmations));
         SetIfPresent("TRADINGBOT_FUTURES_DRIFT_ATR_MULTIPLE", value => config.Freshness.DriftAtrMultiple = ParseDecimal(value, config.Freshness.DriftAtrMultiple));
         SetIfPresent("TRADINGBOT_FUTURES_LOW_RANGE_REQUIRE_STRONG_CONFIRMATION", value => config.Freshness.LowRangeRequireStrongConfirmation = ParseBool(value, config.Freshness.LowRangeRequireStrongConfirmation));
+        SetIfPresent("TRADINGBOT_FUTURES_UPPER_BREAKOUT_MIN_FOLLOW_THROUGH_PERCENT", value => config.Freshness.UpperBreakoutMinFollowThroughPct = ParseDecimal(value, config.Freshness.UpperBreakoutMinFollowThroughPct));
+        SetIfPresent("TRADINGBOT_FUTURES_MID_RANGE_RECLAIM_MIN_PRICE_ACTION_TREND_PERCENT", value => config.Freshness.MidRangeReclaimMinPriceActionTrendPct = ParseDecimal(value, config.Freshness.MidRangeReclaimMinPriceActionTrendPct));
         SetIfPresent("TRADINGBOT_FUTURES_SHORT_ANTI_CHASE_MAX_RANGE_POSITION_PERCENT", value => config.Shorts.AntiChaseMaxRangePositionPct = ParseDecimal(value, config.Shorts.AntiChaseMaxRangePositionPct));
         SetIfPresent("TRADINGBOT_FUTURES_RELATIVE_STRENGTH_GATE_ENABLED", value => config.Regime.RelativeStrengthGateEnabled = ParseBool(value, config.Regime.RelativeStrengthGateEnabled));
         SetIfPresent("TRADINGBOT_FUTURES_MIN_RELATIVE_STRENGTH_PERCENT", value => config.Regime.MinRelativeStrengthPct = ParseDecimal(value, config.Regime.MinRelativeStrengthPct));
@@ -268,6 +270,18 @@ internal sealed class FuturesBotConfiguration
         {
             Console.WriteLine($"config-validation: Freshness.DriftAtrMultiple={Freshness.DriftAtrMultiple} is out of [0,5]; reset to 0.25.");
             Freshness.DriftAtrMultiple = 0.25m;
+        }
+
+        if (Freshness.UpperBreakoutMinFollowThroughPct < 0m || Freshness.UpperBreakoutMinFollowThroughPct > 5m)
+        {
+            Console.WriteLine($"config-validation: Freshness.UpperBreakoutMinFollowThroughPct={Freshness.UpperBreakoutMinFollowThroughPct} is out of [0,5]; reset to 0.60.");
+            Freshness.UpperBreakoutMinFollowThroughPct = 0.60m;
+        }
+
+        if (Freshness.MidRangeReclaimMinPriceActionTrendPct < 0m || Freshness.MidRangeReclaimMinPriceActionTrendPct > 5m)
+        {
+            Console.WriteLine($"config-validation: Freshness.MidRangeReclaimMinPriceActionTrendPct={Freshness.MidRangeReclaimMinPriceActionTrendPct} is out of [0,5]; reset to 0.50.");
+            Freshness.MidRangeReclaimMinPriceActionTrendPct = 0.50m;
         }
 
         Regime.MinRelativeStrengthPct = Math.Clamp(Regime.MinRelativeStrengthPct, 0m, 100m);
@@ -529,6 +543,15 @@ internal sealed class FuturesFreshnessOptions
     public decimal AntiChaseMinRangePositionPct { get; set; } = 35m;
     public int LowRangeMinConfirmations { get; set; } = 2;
     public decimal DriftAtrMultiple { get; set; } = 0.25m;
+
+    // Upper-range breakouts need evidence that the breakout is being accepted, not
+    // merely touched. Either recent candle momentum or snapshot price-action trend
+    // may satisfy this floor.
+    public decimal UpperBreakoutMinFollowThroughPct { get; set; } = 0.60m;
+
+    // Mid-range reclaims are the common "looks bullish but goes nowhere" loss shape.
+    // They need stronger live price-action follow-through than low-zone rebounds.
+    public decimal MidRangeReclaimMinPriceActionTrendPct { get; set; } = 0.50m;
 
     // Low-range confirmations are not equally strong: a fresh upward tape (3 snapshots)
     // and the multi-candle momentum are structural, while a single positive snapshot

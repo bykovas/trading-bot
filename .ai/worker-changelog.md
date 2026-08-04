@@ -1,3 +1,10 @@
+## 2026-08-05-futures-long-follow-through-gate
+
+- Futures LONG entries now require setup-specific follow-through after scoring, market-quality, freshness, and range checks have passed. UPPER-zone breakouts must show either recent candle momentum or snapshot price-action trend at least `Freshness.UpperBreakoutMinFollowThroughPct` (default 0.60%), so a mere touch above the local high no longer spends a slot when the tape is weak.
+- MID-zone non-breakout LONG reclaims/continuations now need snapshot price-action trend at least `Freshness.MidRangeReclaimMinPriceActionTrendPct` (default 0.50%). The recent live loss cluster was concentrated in MID reclaims with score-heavy bullish structure but weak immediate continuation; this shifts capacity toward LOW-zone rebounds, strong breakouts, and shorts instead of reducing the global score funnel.
+- New env overrides: `TRADINGBOT_FUTURES_UPPER_BREAKOUT_MIN_FOLLOW_THROUGH_PERCENT` and `TRADINGBOT_FUTURES_MID_RANGE_RECLAIM_MIN_PRICE_ACTION_TREND_PERCENT`. Invalid values reset to safe defaults during `Normalize()`.
+- Not changed: LONG/SHORT score thresholds, LOW-zone rebound rules, SHORT entry logic, sizing/leverage, TP/SL/trailing, Kraken execution, reconciliation, dead-man switch, universe selection, or portfolio caps.
+
 ## 2026-08-02-futures-small-2x-sizing-and-portfolio-api-rounding
 
 - Futures appsettings now target small entries: `Futures.TargetMarginEur`=5, `Futures.DefaultLeverage`/`MaxLeverage`=2x, `Futures.MaxNotionalEur`=10, `Futures.MaxTotalNotionalEur`=30, `Futures.MaxMarginPerPositionEur`=5, and `CorrelationRisk.MaxExposureEurPerGroup`=10. `Risk.TargetRiskEur`=0.3 / `MaxConcurrentOpenRisk`=0.9 keep accepted stops from shrinking below the 10 EUR notional cap while still bounding three configured slots.
