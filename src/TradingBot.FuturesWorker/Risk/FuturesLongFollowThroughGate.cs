@@ -9,13 +9,15 @@ internal static class FuturesLongFollowThroughGate
 {
     public const string UpperBreakoutWeakFollowThrough = "LONG_UPPER_BREAKOUT_WEAK_FOLLOW_THROUGH";
     public const string MidRangeWeakFollowThrough = "LONG_MID_RANGE_WEAK_FOLLOW_THROUGH";
+    public const string MidRangeChoppyMarket = "LONG_MID_RANGE_CHOPPY_MARKET";
 
     public static RiskEvaluation Evaluate(
         FuturesDesiredExposure desired,
         LongRangeResult? longRange,
         EntryFreshnessResult? freshness,
         PriceActionAssessment? priceAction,
-        FuturesFreshnessOptions thresholds)
+        FuturesFreshnessOptions thresholds,
+        IReadOnlyList<Candle>? candles = null)
     {
         if (desired != FuturesDesiredExposure.Long
             || longRange is not { Evaluated: true, Blocked: false }
@@ -42,6 +44,17 @@ internal static class FuturesLongFollowThroughGate
 
         if (longRange.Zone == "MID" && !freshness.HasFreshBreakout)
         {
+            var efficiency = DirectionalEfficiencyPct(
+                candles,
+                thresholds.DirectionalEfficiencyLookbackCandles);
+            var minEfficiency = thresholds.MinMidRangeDirectionalEfficiencyPct;
+            if (minEfficiency > 0m && efficiency is { } actualEfficiency && actualEfficiency < minEfficiency)
+            {
+                return Reject(
+                    MidRangeChoppyMarket,
+                    $"mid-range long is inside a choppy market: directional efficiency {actualEfficiency:0.###}% over {thresholds.DirectionalEfficiencyLookbackCandles} closed candles below {minEfficiency:0.###}%");
+            }
+
             var min = thresholds.MidRangeReclaimMinPriceActionTrendPct;
             if (!AtLeast(priceActionTrend, min))
             {
@@ -59,6 +72,31 @@ internal static class FuturesLongFollowThroughGate
 
     private static bool AtLeast(decimal? value, decimal threshold) =>
         value is { } actual && actual >= threshold;
+
+    internal static decimal? DirectionalEfficiencyPct(
+        IReadOnlyList<Candle>? candles,
+        int lookbackCandles)
+    {
+        if (candles is null || lookbackCandles < 2 || candles.Count < lookbackCandles)
+        {
+            return null;
+        }
+
+        var window = candles.TakeLast(lookbackCandles).ToList();
+        var path = 0m;
+        for (var index = 1; index < window.Count; index++)
+        {
+            path += Math.Abs(window[index].Close - window[index - 1].Close);
+        }
+
+        if (path == 0m)
+        {
+            return 0m;
+        }
+
+        var netMove = Math.Abs(window[^1].Close - window[0].Close);
+        return decimal.Round(netMove / path * 100m, 3);
+    }
 
     private static string FormatPct(decimal? value) =>
         value is { } actual ? $"{actual:0.###}%" : "unknown";

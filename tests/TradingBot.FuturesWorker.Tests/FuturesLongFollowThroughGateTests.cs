@@ -73,6 +73,61 @@ public sealed class FuturesLongFollowThroughGateTests
     }
 
     [Fact]
+    public void Mid_range_non_breakout_inside_choppy_market_is_blocked()
+    {
+        var options = new FuturesFreshnessOptions
+        {
+            DirectionalEfficiencyLookbackCandles = 96,
+            MinMidRangeDirectionalEfficiencyPct = 5m
+        };
+
+        var result = FuturesLongFollowThroughGate.Evaluate(
+            FuturesDesiredExposure.Long,
+            Range("MID"),
+            Freshness(breakout: false, candleMomentum: 1.10m),
+            PriceAction(trendPct: 0.80m),
+            options,
+            ChoppyCandles(96));
+
+        Assert.False(result.Approved);
+        Assert.Contains(FuturesLongFollowThroughGate.MidRangeChoppyMarket, result.Reasons[0]);
+    }
+
+    [Fact]
+    public void Mid_range_non_breakout_with_directional_market_is_allowed()
+    {
+        var options = new FuturesFreshnessOptions
+        {
+            DirectionalEfficiencyLookbackCandles = 96,
+            MinMidRangeDirectionalEfficiencyPct = 5m
+        };
+
+        var result = FuturesLongFollowThroughGate.Evaluate(
+            FuturesDesiredExposure.Long,
+            Range("MID"),
+            Freshness(breakout: false, candleMomentum: 1.10m),
+            PriceAction(trendPct: 0.80m),
+            options,
+            TrendingCandles(96));
+
+        Assert.True(result.Approved);
+    }
+
+    [Fact]
+    public void Low_range_rebound_ignores_directional_efficiency()
+    {
+        var result = FuturesLongFollowThroughGate.Evaluate(
+            FuturesDesiredExposure.Long,
+            Range("LOW"),
+            Freshness(breakout: false, candleMomentum: 0.15m),
+            PriceAction(trendPct: 0.10m),
+            new FuturesFreshnessOptions(),
+            ChoppyCandles(96));
+
+        Assert.True(result.Approved);
+    }
+
+    [Fact]
     public void Low_range_rebound_is_not_changed()
     {
         var result = FuturesLongFollowThroughGate.Evaluate(
@@ -129,4 +184,24 @@ public sealed class FuturesLongFollowThroughGateTests
             TrendPercent: trendPct,
             RollingAveragePrice: 99m,
             ConsecutiveNonRisingSnapshots: 0);
+
+    private static IReadOnlyList<Candle> ChoppyCandles(int count) =>
+        Enumerable.Range(0, count)
+            .Select(index => Candle(index, index % 2 == 0 ? 100m : 101m))
+            .ToList();
+
+    private static IReadOnlyList<Candle> TrendingCandles(int count) =>
+        Enumerable.Range(0, count)
+            .Select(index => Candle(index, 100m + index * 0.10m))
+            .ToList();
+
+    private static Candle Candle(int index, decimal close) =>
+        new(
+            OpenTime: DateTimeOffset.UnixEpoch.AddMinutes(index * 15),
+            Open: close,
+            High: close,
+            Low: close,
+            Close: close,
+            Volume: 1m,
+            TradeCount: 1);
 }

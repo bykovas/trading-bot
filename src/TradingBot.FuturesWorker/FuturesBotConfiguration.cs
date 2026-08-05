@@ -284,6 +284,18 @@ internal sealed class FuturesBotConfiguration
             Freshness.MidRangeReclaimMinPriceActionTrendPct = 0.50m;
         }
 
+        if (Freshness.DirectionalEfficiencyLookbackCandles < 8 || Freshness.DirectionalEfficiencyLookbackCandles > 120)
+        {
+            Console.WriteLine($"config-validation: Freshness.DirectionalEfficiencyLookbackCandles={Freshness.DirectionalEfficiencyLookbackCandles} is out of [8,120]; reset to 96.");
+            Freshness.DirectionalEfficiencyLookbackCandles = 96;
+        }
+
+        if (Freshness.MinMidRangeDirectionalEfficiencyPct < 0m || Freshness.MinMidRangeDirectionalEfficiencyPct > 100m)
+        {
+            Console.WriteLine($"config-validation: Freshness.MinMidRangeDirectionalEfficiencyPct={Freshness.MinMidRangeDirectionalEfficiencyPct} is out of [0,100]; reset to 5.");
+            Freshness.MinMidRangeDirectionalEfficiencyPct = 5m;
+        }
+
         Regime.MinRelativeStrengthPct = Math.Clamp(Regime.MinRelativeStrengthPct, 0m, 100m);
 
         if (Shorts.AntiChaseMaxRangePositionPct < 0m || Shorts.AntiChaseMaxRangePositionPct > 100m)
@@ -552,6 +564,12 @@ internal sealed class FuturesFreshnessOptions
     // Mid-range reclaims are the common "looks bullish but goes nowhere" loss shape.
     // They need stronger live price-action follow-through than low-zone rebounds.
     public decimal MidRangeReclaimMinPriceActionTrendPct { get; set; } = 0.50m;
+
+    // Directional efficiency separates a sustained move from price travelling back
+    // and forth inside the same range. It only vetoes MID-zone non-breakout LONGs;
+    // LOW rebounds and confirmed UPPER breakouts keep their existing rules.
+    public int DirectionalEfficiencyLookbackCandles { get; set; } = 96;
+    public decimal MinMidRangeDirectionalEfficiencyPct { get; set; } = 5m;
 
     // Low-range confirmations are not equally strong: a fresh upward tape (3 snapshots)
     // and the multi-candle momentum are structural, while a single positive snapshot

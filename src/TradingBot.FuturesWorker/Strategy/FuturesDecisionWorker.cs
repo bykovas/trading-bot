@@ -358,7 +358,13 @@ internal sealed class FuturesDecisionWorker(
                     }
 
                     var followThroughGate = qualityGate.Approved && relativeStrengthBlock is null && longRange is { Blocked: false }
-                        ? FuturesLongFollowThroughGate.Evaluate(desired, longRange, freshness, priceAction, config.Freshness)
+                        ? FuturesLongFollowThroughGate.Evaluate(
+                            desired,
+                            longRange,
+                            freshness,
+                            priceAction,
+                            config.Freshness,
+                            marketState.Candles)
                         : new RiskEvaluation(true, new[] { "long follow-through gate skipped" });
                     if (!followThroughGate.Approved)
                     {

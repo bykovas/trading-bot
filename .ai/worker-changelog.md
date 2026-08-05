@@ -1,3 +1,9 @@
+## 2026-08-05-futures-mid-range-chop-filter
+
+- MID-zone non-breakout futures LONG entries now measure directional efficiency over the latest 96 closed 15-minute candles and reject entries below `Freshness.MinMidRangeDirectionalEfficiencyPct` (default 5%). This separates a sustained move from a short micro-rally inside a range: the live DOGE entry had moved only -0.083% net while travelling 15.80% candle-to-candle, for 0.53% efficiency.
+- New appsettings-only controls: `Freshness.DirectionalEfficiencyLookbackCandles` (default 96, valid 8-120) and `Freshness.MinMidRangeDirectionalEfficiencyPct` (default 5%, valid 0-100). Invalid values reset to safe defaults during `Normalize()`; no strategy environment override was added.
+- Not changed: LOW-zone rebounds, confirmed UPPER breakouts, SHORT entries, score thresholds, sizing/leverage, TP/SL/trailing, Kraken execution, reconciliation, dead-man switch, universe selection, or portfolio caps.
+
 ## 2026-08-05-futures-long-follow-through-gate
 
 - Futures LONG entries now require setup-specific follow-through after scoring, market-quality, freshness, and range checks have passed. UPPER-zone breakouts must show either recent candle momentum or snapshot price-action trend at least `Freshness.UpperBreakoutMinFollowThroughPct` (default 0.60%), so a mere touch above the local high no longer spends a slot when the tape is weak.

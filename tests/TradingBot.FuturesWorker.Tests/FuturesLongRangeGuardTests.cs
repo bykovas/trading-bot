@@ -253,7 +253,9 @@ public sealed class FuturesLongRangeGuardTests
                 LowRangeMinConfirmations = 9,
                 DriftAtrMultiple = -1m,
                 UpperBreakoutMinFollowThroughPct = 9m,
-                MidRangeReclaimMinPriceActionTrendPct = -1m
+                MidRangeReclaimMinPriceActionTrendPct = -1m,
+                DirectionalEfficiencyLookbackCandles = 3,
+                MinMidRangeDirectionalEfficiencyPct = 101m
             }
         };
 
@@ -264,6 +266,8 @@ public sealed class FuturesLongRangeGuardTests
         Assert.Equal(0.25m, config.Freshness.DriftAtrMultiple);
         Assert.Equal(0.60m, config.Freshness.UpperBreakoutMinFollowThroughPct);
         Assert.Equal(0.50m, config.Freshness.MidRangeReclaimMinPriceActionTrendPct);
+        Assert.Equal(96, config.Freshness.DirectionalEfficiencyLookbackCandles);
+        Assert.Equal(5m, config.Freshness.MinMidRangeDirectionalEfficiencyPct);
     }
 
     [Fact]
