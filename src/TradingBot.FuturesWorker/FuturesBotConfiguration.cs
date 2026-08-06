@@ -90,6 +90,7 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_DEFAULT_LEVERAGE", value => config.Futures.DefaultLeverage = ParseDecimal(value, config.Futures.DefaultLeverage));
         SetIfPresent("TRADINGBOT_FUTURES_MAX_POSITIONS", value => config.Futures.MaxPositions = ParseInt(value, config.Futures.MaxPositions));
         SetIfPresent("TRADINGBOT_FUTURES_ALLOW_SHORTS", value => config.Futures.AllowShorts = ParseBool(value, config.Futures.AllowShorts));
+        SetIfPresent("TRADINGBOT_FUTURES_FLIP_LONG_ENTRIES", value => config.Futures.FlipLongEntries = ParseBool(value, config.Futures.FlipLongEntries));
         SetIfPresent("TRADINGBOT_FUTURES_TARGET_MARGIN_EUR", value => config.Futures.TargetMarginEur = ParseDecimal(value, config.Futures.TargetMarginEur));
         SetIfPresent("TRADINGBOT_FUTURES_MAX_NOTIONAL_EUR", value => config.Futures.MaxNotionalEur = ParseDecimal(value, config.Futures.MaxNotionalEur));
         SetIfPresent("TRADINGBOT_FUTURES_TARGET_RISK_EUR", value => config.Risk.TargetRiskEur = ParseDecimal(value, config.Risk.TargetRiskEur));
@@ -183,6 +184,19 @@ internal sealed class FuturesBotConfiguration
         Futures.DefaultLeverage = Math.Clamp(Futures.DefaultLeverage <= 0m ? 1m : Futures.DefaultLeverage, 1m, Futures.MaxLeverage);
         Futures.MaxPositions = Math.Clamp(Futures.MaxPositions <= 0 ? 3 : Futures.MaxPositions, 1, 3);
         Futures.AllowFlip = false;
+
+        // The flipped-logic experiment opens real shorts, so it cannot run with
+        // shorts disabled; drop the flip rather than silently opening nothing.
+        if (Futures.FlipLongEntries && !Futures.AllowShorts)
+        {
+            Futures.FlipLongEntries = false;
+            Console.WriteLine("config-validation: Futures.FlipLongEntries=true requires Futures.AllowShorts=true; flip disabled.");
+        }
+
+        if (Futures.FlipLongEntries)
+        {
+            Console.WriteLine("config-warning: Futures.FlipLongEntries=true — every approved LONG entry will be executed as a SHORT (flipped logic applied).");
+        }
 
         // Sizing migration: the old TargetNotionalEur meant NOTIONAL; the new
         // TargetMarginEur means MARGIN. If only the legacy value is set, derive the
@@ -450,6 +464,16 @@ internal sealed class FuturesOptions
     // Flips (long -> short in one step) are forbidden by the blueprint; Normalize
     // forces this to false regardless of config.
     public bool AllowFlip { get; set; }
+
+    // Contrarian experiment ("flipped logic"): an entry that passed EVERY long gate
+    // (scoring, quality, freshness, 24h range, follow-through, portfolio, risk) is
+    // executed as a SHORT at the last step. No decision logic changes — only the
+    // submitted side inverts, and the decision/ledger reason gains a
+    // "flipped logic applied" marker. The opened position IS a real short and is
+    // managed as one (TP/SL, trailing, signal-reversal close, reconciliation).
+    // SHORT candidates are untouched. Requires AllowShorts; Normalize disables the
+    // flip and warns otherwise.
+    public bool FlipLongEntries { get; set; }
 
     // Legacy per-position margin reference (EUR). Still used by DerivedNotionalEur for
     // migration/compat and as the fallback per-position margin cap when

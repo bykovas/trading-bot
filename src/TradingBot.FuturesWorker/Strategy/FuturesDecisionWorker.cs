@@ -407,8 +407,13 @@ internal sealed class FuturesDecisionWorker(
                     }
                     else
                     {
+                        // Flipped-logic experiment: the LONG thesis passed every gate
+                        // unchanged; only the executed side inverts to SHORT here, so
+                        // order, ledger, TP/SL and reconciliation all see a real short.
+                        var flipApplied = config.Futures.FlipLongEntries && desired == FuturesDesiredExposure.Long;
+                        var executedDesired = flipApplied ? FuturesDesiredExposure.Short : desired;
                         fill = await ApplyOrExecuteLiveAsync(
-                            state, pair, desired, markPrice,
+                            state, pair, executedDesired, markPrice,
                             entryPlan.SizedNotionalEur > 0m ? entryPlan.SizedNotionalEur : entryPlan.RequestedNotionalEur,
                             entryPlan.EffectiveLeverage > 0m ? entryPlan.EffectiveLeverage : config.Futures.DefaultLeverage,
                             reduceOnly: false,
@@ -418,6 +423,14 @@ internal sealed class FuturesDecisionWorker(
                             entryPlan: entryPlan,
                             cancellationToken,
                             signalPrice: marketState.LastPrice);
+                        if (flipApplied)
+                        {
+                            fill.Action.Reason = string.IsNullOrWhiteSpace(fill.Action.Reason)
+                                ? "flipped logic applied"
+                                : $"{fill.Action.Reason}; flipped logic applied";
+                            Console.WriteLine($"FLIPPED_LOGIC pair={pair} approved=LONG executed=SHORT");
+                        }
+
                         if (freshness is not null)
                         {
                             freshness = FuturesEntryFreshnessGuard.WithFillDiagnostics(
