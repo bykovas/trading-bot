@@ -127,7 +127,7 @@ jobs:
           docker push "${MARKET_DATA_WORKER_IMAGE_NAME}:${{ github.sha }}"
 
       - name: Upload deploy bundle
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
         with:
           name: deploy-bundle
@@ -142,7 +142,7 @@ jobs:
 
   deploy:
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: self-hosted
     timeout-minutes: 10
     environment: PROD
