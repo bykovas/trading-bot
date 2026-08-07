@@ -1,3 +1,12 @@
+## 2026-08-07-futures-flipped-entry-inverted-reversal-exit
+
+- Fixes the flipped-logic experiment's exit hole observed live (SPCXX/USD): a flipped short opened FROM a LONG signal was immediately closed by `DecideHeld` as "signal reversal close", because for a normal short a persisting LongCandidate IS the reversal. The position survived only the minimum-hold window and closed at +0.13%. The signal that opens a flipped position can never be the signal that closes it.
+- New `PortfolioPosition.FlippedEntry` (persisted as `portfolio_position_state.flipped_entry boolean not null default false` with an `add column if not exists` migration; carried through Clone, live Kraken reconciliation, and restarts). The futures worker stamps it alongside `EntryChannel` when a flip executes.
+- `LongShortStrategy.DecideHeld` inverts the reversal exit for flipped shorts: hold while the long thesis persists, close when a ShortCandidate appears — exactly when the original long would have closed. Normal shorts and all longs are untouched; spot ignores the field entirely.
+- Everything price-based was already correct for the real short side and is unchanged: working TP 4% / SL 2% tracked by the worker, exchange protective TP/SL orders at 2x distance (8% / 4%) via `ExchangeProtectionMultiplierPercent=200`, and the working-TP -> trailing-stop (2%) handover.
+- The reversal close reason for a flipped position now reads `signal reversal close; flipped logic applied`.
+- Not changed: entry gates, sizing/leverage, TP/SL percentages, trailing, max-hold exit, dead-man switch, universe selection, or portfolio caps.
+
 ## 2026-08-06-futures-flip-long-entries-experiment
 
 - Contrarian experiment, operator-requested: new `Futures.FlipLongEntries` (env `TRADINGBOT_FUTURES_FLIP_LONG_ENTRIES`, appsettings ships true) executes a fully approved LONG entry as a SHORT. The entire long pipeline runs UNCHANGED — scoring, dip-bounce admission, quality gate, freshness, 24h-range guard, follow-through, portfolio guards, and margin risk all still evaluate the long thesis — and only the submitted order side inverts at the execution step. Rationale: the recent live long cohort has been persistently negative; this mirrors those exact entries to measure whether the inverse of the signal carries edge, without perturbing any gate statistics.

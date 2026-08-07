@@ -22,6 +22,17 @@ internal sealed class LongShortStrategy(FuturesBotConfiguration config)
     public FuturesDesiredExposure DecideHeld(PortfolioPosition position, TechnicalSignal signal)
     {
         var intent = SignalScorer.IntentOf(signal, config.Strategy);
+
+        // Flipped-logic short: it exists BECAUSE the LONG thesis fired, so the
+        // reversal exit inverts with it — the position is held while the long
+        // signal persists and closes when the original long would have closed
+        // (a ShortCandidate). Without this the very signal that opened the
+        // position requests its close on the next cycle.
+        if (position.FlippedEntry && position.Side == "SHORT")
+        {
+            return intent == SignalIntent.ShortCandidate ? FuturesDesiredExposure.Flat : FuturesDesiredExposure.Short;
+        }
+
         return position.Side == "SHORT"
             ? intent == SignalIntent.LongCandidate ? FuturesDesiredExposure.Flat : FuturesDesiredExposure.Short
             : intent == SignalIntent.ShortCandidate ? FuturesDesiredExposure.Flat : FuturesDesiredExposure.Long;

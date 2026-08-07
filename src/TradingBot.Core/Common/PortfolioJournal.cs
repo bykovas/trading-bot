@@ -141,6 +141,13 @@ public sealed class PortfolioPosition
     // action so realized-PnL-per-channel is queryable in SQL.
     public string? EntryChannel { get; set; }
 
+    // Futures flipped-logic experiment: true when this position was opened with the
+    // side inverted from the approved thesis (a LONG signal executed as SHORT). The
+    // held-position reversal exit inverts for such positions — the signal that
+    // opened them must not be the signal that closes them. False for spot rows,
+    // legacy state, and normally-opened positions.
+    public bool FlippedEntry { get; set; }
+
     public PortfolioPosition Clone() => new()
     {
         Pair = Pair,
@@ -182,7 +189,8 @@ public sealed class PortfolioPosition
         TpOrderState = TpOrderState,
         SlOrderState = SlOrderState,
         Origin = Origin,
-        EntryChannel = EntryChannel
+        EntryChannel = EntryChannel,
+        FlippedEntry = FlippedEntry
     };
 }
 

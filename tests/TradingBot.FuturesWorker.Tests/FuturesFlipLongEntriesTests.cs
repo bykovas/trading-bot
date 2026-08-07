@@ -39,6 +39,61 @@ public sealed class FuturesFlipLongEntriesTests
         Assert.False(config.Futures.FlipLongEntries);
     }
 
+    [Fact]
+    public void Flipped_short_is_held_while_the_long_signal_persists()
+    {
+        var strategy = new LongShortStrategy(new FuturesBotConfiguration());
+        var position = new PortfolioPosition { Pair = "SOL/USD", Side = "SHORT", FlippedEntry = true };
+
+        // The same LONG signal that opened the flipped short must not close it.
+        var decision = strategy.DecideHeld(position, LongSignal());
+        Assert.Equal(FuturesDesiredExposure.Short, decision);
+    }
+
+    [Fact]
+    public void Flipped_short_closes_when_the_original_long_would_have_closed()
+    {
+        var strategy = new LongShortStrategy(new FuturesBotConfiguration());
+        var position = new PortfolioPosition { Pair = "SOL/USD", Side = "SHORT", FlippedEntry = true };
+
+        // A ShortCandidate is the reversal that would have closed the original long.
+        var decision = strategy.DecideHeld(position, ShortSignal());
+        Assert.Equal(FuturesDesiredExposure.Flat, decision);
+    }
+
+    [Fact]
+    public void Normal_short_still_closes_on_a_long_signal()
+    {
+        var strategy = new LongShortStrategy(new FuturesBotConfiguration());
+        var position = new PortfolioPosition { Pair = "SOL/USD", Side = "SHORT", FlippedEntry = false };
+
+        var decision = strategy.DecideHeld(position, LongSignal());
+        Assert.Equal(FuturesDesiredExposure.Flat, decision);
+    }
+
+    private static TechnicalSignal LongSignal() => new(
+        Score: 0.95m,
+        Direction: "LONG",
+        AllowsLong: true,
+        HasBullishStructure: true,
+        EmaFullyConfirmed: true,
+        BullishEmaGapPercent: 0.3m,
+        EmaGapVelocityPercent: null,
+        Contributions: Array.Empty<SignalContribution>());
+
+    private static TechnicalSignal ShortSignal() => new(
+        Score: 0m,
+        Direction: "SHORT",
+        AllowsLong: false,
+        HasBullishStructure: false,
+        EmaFullyConfirmed: false,
+        BullishEmaGapPercent: null,
+        EmaGapVelocityPercent: null,
+        Contributions: Array.Empty<SignalContribution>(),
+        AllowsShort: true,
+        HasBearishStructure: true,
+        ShortScore: 0.85m);
+
     private static void InvokeNormalize(FuturesBotConfiguration config)
     {
         var method = typeof(FuturesBotConfiguration).GetMethod("Normalize", BindingFlags.Instance | BindingFlags.NonPublic);

@@ -211,7 +211,9 @@ internal sealed class FuturesDecisionWorker(
                         0m, held.Leverage ?? 1m,
                         reduceOnly: desired == FuturesDesiredExposure.Flat,
                         reason: desired == FuturesDesiredExposure.Flat
-                            ? "signal reversal close"
+                            ? held.FlippedEntry
+                                ? "signal reversal close; flipped logic applied"
+                                : "signal reversal close"
                             : externalSoftExitBlocked
                                 ? "external/adopted Kraken Futures position: signal reversal ignored; exchange TP/SL or manual close only"
                                 : minHoldBlocked
@@ -470,6 +472,7 @@ internal sealed class FuturesDecisionWorker(
                             if (openedPosition is not null)
                             {
                                 openedPosition.EntryChannel = entryChannel;
+                                openedPosition.FlippedEntry = flipApplied;
                             }
 
                             newEntriesThisCycle++;
@@ -1384,6 +1387,7 @@ internal sealed class FuturesDecisionWorker(
                 TrailingStopOrderId = tpSl.TrailingStopOrderId,
                 TrailingActivatedAtUtc = tpSl.TrailingActivatedAtUtc,
                 EntryChannel = existing?.EntryChannel,
+                FlippedEntry = existing?.FlippedEntry ?? false,
                 EntryAtr = existing?.EntryAtr,
                 RoundTripCostEstimatePct = existing?.RoundTripCostEstimatePct,
                 ExpectedFundingPct = existing?.ExpectedFundingPct,
