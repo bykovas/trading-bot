@@ -9,7 +9,7 @@ public sealed class MarginRiskAndTpSlTests
         Futures = new FuturesOptions { AllowShorts = true, MaxLeverage = 2m, DefaultLeverage = 2m, MaxPositions = 1 },
         Margin = new MarginOptions
         {
-            MaintenanceMarginRatePercent = 0.5m,
+            MaintenanceMarginRatePercent = 5m,
             MinLiquidationDistancePercent = 15m,
             MaxAccountMarginUtilizationPercent = 50m
         },
@@ -62,11 +62,28 @@ public sealed class MarginRiskAndTpSlTests
     public void Liquidation_distance_gate_blocks_when_too_close()
     {
         var config = Config();
-        config.Margin.MinLiquidationDistancePercent = 60m; // 2x leverage gives ~49.75% distance
+        config.Margin.MinLiquidationDistancePercent = 60m; // 2x leverage gives 45% distance.
         var risk = new MarginRiskManager(config);
         var evaluation = risk.EvaluateEntry(State(), FuturesDesiredExposure.Long, 100m, 20m, 2m, usedMarginEur: 0m);
         Assert.False(evaluation.Approved);
         Assert.Contains(evaluation.Reasons, reason => reason.Contains("liquidation distance"));
+    }
+
+    [Fact]
+    public void Kraken_retail_maintenance_rate_rejects_10x_but_allows_2x_at_eight_percent_floor()
+    {
+        var config = Config();
+        config.Futures.MaxLeverage = 10m;
+        config.Futures.DefaultLeverage = 10m;
+        config.Margin.MinLiquidationDistancePercent = 8m;
+        var risk = new MarginRiskManager(config);
+
+        var tenX = risk.EvaluateEntry(State(), FuturesDesiredExposure.Long, 100m, 20m, 10m, usedMarginEur: 0m);
+        var twoX = risk.EvaluateEntry(State(), FuturesDesiredExposure.Long, 100m, 20m, 2m, usedMarginEur: 0m);
+
+        Assert.False(tenX.Approved);
+        Assert.Contains(tenX.Reasons, reason => reason.Contains("liquidation distance 5% below minimum 8%"));
+        Assert.True(twoX.Approved);
     }
 
     [Fact]

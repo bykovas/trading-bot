@@ -53,8 +53,8 @@ internal sealed record BtcRegimeState(
 internal static class FuturesMath
 {
     // Rough isolated-margin liquidation estimate. Real Kraken Futures uses tiered
-    // maintenance margin per contract; this conservative approximation is enough
-    // for dry-run diagnostics and the pre-trade distance gate.
+    // maintenance margin per contract; this approximation uses the configured
+    // first-tier maintenance rate for diagnostics and the pre-trade distance gate.
     public static decimal EstimateLiquidationPrice(
         string side,
         decimal entryPrice,
@@ -66,7 +66,9 @@ internal static class FuturesMath
             return 0m;
         }
 
-        var lossFraction = (1m / leverage) * (1m - maintenanceMarginRatePercent / 100m);
+        var initialMarginFraction = 1m / leverage;
+        var maintenanceMarginFraction = Math.Max(0m, maintenanceMarginRatePercent / 100m);
+        var lossFraction = Math.Max(0m, initialMarginFraction - maintenanceMarginFraction);
         return side == "SHORT"
             ? decimal.Round(entryPrice * (1m + lossFraction), 10)
             : decimal.Round(entryPrice * (1m - lossFraction), 10);

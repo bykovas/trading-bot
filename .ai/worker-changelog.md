@@ -1,3 +1,10 @@
+## 2026-08-12-futures-maintenance-margin-model
+
+- Corrected the isolated-margin liquidation estimate to subtract maintenance margin as a fraction of position notional from initial margin (`1 / leverage - maintenance rate`). The previous implementation multiplied initial margin by the remaining percentage and materially overstated liquidation distance.
+- Updated `Margin.MaintenanceMarginRatePercent` from 0.5% to Kraken EEA retail's 5% first-tier rate. With the existing 8% minimum liquidation-distance gate, a 10x entry now estimates 5% adverse room and is rejected, while the configured 2x entries estimate 45% and remain eligible.
+- Invalid maintenance-margin settings (`<= 0` or `> 50`) now reset to the safe 5% default with a validation message. Added exact 2x/10x liquidation and risk-gate regression coverage.
+- Not changed: configured 2x leverage, 5 EUR target margin, 10 EUR notional cap, entry scoring/guards, TP/SL/trailing, Kraken execution, reconciliation, or portfolio capacity.
+
 ## 2026-08-07-futures-flipped-entry-inverted-reversal-exit
 
 - Fixes the flipped-logic experiment's exit hole observed live (SPCXX/USD): a flipped short opened FROM a LONG signal was immediately closed by `DecideHeld` as "signal reversal close", because for a normal short a persisting LongCandidate IS the reversal. The position survived only the minimum-hold window and closed at +0.13%. The signal that opens a flipped position can never be the signal that closes it.

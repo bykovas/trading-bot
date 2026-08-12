@@ -223,7 +223,12 @@ internal sealed class FuturesBotConfiguration
             Futures.DeadManSwitchSeconds = minDeadManSwitchSeconds;
         }
 
-        Margin.MaintenanceMarginRatePercent = Math.Clamp(Margin.MaintenanceMarginRatePercent, 0m, 50m);
+        if (Margin.MaintenanceMarginRatePercent is <= 0m or > 50m)
+        {
+            Console.WriteLine(
+                $"config-validation: Margin.MaintenanceMarginRatePercent={Margin.MaintenanceMarginRatePercent:0.####} is invalid; reset to 5.");
+            Margin.MaintenanceMarginRatePercent = 5m;
+        }
         Margin.MinLiquidationDistancePercent = Math.Max(0m, Margin.MinLiquidationDistancePercent);
         Margin.MaxAccountMarginUtilizationPercent = Margin.MaxAccountMarginUtilizationPercent <= 0m
             ? 50m
@@ -515,7 +520,7 @@ internal sealed class FuturesOptions
 
 internal sealed class MarginOptions
 {
-    public decimal MaintenanceMarginRatePercent { get; set; } = 0.5m;
+    public decimal MaintenanceMarginRatePercent { get; set; } = 5m;
     public decimal MinLiquidationDistancePercent { get; set; } = 15m;
     public decimal MaxAccountMarginUtilizationPercent { get; set; } = 80m;
 }

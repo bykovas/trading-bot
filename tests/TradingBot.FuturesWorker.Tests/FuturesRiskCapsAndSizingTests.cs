@@ -31,7 +31,7 @@ public sealed class FuturesRiskCapsAndSizingTests
             Portfolio = new FuturesPortfolioOptions { StartingCashEur = 100m },
             Margin = new MarginOptions
             {
-                MaintenanceMarginRatePercent = 0.5m,
+                MaintenanceMarginRatePercent = 5m,
                 MinLiquidationDistancePercent = 8m,
                 MaxAccountMarginUtilizationPercent = 80m
             },
@@ -49,6 +49,22 @@ public sealed class FuturesRiskCapsAndSizingTests
         };
         Normalize(config);
         return config;
+    }
+
+    [Fact]
+    public void Invalid_maintenance_margin_rate_resets_to_kraken_retail_default()
+    {
+        foreach (var invalidRate in new[] { -1m, 0m, 51m })
+        {
+            var config = new FuturesBotConfiguration
+            {
+                Margin = new MarginOptions { MaintenanceMarginRatePercent = invalidRate }
+            };
+
+            Normalize(config);
+
+            Assert.Equal(5m, config.Margin.MaintenanceMarginRatePercent);
+        }
     }
 
     private static FuturesEntryRiskInputs LongInputs(

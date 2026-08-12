@@ -244,13 +244,25 @@ public sealed class FuturesVirtualPortfolioTests
     [Fact]
     public void Liquidation_estimates_sit_on_the_correct_side()
     {
-        var longLiquidation = FuturesMath.EstimateLiquidationPrice("LONG", 100m, 2m, 0.5m);
-        var shortLiquidation = FuturesMath.EstimateLiquidationPrice("SHORT", 100m, 2m, 0.5m);
-        Assert.True(longLiquidation is > 0m and < 100m);
-        Assert.True(shortLiquidation > 100m);
+        var longLiquidation = FuturesMath.EstimateLiquidationPrice("LONG", 100m, 2m, 5m);
+        var shortLiquidation = FuturesMath.EstimateLiquidationPrice("SHORT", 100m, 2m, 5m);
+        Assert.Equal(55m, longLiquidation);
+        Assert.Equal(145m, shortLiquidation);
 
         // Higher leverage moves liquidation closer to entry.
-        var lev1 = FuturesMath.EstimateLiquidationPrice("LONG", 100m, 1m, 0.5m);
+        var lev1 = FuturesMath.EstimateLiquidationPrice("LONG", 100m, 1m, 5m);
         Assert.True(lev1 < longLiquidation);
+    }
+
+    [Fact]
+    public void Ten_x_liquidation_distance_uses_maintenance_as_notional_fraction()
+    {
+        var longLiquidation = FuturesMath.EstimateLiquidationPrice("LONG", 100m, 10m, 5m);
+        var shortLiquidation = FuturesMath.EstimateLiquidationPrice("SHORT", 100m, 10m, 5m);
+
+        Assert.Equal(95m, longLiquidation);
+        Assert.Equal(105m, shortLiquidation);
+        Assert.Equal(5m, FuturesMath.LiquidationDistancePercent(100m, longLiquidation));
+        Assert.Equal(5m, FuturesMath.LiquidationDistancePercent(100m, shortLiquidation));
     }
 }
