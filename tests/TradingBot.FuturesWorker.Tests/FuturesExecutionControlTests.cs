@@ -132,7 +132,8 @@ public sealed class FuturesExecutionControlTests
             new InstrumentOptions { Pair = "RIVER/USD", KrakenPair = "PF_RIVERUSD", Enabled = true, QuantityDecimals = 8, PriceDecimals = 4 },
             null,
             CancellationToken.None,
-            signalPrice
+            signalPrice,
+            false
         })!;
 
         return (await task, broker, state);

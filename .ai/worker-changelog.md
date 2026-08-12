@@ -1,3 +1,10 @@
+## 2026-08-12-futures-flipped-exit-calibration
+
+- Bot-owned futures positions opened by the LONG-to-SHORT flipped experiment now use a dedicated working profit handoff: take-profit activation at 1.5% and a 0.75% reduce-only Kraken trailing stop. Their working stop-loss remains 2%, and new exchange protection remains twice the working distances (3% TP / 4% SL).
+- `MAX_HOLD` is disabled for flipped entries, so the six-hour stale-loss timer can no longer close this experiment before its price-based exit policy resolves. Signal reversal, working stop-loss, trailing stop, exchange protection, and manual close remain active.
+- New appsettings-only controls: `TpSl.FlippedTakeProfitPercent` (1.5), `TpSl.FlippedTrailingStopPercent` (0.75), and `Exits.MaxHoldForFlippedEntriesEnabled` (false). Kraken reconciliation applies the new working handoff to existing bot-owned flipped positions while preserving any real protective orders already open on the exchange until handoff.
+- Not changed: 5 EUR target margin, 2x leverage, 10 EUR notional cap, normal futures exits, externally opened/manual positions, entry scoring/guards, IOC execution, dead-man switch, or portfolio capacity.
+
 ## 2026-08-12-futures-maintenance-margin-model
 
 - Corrected the isolated-margin liquidation estimate to subtract maintenance margin as a fraction of position notional from initial margin (`1 / leverage - maintenance rate`). The previous implementation multiplied initial margin by the remaining percentage and materially overstated liquidation distance.

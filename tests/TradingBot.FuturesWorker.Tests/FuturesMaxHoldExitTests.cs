@@ -74,6 +74,28 @@ public sealed class FuturesMaxHoldExitTests
         Assert.Null(result.Reason);
     }
 
+    [Fact]
+    public void Flipped_entry_is_not_closed_by_max_hold_when_policy_disables_it()
+    {
+        var position = Position(
+            openedMinutesAgo: 420,
+            unrealizedPnlEur: -0.25m,
+            entryPrice: 100m,
+            markPrice: 104m,
+            stopLossPrice: 105m);
+        position.FlippedEntry = true;
+
+        var result = FuturesDecisionWorker.EvaluateMaxHoldExit(
+            position,
+            Now,
+            maxHoldMinutes: 360,
+            minStopProgressPct: 60m,
+            maxHoldForFlippedEntriesEnabled: false);
+
+        Assert.False(result.ShouldClose);
+        Assert.Contains("disabled for flipped entry", result.Reason);
+    }
+
     private static PortfolioPosition Position(
         int openedMinutesAgo,
         decimal unrealizedPnlEur,

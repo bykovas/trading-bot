@@ -49,7 +49,8 @@ internal sealed class FuturesVirtualPortfolio(
         bool reduceOnly = false,
         string reason = "",
         string? exitTriggerSource = null,
-        FuturesEntryPlan? entryPlan = null)
+        FuturesEntryPlan? entryPlan = null,
+        bool flippedEntry = false)
     {
         var position = state.Positions.FirstOrDefault(p => p.Pair == pair);
         var desiredSide = desired switch
@@ -100,7 +101,7 @@ internal sealed class FuturesVirtualPortfolio(
             return NoOrder(state, pair, null, "short entry refused: AllowShorts=false");
         }
 
-        return Open(state, pair, desiredSide!, markPrice, targetNotionalEur, leverage, reason, entryPlan);
+        return Open(state, pair, desiredSide!, markPrice, targetNotionalEur, leverage, reason, entryPlan, flippedEntry);
     }
 
     private FuturesFillResult Open(
@@ -111,7 +112,8 @@ internal sealed class FuturesVirtualPortfolio(
         decimal notionalEur,
         decimal leverage,
         string reason,
-        FuturesEntryPlan? entryPlan)
+        FuturesEntryPlan? entryPlan,
+        bool flippedEntry)
     {
         var requestedNotionalEur = notionalEur;
         if (entryPlan is not null)
@@ -142,8 +144,9 @@ internal sealed class FuturesVirtualPortfolio(
         state.CashEur -= initialMargin + fee;
 
         var liquidationPrice = FuturesMath.EstimateLiquidationPrice(side, fillPrice, leverage, config.Margin.MaintenanceMarginRatePercent);
-        var tpDistancePct = config.TpSl.TakeProfitPercent;
+        var tpDistancePct = config.TpSl.WorkingTakeProfitPercent(flippedEntry);
         var slDistancePct = config.TpSl.StopLossPercent;
+        var trailingStopPercent = config.TpSl.WorkingTrailingStopPercent(flippedEntry);
         var protectionMultiplier = Math.Max(0m, config.TpSl.ExchangeProtectionMultiplierPercent) / 100m;
         var exchangeTpDistancePct = tpDistancePct * protectionMultiplier;
         var exchangeSlDistancePct = slDistancePct * protectionMultiplier;
@@ -175,8 +178,9 @@ internal sealed class FuturesVirtualPortfolio(
             ExchangeStopLossPrice = config.TpSl.Enabled ? (side == "SHORT" ? fillPrice + exchangeSlDistance : fillPrice - exchangeSlDistance) : null,
             ExchangeTakeProfitPrice = config.TpSl.Enabled ? (side == "SHORT" ? fillPrice - exchangeTpDistance : fillPrice + exchangeTpDistance) : null,
             ExchangeProtectionMultiplierPercent = config.TpSl.ExchangeProtectionMultiplierPercent,
-            TrailingStopPercent = config.TpSl.TrailingStopPercent,
+            TrailingStopPercent = trailingStopPercent,
             Origin = PositionOrigins.Bot,
+            FlippedEntry = flippedEntry,
             EntryAtr = entryPlan?.AtrPct,
             RoundTripCostEstimatePct = entryPlan?.RoundTripCostEstimatePct,
             TpOrderState = config.TpSl.Enabled ? "SIMULATED_OPEN" : null,
@@ -231,6 +235,8 @@ internal sealed class FuturesVirtualPortfolio(
             action.BtcRegimeState = entryPlan.BtcRegimeState;
             action.ShortAllowed = entryPlan.ShortAllowed;
         }
+        action.StopDistancePct = config.TpSl.Enabled ? slDistancePct : null;
+        action.TakeProfitDistancePct = config.TpSl.Enabled ? tpDistancePct : null;
         StampOpenHistory(state, pair, _clock.UtcNow);
         FillLedger(action, before, state);
         return new FuturesFillResult(action, PositionOpened: true, PositionClosed: false);

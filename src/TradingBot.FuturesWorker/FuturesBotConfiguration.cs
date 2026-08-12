@@ -412,6 +412,8 @@ internal sealed class FuturesBotConfiguration
         TpSl.StopLossPercent = TpSl.StopLossPercent <= 0m ? 1m : TpSl.StopLossPercent;
         TpSl.ExchangeProtectionMultiplierPercent = TpSl.ExchangeProtectionMultiplierPercent <= 0m ? 200m : TpSl.ExchangeProtectionMultiplierPercent;
         TpSl.TrailingStopPercent = TpSl.TrailingStopPercent <= 0m ? 2m : TpSl.TrailingStopPercent;
+        TpSl.FlippedTakeProfitPercent = TpSl.FlippedTakeProfitPercent <= 0m ? 1.5m : TpSl.FlippedTakeProfitPercent;
+        TpSl.FlippedTrailingStopPercent = TpSl.FlippedTrailingStopPercent <= 0m ? 0.75m : TpSl.FlippedTrailingStopPercent;
         TpSl.ExternalTrailingActivationProgressPercent = Math.Clamp(TpSl.ExternalTrailingActivationProgressPercent, 0m, 100m);
         TpSl.TriggerSource = string.IsNullOrWhiteSpace(TpSl.TriggerSource) ? "mark" : TpSl.TriggerSource;
 
@@ -710,6 +712,7 @@ internal sealed class FuturesExitOptions
     public decimal SlippageBufferPct { get; set; } = 0.10m;
     public int MaxHoldMinutes { get; set; } = 360;
     public decimal MaxHoldMinStopProgressPct { get; set; } = 60m;
+    public bool MaxHoldForFlippedEntriesEnabled { get; set; }
     public decimal TrailingActivationBufferPct { get; set; } = 0m;
 }
 
@@ -820,6 +823,18 @@ internal sealed class TpSlOptions
     // Once the bot-owned live position reaches the working TP, protective orders
     // are replaced with a reduce-only Kraken trailing stop at this distance.
     public decimal TrailingStopPercent { get; set; } = 2m;
+
+    // Flipped LONG-to-SHORT entries use a separately calibrated profit handoff.
+    // Their working stop remains StopLossPercent and exchange protection still
+    // uses ExchangeProtectionMultiplierPercent.
+    public decimal FlippedTakeProfitPercent { get; set; } = 1.5m;
+    public decimal FlippedTrailingStopPercent { get; set; } = 0.75m;
+
+    public decimal WorkingTakeProfitPercent(bool flippedEntry) =>
+        flippedEntry ? FlippedTakeProfitPercent : TakeProfitPercent;
+
+    public decimal WorkingTrailingStopPercent(bool flippedEntry) =>
+        flippedEntry ? FlippedTrailingStopPercent : TrailingStopPercent;
 
     // For KRAKEN_SYNC / externally opened positions only: when the closeable live
     // price has travelled this percent of the way from entry to the existing

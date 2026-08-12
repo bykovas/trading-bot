@@ -93,6 +93,45 @@ public sealed class FuturesVirtualPortfolioTests
     }
 
     [Fact]
+    public void Flipped_entry_uses_calibrated_profit_handoff_without_changing_size_or_stop()
+    {
+        var config = Config();
+        config.TpSl.TakeProfitPercent = 4m;
+        config.TpSl.StopLossPercent = 2m;
+        config.TpSl.ExchangeProtectionMultiplierPercent = 200m;
+        config.TpSl.TrailingStopPercent = 2m;
+        config.TpSl.FlippedTakeProfitPercent = 1.5m;
+        config.TpSl.FlippedTrailingStopPercent = 0.75m;
+        var portfolio = new FuturesVirtualPortfolio(config, new NullStore());
+        var state = portfolio.Load();
+
+        var fill = portfolio.Apply(
+            state,
+            "DOGE/USD",
+            FuturesDesiredExposure.Short,
+            100m,
+            10m,
+            2m,
+            flippedEntry: true);
+
+        Assert.True(fill.PositionOpened);
+        var position = Assert.Single(state.Positions);
+        Assert.True(position.FlippedEntry);
+        Assert.Equal(10m, position.EntryNotionalEur);
+        Assert.Equal(5m, position.InitialMarginEur);
+        Assert.Equal(2m, position.Leverage);
+        Assert.Equal(102m, position.StopLossPrice);
+        Assert.Equal(98.5m, position.TakeProfitPrice);
+        Assert.Equal(104m, position.ExchangeStopLossPrice);
+        Assert.Equal(97m, position.ExchangeTakeProfitPrice);
+        Assert.Equal(2m, position.StopDistancePct);
+        Assert.Equal(1.5m, position.TakeProfitDistancePct);
+        Assert.Equal(0.75m, position.TrailingStopPercent);
+        Assert.Equal(2m, fill.Action.StopDistancePct);
+        Assert.Equal(1.5m, fill.Action.TakeProfitDistancePct);
+    }
+
+    [Fact]
     public void Entry_without_plan_uses_fixed_tpsl_not_atr_multipliers()
     {
         var config = Config();

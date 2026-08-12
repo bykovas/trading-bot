@@ -180,7 +180,12 @@ internal sealed class FuturesDecisionWorker(
                     riskReasons = new[] { $"hard exit: {trigger.Kind} via {trigger.TriggerSource} price" };
                 }
                 else if (!IsExternalFuturesPosition(held)
-                    && EvaluateMaxHoldExit(held, utc, config.Exits.MaxHoldMinutes, config.Exits.MaxHoldMinStopProgressPct) is { ShouldClose: true } maxHold)
+                    && EvaluateMaxHoldExit(
+                        held,
+                        utc,
+                        config.Exits.MaxHoldMinutes,
+                        config.Exits.MaxHoldMinStopProgressPct,
+                        config.Exits.MaxHoldForFlippedEntriesEnabled) is { ShouldClose: true } maxHold)
                 {
                     fill = await ApplyOrExecuteLiveAsync(
                         state, pair, FuturesDesiredExposure.Flat, markPrice,
@@ -424,7 +429,8 @@ internal sealed class FuturesDecisionWorker(
                             instrument: marketState.Instrument,
                             entryPlan: entryPlan,
                             cancellationToken,
-                            signalPrice: marketState.LastPrice);
+                            signalPrice: marketState.LastPrice,
+                            flippedEntry: flipApplied);
                         if (flipApplied)
                         {
                             fill.Action.Reason = string.IsNullOrWhiteSpace(fill.Action.Reason)
@@ -473,6 +479,8 @@ internal sealed class FuturesDecisionWorker(
                             {
                                 openedPosition.EntryChannel = entryChannel;
                                 openedPosition.FlippedEntry = flipApplied;
+                                fill.Action.StopDistancePct = openedPosition.StopDistancePct;
+                                fill.Action.TakeProfitDistancePct = openedPosition.TakeProfitDistancePct;
                             }
 
                             newEntriesThisCycle++;
@@ -618,7 +626,12 @@ internal sealed class FuturesDecisionWorker(
                 fill = await HandleTpSlTriggerAsync(state, held, trigger, markPrice, marketState.Instrument, cancellationToken, fast: true);
             }
             else if (!IsExternalFuturesPosition(held)
-                && EvaluateMaxHoldExit(held, utc, config.Exits.MaxHoldMinutes, config.Exits.MaxHoldMinStopProgressPct) is { ShouldClose: true } maxHold)
+                && EvaluateMaxHoldExit(
+                    held,
+                    utc,
+                    config.Exits.MaxHoldMinutes,
+                    config.Exits.MaxHoldMinStopProgressPct,
+                    config.Exits.MaxHoldForFlippedEntriesEnabled) is { ShouldClose: true } maxHold)
             {
                 fill = await ApplyOrExecuteLiveAsync(
                     state, held.Pair, FuturesDesiredExposure.Flat, markPrice,
@@ -857,7 +870,9 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var closeSide = CloseSide(position.Side);
-        var trailingPercent = config.TpSl.TrailingStopPercent;
+        var trailingPercent = position.TrailingStopPercent is > 0m
+            ? position.TrailingStopPercent.Value
+            : config.TpSl.WorkingTrailingStopPercent(position.FlippedEntry);
         var trailing = await broker.SendTrailingStopOrderAsync(
             instrument.KrakenPair,
             closeSide,
@@ -1027,11 +1042,12 @@ internal sealed class FuturesDecisionWorker(
         InstrumentOptions instrument,
         FuturesEntryPlan? entryPlan,
         CancellationToken cancellationToken,
-        decimal? signalPrice = null)
+        decimal? signalPrice = null,
+        bool flippedEntry = false)
     {
         if (!config.Futures.LiveTradingEnabled)
         {
-            return portfolio.Apply(state, pair, desired, markPrice, targetNotionalEur, leverage, reduceOnly, reason, exitTriggerSource, entryPlan);
+            return portfolio.Apply(state, pair, desired, markPrice, targetNotionalEur, leverage, reduceOnly, reason, exitTriggerSource, entryPlan, flippedEntry);
         }
 
         var held = state.Positions.FirstOrDefault(position => position.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
@@ -1180,7 +1196,18 @@ internal sealed class FuturesDecisionWorker(
         // Record the virtual ledger against the exchange average fill and filled
         // quantity. Partial IOC fills commit only the filled part; unfilled remainder
         // is canceled by the exchange.
-        var opened = portfolio.Apply(state, pair, desired, fillDetails.AveragePrice, filledNotionalEur, entryLeverage, reduceOnly: false, reason, exitTriggerSource, adjustedPlan);
+        var opened = portfolio.Apply(
+            state,
+            pair,
+            desired,
+            fillDetails.AveragePrice,
+            filledNotionalEur,
+            entryLeverage,
+            reduceOnly: false,
+            reason,
+            exitTriggerSource,
+            adjustedPlan,
+            flippedEntry);
         opened.Action.FillSource = "REAL";
         opened.Action.Reason = $"live Kraken Futures IOC accepted id={order.OrderId ?? "-"} status={order.Status}; {opened.Action.Reason}";
         AttachExecutionDiagnostics(opened.Action, referencePrice, preSubmit, limitPrice, size, order, fillDetails);
@@ -1586,14 +1613,20 @@ internal sealed class FuturesDecisionWorker(
         FuturesOpenOrder? existingTakeProfit,
         FuturesOpenOrder? existingTrailingStop)
     {
+        var isFlippedEntry = existing?.FlippedEntry == true;
         var stopDistancePct = config.TpSl.StopLossPercent;
-        var takeProfitDistancePct = config.TpSl.TakeProfitPercent;
+        var takeProfitDistancePct = config.TpSl.WorkingTakeProfitPercent(isFlippedEntry);
+        var configuredTrailingStopPercent = config.TpSl.WorkingTrailingStopPercent(isFlippedEntry);
         var trailingStopState = existingTrailingStop is not null
             ? "EXCHANGE_OPEN"
             : existing?.TrailingStopState;
-        var trailingStopPercent = existingTrailingStop?.TrailingStopPercent is > 0m
-            ? existingTrailingStop.TrailingStopPercent
-            : existing?.TrailingStopPercent ?? (existingTrailingStop is not null ? config.TpSl.TrailingStopPercent : null);
+        var trailingStopPercent = existingTrailingStop is not null
+            ? existingTrailingStop.TrailingStopPercent is > 0m
+                ? existingTrailingStop.TrailingStopPercent
+                : existing?.TrailingStopPercent ?? configuredTrailingStopPercent
+            : isFlippedEntry
+                ? configuredTrailingStopPercent
+                : existing?.TrailingStopPercent;
         var trailingStopOrderId = existingTrailingStop is not null
             ? existingTrailingStop.OrderId
             : existing?.TrailingStopOrderId;
@@ -1621,7 +1654,7 @@ internal sealed class FuturesDecisionWorker(
 
         var isShort = side.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
         var hasExistingStopLossPrice = existing?.StopLossPrice is > 0m;
-        var hasExistingTakeProfitPrice = existing?.TakeProfitPrice is > 0m;
+        var hasExistingTakeProfitPrice = !isFlippedEntry && existing?.TakeProfitPrice is > 0m;
         var stopLossPrice = hasExistingStopLossPrice
             ? existing!.StopLossPrice!.Value
             : isShort
@@ -1646,12 +1679,12 @@ internal sealed class FuturesDecisionWorker(
             ? existingStopLoss.StopPrice.Value
             : existing?.ExchangeStopLossPrice is > 0m
                 ? existing.ExchangeStopLossPrice.Value
-                : ExchangeProtectionPrice(entryPrice, side, isTakeProfit: false);
+                : ExchangeProtectionPrice(entryPrice, side, isTakeProfit: false, stopDistancePct);
         var exchangeTakeProfitPrice = existingTakeProfit?.StopPrice is > 0m
             ? existingTakeProfit.StopPrice.Value
-            : existing?.ExchangeTakeProfitPrice is > 0m
+            : !isFlippedEntry && existing?.ExchangeTakeProfitPrice is > 0m
                 ? existing.ExchangeTakeProfitPrice.Value
-                : ExchangeProtectionPrice(entryPrice, side, isTakeProfit: true);
+                : ExchangeProtectionPrice(entryPrice, side, isTakeProfit: true, takeProfitDistancePct);
 
         return new ImportedTpSlState(
             trailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true
@@ -1763,16 +1796,20 @@ internal sealed class FuturesDecisionWorker(
         return decimal.Round(Math.Min(100m, travelled / targetDistance * 100m), 4);
     }
 
-    private decimal ExchangeProtectionPrice(decimal entryPrice, string positionSide, bool isTakeProfit)
+    private decimal ExchangeProtectionPrice(
+        decimal entryPrice,
+        string positionSide,
+        bool isTakeProfit,
+        decimal? baseDistancePctOverride = null)
     {
         if (entryPrice <= 0m)
         {
             return 0m;
         }
 
-        var baseDistancePct = isTakeProfit
+        var baseDistancePct = baseDistancePctOverride ?? (isTakeProfit
             ? config.TpSl.TakeProfitPercent
-            : config.TpSl.StopLossPercent;
+            : config.TpSl.StopLossPercent);
         var distancePct = baseDistancePct * Math.Max(0m, config.TpSl.ExchangeProtectionMultiplierPercent) / 100m;
         var isShort = positionSide.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
         if (isTakeProfit)
@@ -1832,8 +1869,14 @@ internal sealed class FuturesDecisionWorker(
         PortfolioPosition position,
         DateTimeOffset utc,
         int maxHoldMinutes,
-        decimal minStopProgressPct)
+        decimal minStopProgressPct,
+        bool maxHoldForFlippedEntriesEnabled = true)
     {
+        if (position.FlippedEntry && !maxHoldForFlippedEntriesEnabled)
+        {
+            return new FuturesMaxHoldExit(false, "MAX_HOLD disabled for flipped entry");
+        }
+
         if (maxHoldMinutes <= 0 || position.OpenedAtUtc is not { } opened || utc - opened < TimeSpan.FromMinutes(maxHoldMinutes))
         {
             return new FuturesMaxHoldExit(false, null);

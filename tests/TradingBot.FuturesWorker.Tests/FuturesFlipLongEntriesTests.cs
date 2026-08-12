@@ -40,6 +40,30 @@ public sealed class FuturesFlipLongEntriesTests
     }
 
     [Fact]
+    public void Flipped_exit_policy_defaults_are_normalized_without_changing_normal_policy()
+    {
+        var config = new FuturesBotConfiguration
+        {
+            TpSl = new TpSlOptions
+            {
+                TakeProfitPercent = 4m,
+                StopLossPercent = 2m,
+                TrailingStopPercent = 2m,
+                FlippedTakeProfitPercent = 0m,
+                FlippedTrailingStopPercent = -1m
+            }
+        };
+
+        InvokeNormalize(config);
+
+        Assert.Equal(4m, config.TpSl.TakeProfitPercent);
+        Assert.Equal(2m, config.TpSl.StopLossPercent);
+        Assert.Equal(2m, config.TpSl.TrailingStopPercent);
+        Assert.Equal(1.5m, config.TpSl.FlippedTakeProfitPercent);
+        Assert.Equal(0.75m, config.TpSl.FlippedTrailingStopPercent);
+    }
+
+    [Fact]
     public void Flipped_short_is_held_while_the_long_signal_persists()
     {
         var strategy = new LongShortStrategy(new FuturesBotConfiguration());
