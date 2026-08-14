@@ -1,3 +1,9 @@
+## 2026-08-14-futures-flipped-price-owned-exits
+
+- Flipped LONG-to-SHORT positions no longer close on `ShortCandidate`. A bearish signal confirms the executed SHORT side rather than reversing it, so flipped entries are now managed exclusively by working SL, working-TP handoff, exchange trailing protection, exchange emergency protection, or manual close.
+- Any position with `TrailingStopState=EXCHANGE_OPEN` now ignores strategy reversal exits. This prevents a full decision cycle from market-closing a winner after Kraken trailing protection has already been armed.
+- Not changed: entry selection/scoring, trade frequency, 5 EUR margin, 2x leverage, 10 EUR notional, working SL 2%, flipped trailing activation 1.5%, flipped trailing distance 0.75%, normal reversal behavior before trailing activation, external/manual position ownership, execution, reconciliation, or portfolio caps.
+
 ## 2026-08-12-futures-flipped-exit-calibration
 
 - Bot-owned futures positions opened by the LONG-to-SHORT flipped experiment now use a dedicated working profit handoff: take-profit activation at 1.5% and a 0.75% reduce-only Kraken trailing stop. Their working stop-loss remains 2%, and new exchange protection remains twice the working distances (3% TP / 4% SL).

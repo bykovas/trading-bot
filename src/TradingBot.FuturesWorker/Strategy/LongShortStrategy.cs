@@ -21,16 +21,25 @@ internal sealed class LongShortStrategy(FuturesBotConfiguration config)
     // Hard exits (TP/SL) are owned by TpSlOrchestrator, not the strategy.
     public FuturesDesiredExposure DecideHeld(PortfolioPosition position, TechnicalSignal signal)
     {
+        var heldExposure = position.Side == "SHORT"
+            ? FuturesDesiredExposure.Short
+            : FuturesDesiredExposure.Long;
+
+        // Once exchange trailing protection is armed, Kraken owns the exit. A
+        // strategy reversal must not cut the winner or cancel the trailing order.
+        if (position.TrailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return heldExposure;
+        }
+
         var intent = SignalScorer.IntentOf(signal, config.Strategy);
 
-        // Flipped-logic short: it exists BECAUSE the LONG thesis fired, so the
-        // reversal exit inverts with it — the position is held while the long
-        // signal persists and closes when the original long would have closed
-        // (a ShortCandidate). Without this the very signal that opened the
-        // position requests its close on the next cycle.
+        // A flipped short deliberately trades against an approved LONG entry.
+        // Neither a persisting LONG nor a later ShortCandidate is a meaningful
+        // reversal for that experiment, so price-based TP/SL/trailing owns exit.
         if (position.FlippedEntry && position.Side == "SHORT")
         {
-            return intent == SignalIntent.ShortCandidate ? FuturesDesiredExposure.Flat : FuturesDesiredExposure.Short;
+            return FuturesDesiredExposure.Short;
         }
 
         return position.Side == "SHORT"

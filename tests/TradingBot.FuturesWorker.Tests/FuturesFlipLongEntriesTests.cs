@@ -75,14 +75,30 @@ public sealed class FuturesFlipLongEntriesTests
     }
 
     [Fact]
-    public void Flipped_short_closes_when_the_original_long_would_have_closed()
+    public void Flipped_short_is_held_when_a_short_signal_confirms_its_executed_side()
     {
         var strategy = new LongShortStrategy(new FuturesBotConfiguration());
         var position = new PortfolioPosition { Pair = "SOL/USD", Side = "SHORT", FlippedEntry = true };
 
-        // A ShortCandidate is the reversal that would have closed the original long.
+        // Price-based TP/SL/trailing owns the flipped experiment's exit.
         var decision = strategy.DecideHeld(position, ShortSignal());
-        Assert.Equal(FuturesDesiredExposure.Flat, decision);
+        Assert.Equal(FuturesDesiredExposure.Short, decision);
+    }
+
+    [Fact]
+    public void Active_exchange_trailing_prevents_strategy_reversal_close()
+    {
+        var strategy = new LongShortStrategy(new FuturesBotConfiguration());
+        var position = new PortfolioPosition
+        {
+            Pair = "SOL/USD",
+            Side = "SHORT",
+            FlippedEntry = false,
+            TrailingStopState = "EXCHANGE_OPEN"
+        };
+
+        var decision = strategy.DecideHeld(position, LongSignal());
+        Assert.Equal(FuturesDesiredExposure.Short, decision);
     }
 
     [Fact]
