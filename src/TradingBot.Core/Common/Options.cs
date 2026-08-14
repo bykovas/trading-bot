@@ -287,10 +287,13 @@ public sealed class MarketDataIngestionOptions
 
 public sealed class CorrelationRiskOptions
 {
+    private decimal _maxExposurePerGroup;
+
     // Per-group open-position and exposure caps. Every value uses the 0 = disabled
     // convention so a default-constructed (unconfigured) options object is inert.
     public int MaxOpenPositionsPerGroup { get; set; } = 0;
-    public decimal MaxExposureEurPerGroup { get; set; } = 0m;
+    public decimal MaxExposureEurPerGroup { get => _maxExposurePerGroup; set => _maxExposurePerGroup = value; }
+    public decimal MaxExposureUsdPerGroup { get => _maxExposurePerGroup; set => _maxExposurePerGroup = value; }
 
     // Aggregate caps across all high-beta groups (and ungrouped high-beta singletons).
     public int MaxHighBetaPositions { get; set; } = 0;

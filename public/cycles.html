@@ -444,7 +444,14 @@
     const prev = document.getElementById("prev");
     const next = document.getElementById("next");
 
-    const money = new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" });
+    const moneyFormats = {
+      EUR: new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" }),
+      USD: new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
+    };
+
+    function money(value) {
+      return moneyFormats[currentBotInstance.startsWith("futures-") ? "USD" : "EUR"].format(value);
+    }
 
     function refreshBotStatus() {
       if (!window.BlynaiBotStatus) return;
@@ -506,8 +513,8 @@
             <td>${text(record.aiProvider)}</td>
             <td class="num">${record.activePairs?.length ?? 0}</td>
             <td class="num">${record.decisions?.length ?? 0}</td>
-            <td class="num">${Number.isFinite(before) ? money.format(before) : "-"}</td>
-            <td class="num ${valueClass(before, after)}">${Number.isFinite(after) ? money.format(after) : "-"}</td>
+            <td class="num">${Number.isFinite(before) ? money(before) : "-"}</td>
+            <td class="num ${valueClass(before, after)}">${Number.isFinite(after) ? money(after) : "-"}</td>
             <td><a href="/api/cycles/${encodeURIComponent(item.cycleId)}">JSON</a></td>
           </tr>
         `;

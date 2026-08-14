@@ -20,15 +20,15 @@ public sealed class FuturesRiskCapsAndSizingTests
         {
             Futures = new FuturesOptions
             {
-                MaxLeverage = 2m,
-                DefaultLeverage = 2m,
+                MaxLeverage = 4m,
+                DefaultLeverage = 4m,
                 MaxPositions = 3,
-                TargetMarginEur = 5m,
-                MaxNotionalEur = 10m,
-                MaxTotalNotionalEur = 30m,
-                MaxMarginPerPositionEur = 5m
+                TargetMarginUsd = 15m,
+                MaxNotionalUsd = 60m,
+                MaxTotalNotionalUsd = 180m,
+                MaxMarginPerPositionUsd = 15m
             },
-            Portfolio = new FuturesPortfolioOptions { StartingCashEur = 100m },
+            Portfolio = new FuturesPortfolioOptions { StartingCashUsd = 60m },
             Margin = new MarginOptions
             {
                 MaintenanceMarginRatePercent = 5m,
@@ -44,7 +44,7 @@ public sealed class FuturesRiskCapsAndSizingTests
                 StopDistanceCapPct = 3m,
                 SlippageBufferPct = 0.10m
             },
-            Risk = new FuturesRiskOptions { TargetRiskEur = 0.3m, MaxConcurrentOpenRisk = 0.9m },
+            Risk = new FuturesRiskOptions { TargetRiskUsd = 1.8m, MaxConcurrentOpenRiskUsd = 5.4m },
             TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 4m, StopLossPercent = 2m }
         };
         Normalize(config);
@@ -107,23 +107,23 @@ public sealed class FuturesRiskCapsAndSizingTests
         MarketValueEur = 0m
     };
 
-    // 1. Live defaults target a 10 EUR notional floor-stop entry.
+    // 1. Live defaults target a 60 USD notional floor-stop entry.
     [Fact]
-    public void Live_defaults_target_10_notional_for_floor_stop()
+    public void Live_defaults_target_60_usd_notional_for_floor_stop()
     {
         var config = LiveConfig();
-        Assert.Equal(0.3m, config.Risk.TargetRiskEur);                 // 3% max stop on 10 EUR notional
-        Assert.Equal(0.9m, config.Risk.MaxConcurrentOpenRisk);         // TargetRiskEur * MaxPositions
-        Assert.Equal(config.Risk.TargetRiskEur * config.Futures.MaxPositions, config.Risk.MaxConcurrentOpenRisk);
+        Assert.Equal(1.8m, config.Risk.TargetRiskUsd);                 // 3% max stop on 60 USD notional
+        Assert.Equal(5.4m, config.Risk.MaxConcurrentOpenRiskUsd);      // TargetRiskUsd * MaxPositions
+        Assert.Equal(config.Risk.TargetRiskUsd * config.Futures.MaxPositions, config.Risk.MaxConcurrentOpenRiskUsd);
 
         var costs = FuturesExecutionCostModel.Estimate(config, FuturesDesiredExposure.Long, 0m);
-        var plan = FuturesPositionSizer.Size(config, atrPct: 0.5m, costs, leverage: 2m);
+        var plan = FuturesPositionSizer.Size(config, atrPct: 0.5m, costs, leverage: 4m);
         Assert.Equal(2m, plan.StopDistancePct);                        // floored
-        Assert.Equal(10m, plan.SizedNotionalEur);
-        Assert.Equal(5m, plan.RequiredMarginEur);
-        Assert.Equal(config.Futures.MaxMarginPerPositionEur, plan.RequiredMarginEur);
-        Assert.Equal(config.Futures.MaxNotionalEur, plan.SizedNotionalEur);
-        Assert.Equal(0.2m, plan.ProjectedStopLossEur);                 // actual risk at the 2% floor
+        Assert.Equal(60m, plan.SizedNotionalEur);
+        Assert.Equal(15m, plan.RequiredMarginEur);
+        Assert.Equal(config.Futures.MaxMarginPerPositionUsd, plan.RequiredMarginEur);
+        Assert.Equal(config.Futures.MaxNotionalUsd, plan.SizedNotionalEur);
+        Assert.Equal(1.2m, plan.ProjectedStopLossEur);                 // actual risk at the 2% floor
     }
 
     // 2. ATR stop above the maximum allowed stop is BLOCKED, never silently clamped.
@@ -147,31 +147,31 @@ public sealed class FuturesRiskCapsAndSizingTests
         Assert.Contains(eval.Reasons, r => r.Contains("STOP_DISTANCE_TOO_LARGE"));
     }
 
-    // 3. Three concurrent 5 EUR-margin positions fit at the 80% utilization cap.
+    // 3. Three concurrent 15 USD-margin positions fit at the 80% utilization cap.
     [Fact]
-    public void Two_concurrent_positions_fit_within_caps_at_100_eur()
+    public void Three_concurrent_positions_fit_within_caps_at_60_usd()
     {
         var config = LiveConfig();
         var risk = new MarginRiskManager(config);
-        // Floor-stop entries use the requested 10 EUR notional / 5 EUR margin.
-        const decimal notional = 10m;
-        const decimal margin = 5m;
+        // Floor-stop entries use the requested 60 USD notional / 15 USD margin.
+        const decimal notional = 60m;
+        const decimal margin = 15m;
 
-        var state = new PortfolioState { CashEur = 100m };
-        var first = risk.EvaluateEntry(LongInputs(config, state, notional, 2m, 2m, 0.2m, usedMarginEur: 0m));
+        var state = new PortfolioState { CashEur = 60m };
+        var first = risk.EvaluateEntry(LongInputs(config, state, notional, 4m, 2m, 1.2m, usedMarginEur: 0m));
         Assert.True(first.Approved);
 
         state.Positions.Add(OpenLong(notional, margin));
-        var second = risk.EvaluateEntry(LongInputs(config, state, notional, 2m, 2m, 0.4m, usedMarginEur: margin));
+        var second = risk.EvaluateEntry(LongInputs(config, state, notional, 4m, 2m, 2.4m, usedMarginEur: margin));
         Assert.True(second.Approved);
 
         state.Positions.Add(OpenLong(notional, margin));
-        var third = risk.EvaluateEntry(LongInputs(config, state, notional, 2m, 2m, 0.6m, usedMarginEur: margin * 2m));
+        var third = risk.EvaluateEntry(LongInputs(config, state, notional, 4m, 2m, 3.6m, usedMarginEur: margin * 2m));
         Assert.True(third.Approved);
 
         // A 4th is blocked by the position-count cap.
         state.Positions.Add(OpenLong(notional, margin));
-        var fourth = risk.EvaluateEntry(LongInputs(config, state, notional, 2m, 2m, 0.6m, usedMarginEur: margin * 3m));
+        var fourth = risk.EvaluateEntry(LongInputs(config, state, notional, 4m, 2m, 3.6m, usedMarginEur: margin * 3m));
         Assert.False(fourth.Approved);
         Assert.Contains(fourth.Reasons, r => r.Contains("max futures positions"));
     }
@@ -185,12 +185,12 @@ public sealed class FuturesRiskCapsAndSizingTests
         config.Risk.MaxConcurrentOpenRisk = 20m;
         config.Margin.MaxAccountMarginUtilizationPercent = 1000m;
         var risk = new MarginRiskManager(config);
-        // Three floor-stop positions already consume the 30 EUR aggregate cap.
-        var state = new PortfolioState { CashEur = 100m };
-        state.Positions.Add(OpenLong(10m, 5m));
-        state.Positions.Add(OpenLong(10m, 5m));
-        state.Positions.Add(OpenLong(10m, 5m));
-        var fourth = risk.EvaluateEntry(LongInputs(config, state, 10m, 2m, 2m, 0.6m, usedMarginEur: 15m));
+        // Three floor-stop positions already consume the 180 USD aggregate cap.
+        var state = new PortfolioState { CashEur = 60m };
+        state.Positions.Add(OpenLong(60m, 15m));
+        state.Positions.Add(OpenLong(60m, 15m));
+        state.Positions.Add(OpenLong(60m, 15m));
+        var fourth = risk.EvaluateEntry(LongInputs(config, state, 60m, 4m, 2m, 3.6m, usedMarginEur: 45m));
         Assert.False(fourth.Approved);
         Assert.Contains(fourth.Reasons, r => r.Contains("MAX_TOTAL_NOTIONAL"));
     }
@@ -201,9 +201,9 @@ public sealed class FuturesRiskCapsAndSizingTests
     {
         var config = LiveConfig();
         var risk = new MarginRiskManager(config);
-        var state = new PortfolioState { CashEur = 100m };
-        // 98 EUR already committed -> 2 EUR free; a 10 EUR notional at 2x needs 5 EUR margin.
-        var eval = risk.EvaluateEntry(LongInputs(config, state, 10m, 2m, 2m, 0.2m, usedMarginEur: 98m));
+        var state = new PortfolioState { CashEur = 60m };
+        // 58 USD already committed -> 2 USD free; a 60 USD notional at 4x needs 15 USD margin.
+        var eval = risk.EvaluateEntry(LongInputs(config, state, 60m, 4m, 2m, 1.2m, usedMarginEur: 58m));
         Assert.False(eval.Approved);
         Assert.Contains(eval.Reasons, r => r.Contains("INSUFFICIENT_AVAILABLE_MARGIN"));
     }
@@ -213,12 +213,12 @@ public sealed class FuturesRiskCapsAndSizingTests
     {
         var config = LiveConfig();
         var costs = FuturesExecutionCostModel.Estimate(config, FuturesDesiredExposure.Long, 0m);
-        var full = FuturesPositionSizer.Size(config, atrPct: 0.5m, costs, leverage: 2m);
-        Assert.Equal(10m, full.SizedNotionalEur);
-        Assert.Equal(5m, full.RequiredMarginEur);
+        var full = FuturesPositionSizer.Size(config, atrPct: 0.5m, costs, leverage: 4m);
+        Assert.Equal(60m, full.SizedNotionalEur);
+        Assert.Equal(15m, full.RequiredMarginEur);
 
         var state = new PortfolioState { CashEur = 3m };
-        var existing = OpenLong(20m, 10m);
+        var existing = OpenLong(40m, 10m);
         existing.MarketValueEur = 97m;
         state.Positions.Add(existing);
         var shrunk = FuturesPositionSizer.FitToAvailableCollateral(
@@ -230,12 +230,12 @@ public sealed class FuturesRiskCapsAndSizingTests
 
         Assert.True(shrunk.SizedNotionalEur < full.SizedNotionalEur);
         Assert.Contains("AVAILABLE_COLLATERAL", shrunk.NotionalCapReason);
-        Assert.Equal(decimal.Round(3m / (1m / 2m + config.Fees.TakerPct / 100m), 6), shrunk.SizedNotionalEur);
-        Assert.Equal(decimal.Round(shrunk.SizedNotionalEur / 2m, 6), shrunk.RequiredMarginEur);
+        Assert.Equal(decimal.Round(3m / (1m / 4m + config.Fees.TakerPct / 100m), 6), shrunk.SizedNotionalEur);
+        Assert.Equal(decimal.Round(shrunk.SizedNotionalEur / 4m, 6), shrunk.RequiredMarginEur);
         Assert.True(shrunk.ProjectedStopLossEur < full.ProjectedStopLossEur);
 
         var risk = new MarginRiskManager(config);
-        var eval = risk.EvaluateEntry(LongInputs(config, state, shrunk.SizedNotionalEur, 2m, shrunk.StopDistancePct, shrunk.ProjectedOpenRiskEur, usedMarginEur: 10m));
+        var eval = risk.EvaluateEntry(LongInputs(config, state, shrunk.SizedNotionalEur, 4m, shrunk.StopDistancePct, shrunk.ProjectedOpenRiskEur, usedMarginEur: 10m));
         Assert.True(eval.Approved);
     }
 

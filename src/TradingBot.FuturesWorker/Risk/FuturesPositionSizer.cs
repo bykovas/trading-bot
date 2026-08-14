@@ -8,8 +8,8 @@ namespace TradingBot.FuturesWorker;
 //                  shrink the stop; it flags StopExceedsMaxAllowed so the risk manager can
 //                  block the entry with STOP_DISTANCE_TOO_LARGE. A capped-down stop would
 //                  place the exit inside the instrument's own volatility (guaranteed churn).
-//   notional     = TargetRiskEur / (stopPct/100)   then apply max-notional / max-margin caps
-//   margin       = notional / leverage             (leverage sets collateral, not EUR risk)
+//   notional     = TargetRiskUsd / (stopPct/100)   then apply max-notional / max-margin caps
+//   margin       = notional / leverage             (leverage sets collateral, not USD risk)
 //   tpPct        = max(MinRewardRiskMultiple * stopPct,
 //                      MinTpVsCostMult * roundTripCostPct,
 //                      Exits.MinTakeProfitPct floor)
@@ -60,24 +60,24 @@ internal static class FuturesPositionSizer
             stopSource = "ATR_EXCEEDS_MAX";
         }
 
-        var targetRiskEur = config.Risk.TargetRiskEur > 0m
-            ? config.Risk.TargetRiskEur
-            : stopFloorPct / 100m * config.Futures.DerivedNotionalEur(leverage);
+        var targetRiskUsd = config.Risk.TargetRiskUsd > 0m
+            ? config.Risk.TargetRiskUsd
+            : stopFloorPct / 100m * config.Futures.DerivedNotionalUsd(leverage);
 
         // Risk budget drives notional. Leverage only converts notional → margin.
         var rawNotional = stopDistancePct <= 0m
             ? 0m
-            : targetRiskEur / (stopDistancePct / 100m);
+            : targetRiskUsd / (stopDistancePct / 100m);
 
-        var maxNotional = config.Futures.MaxNotionalEur > 0m
-            ? config.Futures.MaxNotionalEur
-            : config.Futures.DerivedNotionalEur(config.Futures.MaxLeverage);
+        var maxNotional = config.Futures.MaxNotionalUsd > 0m
+            ? config.Futures.MaxNotionalUsd
+            : config.Futures.DerivedNotionalUsd(config.Futures.MaxLeverage);
         // Per-position margin CAP → notional ceiling. Prefer the explicit
-        // MaxMarginPerPositionEur; fall back to TargetMarginEur (legacy) when unset.
-        var marginCapEur = config.Futures.MaxMarginPerPositionEur > 0m
-            ? config.Futures.MaxMarginPerPositionEur
-            : config.Futures.TargetMarginEur;
-        var maxNotionalFromMargin = marginCapEur > 0m ? marginCapEur * leverage : maxNotional;
+        // MaxMarginPerPositionUsd; fall back to TargetMarginUsd when unset.
+        var marginCapUsd = config.Futures.MaxMarginPerPositionUsd > 0m
+            ? config.Futures.MaxMarginPerPositionUsd
+            : config.Futures.TargetMarginUsd;
+        var maxNotionalFromMargin = marginCapUsd > 0m ? marginCapUsd * leverage : maxNotional;
         var notionalCap = Math.Min(maxNotional, maxNotionalFromMargin);
 
         var sizedNotional = Math.Min(rawNotional, notionalCap);
@@ -90,7 +90,7 @@ internal static class FuturesPositionSizer
         // Realistic per-trade worst case: stop move PLUS round-trip execution cost and any
         // configured emergency-exit slippage. This is the number reported per trade so the
         // projected risk explicitly includes stop-exit slippage. The concurrent portfolio
-        // cap (MaxConcurrentOpenRisk) uses PURE stop-distance heat = TargetRiskEur * N.
+        // cap uses PURE stop-distance heat = TargetRiskUsd * N.
         var projectedOpenRiskEur = decimal.Round(
             projectedStopLossEur + sizedNotional * (costs.RoundTripCostPct + config.Risk.EstimatedEmergencyExitCostPct) / 100m,
             8);
@@ -113,7 +113,7 @@ internal static class FuturesPositionSizer
             MaxAllowedStopPct: decimal.Round(stopCapPct, 6),
             StopExceedsMaxAllowed: stopExceedsMaxAllowed,
             TakeProfitDistancePct: decimal.Round(takeProfitDistancePct, 6),
-            TargetRiskEur: decimal.Round(targetRiskEur, 6),
+            TargetRiskEur: decimal.Round(targetRiskUsd, 6),
             SizedNotionalEur: decimal.Round(sizedNotional, 6),
             RequiredMarginEur: decimal.Round(requiredMarginEur, 6),
             RequestedLeverage: decimal.Round(requestedLeverage, 6),

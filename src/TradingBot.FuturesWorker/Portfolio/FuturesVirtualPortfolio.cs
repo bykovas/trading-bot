@@ -2,8 +2,8 @@ namespace TradingBot.FuturesWorker;
 
 // Margin-ledger virtual portfolio for futures dry-run. NOT a reuse of the spot
 // DryRunPortfolio (blueprint hard rule): cash here is margin collateral, a
-// position's MarketValueEur is its equity contribution (initial margin +
-// unrealized PnL), and SHORT positions are first-class. All simulated exits are
+// position's legacy MarketValueEur field is its USD equity contribution (initial
+// margin + unrealized PnL), and SHORT positions are first-class. All simulated exits are
 // reduce-only; a flip request is refused, never auto-split into close + open.
 internal sealed class FuturesVirtualPortfolio(
     FuturesBotConfiguration config,
@@ -24,7 +24,9 @@ internal sealed class FuturesVirtualPortfolio(
         store.Load() ?? new PortfolioState
         {
             UpdatedAt = _clock.UtcNow,
-            CashEur = config.Portfolio.StartingCashEur
+            CashEur = config.Portfolio.StartingCashUsd,
+            CashQuoteValue = config.Portfolio.StartingCashUsd,
+            CashQuoteCurrency = "USD"
         };
 
     public void Save(PortfolioState state)
@@ -123,10 +125,9 @@ internal sealed class FuturesVirtualPortfolio(
 
         leverage = Math.Clamp(leverage <= 0m ? 1m : leverage, 1m, config.Futures.MaxLeverage);
         var fillPrice = markPrice;
-        // Quantity uses the FX-converted (USD) notional over the USD mark price; the
-        // EUR books (notional, margin) stay in EUR so margin = notional / leverage.
-        var usdPerEur = config.Futures.UsdPerEur <= 0m ? 1m : config.Futures.UsdPerEur;
-        var quantity = fillPrice <= 0m ? 0m : notionalEur * usdPerEur / fillPrice;
+        // Futures notional, collateral, prices, fees, and PnL all use USD. Generic
+        // persistence properties retain their legacy *Eur names for compatibility.
+        var quantity = fillPrice <= 0m ? 0m : notionalEur / fillPrice;
         var fee = FuturesExecutionCostModel.FeeEur(notionalEur, config.Fees.TakerPct);
         var initialMargin = leverage <= 0m ? notionalEur : notionalEur / leverage;
 
@@ -137,7 +138,7 @@ internal sealed class FuturesVirtualPortfolio(
 
         if (state.CashEur < initialMargin + fee)
         {
-            return NoOrder(state, pair, null, $"insufficient margin: need EUR {initialMargin + fee:0.####}, have EUR {state.CashEur:0.####}");
+            return NoOrder(state, pair, null, $"insufficient margin: need USD {initialMargin + fee:0.####}, have USD {state.CashEur:0.####}");
         }
 
         var before = Snapshot(state);
@@ -189,7 +190,7 @@ internal sealed class FuturesVirtualPortfolio(
 
         var action = BaseAction(pair, side == "SHORT" ? "WOULD_OPEN_SHORT" : "WOULD_OPEN_LONG",
             string.IsNullOrEmpty(reason)
-                ? $"{LedgerOpenLabel} {side.ToLowerInvariant()}: notional EUR {notionalEur:0.####}, margin EUR {initialMargin:0.####}, fee EUR {fee:0.####} ({FuturesExecutionCostModel.TakerIocRoundTrip}), fill {fillPrice:0.####}, leverage {leverage:0.#}x"
+                ? $"{LedgerOpenLabel} {side.ToLowerInvariant()}: notional USD {notionalEur:0.####}, margin USD {initialMargin:0.####}, fee USD {fee:0.####} ({FuturesExecutionCostModel.TakerIocRoundTrip}), fill {fillPrice:0.####}, leverage {leverage:0.#}x"
                 : reason);
         action.Side = side;
         action.ReduceOnly = false;
@@ -217,7 +218,7 @@ internal sealed class FuturesVirtualPortfolio(
         action.StopSource = entryPlan?.StopSource;
         action.NotionalCapReason = entryPlan?.NotionalCapReason;
         Console.WriteLine(
-            $"POSITION_SIZING pair={pair} side={side} targetRiskEur={entryPlan?.TargetRiskEur:0.####} stopPct={slDistancePct:0.###} sizedNotionalEur={notionalEur:0.####} leverage={leverage:0.#}x requiredMarginEur={initialMargin:0.####} usdPerEur={usdPerEur:0.####} quantity={quantity:0.########} fill={fillPrice:0.####} costModel={action.ExecutionCostModel}");
+            $"POSITION_SIZING pair={pair} side={side} targetRiskUsd={entryPlan?.TargetRiskEur:0.####} stopPct={slDistancePct:0.###} sizedNotionalUsd={notionalEur:0.####} leverage={leverage:0.#}x requiredMarginUsd={initialMargin:0.####} quantity={quantity:0.########} fill={fillPrice:0.####} costModel={action.ExecutionCostModel}");
         if (entryPlan is not null)
         {
             action.RoundTripCostEstimatePct = entryPlan.RoundTripCostEstimatePct;
@@ -272,7 +273,7 @@ internal sealed class FuturesVirtualPortfolio(
                 : string.Empty;
 
         var action = BaseAction(position.Pair, "WOULD_CLOSE",
-            $"{reason}: {LedgerCloseLabel} {position.Side.ToLowerInvariant()}, entry {position.EntryPrice:0.########}, fill {fillPrice:0.########}, realized PnL EUR {pnl:0.####} ({realizedPct:0.####}%){levelText}, fee EUR {fee:0.####}");
+            $"{reason}: {LedgerCloseLabel} {position.Side.ToLowerInvariant()}, entry {position.EntryPrice:0.########}, fill {fillPrice:0.########}, realized PnL USD {pnl:0.####} ({realizedPct:0.####}%){levelText}, fee USD {fee:0.####}");
         action.Side = position.Side;
         action.ReduceOnly = true;
         action.Leverage = position.Leverage;

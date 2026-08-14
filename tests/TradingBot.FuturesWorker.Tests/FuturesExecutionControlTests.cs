@@ -83,6 +83,32 @@ public sealed class FuturesExecutionControlTests
         Assert.Equal("FILL_RECONCILIATION_PENDING", fill.Action.HoldReasonCode);
     }
 
+    [Fact]
+    public async Task Entry_quantity_uses_fresh_executable_ask_without_fx_conversion()
+    {
+        var broker = new StubBroker
+        {
+            Ticker = new FuturesTickerQuote("PF_RIVERUSD", 3.49m, 3.50m, 3.495m, 3.495m, DateTimeOffset.UtcNow),
+            IocResult = new FuturesOrderResult("filled", "order-1", null, new FuturesOrderFill(2m, 3.50m, null, DateTimeOffset.UtcNow))
+        };
+
+        var (_, brokerAfter, _) = await ExecuteEntryAsync(broker, signalPrice: 3.49456893782m);
+
+        Assert.Equal(decimal.Round(100m / 3.50m, 8), brokerAfter.LastSize);
+    }
+
+    [Fact]
+    public void Available_collateral_sums_only_usd_accounting_units()
+    {
+        var total = FuturesDecisionWorker.SumFuturesAvailableCollateralUsd([
+            new FuturesAccountBalance("USD", 50m, 45m),
+            new FuturesAccountBalance("USDC", 10m, 9m),
+            new FuturesAccountBalance("EUR", 100m, 100m)
+        ]);
+
+        Assert.Equal(54m, total);
+    }
+
     private static async Task<(FuturesFillResult Fill, StubBroker Broker, PortfolioState State)> ExecuteEntryAsync(
         StubBroker broker,
         decimal signalPrice)
@@ -92,13 +118,12 @@ public sealed class FuturesExecutionControlTests
             Futures = new FuturesOptions
             {
                 LiveTradingEnabled = true,
-                TargetMarginEur = 10m,
+                TargetMarginUsd = 10m,
                 DefaultLeverage = 10m,
-                MaxLeverage = 10m,
-                UsdPerEur = 1m
+                MaxLeverage = 10m
             },
             Entry = new FuturesEntryOptions { MaxEntryPriceDeviationPct = 0.35m },
-            Portfolio = new FuturesPortfolioOptions { StartingCashEur = 200m },
+            Portfolio = new FuturesPortfolioOptions { StartingCashUsd = 200m },
             Fees = new FuturesFeesOptions { MakerPct = 0m, TakerPct = 0m },
             Worker = new WorkerOptions { RunOnce = true },
             DryRun = new DryRunOptions { OutputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")) }
@@ -124,7 +149,7 @@ public sealed class FuturesExecutionControlTests
             "RIVER/USD",
             FuturesDesiredExposure.Long,
             3.49456893782m,
-            config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage),
+            config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage),
             config.Futures.DefaultLeverage,
             false,
             string.Empty,
@@ -153,6 +178,7 @@ public sealed class FuturesExecutionControlTests
         public FuturesOrderResult IocResult { get; init; } = FuturesOrderResult.Rejected("not configured");
         public int IocCallCount { get; private set; }
         public decimal? LastLimitPrice { get; private set; }
+        public decimal? LastSize { get; private set; }
 
         public Task<IReadOnlyList<FuturesAccountBalance>> GetAccountsAsync(CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<FuturesAccountBalance>>([new FuturesAccountBalance("EUR", 200m, 200m)]);
@@ -172,6 +198,7 @@ public sealed class FuturesExecutionControlTests
         public Task<FuturesOrderResult> SendIocLimitOrderAsync(string symbol, string side, decimal size, decimal limitPrice, bool reduceOnly, CancellationToken cancellationToken)
         {
             IocCallCount++;
+            LastSize = size;
             LastLimitPrice = limitPrice;
             return Task.FromResult(IocResult);
         }

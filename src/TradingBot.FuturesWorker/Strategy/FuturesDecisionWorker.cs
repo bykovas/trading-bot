@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace TradingBot.FuturesWorker;
 
 // Dry-run futures cycle loop (blueprint phase 4): fetch market data, score with
@@ -24,8 +22,6 @@ internal sealed class FuturesDecisionWorker(
     private readonly WorkerBuildInfo _buildInfo = WorkerBuildInfo.FromEnvironment();
     private readonly IReadOnlyDictionary<string, string> _pairToCorrelationGroup =
         CorrelationRiskResolver.BuildPairToGroup(config.CorrelationRisk);
-    private static readonly HttpClient FxHttpClient = new();
-
     // Rolling per-pair light snapshot history feeding the anti-lag price-action
     // guard (same mechanism as the spot worker). In-memory; hydrated on startup
     // from the persisted market snapshots so the guard is not blind after restarts.
@@ -493,7 +489,7 @@ internal sealed class FuturesDecisionWorker(
 
                 fill = await ApplyOrExecuteLiveAsync(
                     state, pair, desired, markPrice,
-                    entryPlan?.SizedNotionalEur > 0m ? entryPlan.SizedNotionalEur : config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage),
+                    entryPlan?.SizedNotionalEur > 0m ? entryPlan.SizedNotionalEur : config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage),
                     entryPlan?.EffectiveLeverage > 0m ? entryPlan.EffectiveLeverage : config.Futures.DefaultLeverage,
                     reduceOnly: false,
                     reason: string.Empty,
@@ -1089,24 +1085,6 @@ internal sealed class FuturesDecisionWorker(
             return fill;
         }
 
-        // Live market orders fill in full and immediately, so they are sized from
-        // the REAL target notional (margin * leverage) — never from
-        // entryPlan.FilledNotionalEur, which is the dry-run maker-fill simulation
-        // (it models partial passive fills, e.g. exactly half, that do not apply to
-        // a taker order). The EUR notional is converted to the instrument's USD
-        // quote currency via UsdPerEur before dividing by the USD mark price.
-        var notionalQuote = targetNotionalEur * config.Futures.UsdPerEur;
-        var rawSize = markPrice <= 0m ? 0m : notionalQuote / markPrice;
-        var quantityDecimals = instrument.QuantityDecimals ?? 8;
-        var size = TruncateToDecimals(rawSize, quantityDecimals);
-        if (size <= 0m)
-        {
-            var skipReason = $"live futures entry skipped: raw size {rawSize:0.########} rounds to zero at Kraken quantity precision {quantityDecimals}";
-            var skipped = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage, reason: skipReason);
-            skipped.Action.HoldReasonCode = "LIVE_ORDER_SIZE_TOO_SMALL";
-            return skipped;
-        }
-
         var side = desired == FuturesDesiredExposure.Short ? "sell" : "buy";
         var preSubmit = await broker.GetTickerAsync(instrument.KrakenPair, cancellationToken);
         if (preSubmit is null)
@@ -1124,6 +1102,15 @@ internal sealed class FuturesDecisionWorker(
             : referencePrice * (1m + maxDeviation / 100m);
         var priceDecimals = ResolvePriceDecimals(instrument, preSubmit, referencePrice);
         var limitPrice = RoundLimitPrice(rawLimitPrice, desired, priceDecimals);
+
+        // Futures accounting and all USD-quoted perp prices use the same unit. Size
+        // from the fresh executable quote instead of the stale decision mark so the
+        // requested notional stays as close as the contract quantity step permits.
+        var executablePrice = desired == FuturesDesiredExposure.Short ? preSubmit.Bid : preSubmit.Ask;
+        var rawSize = executablePrice <= 0m ? 0m : targetNotionalEur / executablePrice;
+        var quantityDecimals = instrument.QuantityDecimals ?? 8;
+        var size = TruncateToDecimals(rawSize, quantityDecimals);
+
         var quoteAlreadyWorse = desired == FuturesDesiredExposure.Short
             ? preSubmit.Bid < limitPrice
             : preSubmit.Ask > limitPrice;
@@ -1137,6 +1124,14 @@ internal sealed class FuturesDecisionWorker(
             rejected.Action.HoldReasonCode = "LIVE_ENTRY_PRICE_DEVIATION";
             AttachExecutionDiagnostics(rejected.Action, referencePrice, preSubmit, limitPrice, size, null, null);
             return rejected;
+        }
+
+        if (size <= 0m)
+        {
+            var skipReason = $"live futures entry skipped: USD notional {targetNotionalEur:0.########} at executable price {executablePrice:0.########} produces raw size {rawSize:0.########}, which rounds to zero at Kraken quantity precision {quantityDecimals}";
+            var skipped = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage, reason: skipReason);
+            skipped.Action.HoldReasonCode = "LIVE_ORDER_SIZE_TOO_SMALL";
+            return skipped;
         }
 
         // Kraken Futures leverage is a per-symbol margin preference, not an order
@@ -1186,12 +1181,10 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var fillDetails = order.Fill!;
-        var filledNotionalEur = config.Futures.UsdPerEur <= 0m
-            ? fillDetails.Quantity * fillDetails.AveragePrice
-            : fillDetails.Quantity * fillDetails.AveragePrice / config.Futures.UsdPerEur;
+        var filledNotionalUsd = fillDetails.Quantity * fillDetails.AveragePrice;
         var adjustedPlan = entryPlan is null
             ? null
-            : entryPlan with { FilledNotionalEur = filledNotionalEur };
+            : entryPlan with { FilledNotionalEur = filledNotionalUsd };
 
         // Record the virtual ledger against the exchange average fill and filled
         // quantity. Partial IOC fills commit only the filled part; unfilled remainder
@@ -1201,7 +1194,7 @@ internal sealed class FuturesDecisionWorker(
             pair,
             desired,
             fillDetails.AveragePrice,
-            filledNotionalEur,
+            filledNotionalUsd,
             entryLeverage,
             reduceOnly: false,
             reason,
@@ -1342,13 +1335,10 @@ internal sealed class FuturesDecisionWorker(
             .ToDictionary(instrument => instrument.KrakenPair, StringComparer.OrdinalIgnoreCase);
         var markByPair = lightStates.ToDictionary(state => state.Instrument.Pair, state => state.LastPrice, StringComparer.OrdinalIgnoreCase);
 
-        var collateral = await ConvertFuturesAvailableCollateralToEurAsync(accounts, cancellationToken);
-        if (collateral.AvailableEur > 0m)
-        {
-            state.CashEur = collateral.AvailableEur;
-            state.CashQuoteValue = collateral.AvailableUsd > 0m ? collateral.AvailableUsd : null;
-            state.CashQuoteCurrency = collateral.AvailableUsd > 0m ? "USD" : null;
-        }
+        var availableUsd = SumFuturesAvailableCollateralUsd(accounts);
+        state.CashEur = availableUsd;
+        state.CashQuoteValue = availableUsd;
+        state.CashQuoteCurrency = "USD";
 
         var imported = new List<PortfolioPosition>();
         foreach (var remote in positions)
@@ -1436,19 +1426,12 @@ internal sealed class FuturesDecisionWorker(
         state.PendingFuturesOrders.RemoveAll(order =>
             imported.Any(position => position.Pair.Equals(order.Pair, StringComparison.OrdinalIgnoreCase)));
         state.UpdatedAt = utc;
-        var quoteText = state.CashQuoteValue is { } quote
-            ? $" ({quote:0.####} {state.CashQuoteCurrency})"
-            : "";
-        Console.WriteLine($"futures-kraken-sync: accounts={accounts.Count} remotePositions={positions.Count} openOrders={openOrders.Count} trackedPositions={state.Positions.Count} previousTracked={before} availableCollateral={state.CashEur:0.####} EUR{quoteText}");
+        Console.WriteLine($"futures-kraken-sync: accounts={accounts.Count} remotePositions={positions.Count} openOrders={openOrders.Count} trackedPositions={state.Positions.Count} previousTracked={before} availableCollateralUsd={state.CashEur:0.####}");
     }
 
-    private static async Task<FuturesCollateralTotals> ConvertFuturesAvailableCollateralToEurAsync(
-        IReadOnlyList<FuturesAccountBalance> accounts,
-        CancellationToken cancellationToken)
+    internal static decimal SumFuturesAvailableCollateralUsd(IReadOnlyList<FuturesAccountBalance> accounts)
     {
-        var eur = 0m;
         var usd = 0m;
-        decimal? usdToEur = null;
 
         foreach (var account in accounts)
         {
@@ -1458,60 +1441,18 @@ internal sealed class FuturesDecisionWorker(
                 continue;
             }
 
-            if (currency is "EUR")
-            {
-                eur += account.AvailableMargin;
-                continue;
-            }
-
             if (currency is "USD" or "USDC" or "USDT")
             {
                 usd += account.AvailableMargin;
-                usdToEur ??= await FetchUsdToEurRateAsync(cancellationToken);
-                eur += usdToEur is { } rate
-                    ? account.AvailableMargin * rate
-                    : account.AvailableMargin;
                 continue;
             }
 
-            // Unknown collateral units are rare for this account. Keep them visible
-            // instead of dropping buying power, but make the fallback explicit in logs.
-            eur += account.AvailableMargin;
-            Console.WriteLine($"futures-kraken-sync: unknown collateral currency '{account.Currency}', treating available {account.AvailableMargin:0.####} as EUR");
+            // Futures accounting is deliberately USD-only. Never mix an unconverted
+            // collateral unit into USD buying power.
+            Console.WriteLine($"futures-kraken-sync: ignoring non-USD collateral currency '{account.Currency}' available={account.AvailableMargin:0.####}");
         }
 
-        return new FuturesCollateralTotals(eur, usd);
-    }
-
-    private static async Task<decimal?> FetchUsdToEurRateAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var response = await FxHttpClient.GetAsync(
-                "https://api.kraken.com/0/public/Ticker?assetVersion=1&pair=EUR/USD",
-                cancellationToken);
-            response.EnsureSuccessStatusCode();
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            if (!doc.RootElement.TryGetProperty("result", out var result)
-                || !result.TryGetProperty("EUR/USD", out var ticker)
-                || !ticker.TryGetProperty("c", out var close)
-                || close.ValueKind != JsonValueKind.Array
-                || close.GetArrayLength() == 0
-                || !decimal.TryParse(close[0].GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var eurUsd)
-                || eurUsd <= 0m)
-            {
-                Console.WriteLine("futures-kraken-sync: EUR/USD ticker missing; keeping USD available collateral without conversion");
-                return null;
-            }
-
-            return 1m / eurUsd;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
-        {
-            Console.WriteLine($"futures-kraken-sync: EUR/USD conversion unavailable ({ex.Message}); keeping USD available collateral without conversion");
-            return null;
-        }
+        return decimal.Round(usd, 8);
     }
 
     private static string NormalizeCurrency(string currency)
@@ -1526,8 +1467,6 @@ internal sealed class FuturesDecisionWorker(
             _ => normalized
         };
     }
-
-    private sealed record FuturesCollateralTotals(decimal AvailableEur, decimal AvailableUsd);
 
     private async Task<ImportedTpSlState> EnsureExchangeProtectionOrdersAsync(
         InstrumentOptions instrument,
@@ -1886,7 +1825,7 @@ internal sealed class FuturesDecisionWorker(
         {
             return new FuturesMaxHoldExit(
                 false,
-                $"MAX_HOLD healthy hold after {maxHoldMinutes}m: unrealized PnL EUR {position.UnrealizedPnlEur:0.####} >= 0");
+                $"MAX_HOLD healthy hold after {maxHoldMinutes}m: unrealized PnL USD {position.UnrealizedPnlEur:0.####} >= 0");
         }
 
         var stopProgressPct = StopProgressPct(position);
@@ -1894,7 +1833,7 @@ internal sealed class FuturesDecisionWorker(
         {
             return new FuturesMaxHoldExit(
                 false,
-                $"MAX_HOLD stale-loss hold after {maxHoldMinutes}m: unrealized PnL EUR {position.UnrealizedPnlEur:0.####} < 0, but stop progress {progress:0.##}% < {minStopProgressPct:0.##}%");
+                $"MAX_HOLD stale-loss hold after {maxHoldMinutes}m: unrealized PnL USD {position.UnrealizedPnlEur:0.####} < 0, but stop progress {progress:0.##}% < {minStopProgressPct:0.##}%");
         }
 
         var stopText = stopProgressPct is { } value
@@ -1902,7 +1841,7 @@ internal sealed class FuturesDecisionWorker(
             : ", stop progress unavailable";
         return new FuturesMaxHoldExit(
             true,
-            $"MAX_HOLD stale-loss close after {maxHoldMinutes}m: unrealized PnL EUR {position.UnrealizedPnlEur:0.####} < 0{stopText}");
+            $"MAX_HOLD stale-loss close after {maxHoldMinutes}m: unrealized PnL USD {position.UnrealizedPnlEur:0.####} < 0{stopText}");
     }
 
     private static decimal? StopProgressPct(PortfolioPosition position)
@@ -1988,11 +1927,11 @@ internal sealed class FuturesDecisionWorker(
         var groupExposure = groupPositions.Sum(position => position.EntryNotionalEur);
         var incrementalNotional = sizedNotionalEur > 0m
             ? sizedNotionalEur
-            : config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage);
-        if (config.CorrelationRisk.MaxExposureEurPerGroup > 0m
-            && groupExposure + incrementalNotional > config.CorrelationRisk.MaxExposureEurPerGroup)
+            : config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage);
+        if (config.CorrelationRisk.MaxExposureUsdPerGroup > 0m
+            && groupExposure + incrementalNotional > config.CorrelationRisk.MaxExposureUsdPerGroup)
         {
-            return new RiskEvaluation(false, new[] { $"correlation group {group} exposure EUR {groupExposure + incrementalNotional:0.####} exceeds cap EUR {config.CorrelationRisk.MaxExposureEurPerGroup:0.####}" });
+            return new RiskEvaluation(false, new[] { $"correlation group {group} exposure USD {groupExposure + incrementalNotional:0.####} exceeds cap USD {config.CorrelationRisk.MaxExposureUsdPerGroup:0.####}" });
         }
 
         return new RiskEvaluation(true, new[] { $"portfolio entry guards passed for group {group}" });
@@ -2367,7 +2306,7 @@ internal sealed class FuturesDecisionWorker(
     }
 
     // Concurrent portfolio heat = PURE stop-distance loss summed over open positions plus
-    // the new entry. This matches the MaxConcurrentOpenRisk = TargetRiskEur * MaxPositions
+    // the new entry. This matches MaxConcurrentOpenRiskUsd = TargetRiskUsd * MaxPositions
     // budget exactly. Realistic execution/slippage cost is reported per trade by the sizer
     // (PositionSizePlan.ProjectedOpenRiskEur) and bounded by the notional caps; it is NOT
     // added here so the budget stays a clean N-stops figure.
@@ -2391,7 +2330,7 @@ internal sealed class FuturesDecisionWorker(
     {
         if (position.StopLossPrice is null or <= 0m || position.EntryPrice <= 0m || position.Quantity <= 0m)
         {
-            return config.Risk.MaxConcurrentOpenRisk + 1m;
+            return config.Risk.MaxConcurrentOpenRiskUsd + 1m;
         }
 
         return position.Side == "SHORT"
@@ -2750,10 +2689,10 @@ internal sealed class FuturesDecisionWorker(
                 ? 0m
                 : decimal.Round(entryDecisions.Count(decision => (decision.DryRunAction.MakerFillRate ?? 0m) > 0m) / (decimal)entryDecisions.Count, 4),
             PairsPassedVolume: fullStates.Count(state => (state.Quote?.VolumeToday ?? 0m) >= config.Filters.MinQuoteVolume24h),
-            PairsPassedDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage) * config.Filters.MinExitDepthMultiple),
+            PairsPassedDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage) * config.Filters.MinExitDepthMultiple),
             OpenRiskEur: stateOpenRisk(decisions),
             BtcRegimeState: btcRegime.Description,
-            PairsPassedExitDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage) * config.Filters.MinExitDepthMultiple),
+            PairsPassedExitDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage) * config.Filters.MinExitDepthMultiple),
             FundingState: string.Join("; ", decisions.Select(decision => decision.DryRunAction.FundingState).Where(value => !string.IsNullOrWhiteSpace(value)).Take(3)));
     }
 

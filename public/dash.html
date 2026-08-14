@@ -563,17 +563,15 @@
       positionsBody: document.getElementById("positions-body")
     };
 
-    const eur = new Intl.NumberFormat("en-IE", {
-      style: "currency",
-      currency: "EUR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
+    const moneyFormats = {
+      EUR: new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      USD: new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    };
 
     const compact = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
 
     function money(value) {
-      return Number.isFinite(Number(value)) ? eur.format(Number(value)) : "--";
+      return Number.isFinite(Number(value)) ? moneyFormats[isFuturesBot() ? "USD" : "EUR"].format(Number(value)) : "--";
     }
 
     function quoteMoney(value, currency) {
@@ -589,6 +587,7 @@
     }
 
     function quoteFromEur(eurValue, summary) {
+      if (isFuturesBot()) return "";
       const eurNumeric = Number(eurValue);
       const cashEur = Number(summary?.cashEur);
       const quoteValue = Number(summary?.cashQuoteValue);
@@ -621,7 +620,7 @@
     function signedMoney(value) {
       const n = Number(value);
       if (!Number.isFinite(n)) return "--";
-      return `${n >= 0 ? "+" : ""}${eur.format(n)}`;
+      return `${n >= 0 ? "+" : ""}${moneyFormats[isFuturesBot() ? "USD" : "EUR"].format(n)}`;
     }
 
     function signedPercent(value) {
@@ -725,7 +724,7 @@
         els.totalValue.textContent = "--";
         els.totalValueNet.textContent = "Cash + open positions";
         els.cash.textContent = "--";
-        els.cashQuote.textContent = isFuturesBot() ? "Kraken futures collateral" : "Available EUR";
+        els.cashQuote.textContent = isFuturesBot() ? "Kraken futures collateral · USD" : "Available EUR";
         els.positionsValue.textContent = "--";
         els.openPositions.textContent = "0 open positions";
         els.dailyPnl.textContent = "--";
@@ -743,10 +742,10 @@
         ? `${money(summary.netTotalValueEur)} net after fees (${netQuote})`
         : `${money(summary.netTotalValueEur)} net after fees`;
       els.cash.textContent = money(summary.cashEur);
-      const cashQuote = quoteMoney(summary.cashQuoteValue, summary.cashQuoteCurrency);
+      const cashQuote = isFuturesBot() ? "" : quoteMoney(summary.cashQuoteValue, summary.cashQuoteCurrency);
       els.cashQuote.textContent = cashQuote
         ? `${isFuturesBot() ? "Kraken futures collateral" : "Available EUR"} (${cashQuote})`
-        : (isFuturesBot() ? "Kraken futures collateral" : "Available EUR");
+        : (isFuturesBot() ? "Kraken futures collateral · USD" : "Available EUR");
       els.positionsValue.textContent = money(summary.positionsValueEur);
       const positionsQuote = Number(summary.openPositions) > 0 ? quoteFromEur(summary.positionsValueEur, summary) : "";
       els.openPositions.textContent = `${summary.openPositions} open position${summary.openPositions === 1 ? "" : "s"}${positionsQuote ? ` (${positionsQuote})` : ""}`;

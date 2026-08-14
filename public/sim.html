@@ -633,9 +633,9 @@
         <span class="hint">Max open positions per correlation group</span>
       </div>
       <div class="field">
-        <label for="f-notional">Notional EUR</label>
+        <label for="f-notional" id="notional-label">Notional EUR</label>
         <input type="number" id="f-notional" value="10" min="1" max="10000" step="1">
-        <span class="hint">EUR per position</span>
+        <span class="hint" id="notional-hint">EUR per position</span>
       </div>
       <div class="field">
         <label for="f-fee">Fee %</label>
@@ -766,7 +766,7 @@
                 <th>Exit</th>
                 <th class="num">Price out</th>
                 <th class="num">%</th>
-                <th class="num">EUR</th>
+                <th class="num" id="trade-currency-heading">EUR</th>
                 <th>Type</th>
                 <th>Regime</th>
                 <th class="num">Score</th>
@@ -795,7 +795,20 @@
         b.classList.toggle("active", active);
         b.setAttribute("aria-pressed", active ? "true" : "false");
       });
+      updateCurrencyUi();
       if (persist) localStorage.setItem("tradingBot.simBotInstanceId", currentBotInstance);
+    }
+
+    function isFuturesBot() {
+      return currentBotInstance.startsWith("futures-");
+    }
+
+    function updateCurrencyUi() {
+      const currency = isFuturesBot() ? "USD" : "EUR";
+      document.getElementById("notional-label").textContent = `Notional ${currency}`;
+      document.getElementById("notional-hint").textContent = `${currency} per position`;
+      document.getElementById("f-exclude").placeholder = isFuturesBot() ? "ZEC/USD, SYN/USD" : "ZEC/EUR, SYN/EUR";
+      document.getElementById("trade-currency-heading").textContent = currency;
     }
     (function initBotSelector() {
       const fromUrl = new URLSearchParams(location.search).get("botInstanceId");
@@ -813,11 +826,14 @@
     tradesEl.addEventListener("change", () => { tradesLabel.textContent = tradesEl.checked ? "On" : "Off"; });
 
     // ── Formatting ──
-    const eurFmt = new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const moneyFormats = {
+      EUR: new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      USD: new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    };
     const numFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
 
-    function money(v) { const n = Number(v); return Number.isFinite(n) ? eurFmt.format(n) : "--"; }
-    function signedMoney(v) { const n = Number(v); if (!Number.isFinite(n)) return "--"; return `${n >= 0 ? "+" : ""}${eurFmt.format(n)}`; }
+    function money(v) { const n = Number(v); return Number.isFinite(n) ? moneyFormats[isFuturesBot() ? "USD" : "EUR"].format(n) : "--"; }
+    function signedMoney(v) { const n = Number(v); if (!Number.isFinite(n)) return "--"; return `${n >= 0 ? "+" : ""}${moneyFormats[isFuturesBot() ? "USD" : "EUR"].format(n)}`; }
     function pct(v) { const n = Number(v); if (!Number.isFinite(n)) return "--"; return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`; }
     function num(v) { const n = Number(v); return Number.isFinite(n) ? numFmt.format(n) : "--"; }
     function pnlClass(v) { const n = Number(v); if (!Number.isFinite(n) || n === 0) return ""; return n > 0 ? "positive" : "negative"; }

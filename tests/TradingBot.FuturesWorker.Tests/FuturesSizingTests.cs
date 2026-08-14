@@ -3,21 +3,18 @@ using Xunit;
 
 namespace TradingBot.FuturesWorker.Tests;
 
-// Part 1: margin-based sizing. TargetMarginEur is the initial margin; the position
-// notional is derived once as margin * leverage. Quantity converts the EUR notional
-// to the instrument's USD quote currency via UsdPerEur before dividing by price.
+// Futures accounting is USD-native: margin, notional, fees, and PnL all share USD.
 public sealed class FuturesSizingTests
 {
-    private static FuturesBotConfiguration Config(decimal targetMarginEur, decimal leverage, decimal usdPerEur = 1m) => new()
+    private static FuturesBotConfiguration Config(decimal targetMarginUsd, decimal leverage) => new()
     {
         Futures = new FuturesOptions
         {
-            TargetMarginEur = targetMarginEur,
+            TargetMarginUsd = targetMarginUsd,
             DefaultLeverage = leverage,
-            MaxLeverage = 10m,
-            UsdPerEur = usdPerEur
+            MaxLeverage = 10m
         },
-        Portfolio = new FuturesPortfolioOptions { StartingCashEur = 100m },
+        Portfolio = new FuturesPortfolioOptions { StartingCashUsd = 100m },
         Fees = new FuturesFeesOptions { MakerPct = 0m, TakerPct = 0m },
         TpSl = new TpSlOptions { Enabled = true, TakeProfitPercent = 3m, StopLossPercent = 2m }
     };
@@ -34,10 +31,10 @@ public sealed class FuturesSizingTests
     }
 
     private static (FuturesVirtualPortfolio Portfolio, PortfolioState State, FuturesBotConfiguration Config) Setup(
-        decimal targetMarginEur, decimal leverage, decimal usdPerEur = 1m, decimal startingCash = 100m)
+        decimal targetMarginUsd, decimal leverage, decimal startingCash = 100m)
     {
-        var config = Config(targetMarginEur, leverage, usdPerEur);
-        config.Portfolio.StartingCashEur = startingCash;
+        var config = Config(targetMarginUsd, leverage);
+        config.Portfolio.StartingCashUsd = startingCash;
         var portfolio = new FuturesVirtualPortfolio(config, new NullStore());
         return (portfolio, portfolio.Load(), config);
     }
@@ -45,11 +42,11 @@ public sealed class FuturesSizingTests
     [Fact]
     public void Margin_10_leverage_10_derives_100_notional_and_10_margin()
     {
-        var (portfolio, state, config) = Setup(targetMarginEur: 10m, leverage: 10m);
-        Assert.Equal(100m, config.Futures.DerivedNotionalEur(10m));
+        var (portfolio, state, config) = Setup(targetMarginUsd: 10m, leverage: 10m);
+        Assert.Equal(100m, config.Futures.DerivedNotionalUsd(10m));
 
         var fill = portfolio.Apply(state, "RIVER/USD", FuturesDesiredExposure.Long, 3.509m,
-            config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage), config.Futures.DefaultLeverage);
+            config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage), config.Futures.DefaultLeverage);
 
         var position = Assert.Single(state.Positions);
         Assert.Equal(100m, position.EntryNotionalEur);
@@ -61,11 +58,11 @@ public sealed class FuturesSizingTests
     [Fact]
     public void Margin_10_leverage_2_derives_20_notional_and_10_margin()
     {
-        var (portfolio, state, config) = Setup(targetMarginEur: 10m, leverage: 2m);
-        Assert.Equal(20m, config.Futures.DerivedNotionalEur(2m));
+        var (portfolio, state, config) = Setup(targetMarginUsd: 10m, leverage: 2m);
+        Assert.Equal(20m, config.Futures.DerivedNotionalUsd(2m));
 
         portfolio.Apply(state, "XBT/USD", FuturesDesiredExposure.Long, 100m,
-            config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage), config.Futures.DefaultLeverage);
+            config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage), config.Futures.DefaultLeverage);
 
         var position = Assert.Single(state.Positions);
         Assert.Equal(20m, position.EntryNotionalEur);
@@ -73,32 +70,27 @@ public sealed class FuturesSizingTests
     }
 
     [Fact]
-    public void Quantity_applies_eur_usd_conversion()
+    public void Margin_15_leverage_4_derives_60_usd_notional()
     {
-        // RIVER example: 100 EUR notional, USD/EUR 1.08, price 3.509
-        // quantity = 100 * 1.08 / 3.509 = 30.78 RIVER (~10x the old 2.8).
-        var (portfolio, state, config) = Setup(targetMarginEur: 10m, leverage: 10m, usdPerEur: 1.08m);
+        var (portfolio, state, config) = Setup(targetMarginUsd: 15m, leverage: 4m);
 
-        var fill = portfolio.Apply(state, "RIVER/USD", FuturesDesiredExposure.Long, 3.509m,
-            config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage), config.Futures.DefaultLeverage);
+        var fill = portfolio.Apply(state, "ATOM/USD", FuturesDesiredExposure.Short, 1.50m,
+            config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage), config.Futures.DefaultLeverage);
 
-        var expected = 100m * 1.08m / 3.509m;
-        Assert.Equal(decimal.Round(expected, 6), decimal.Round(fill.Action.Quantity, 6));
-        Assert.True(fill.Action.Quantity > 28m && fill.Action.Quantity < 32m);
-        // ~11x the old 2.8 RIVER quantity.
-        Assert.True(fill.Action.Quantity / 2.8m > 9m);
-        // The EUR margin is unchanged by FX.
-        Assert.Equal(10m, Assert.Single(state.Positions).InitialMarginEur);
+        Assert.Equal(60m, config.Futures.DerivedNotionalUsd(4m));
+        Assert.Equal(40m, fill.Action.Quantity);
+        Assert.Equal(60m, Assert.Single(state.Positions).EntryNotionalEur);
+        Assert.Equal(15m, Assert.Single(state.Positions).InitialMarginEur);
     }
 
     [Fact]
     public void Insufficient_collateral_is_rejected()
     {
-        // Margin needed is 10 EUR but only 5 EUR collateral is available.
-        var (portfolio, state, config) = Setup(targetMarginEur: 10m, leverage: 10m, startingCash: 5m);
+        // Margin needed is 10 USD but only 5 USD collateral is available.
+        var (portfolio, state, config) = Setup(targetMarginUsd: 10m, leverage: 10m, startingCash: 5m);
 
         var fill = portfolio.Apply(state, "RIVER/USD", FuturesDesiredExposure.Long, 3.509m,
-            config.Futures.DerivedNotionalEur(config.Futures.DefaultLeverage), config.Futures.DefaultLeverage);
+            config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage), config.Futures.DefaultLeverage);
 
         Assert.False(fill.PositionOpened);
         Assert.Empty(state.Positions);
@@ -110,16 +102,16 @@ public sealed class FuturesSizingTests
     {
         var config = new FuturesBotConfiguration
         {
-            Futures = new FuturesOptions { TargetMarginEur = 40m, DefaultLeverage = 10m, MaxLeverage = 10m, MaxPositions = 3 },
-            Risk = new FuturesRiskOptions { TargetRiskEur = 3m, MaxConcurrentOpenRisk = 1.5m },
+            Futures = new FuturesOptions { TargetMarginUsd = 40m, DefaultLeverage = 10m, MaxLeverage = 10m, MaxPositions = 3 },
+            Risk = new FuturesRiskOptions { TargetRiskUsd = 3m, MaxConcurrentOpenRiskUsd = 1.5m },
             TpSl = new TpSlOptions { Enabled = true, StopLossPercent = 0.75m, TakeProfitPercent = 1.5m }
         };
         InvokeNormalize(config);
 
-        Assert.Equal(400m, config.Futures.DerivedNotionalEur(10m));
-        Assert.Equal(400m, config.CorrelationRisk.MaxExposureEurPerGroup);
-        Assert.Equal(3m, config.Risk.TargetRiskEur);
-        Assert.Equal(9m, config.Risk.MaxConcurrentOpenRisk);
+        Assert.Equal(400m, config.Futures.DerivedNotionalUsd(10m));
+        Assert.Equal(400m, config.CorrelationRisk.MaxExposureUsdPerGroup);
+        Assert.Equal(3m, config.Risk.TargetRiskUsd);
+        Assert.Equal(9m, config.Risk.MaxConcurrentOpenRiskUsd);
     }
 
     [Fact]
@@ -127,15 +119,15 @@ public sealed class FuturesSizingTests
     {
         var config = new FuturesBotConfiguration
         {
-            Futures = new FuturesOptions { TargetMarginEur = 0m, TargetNotionalEur = 10m, DefaultLeverage = 10m, MaxLeverage = 10m }
+            Futures = new FuturesOptions { TargetMarginUsd = 0m, TargetNotionalUsd = 10m, DefaultLeverage = 10m, MaxLeverage = 10m }
         };
         InvokeNormalize(config);
 
         // Legacy notional 10 at 10x migrates to margin 1 so the OLD 10-notional
         // exposure is preserved (not silently blown up to 100).
-        Assert.Equal(1m, config.Futures.TargetMarginEur);
-        Assert.Equal(10m, config.Futures.DerivedNotionalEur(10m));
-        Assert.Null(config.Futures.TargetNotionalEur);
+        Assert.Equal(1m, config.Futures.TargetMarginUsd);
+        Assert.Equal(10m, config.Futures.DerivedNotionalUsd(10m));
+        Assert.Null(config.Futures.TargetNotionalUsd);
     }
 
     private static void InvokeNormalize(FuturesBotConfiguration config)

@@ -1,7 +1,9 @@
 @model DashboardViewModel
 @{
   ViewData["Title"] = "Portfolio"; ViewData["PageTitle"] = "Portfolio";
-  var cashQuote = Model.Summary?.CashQuoteValue is { } quoteValue && !string.IsNullOrWhiteSpace(Model.Summary.CashQuoteCurrency)
+  var isFutures = Model.Shell.BotInstanceId?.StartsWith("futures-", StringComparison.OrdinalIgnoreCase) == true;
+  var accountingSymbol = isFutures ? "$" : "€";
+  var cashQuote = !isFutures && Model.Summary?.CashQuoteValue is { } quoteValue && !string.IsNullOrWhiteSpace(Model.Summary.CashQuoteCurrency)
     ? $" ({CurrencySymbol(Model.Summary.CashQuoteCurrency)}{quoteValue:0.00})"
     : "";
 }
@@ -9,9 +11,9 @@
   @await Html.PartialAsync("_ShellHeader", Model.Shell)
   @await Html.PartialAsync("_Notice", Model.Notice ?? "")
   <section class="metric-grid">
-    <article class="metric"><span>Cash</span><b class="num">€@(Model.Summary?.CashEur.ToString("0.00") ?? "—")</b><small class="metric-sub">@cashQuote</small></article>
-    <article class="metric"><span>Positions</span><b class="num">€@(Model.Summary?.PositionsValueEur.ToString("0.00") ?? "—")</b></article>
-    <article class="metric"><span>Total</span><b class="num">€@(Model.Summary?.TotalValueEur.ToString("0.00") ?? "—")</b></article>
+    <article class="metric"><span>Cash</span><b class="num">@accountingSymbol@(Model.Summary?.CashEur.ToString("0.00") ?? "—")</b><small class="metric-sub">@cashQuote</small></article>
+    <article class="metric"><span>Positions</span><b class="num">@accountingSymbol@(Model.Summary?.PositionsValueEur.ToString("0.00") ?? "—")</b></article>
+    <article class="metric"><span>Total</span><b class="num">@accountingSymbol@(Model.Summary?.TotalValueEur.ToString("0.00") ?? "—")</b></article>
     <article class="metric"><span>Open</span><b class="num">@(Model.Summary?.OpenPositions.ToString() ?? "—")</b></article>
   </section>
   <section class="panel"><div class="panel-head"><h2>Open positions</h2><span class="ghost disabled" aria-disabled="true">Export CSV disabled</span></div>
@@ -19,7 +21,7 @@
       <div class="positions-head" aria-hidden="true"><span>Symbol</span><span>Qty</span><span>Last</span><span>uPnL</span></div>
     @foreach (var p in Model.Positions)
     {
-      <article class="row-card position-row"><div><b>@p.Pair</b><small><span class="side-badge @(p.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? "short" : "long")">@p.Side</span> @((p.Leverage is null) ? "spot" : $"{p.Leverage:0.#}x")</small></div><div><span class="num qty">@p.Quantity</span><small>qty</small></div><div><span class="num price">€@p.LastPrice.ToString("0.####")</span><small>last</small></div><div><span class="num pnl @(p.UnrealizedPnlEur >= 0 ? "pos" : "neg")">€@p.UnrealizedPnlEur.ToString("0.00")</span><small>uPnL</small></div></article>
+      <article class="row-card position-row"><div><b>@p.Pair</b><small><span class="side-badge @(p.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? "short" : "long")">@p.Side</span> @((p.Leverage is null) ? "spot" : $"{p.Leverage:0.#}x")</small></div><div><span class="num qty">@p.Quantity</span><small>qty</small></div><div><span class="num price">@accountingSymbol@p.LastPrice.ToString("0.####")</span><small>last</small></div><div><span class="num pnl @(p.UnrealizedPnlEur >= 0 ? "pos" : "neg")">@accountingSymbol@p.UnrealizedPnlEur.ToString("0.00")</span><small>uPnL</small></div></article>
     }
     @if (!Model.Positions.Any()) { <p class="empty">No open positions for this bot instance.</p> }
     </div>

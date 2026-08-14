@@ -1,3 +1,10 @@
+## 2026-08-14-futures-usd-native-15x4-sizing
+
+- Futures accounting is now USD-native end to end: Kraken USD/USDC/USDT available collateral is kept in USD, position quantity is calculated directly from USD notional and the fresh executable bid/ask, and the previous static EUR/USD multiplier plus live FX lookup were removed. Non-USD collateral is excluded rather than mixed into USD buying power.
+- Shipped futures settings now use 15 USD target/max margin at 4x leverage for a 60 USD per-position notional cap. The three-position caps are 180 USD aggregate notional and 5.4 USD concurrent stop heat; virtual futures starts with 60 USD, while live cash continues to reconcile from Kraken.
+- Futures dashboard, trades, cycle diagnostics, snapshots, simulation, and server-rendered views now display futures values as USD while spot remains EUR. Generic persisted fields with legacy `*Eur` names remain schema-compatible, but their futures values are USD and no conversion is applied.
+- No new sizing or risk values are sourced from environment variables; appsettings remains the source of truth. Not changed: entry scoring/guards, flipped-entry direction, max positions, TP/SL/trailing policy, IOC semantics, dead-man switch, Kraken protection, reconciliation ownership, or spot accounting.
+
 ## 2026-08-14-futures-flipped-price-owned-exits
 
 - Flipped LONG-to-SHORT positions no longer close on `ShortCandidate`. A bearish signal confirms the executed SHORT side rather than reversing it, so flipped entries are now managed exclusively by working SL, working-TP handoff, exchange trailing protection, exchange emergency protection, or manual close.

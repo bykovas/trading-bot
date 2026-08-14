@@ -626,12 +626,10 @@
       tradeList: document.getElementById("trade-list")
     };
 
-    const eur = new Intl.NumberFormat("en-IE", {
-      style: "currency",
-      currency: "EUR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
+    const moneyFormats = {
+      EUR: new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      USD: new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    };
 
     const numberFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
 
@@ -646,13 +644,13 @@
 
     function money(value) {
       const n = Number(value);
-      return Number.isFinite(n) ? eur.format(n) : "--";
+      return Number.isFinite(n) ? moneyFormats[currentBotInstance.startsWith("futures-") ? "USD" : "EUR"].format(n) : "--";
     }
 
     function signedMoney(value) {
       const n = Number(value);
       if (!Number.isFinite(n)) return "--";
-      return `${n >= 0 ? "+" : ""}${eur.format(n)}`;
+      return `${n >= 0 ? "+" : ""}${moneyFormats[currentBotInstance.startsWith("futures-") ? "USD" : "EUR"].format(n)}`;
     }
 
     function percent(value) {
@@ -869,7 +867,7 @@
     }
 
     function parseRealizedPnl(reason) {
-      const match = String(reason || "").match(/realized PnL EUR ([+-]?\d+(?:\.\d+)?)/i);
+      const match = String(reason || "").match(/realized PnL (?:EUR|USD) ([+-]?\d+(?:\.\d+)?)/i);
       return match ? Number(match[1]) : 0;
     }
 
