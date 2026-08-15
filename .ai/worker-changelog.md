@@ -1,3 +1,9 @@
+## 2026-08-15-futures-usd-15x10-sizing
+
+- Futures entries now target 15 USD initial margin at 10x leverage, producing a 150 USD notional position when sufficient collateral is available. Per-position, aggregate, and correlation-group notional caps are aligned at 150 / 450 / 150 USD so downstream guards do not silently retain the previous 60 USD ceiling.
+- The stop-distance risk budget is aligned to the configured 3% maximum accepted stop: `Risk.TargetRiskUsd` is 4.5 and `Risk.MaxConcurrentOpenRiskUsd` is 13.5 for three slots. This preserves the full 150 USD notional across accepted 2-3% stop distances; positions can still shrink when free collateral is below 15 USD.
+- `Margin.MinLiquidationDistancePercent` is 5%, matching the modeled 5% liquidation distance at 10x with the configured 5% maintenance-margin rate. The working 2% stop floor, 3% maximum accepted stop, Kraken protection, TP/trailing policy, entry scoring/guards, flipped execution direction, and 60 USD account balance are unchanged.
+
 ## 2026-08-14-futures-usd-native-15x4-sizing
 
 - Futures accounting is now USD-native end to end: Kraken USD/USDC/USDT available collateral is kept in USD, position quantity is calculated directly from USD notional and the fresh executable bid/ask, and the previous static EUR/USD multiplier plus live FX lookup were removed. Non-USD collateral is excluded rather than mixed into USD buying power.
