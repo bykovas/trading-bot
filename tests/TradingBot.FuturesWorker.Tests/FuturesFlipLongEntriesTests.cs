@@ -3,10 +3,9 @@ using Xunit;
 
 namespace TradingBot.FuturesWorker.Tests;
 
-// Flipped-logic experiment: Futures.FlipLongEntries executes a fully approved LONG
-// entry as a SHORT. These tests pin the config contract: off by default, and never
-// active while shorts are disabled (a flip with AllowShorts=false would silently
-// open nothing at the portfolio layer).
+// Flipped-logic experiment: Futures.FlipLongEntries may execute a fully approved
+// LONG as a SHORT when the closed-candle 24h regime permits a countertrend trade.
+// These tests pin both the config safety contract and the regime boundary.
 public sealed class FuturesFlipLongEntriesTests
 {
     [Fact]
@@ -15,6 +14,8 @@ public sealed class FuturesFlipLongEntriesTests
         var config = new FuturesBotConfiguration();
         InvokeNormalize(config);
         Assert.False(config.Futures.FlipLongEntries);
+        Assert.Equal(3m, config.Futures.FlipMaxPair24hRisePercent);
+        Assert.Equal(0m, config.Futures.FlipMaxBtc24hRisePercent);
     }
 
     [Fact]
@@ -37,6 +38,114 @@ public sealed class FuturesFlipLongEntriesTests
         };
         InvokeNormalize(config);
         Assert.False(config.Futures.FlipLongEntries);
+    }
+
+    [Fact]
+    public void Flip_applies_when_btc_is_weak_and_pair_is_not_in_a_strong_daily_rise()
+    {
+        var options = EnabledFlipOptions();
+
+        var decision = FuturesFlipRegimeGate.Evaluate(
+            FuturesDesiredExposure.Long,
+            options,
+            pair24hChangePct: 2.4m,
+            btc24hChangePct: -0.6m);
+
+        Assert.True(decision.Requested);
+        Assert.True(decision.ApplyFlip);
+        Assert.Contains("countertrend flip allowed", decision.Reason);
+    }
+
+    [Fact]
+    public void Strong_pair_rise_preserves_the_original_long()
+    {
+        var decision = FuturesFlipRegimeGate.Evaluate(
+            FuturesDesiredExposure.Long,
+            EnabledFlipOptions(),
+            pair24hChangePct: 3.01m,
+            btc24hChangePct: -0.6m);
+
+        Assert.True(decision.Requested);
+        Assert.False(decision.ApplyFlip);
+        Assert.Contains("pair 24h change", decision.Reason);
+        Assert.Contains("original LONG preserved", decision.Reason);
+    }
+
+    [Fact]
+    public void Rising_btc_preserves_the_original_long()
+    {
+        var decision = FuturesFlipRegimeGate.Evaluate(
+            FuturesDesiredExposure.Long,
+            EnabledFlipOptions(),
+            pair24hChangePct: -1.5m,
+            btc24hChangePct: 0.01m);
+
+        Assert.True(decision.Requested);
+        Assert.False(decision.ApplyFlip);
+        Assert.Contains("BTC 24h change", decision.Reason);
+    }
+
+    [Fact]
+    public void Missing_24h_context_fails_safe_to_the_original_long()
+    {
+        var decision = FuturesFlipRegimeGate.Evaluate(
+            FuturesDesiredExposure.Long,
+            EnabledFlipOptions(),
+            pair24hChangePct: null,
+            btc24hChangePct: null);
+
+        Assert.True(decision.Requested);
+        Assert.False(decision.ApplyFlip);
+        Assert.Contains("unavailable", decision.Reason);
+    }
+
+    [Fact]
+    public void Native_short_signal_is_not_touched_by_the_flip_gate()
+    {
+        var decision = FuturesFlipRegimeGate.Evaluate(
+            FuturesDesiredExposure.Short,
+            EnabledFlipOptions(),
+            pair24hChangePct: -2m,
+            btc24hChangePct: -1m);
+
+        Assert.False(decision.Requested);
+        Assert.False(decision.ApplyFlip);
+    }
+
+    [Fact]
+    public void Closed_candle_change_uses_one_complete_24h_window()
+    {
+        var candles = Enumerable.Range(0, 96)
+            .Select(index => new Candle(
+                DateTimeOffset.UnixEpoch.AddMinutes(index * 15),
+                Open: 100m,
+                High: 103m,
+                Low: 99m,
+                Close: index == 95 ? 102m : 100m,
+                Volume: 1m,
+                TradeCount: 1))
+            .ToList();
+
+        Assert.Equal(2m, FuturesFlipRegimeGate.CalculateClosedCandle24hChangePct(candles, 15));
+        Assert.Null(FuturesFlipRegimeGate.CalculateClosedCandle24hChangePct(candles.Take(95).ToList(), 15));
+    }
+
+    [Fact]
+    public void Invalid_flip_regime_thresholds_reset_to_safe_defaults()
+    {
+        var config = new FuturesBotConfiguration
+        {
+            Futures = new FuturesOptions
+            {
+                FlipMaxPair24hRisePercent = -1m,
+                FlipMaxBtc24hRisePercent = 101m
+            }
+        };
+
+        InvokeNormalize(config);
+
+        Assert.Equal(3m, config.Futures.FlipMaxPair24hRisePercent);
+        Assert.Equal(0m, config.Futures.FlipMaxBtc24hRisePercent);
     }
 
     [Fact]
@@ -133,6 +242,14 @@ public sealed class FuturesFlipLongEntriesTests
         AllowsShort: true,
         HasBearishStructure: true,
         ShortScore: 0.85m);
+
+    private static FuturesOptions EnabledFlipOptions() => new()
+    {
+        AllowShorts = true,
+        FlipLongEntries = true,
+        FlipMaxPair24hRisePercent = 3m,
+        FlipMaxBtc24hRisePercent = 0m
+    };
 
     private static void InvokeNormalize(FuturesBotConfiguration config)
     {

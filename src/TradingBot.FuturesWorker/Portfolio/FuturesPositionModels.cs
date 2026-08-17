@@ -48,7 +48,10 @@ internal sealed record BtcRegimeState(
     // BTC's own recent change over the same candle lookback the pair momentum uses, so
     // a pair can be compared against the market instead of only against zero. Null when
     // the regime could not be computed.
-    decimal? RecentChangePct = null);
+    decimal? RecentChangePct = null,
+    // Closed-candle return over the latest complete 24h window. This is separate
+    // from RecentChangePct, which intentionally follows the shorter momentum lookback.
+    decimal? Change24hPct = null);
 
 internal static class FuturesMath
 {

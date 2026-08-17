@@ -186,9 +186,22 @@ internal sealed class FuturesBotConfiguration
             Console.WriteLine("config-validation: Futures.FlipLongEntries=true requires Futures.AllowShorts=true; flip disabled.");
         }
 
+        if (Futures.FlipMaxPair24hRisePercent < 0m || Futures.FlipMaxPair24hRisePercent > 100m)
+        {
+            Console.WriteLine($"config-validation: Futures.FlipMaxPair24hRisePercent={Futures.FlipMaxPair24hRisePercent} is out of [0,100]; reset to 3.");
+            Futures.FlipMaxPair24hRisePercent = 3m;
+        }
+
+        if (Futures.FlipMaxBtc24hRisePercent < -100m || Futures.FlipMaxBtc24hRisePercent > 100m)
+        {
+            Console.WriteLine($"config-validation: Futures.FlipMaxBtc24hRisePercent={Futures.FlipMaxBtc24hRisePercent} is out of [-100,100]; reset to 0.");
+            Futures.FlipMaxBtc24hRisePercent = 0m;
+        }
+
         if (Futures.FlipLongEntries)
         {
-            Console.WriteLine("config-warning: Futures.FlipLongEntries=true — every approved LONG entry will be executed as a SHORT (flipped logic applied).");
+            Console.WriteLine(
+                $"config-warning: Futures.FlipLongEntries=true — approved LONG entries execute as SHORT only when pair24h <= {Futures.FlipMaxPair24hRisePercent:0.###}% and btc24h <= {Futures.FlipMaxBtc24hRisePercent:0.###}%; otherwise the original LONG is preserved.");
         }
 
         // Sizing migration: the old TargetNotionalUsd meant NOTIONAL; the new
@@ -477,15 +490,13 @@ internal sealed class FuturesOptions
     // forces this to false regardless of config.
     public bool AllowFlip { get; set; }
 
-    // Contrarian experiment ("flipped logic"): an entry that passed EVERY long gate
-    // (scoring, quality, freshness, 24h range, follow-through, portfolio, risk) is
-    // executed as a SHORT at the last step. No decision logic changes — only the
-    // submitted side inverts, and the decision/ledger reason gains a
-    // "flipped logic applied" marker. The opened position IS a real short and is
-    // managed as one (TP/SL, trailing, signal-reversal close, reconciliation).
-    // SHORT candidates are untouched. Requires AllowShorts; Normalize disables the
-    // flip and warns otherwise.
+    // Contrarian experiment ("flipped logic"): a fully approved LONG is executed
+    // as a SHORT only when the closed-candle 24h regime is countertrend-friendly.
+    // Outside that regime the original LONG is preserved, so the gate changes side
+    // selection rather than suppressing an otherwise approved trade.
     public bool FlipLongEntries { get; set; }
+    public decimal FlipMaxPair24hRisePercent { get; set; } = 3m;
+    public decimal FlipMaxBtc24hRisePercent { get; set; } = 0m;
 
     private decimal _targetMarginUsd = 10m;
     private decimal _maxNotionalUsd;

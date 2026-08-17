@@ -1,3 +1,9 @@
+## 2026-08-17-futures-flip-regime-gate
+
+- The flipped-entry experiment no longer turns every approved LONG into a SHORT. It now flips only when the latest complete closed-candle 24h return is at or below `Futures.FlipMaxPair24hRisePercent` for the pair (default 3%) and at or below `Futures.FlipMaxBtc24hRisePercent` for BTC (default 0%). If either series is unavailable or exceeds its limit, the already-approved original LONG is preserved instead of suppressing the trade.
+- The worker calculates both returns from one complete 24h window of closed candles at the configured timeframe and emits a `FLIP_REGIME` line with the pair/BTC values, thresholds, executed side, verdict, and reason. The action reason also records whether the flip was applied or skipped, making live outcomes distinguishable in the decision journal.
+- No strategy setting was added to environment variables; both thresholds live in appsettings and invalid values reset to 3% / 0% during normalization. Not changed: entry scoring and guards, native SHORT decisions, trade capacity, sizing/leverage, TP/SL/trailing, IOC execution, reconciliation, or spot behavior.
+
 ## 2026-08-15-futures-usd-15x10-sizing
 
 - Futures entries now target 15 USD initial margin at 10x leverage, producing a 150 USD notional position when sufficient collateral is available. Per-position, aggregate, and correlation-group notional caps are aligned at 150 / 450 / 150 USD so downstream guards do not silently retain the previous 60 USD ceiling.

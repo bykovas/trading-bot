@@ -410,10 +410,18 @@ internal sealed class FuturesDecisionWorker(
                     }
                     else
                     {
-                        // Flipped-logic experiment: the LONG thesis passed every gate
-                        // unchanged; only the executed side inverts to SHORT here, so
-                        // order, ledger, TP/SL and reconciliation all see a real short.
-                        var flipApplied = config.Futures.FlipLongEntries && desired == FuturesDesiredExposure.Long;
+                        // Flipped-logic experiment: keep the approved trade, but invert
+                        // its side only in a measured countertrend regime. When the pair
+                        // is already strongly up or BTC is rising, preserve the LONG.
+                        var pair24hChangePct = FuturesFlipRegimeGate.CalculateClosedCandle24hChangePct(
+                            marketState.Candles,
+                            config.Trading.TimeframeMinutes);
+                        var flipDecision = FuturesFlipRegimeGate.Evaluate(
+                            desired,
+                            config.Futures,
+                            pair24hChangePct,
+                            btcRegime.Change24hPct);
+                        var flipApplied = flipDecision.ApplyFlip;
                         var executedDesired = flipApplied ? FuturesDesiredExposure.Short : desired;
                         fill = await ApplyOrExecuteLiveAsync(
                             state, pair, executedDesired, markPrice,
@@ -427,12 +435,16 @@ internal sealed class FuturesDecisionWorker(
                             cancellationToken,
                             signalPrice: marketState.LastPrice,
                             flippedEntry: flipApplied);
-                        if (flipApplied)
+                        if (flipDecision.Requested)
                         {
+                            var flipReason = flipApplied
+                                ? $"flipped logic applied; {flipDecision.Reason}"
+                                : $"flipped logic skipped; {flipDecision.Reason}";
                             fill.Action.Reason = string.IsNullOrWhiteSpace(fill.Action.Reason)
-                                ? "flipped logic applied"
-                                : $"{fill.Action.Reason}; flipped logic applied";
-                            Console.WriteLine($"FLIPPED_LOGIC pair={pair} approved=LONG executed=SHORT");
+                                ? flipReason
+                                : $"{fill.Action.Reason}; {flipReason}";
+                            Console.WriteLine(
+                                $"FLIP_REGIME pair={pair} approved=LONG executed={executedDesired.ToString().ToUpperInvariant()} applied={flipApplied} pair24h={flipDecision.Pair24hChangePct:0.###}% btc24h={flipDecision.Btc24hChangePct:0.###}% maxPair24h={config.Futures.FlipMaxPair24hRisePercent:0.###}% maxBtc24h={config.Futures.FlipMaxBtc24hRisePercent:0.###}% reason={flipDecision.Reason}");
                         }
 
                         if (freshness is not null)
@@ -2396,13 +2408,18 @@ internal sealed class FuturesDecisionWorker(
             var reference = closes[^(btcLookback + 1)];
             btcRecentChangePct = reference > 0m ? (close - reference) / reference * 100m : null;
         }
+        var btc24hChangePct = FuturesFlipRegimeGate.CalculateClosedCandle24hChangePct(
+            btc.Candles,
+            config.Trading.TimeframeMinutes);
+        var btc24hText = btc24hChangePct?.ToString("0.###") ?? "n/a";
 
         return new BtcRegimeState(
             allowsLongs,
             allowsShortRegime,
             !allowsLongs,
-            $"close={close:0.####} ma{config.Regime.BtcTrendMa}={ma:0.####} slope={slope:0.####} drawdown{config.Regime.BtcCrashLookback}={drawdown:0.###}% btcChange{btcLookback}={btcRecentChangePct:0.###}% allowsLongs={allowsLongs} allowsShorts={allowsShortRegime}",
-            btcRecentChangePct);
+            $"close={close:0.####} ma{config.Regime.BtcTrendMa}={ma:0.####} slope={slope:0.####} drawdown{config.Regime.BtcCrashLookback}={drawdown:0.###}% btcChange{btcLookback}={btcRecentChangePct:0.###}% btc24h={btc24hText}% allowsLongs={allowsLongs} allowsShorts={allowsShortRegime}",
+            btcRecentChangePct,
+            btc24hChangePct);
     }
 
     private (bool Allowed, string? Reason) EvaluateShortGate(FuturesDesiredExposure desired, TechnicalSignal signal, BtcRegimeState btcRegime)
