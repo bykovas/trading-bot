@@ -1,3 +1,10 @@
+## 2026-08-19-lukas-independent-futures-live-instance
+
+- Added an independently gated `futures-lukas-live` worker using the shared futures image and market-data database but isolated Kraken credentials, portfolio state, exchange reconciliation, protective orders, trailing management, logs, and runtime directories. Its Docker container is `trading-bot-lukas-futures-worker-live` and it is enabled only by `TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED=true`.
+- Added a repository-owned Lukas futures profile that is identical to the primary futures profile except for instance identity and `Futures.FlipLongEntries=false`. A regression test compares the complete JSON profiles so future strategy, sizing, risk, and exit tuning cannot drift silently between accounts.
+- Added CI secret wiring for the existing Lukas Kraken Futures key pair, isolated deployment mapping into the worker's standard credential names, fail-closed live-instance coverage, and UI selectors for the new instance. The startup limits log now reports the configured flip policy instead of the stale `flip=forbidden` text.
+- Not changed: signal scoring, entry guards, native SHORT behavior, the primary account's conditional flipped-entry policy, sizing/leverage, TP/SL/trailing rules, IOC execution, Kraken reconciliation semantics, dead-man switch behavior, spot workers, or shared market-data collection.
+
 ## 2026-08-17-futures-flip-regime-gate
 
 - The flipped-entry experiment no longer turns every approved LONG into a SHORT. It now flips only when the latest complete closed-candle 24h return is at or below `Futures.FlipMaxPair24hRisePercent` for the pair (default 3%) and at or below `Futures.FlipMaxBtc24hRisePercent` for BTC (default 0%). If either series is unavailable or exceeds its limit, the already-approved original LONG is preserved instead of suppressing the trade.

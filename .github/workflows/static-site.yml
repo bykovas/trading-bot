@@ -138,6 +138,7 @@ jobs:
             infra/traefik/trading-bot.yml
             src/TradingBot.SpotWorker/appsettings.json
             src/TradingBot.FuturesWorker/appsettings.json
+            src/TradingBot.FuturesWorker/appsettings.lukas.json
             src/TradingBot.MarketDataWorker/appsettings.json
 
   deploy:
@@ -172,6 +173,9 @@ jobs:
       TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED: ${{ vars.TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED }}
       TRADINGBOT_KRAKEN_FUTURES_API_KEY: ${{ secrets.TRADINGBOT_KRAKEN_FUTURES_API_KEY }}
       TRADINGBOT_KRAKEN_FUTURES_API_SECRET: ${{ secrets.TRADINGBOT_KRAKEN_FUTURES_API_SECRET }}
+      TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED: ${{ vars.TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED }}
+      TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY: ${{ secrets.TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY }}
+      TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET: ${{ secrets.TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET }}
 
     steps:
       - name: Download deploy bundle

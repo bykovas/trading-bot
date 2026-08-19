@@ -20,11 +20,15 @@ LIVE_ENV_FILE="${LIVE_DIR}/.env"
 VIRTUAL_ENV_FILE="${VIRTUAL_DIR}/.env"
 FUTURES_DIR="${DEPLOY_DIR}/futures"
 FUTURES_LIVE_DIR="${FUTURES_DIR}/live"
+FUTURES_LUKAS_LIVE_DIR="${FUTURES_DIR}/lukas-live"
 FUTURES_VIRTUAL_DIR="${FUTURES_DIR}/virtual"
 FUTURES_APPSETTINGS_SOURCE="src/TradingBot.FuturesWorker/appsettings.json"
+FUTURES_LUKAS_APPSETTINGS_SOURCE="src/TradingBot.FuturesWorker/appsettings.lukas.json"
 FUTURES_LIVE_APPSETTINGS="${FUTURES_LIVE_DIR}/appsettings.json"
+FUTURES_LUKAS_LIVE_APPSETTINGS="${FUTURES_LUKAS_LIVE_DIR}/appsettings.json"
 FUTURES_VIRTUAL_APPSETTINGS="${FUTURES_VIRTUAL_DIR}/appsettings.json"
 FUTURES_LIVE_ENV_FILE="${FUTURES_LIVE_DIR}/.env"
+FUTURES_LUKAS_LIVE_ENV_FILE="${FUTURES_LUKAS_LIVE_DIR}/.env"
 FUTURES_VIRTUAL_ENV_FILE="${FUTURES_VIRTUAL_DIR}/.env"
 DATABASE_DIR="${DEPLOY_DIR}/database"
 DATABASE_ENV_DIR="${DEPLOY_DIR}/postgres"
@@ -64,6 +68,7 @@ echo "  worker = ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}"
 echo "  live   = trading-bot-spot-worker-live"
 echo "  virtual= trading-bot-spot-worker-virtual"
 echo "  futures= ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG}"
+echo "  lukas  = trading-bot-lukas-futures-worker-live"
 echo "  market-data= ${MARKET_DATA_WORKER_IMAGE_NAME}:${MARKET_DATA_WORKER_IMAGE_TAG}"
 
 mkdir -p \
@@ -77,6 +82,8 @@ mkdir -p \
   "${VIRTUAL_DIR}/logs" \
   "${FUTURES_LIVE_DIR}/data" \
   "${FUTURES_LIVE_DIR}/logs" \
+  "${FUTURES_LUKAS_LIVE_DIR}/data" \
+  "${FUTURES_LUKAS_LIVE_DIR}/logs" \
   "${FUTURES_VIRTUAL_DIR}/data" \
   "${FUTURES_VIRTUAL_DIR}/logs" \
   "${MARKET_DATA_DIR}/logs" \
@@ -85,10 +92,10 @@ mkdir -p \
 cp infra/docker-compose.prod.yml "${COMPOSE_FILE}"
 cp infra/traefik/trading-bot.yml "${TRAEFIK_DYNAMIC_FILE}"
 
-# appsettings.json is repository-owned: on EVERY deploy both live and virtual get
-# the same fresh file from the repo, so live and virtual always run identical
-# strategy/config. Operator-specific overrides belong in the .env files (which are
-# preserved for live below), NOT in appsettings.
+# appsettings files are repository-owned and refreshed on every deploy. The primary
+# live and virtual workers share the default strategy profile; Lukas receives the
+# matching non-flipped profile. Runtime identity and secrets belong in .env files,
+# never in appsettings.
 #
 # install_config overwrites the destination even when the existing file is owned by
 # another user (e.g. a live appsettings.json created root-owned by an earlier
@@ -108,6 +115,8 @@ install_config "${WORKER_APPSETTINGS_SOURCE}" "${VIRTUAL_APPSETTINGS}"
 
 echo "Updating futures live appsettings from repository config (identical to virtual)"
 install_config "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_LIVE_APPSETTINGS}"
+echo "Updating Lukas futures live appsettings from repository config"
+install_config "${FUTURES_LUKAS_APPSETTINGS_SOURCE}" "${FUTURES_LUKAS_LIVE_APPSETTINGS}"
 echo "Updating futures virtual appsettings from repository config"
 install_config "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_VIRTUAL_APPSETTINGS}"
 echo "Updating market data worker appsettings from repository config"
@@ -132,6 +141,18 @@ if [ "$(printf '%s' "${TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED:-false}" | tr '[:
 else
   FUTURES_LIVE_TRADING_FLAG="false"
   echo "Futures live trading disabled (TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED='${TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED:-}' is not 'true')"
+fi
+
+if [ "$(printf '%s' "${TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+  FUTURES_LUKAS_LIVE_TRADING_FLAG="true"
+  : "${TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY:?TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY is required when Lukas futures live trading is enabled}"
+  : "${TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET:?TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET is required when Lukas futures live trading is enabled}"
+  COMPOSE_PROFILES="lukas-live"
+  echo "!!! TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED=true from PROD environment: deploying Lukas FUTURES LIVE trading ON !!!"
+else
+  FUTURES_LUKAS_LIVE_TRADING_FLAG="false"
+  COMPOSE_PROFILES=""
+  echo "Lukas futures live trading disabled (TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED='${TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED:-}' is not 'true')"
 fi
 
 echo "Writing API environment to ${API_ENV_FILE}"
@@ -228,6 +249,23 @@ else
   } > "${FUTURES_LIVE_ENV_FILE}"
 fi
 
+# Lukas has a managed, isolated runtime environment. Rewriting this file on every
+# deploy rotates only his account credentials and prevents stale primary-account
+# credentials from surviving in the dedicated worker.
+echo "Writing Lukas futures live environment to ${FUTURES_LUKAS_LIVE_ENV_FILE}"
+{
+  printf 'TRADINGBOT_BOT_INSTANCE_ID=futures-lukas-live\n'
+  printf 'TRADINGBOT_BOT_INSTANCE_NAME=Lukas live futures worker\n'
+  printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
+  printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  printf 'TRADINGBOT_MARKET_DATA_MODE=database\n'
+  printf 'TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true\n'
+  printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=%s\n' "${FUTURES_LUKAS_LIVE_TRADING_FLAG}"
+  printf 'TRADINGBOT_KRAKEN_FUTURES_API_KEY=%s\n' "${TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY:-}"
+  printf 'TRADINGBOT_KRAKEN_FUTURES_API_SECRET=%s\n' "${TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET:-}"
+  printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
+} > "${FUTURES_LUKAS_LIVE_ENV_FILE}"
+
 echo "Writing futures virtual environment to ${FUTURES_VIRTUAL_ENV_FILE}"
 {
   printf 'TRADINGBOT_BOT_INSTANCE_ID=futures-virtual\n'
@@ -271,6 +309,7 @@ export MARKET_DATA_WORKER_IMAGE_NAME
 export MARKET_DATA_WORKER_IMAGE_TAG
 export TRAEFIK_NETWORK
 export POSTGRES_BIND_HOST
+export COMPOSE_PROFILES
 
 docker compose \
   -p "${PROJECT_NAME}" \
@@ -334,6 +373,9 @@ database_ready_check() {
 run_healthcheck_with_retries "database DNS and Postgres readiness" 45 2 database_ready_check
 
 echo "Starting application services after database readiness."
+if [ "${FUTURES_LUKAS_LIVE_TRADING_FLAG}" != "true" ]; then
+  docker rm -f trading-bot-lukas-futures-worker-live >/dev/null 2>&1 || true
+fi
 docker compose \
   -p "${PROJECT_NAME}" \
   -f "${COMPOSE_FILE}" \
@@ -359,8 +401,18 @@ run_healthcheck_with_retries "trading-bot-api container" 30 2 \
   docker run --rm --network container:trading-bot-ui busybox:1.36 \
     wget -q -O /dev/null http://trading-bot-api:8080/api/health
 
-# Worker health: workers have no HTTP endpoint, so verify both containers are running.
-for WORKER_CONTAINER in trading-bot-spot-worker-live trading-bot-spot-worker-virtual trading-bot-futures-worker-live trading-bot-futures-worker-virtual; do
+# Worker health: workers have no HTTP endpoint, so verify every enabled container.
+WORKER_CONTAINERS=(
+  trading-bot-spot-worker-live
+  trading-bot-spot-worker-virtual
+  trading-bot-futures-worker-live
+  trading-bot-futures-worker-virtual
+)
+if [ "${FUTURES_LUKAS_LIVE_TRADING_FLAG}" = "true" ]; then
+  WORKER_CONTAINERS+=(trading-bot-lukas-futures-worker-live)
+fi
+
+for WORKER_CONTAINER in "${WORKER_CONTAINERS[@]}"; do
   WORKER_RUNNING="$(docker inspect -f '{{.State.Running}}' "${WORKER_CONTAINER}" 2>/dev/null || echo false)"
   if [ "${WORKER_RUNNING}" != "true" ]; then
     echo "ERROR: ${WORKER_CONTAINER} is not running."

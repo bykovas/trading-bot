@@ -80,6 +80,23 @@ services:
       - /opt/trading-bot/futures/live/data:/app/data
       - /opt/trading-bot/futures/live/logs:/app/logs
 
+  futures-worker-lukas-live:
+    container_name: trading-bot-lukas-futures-worker-live
+    image: ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    profiles:
+      - lukas-live
+    env_file:
+      - /opt/trading-bot/futures/lukas-live/.env
+    depends_on:
+      db-ready:
+        condition: service_completed_successfully
+    # Lukas uses an isolated account, runtime config, state, and exchange orders.
+    volumes:
+      - /opt/trading-bot/futures/lukas-live/appsettings.json:/app/appsettings.json:ro
+      - /opt/trading-bot/futures/lukas-live/data:/app/data
+      - /opt/trading-bot/futures/lukas-live/logs:/app/logs
+
   futures-worker-virtual:
     container_name: trading-bot-futures-worker-virtual
     image: ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG:-latest}

@@ -147,7 +147,7 @@
 
     .bot-switch {
       display: inline-grid;
-      grid-template-columns: repeat(4, minmax(64px, 1fr));
+      grid-template-columns: repeat(5, minmax(64px, 1fr));
       align-items: center;
       gap: 3px;
       min-height: 38px;
@@ -721,6 +721,7 @@
           <button type="button" data-bot-instance="spot-live">Spot Live</button>
           <button type="button" data-bot-instance="spot-virtual">Spot Virt</button>
           <button type="button" data-bot-instance="futures-live">Fut Live</button>
+          <button type="button" data-bot-instance="futures-lukas-live">Lukas</button>
           <button type="button" data-bot-instance="futures-virtual">Fut Virt</button>
         </div>
       </div>
@@ -799,7 +800,7 @@
   <script src="/decision-explainer.js"></script>
   <script>
     const botButtons = Array.from(document.querySelectorAll("[data-bot-instance]"));
-    const botInstances = ["spot-live", "spot-virtual", "futures-live", "futures-virtual"];
+    const botInstances = ["spot-live", "spot-virtual", "futures-live", "futures-lukas-live", "futures-virtual"];
     let currentBotInstance = "futures-live";
     let refreshSequence = 0;
 

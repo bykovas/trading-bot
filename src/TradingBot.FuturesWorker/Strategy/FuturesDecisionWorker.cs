@@ -31,7 +31,7 @@ internal sealed class FuturesDecisionWorker(
     {
         if (IsLiveInstance && !config.Futures.LiveTradingEnabled)
         {
-            throw new InvalidOperationException("Bot instance is futures-live but TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED is not true; refusing to create virtual positions under a live instance id.");
+            throw new InvalidOperationException($"Bot instance '{config.BotInstance.Id}' is live but TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED is not true; refusing to create virtual positions under a live instance id.");
         }
 
         if (config.Futures.LiveTradingEnabled && broker?.IsConfigured != true)
@@ -44,7 +44,7 @@ internal sealed class FuturesDecisionWorker(
         {
             Console.WriteLine("!!! FUTURES LIVE TRADING ENABLED: approved decisions will place REAL Kraken Futures market orders !!!");
         }
-        Console.WriteLine($"futures limits: leverage<= {config.Futures.MaxLeverage:0.#}x, positions<= {config.Futures.MaxPositions}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flip=forbidden");
+        Console.WriteLine($"futures limits: leverage<= {config.Futures.MaxLeverage:0.#}x, positions<= {config.Futures.MaxPositions}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flipLongEntries={config.Futures.FlipLongEntries}");
         Console.WriteLine($"futures exit checks: fastExit={config.Futures.FastExitCheckSeconds}s fullCycle={config.Worker.LoopIntervalSeconds}s");
         HydratePriceHistory();
 

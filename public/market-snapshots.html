@@ -193,7 +193,7 @@
 
     .bot-switch {
       display: inline-grid;
-      grid-template-columns: repeat(4, minmax(64px, 1fr));
+      grid-template-columns: repeat(5, minmax(64px, 1fr));
       align-items: center;
       gap: 3px;
       min-height: 34px;
@@ -343,6 +343,7 @@
           <button type="button" data-bot-instance="spot-live">Spot Live</button>
           <button type="button" data-bot-instance="spot-virtual">Spot Virt</button>
           <button type="button" data-bot-instance="futures-live">Fut Live</button>
+          <button type="button" data-bot-instance="futures-lukas-live">Lukas</button>
           <button type="button" data-bot-instance="futures-virtual">Fut Virt</button>
         </div>
         <div class="bot-switch scope-switch" role="group" aria-label="History scope">
@@ -400,7 +401,7 @@
     let currentBotInstance = "spot-live";
     let currentHistoryScope = "current";
     // Back-compat: pre-rename ids persisted in localStorage or shared URLs.
-    const botInstances = ["spot-live", "spot-virtual", "futures-live", "futures-virtual"];
+    const botInstances = ["spot-live", "spot-virtual", "futures-live", "futures-lukas-live", "futures-virtual"];
     function normalizeBotInstance(value) {
       if (value === "live") return "spot-live";
       if (value === "virtual") return "spot-virtual";
