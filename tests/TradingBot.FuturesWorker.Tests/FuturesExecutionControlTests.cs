@@ -8,17 +8,17 @@ namespace TradingBot.FuturesWorker.Tests;
 public sealed class FuturesExecutionControlTests
 {
     [Fact]
-    public async Task Long_with_refreshed_quote_inside_deviation_submits_ioc_limit_at_max_allowed_price()
+    public async Task Long_with_refreshed_quote_inside_deviation_submits_fok_limit_at_max_allowed_price()
     {
         var broker = new StubBroker
         {
             Ticker = new FuturesTickerQuote("PF_RIVERUSD", 3.49m, 3.50m, 3.495m, 3.495m, DateTimeOffset.UtcNow),
-            IocResult = new FuturesOrderResult("filled", "order-1", null, new FuturesOrderFill(2m, 3.50m, null, DateTimeOffset.UtcNow))
+            FokResult = new FuturesOrderResult("filled", "order-1", null, new FuturesOrderFill(28.57142857m, 3.50m, null, DateTimeOffset.UtcNow))
         };
         var (fill, brokerAfter, _) = await ExecuteEntryAsync(broker, signalPrice: 3.49456893782m);
 
         Assert.True(fill.PositionOpened);
-        Assert.Equal(1, brokerAfter.IocCallCount);
+        Assert.Equal(1, brokerAfter.FokCallCount);
         Assert.Equal(3.5067m, brokerAfter.LastLimitPrice);
     }
 
@@ -33,23 +33,25 @@ public sealed class FuturesExecutionControlTests
 
         Assert.False(fill.PositionOpened);
         Assert.Empty(state.Positions);
-        Assert.Equal(0, brokerAfter.IocCallCount);
+        Assert.Equal(0, brokerAfter.FokCallCount);
         Assert.Equal("LIVE_ENTRY_PRICE_DEVIATION", fill.Action.HoldReasonCode);
     }
 
     [Fact]
-    public async Task Partial_fill_commits_only_filled_quantity()
+    public async Task Invalid_partial_fok_fill_is_immediately_unwound_and_not_committed()
     {
         var broker = new StubBroker
         {
             Ticker = new FuturesTickerQuote("PF_RIVERUSD", 3.49m, 3.50m, 3.495m, 3.495m, DateTimeOffset.UtcNow),
-            IocResult = new FuturesOrderResult("filled", "order-1", null, new FuturesOrderFill(1.25m, 3.50m, null, DateTimeOffset.UtcNow))
+            FokResult = new FuturesOrderResult("filled", "order-1", null, new FuturesOrderFill(1.25m, 3.50m, null, DateTimeOffset.UtcNow))
         };
         var (fill, _, state) = await ExecuteEntryAsync(broker, signalPrice: 3.49456893782m);
 
-        Assert.True(fill.PositionOpened);
-        Assert.Equal(1.25m, Assert.Single(state.Positions).Quantity);
+        Assert.False(fill.PositionOpened);
+        Assert.Empty(state.Positions);
         Assert.Equal(1.25m, fill.Action.FilledQuantity);
+        Assert.Equal("LIVE_FOK_PARTIAL_FILL_UNWOUND", fill.Action.HoldReasonCode);
+        Assert.Equal(1, broker.CloseCallCount);
     }
 
     [Fact]
@@ -58,7 +60,7 @@ public sealed class FuturesExecutionControlTests
         var broker = new StubBroker
         {
             Ticker = new FuturesTickerQuote("PF_RIVERUSD", 3.49m, 3.50m, 3.495m, 3.495m, DateTimeOffset.UtcNow),
-            IocResult = new FuturesOrderResult("filled", "order-1", null, new FuturesOrderFill(2m, 3.501m, null, DateTimeOffset.UtcNow))
+            FokResult = new FuturesOrderResult("filled", "order-1", null, new FuturesOrderFill(28.57142857m, 3.501m, null, DateTimeOffset.UtcNow))
         };
         var (fill, _, state) = await ExecuteEntryAsync(broker, signalPrice: 3.49456893782m);
 
@@ -68,19 +70,19 @@ public sealed class FuturesExecutionControlTests
     }
 
     [Fact]
-    public async Task Missing_fill_readback_marks_pending_and_blocks_same_symbol()
+    public async Task Fok_without_fill_opens_nothing_and_does_not_create_pending_entry()
     {
         var broker = new StubBroker
         {
             Ticker = new FuturesTickerQuote("PF_RIVERUSD", 3.49m, 3.50m, 3.495m, 3.495m, DateTimeOffset.UtcNow),
-            IocResult = new FuturesOrderResult("placed", "order-1", null)
+            FokResult = new FuturesOrderResult("cancelled", "order-1", null)
         };
         var (fill, _, state) = await ExecuteEntryAsync(broker, signalPrice: 3.49456893782m);
 
         Assert.False(fill.PositionOpened);
         Assert.Empty(state.Positions);
-        Assert.Single(state.PendingFuturesOrders);
-        Assert.Equal("FILL_RECONCILIATION_PENDING", fill.Action.HoldReasonCode);
+        Assert.Empty(state.PendingFuturesOrders);
+        Assert.Equal("LIVE_FOK_NOT_FILLED", fill.Action.HoldReasonCode);
     }
 
     [Fact]
@@ -89,7 +91,7 @@ public sealed class FuturesExecutionControlTests
         var broker = new StubBroker
         {
             Ticker = new FuturesTickerQuote("PF_RIVERUSD", 3.49m, 3.50m, 3.495m, 3.495m, DateTimeOffset.UtcNow),
-            IocResult = new FuturesOrderResult("filled", "order-1", null, new FuturesOrderFill(2m, 3.50m, null, DateTimeOffset.UtcNow))
+            FokResult = new FuturesOrderResult("filled", "order-1", null, new FuturesOrderFill(28.57142857m, 3.50m, null, DateTimeOffset.UtcNow))
         };
 
         var (_, brokerAfter, _) = await ExecuteEntryAsync(broker, signalPrice: 3.49456893782m);
@@ -175,8 +177,9 @@ public sealed class FuturesExecutionControlTests
     {
         public bool IsConfigured => true;
         public FuturesTickerQuote? Ticker { get; init; }
-        public FuturesOrderResult IocResult { get; init; } = FuturesOrderResult.Rejected("not configured");
-        public int IocCallCount { get; private set; }
+        public FuturesOrderResult FokResult { get; init; } = FuturesOrderResult.Rejected("not configured");
+        public int FokCallCount { get; private set; }
+        public int CloseCallCount { get; private set; }
         public decimal? LastLimitPrice { get; private set; }
         public decimal? LastSize { get; private set; }
 
@@ -192,15 +195,18 @@ public sealed class FuturesExecutionControlTests
         public Task<FuturesTickerQuote?> GetTickerAsync(string symbol, CancellationToken cancellationToken) =>
             Task.FromResult(Ticker);
 
-        public Task<FuturesOrderResult> SendOrderAsync(string symbol, string side, decimal size, bool reduceOnly, decimal leverage, CancellationToken cancellationToken) =>
-            Task.FromResult(new FuturesOrderResult("placed", "close-1", null));
-
-        public Task<FuturesOrderResult> SendIocLimitOrderAsync(string symbol, string side, decimal size, decimal limitPrice, bool reduceOnly, CancellationToken cancellationToken)
+        public Task<FuturesOrderResult> SendOrderAsync(string symbol, string side, decimal size, bool reduceOnly, decimal leverage, CancellationToken cancellationToken)
         {
-            IocCallCount++;
+            CloseCallCount++;
+            return Task.FromResult(new FuturesOrderResult("placed", "close-1", null));
+        }
+
+        public Task<FuturesOrderResult> SendFillOrKillLimitOrderAsync(string symbol, string side, decimal size, decimal limitPrice, bool reduceOnly, CancellationToken cancellationToken)
+        {
+            FokCallCount++;
             LastSize = size;
             LastLimitPrice = limitPrice;
-            return Task.FromResult(IocResult);
+            return Task.FromResult(FokResult);
         }
 
         public Task<FuturesOrderResult> SendTriggerOrderAsync(

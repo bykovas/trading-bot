@@ -36,7 +36,7 @@ internal sealed record FuturesEntryPlan(
     decimal RequiredMarginEur = 0m,
     decimal EffectiveLeverage = 0m,
     decimal ProjectedStopLossEur = 0m,
-    string ExecutionCostModel = FuturesExecutionCostModel.TakerIocRoundTrip,
+    string ExecutionCostModel = FuturesExecutionCostModel.TakerFokRoundTrip,
     string StopSource = "UNKNOWN",
     string? NotionalCapReason = null);
 

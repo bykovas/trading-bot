@@ -24,7 +24,7 @@ internal interface IFuturesBroker
         decimal leverage,
         CancellationToken cancellationToken);
 
-    Task<FuturesOrderResult> SendIocLimitOrderAsync(
+    Task<FuturesOrderResult> SendFillOrKillLimitOrderAsync(
         string symbol,
         string side,
         decimal size,

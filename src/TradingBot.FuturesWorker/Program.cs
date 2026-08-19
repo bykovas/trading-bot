@@ -28,6 +28,7 @@ var store = CreatePortfolioStore(config);
 Console.WriteLine($"futures persistence: state={store.StateDescription} events={store.EventsDescription}");
 
 var portfolio = new FuturesVirtualPortfolio(config, store);
+var entryMirrorStore = CreateEntryMirrorStore(config);
 var krakenFuturesBroker = new KrakenFuturesBroker(httpClient, config.Kraken);
 var worker = new FuturesDecisionWorker(
     config,
@@ -38,7 +39,8 @@ var worker = new FuturesDecisionWorker(
     portfolio,
     new TpSlOrchestrator(config),
     krakenFuturesBroker,
-    universeProvider: universeProvider);
+    universeProvider: universeProvider,
+    entryMirrorStore: entryMirrorStore);
 
 await worker.RunAsync(cancellation.Token);
 
@@ -46,3 +48,8 @@ static IDryRunPortfolioStore CreatePortfolioStore(FuturesBotConfiguration config
     config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
         ? new PostgresDryRunPortfolioStore(config.Database.ConnectionString, config.BotInstance.Id)
         : new FileDryRunPortfolioStore(config.DryRun);
+
+static IFuturesEntryMirrorStore CreateEntryMirrorStore(FuturesBotConfiguration config) =>
+    config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
+        ? new PostgresFuturesEntryMirrorStore(config.Database.ConnectionString)
+        : new NullFuturesEntryMirrorStore();

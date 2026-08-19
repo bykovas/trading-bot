@@ -7,7 +7,7 @@ namespace TradingBot.FuturesWorker.Tests;
 public sealed class FuturesInstanceConfigurationTests
 {
     [Fact]
-    public void Lukas_profile_matches_primary_profile_except_identity_and_flip_policy()
+    public void Lukas_profile_matches_primary_profile_except_identity_flip_and_mirror_role()
     {
         var root = FindRepositoryRoot();
         var primary = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.json"));
@@ -15,12 +15,17 @@ public sealed class FuturesInstanceConfigurationTests
 
         Assert.True(primary["Futures"]?["FlipLongEntries"]?.GetValue<bool>());
         Assert.False(lukas["Futures"]?["FlipLongEntries"]?.GetValue<bool>());
+        Assert.Equal("futures-lukas-live", primary["EntryMirror"]?["FollowSourceBotInstanceId"]?.GetValue<string>());
+        Assert.Equal("futures-live", lukas["EntryMirror"]?["PublishToBotInstanceId"]?.GetValue<string>());
+        Assert.True(primary["EntryMirror"]?["InvertSide"]?.GetValue<bool>());
+        Assert.True(lukas["EntryMirror"]?["InvertSide"]?.GetValue<bool>());
         Assert.Equal("futures-lukas-live", lukas["BotInstance"]?["Id"]?.GetValue<string>());
         Assert.Equal("Lukas live futures worker", lukas["BotInstance"]?["Name"]?.GetValue<string>());
 
         var normalizedLukas = lukas.DeepClone().AsObject();
         normalizedLukas["BotInstance"] = primary["BotInstance"]?.DeepClone();
         normalizedLukas["Futures"]!["FlipLongEntries"] = true;
+        normalizedLukas["EntryMirror"] = primary["EntryMirror"]?.DeepClone();
 
         Assert.True(JsonNode.DeepEquals(primary, normalizedLukas));
     }

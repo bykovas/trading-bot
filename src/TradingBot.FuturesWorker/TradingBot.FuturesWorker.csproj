@@ -21,4 +21,8 @@
     <ProjectReference Include="..\TradingBot.Core\TradingBot.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="8.0.6" />
+  </ItemGroup>
+
 </Project>

@@ -29,6 +29,7 @@ internal sealed class FuturesBotConfiguration
     public FuturesShortOptions Shorts { get; set; } = new();
     public FuturesRiskOptions Risk { get; set; } = new();
     public FuturesExecutionPolicyOptions ExecutionPolicy { get; set; } = new();
+    public FuturesEntryMirrorOptions EntryMirror { get; set; } = new();
     public CorrelationRiskOptions CorrelationRisk { get; set; } = new();
     public TpSlOptions TpSl { get; set; } = new();
     public FuturesPortfolioOptions Portfolio { get; set; } = new();
@@ -226,6 +227,40 @@ internal sealed class FuturesBotConfiguration
         if (Futures.DeadManSwitchSeconds < minDeadManSwitchSeconds)
         {
             Futures.DeadManSwitchSeconds = minDeadManSwitchSeconds;
+        }
+
+        EntryMirror.PublishToBotInstanceId = NormalizeOptionalInstanceId(EntryMirror.PublishToBotInstanceId);
+        EntryMirror.FollowSourceBotInstanceId = NormalizeOptionalInstanceId(EntryMirror.FollowSourceBotInstanceId);
+        EntryMirror.MaxCommandAgeSeconds = Math.Clamp(
+            EntryMirror.MaxCommandAgeSeconds <= 0 ? 60 : EntryMirror.MaxCommandAgeSeconds,
+            10,
+            300);
+        EntryMirror.MaxAttempts = Math.Clamp(
+            EntryMirror.MaxAttempts <= 0 ? 3 : EntryMirror.MaxAttempts,
+            1,
+            10);
+
+        if (!string.IsNullOrWhiteSpace(EntryMirror.PublishToBotInstanceId)
+            && !string.IsNullOrWhiteSpace(EntryMirror.FollowSourceBotInstanceId))
+        {
+            Console.WriteLine("config-validation: EntryMirror cannot publish and follow in the same worker; mirror configuration disabled.");
+            EntryMirror.PublishToBotInstanceId = null;
+            EntryMirror.FollowSourceBotInstanceId = null;
+        }
+
+        if (EntryMirror.PublishToBotInstanceId?.Equals(BotInstance.Id, StringComparison.OrdinalIgnoreCase) == true
+            || EntryMirror.FollowSourceBotInstanceId?.Equals(BotInstance.Id, StringComparison.OrdinalIgnoreCase) == true)
+        {
+            Console.WriteLine("config-validation: EntryMirror peer must differ from BotInstance.Id; mirror configuration disabled.");
+            EntryMirror.PublishToBotInstanceId = null;
+            EntryMirror.FollowSourceBotInstanceId = null;
+        }
+
+        if (Futures.LiveTradingEnabled
+            && EntryMirror.IsConfigured
+            && (!Database.Enabled || string.IsNullOrWhiteSpace(Database.ConnectionString)))
+        {
+            throw new InvalidOperationException("Live futures entry mirroring requires the shared Postgres database.");
         }
 
         if (Margin.MaintenanceMarginRatePercent is <= 0m or > 50m)
@@ -458,6 +493,22 @@ internal sealed class FuturesBotConfiguration
             .Select(value => value.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+    private static string? NormalizeOptionalInstanceId(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : BotInstanceId.Normalize(value);
+}
+
+internal sealed class FuturesEntryMirrorOptions
+{
+    public string? PublishToBotInstanceId { get; set; }
+    public string? FollowSourceBotInstanceId { get; set; }
+    public bool InvertSide { get; set; } = true;
+    public int MaxCommandAgeSeconds { get; set; } = 60;
+    public int MaxAttempts { get; set; } = 3;
+
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(PublishToBotInstanceId)
+        || !string.IsNullOrWhiteSpace(FollowSourceBotInstanceId);
 }
 
 internal sealed class FuturesPortfolioOptions

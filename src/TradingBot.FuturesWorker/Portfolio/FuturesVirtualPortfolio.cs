@@ -190,7 +190,7 @@ internal sealed class FuturesVirtualPortfolio(
 
         var action = BaseAction(pair, side == "SHORT" ? "WOULD_OPEN_SHORT" : "WOULD_OPEN_LONG",
             string.IsNullOrEmpty(reason)
-                ? $"{LedgerOpenLabel} {side.ToLowerInvariant()}: notional USD {notionalEur:0.####}, margin USD {initialMargin:0.####}, fee USD {fee:0.####} ({FuturesExecutionCostModel.TakerIocRoundTrip}), fill {fillPrice:0.####}, leverage {leverage:0.#}x"
+                ? $"{LedgerOpenLabel} {side.ToLowerInvariant()}: notional USD {notionalEur:0.####}, margin USD {initialMargin:0.####}, fee USD {fee:0.####} ({FuturesExecutionCostModel.TakerFokRoundTrip}), fill {fillPrice:0.####}, leverage {leverage:0.#}x"
                 : reason);
         action.Side = side;
         action.ReduceOnly = false;
@@ -208,8 +208,8 @@ internal sealed class FuturesVirtualPortfolio(
         action.LastPrice = markPrice;
         action.FeeEur = fee;
         action.GrossNotionalEur = notionalEur;
-        action.FillSource = "MODELED_TAKER_IOC";
-        action.ExecutionCostModel = entryPlan?.ExecutionCostModel ?? FuturesExecutionCostModel.TakerIocRoundTrip;
+        action.FillSource = "MODELED_TAKER_FOK";
+        action.ExecutionCostModel = entryPlan?.ExecutionCostModel ?? FuturesExecutionCostModel.TakerFokRoundTrip;
         action.TargetRiskEur = entryPlan?.TargetRiskEur;
         action.SizedNotionalEur = entryPlan?.SizedNotionalEur ?? notionalEur;
         action.RequiredMarginEur = entryPlan?.RequiredMarginEur ?? initialMargin;

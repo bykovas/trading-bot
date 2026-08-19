@@ -32,6 +32,14 @@ internal sealed class LongShortStrategy(FuturesBotConfiguration config)
             return heldExposure;
         }
 
+        // A mirrored position intentionally opposes the source account. The local
+        // scoring stream is therefore not an exit signal for either mirror side;
+        // price-based TP/SL/trailing protection owns its lifecycle.
+        if (position.EntryChannel?.Equals("Mirror", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return heldExposure;
+        }
+
         var intent = SignalScorer.IntentOf(signal, config.Strategy);
 
         // A flipped short deliberately trades against an approved LONG entry.

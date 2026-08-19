@@ -35,11 +35,11 @@ public sealed class FuturesPositionSizerAndCostModelTests
     }
 
     [Fact]
-    public void Cost_model_is_taker_ioc_round_trip_for_live_and_virtual()
+    public void Cost_model_is_taker_fok_round_trip_for_live_and_virtual()
     {
         var config = BaseConfig();
         var costs = FuturesExecutionCostModel.Estimate(config, FuturesDesiredExposure.Long, fundingRatePercent: 0.01m);
-        Assert.Equal(FuturesExecutionCostModel.TakerIocRoundTrip, costs.Model);
+        Assert.Equal(FuturesExecutionCostModel.TakerFokRoundTrip, costs.Model);
         // 0.05 + 0.05 + 0.10 + 0.01 funding = 0.21
         Assert.Equal(0.21m, costs.RoundTripCostPct);
         Assert.Equal(0.05m, costs.EntryFeePct);
@@ -153,8 +153,8 @@ public sealed class FuturesPositionSizerAndCostModelTests
         Assert.True(fill.PositionOpened);
         var expectedFee = FuturesExecutionCostModel.FeeEur(size.SizedNotionalEur, config.Fees.TakerPct);
         Assert.Equal(expectedFee, fill.Action.FeeEur);
-        Assert.Equal("MODELED_TAKER_IOC", fill.Action.FillSource);
-        Assert.Equal(FuturesExecutionCostModel.TakerIocRoundTrip, fill.Action.ExecutionCostModel);
+        Assert.Equal("MODELED_TAKER_FOK", fill.Action.FillSource);
+        Assert.Equal(FuturesExecutionCostModel.TakerFokRoundTrip, fill.Action.ExecutionCostModel);
     }
 
     private sealed class NullStore : IDryRunPortfolioStore

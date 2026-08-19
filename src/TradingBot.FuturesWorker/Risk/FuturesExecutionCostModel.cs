@@ -1,11 +1,11 @@
 namespace TradingBot.FuturesWorker;
 
-// Single live/virtual execution cost model. Live futures entries are taker IOC, so
+// Single live/virtual execution cost model. Live futures entries are taker FOK, so
 // virtual planning, risk, TP floors, and simulated fees all use the same taker
 // round-trip (entry fee + exit fee + slippage buffer + expected funding).
 internal static class FuturesExecutionCostModel
 {
-    public const string TakerIocRoundTrip = "taker_ioc_round_trip";
+    public const string TakerFokRoundTrip = "taker_fok_round_trip";
 
     public static ExecutionCostEstimate Estimate(
         FuturesBotConfiguration config,
@@ -18,7 +18,7 @@ internal static class FuturesExecutionCostModel
         var expectedFundingPct = ExpectedFundingPct(desired, fundingRatePercent);
         var roundTrip = entryFeePct + exitFeePct + slippagePct + expectedFundingPct;
         return new ExecutionCostEstimate(
-            Model: TakerIocRoundTrip,
+            Model: TakerFokRoundTrip,
             EntryFeePct: entryFeePct,
             ExitFeePct: exitFeePct,
             SlippageBufferPct: slippagePct,

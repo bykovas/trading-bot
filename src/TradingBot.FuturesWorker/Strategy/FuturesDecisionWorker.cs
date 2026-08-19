@@ -15,10 +15,12 @@ internal sealed class FuturesDecisionWorker(
     TpSlOrchestrator tpSl,
     IFuturesBroker? broker = null,
     IClock? clock = null,
-    IUniverseProvider? universeProvider = null)
+    IUniverseProvider? universeProvider = null,
+    IFuturesEntryMirrorStore? entryMirrorStore = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly IUniverseProvider _universeProvider = universeProvider ?? new ConfiguredUniverseProvider(config.CandidateUniverse);
+    private readonly IFuturesEntryMirrorStore _entryMirrorStore = entryMirrorStore ?? new NullFuturesEntryMirrorStore();
     private readonly WorkerBuildInfo _buildInfo = WorkerBuildInfo.FromEnvironment();
     private readonly IReadOnlyDictionary<string, string> _pairToCorrelationGroup =
         CorrelationRiskResolver.BuildPairToGroup(config.CorrelationRisk);
@@ -26,6 +28,20 @@ internal sealed class FuturesDecisionWorker(
     // guard (same mechanism as the spot worker). In-memory; hydrated on startup
     // from the persisted market snapshots so the guard is not blind after restarts.
     private readonly SnapshotPriceHistory _priceHistory = new();
+
+    private bool IsMirrorPublisher =>
+        config.Futures.LiveTradingEnabled
+        && !string.IsNullOrWhiteSpace(config.EntryMirror.PublishToBotInstanceId);
+
+    private bool IsMirrorFollower =>
+        config.Futures.LiveTradingEnabled
+        && !string.IsNullOrWhiteSpace(config.EntryMirror.FollowSourceBotInstanceId);
+
+    private string MirrorRole => IsMirrorPublisher
+        ? $"publisher->{config.EntryMirror.PublishToBotInstanceId}"
+        : IsMirrorFollower
+            ? $"follower<-{config.EntryMirror.FollowSourceBotInstanceId}"
+            : "independent";
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
@@ -44,7 +60,7 @@ internal sealed class FuturesDecisionWorker(
         {
             Console.WriteLine("!!! FUTURES LIVE TRADING ENABLED: approved decisions will place REAL Kraken Futures market orders !!!");
         }
-        Console.WriteLine($"futures limits: leverage<= {config.Futures.MaxLeverage:0.#}x, positions<= {config.Futures.MaxPositions}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flipLongEntries={config.Futures.FlipLongEntries}");
+        Console.WriteLine($"futures limits: leverage<= {config.Futures.MaxLeverage:0.#}x, positions<= {config.Futures.MaxPositions}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flipLongEntries={config.Futures.FlipLongEntries}, mirrorRole={MirrorRole}");
         Console.WriteLine($"futures exit checks: fastExit={config.Futures.FastExitCheckSeconds}s fullCycle={config.Worker.LoopIntervalSeconds}s");
         HydratePriceHistory();
 
@@ -125,6 +141,8 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var portfolioBefore = state.Clone();
+        var mirrorDecisions = new List<DryRunDecisionRecord>();
+        await ProcessMirrorEntriesAsync(state, universe, mirrorDecisions, cancellationToken);
 
         // Held pairs are always evaluated; new-entry candidates first use the
         // normal MaxActiveInstruments ranking, then missing force-included pairs
@@ -143,7 +161,7 @@ internal sealed class FuturesDecisionWorker(
 
         var fullStates = await marketDataSource.GetFullMarketStatesAsync(active, config.Trading.TimeframeMinutes, lightStates, cancellationToken);
         var btcRegime = EvaluateBtcRegime(fullStates);
-        var decisions = new List<DryRunDecisionRecord>();
+        var decisions = new List<DryRunDecisionRecord>(mirrorDecisions);
         var newEntriesThisCycle = 0;
 
         foreach (var marketState in fullStates.Where(candidate => candidate.IsUsable))
@@ -237,6 +255,22 @@ internal sealed class FuturesDecisionWorker(
             }
             else
             {
+                if (IsMirrorFollower)
+                {
+                    fill = portfolio.Apply(
+                        state,
+                        pair,
+                        FuturesDesiredExposure.Flat,
+                        markPrice,
+                        0m,
+                        config.Futures.DefaultLeverage,
+                        reason: $"mirror follower: independent entry disabled; waiting for {config.EntryMirror.FollowSourceBotInstanceId}");
+                    fill.Action.HoldReasonCode = "MIRROR_FOLLOWER_WAITING";
+                    riskReasons = new[] { "independent entry disabled for mirror follower" };
+                    decisions.Add(BuildDecisionRecord(marketState, indicators, signal, fill, true, riskReasons, priceAction));
+                    continue;
+                }
+
                 var desired = strategy.DecideEntry(signal);
                 FuturesEntryPlan? entryPlan = null;
                 EntryFreshnessResult? freshness = null;
@@ -492,6 +526,12 @@ internal sealed class FuturesDecisionWorker(
                             }
 
                             newEntriesThisCycle++;
+                            await PublishMirrorEntryAsync(
+                                cycleId,
+                                marketState.Instrument,
+                                executedDesired,
+                                fill,
+                                cancellationToken);
                         }
 
                         decisions.Add(BuildDecisionRecord(marketState, indicators, signal, fill, riskApproved, riskReasons, priceAction));
@@ -585,11 +625,20 @@ internal sealed class FuturesDecisionWorker(
         if (config.Futures.LiveTradingEnabled)
         {
             await ReconcileWithKrakenAsync(state, universe, Array.Empty<InstrumentMarketState>(), utc, cancellationToken);
-            if (state.Positions.Count == 0)
+        }
+
+        var portfolioBefore = state.Clone();
+        var decisions = new List<DryRunDecisionRecord>();
+        await ProcessMirrorEntriesAsync(state, universe, decisions, cancellationToken);
+
+        if (state.Positions.Count == 0)
+        {
+            portfolio.Save(state);
+            if (decisions.Count > 0)
             {
-                portfolio.Save(state);
-                return;
+                AppendFastCycle(utc, portfolioBefore, state, decisions, decisions.Select(decision => decision.Pair));
             }
+            return;
         }
 
         var heldPairs = state.Positions.Select(position => position.Pair).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -607,10 +656,8 @@ internal sealed class FuturesDecisionWorker(
         _priceHistory.Record(utc, lightStates);
 
         var stateByPair = lightStates.ToDictionary(item => item.Instrument.Pair, StringComparer.OrdinalIgnoreCase);
-        var portfolioBefore = state.Clone();
-        var decisions = new List<DryRunDecisionRecord>();
         var closed = 0;
-        var recorded = 0;
+        var recorded = decisions.Count;
         foreach (var held in state.Positions.ToList())
         {
             if (!stateByPair.TryGetValue(held.Pair, out var marketState))
@@ -671,23 +718,334 @@ internal sealed class FuturesDecisionWorker(
         portfolio.Save(state);
         if (recorded > 0)
         {
-            portfolio.Store.AppendCycle(new DryRunCycleRecord
-            {
-                CycleId = $"{config.BotInstance.Id}-{utc:yyyyMMddHHmmss}-fast-exit",
-                BotInstanceId = config.BotInstance.Id,
-                BotInstanceName = config.BotInstance.Name,
-                Utc = utc,
-                MarketDataMode = config.Kraken.MarketDataMode,
-                AiProvider = "none",
-                Worker = _buildInfo,
-                ActivePairs = heldInstruments.Select(instrument => instrument.Pair).ToList(),
-                Decisions = decisions,
-                PortfolioBefore = portfolioBefore,
-                PortfolioAfter = state.Clone(),
-                EntryDiagnostics = null
-            });
+            AppendFastCycle(utc, portfolioBefore, state, decisions, heldInstruments.Select(instrument => instrument.Pair));
             Console.WriteLine($"futures fast-exit-check: recorded={recorded} closed={closed} remainingPositions={state.Positions.Count}");
         }
+    }
+
+    private async Task PublishMirrorEntryAsync(
+        string cycleId,
+        InstrumentOptions instrument,
+        FuturesDesiredExposure sourceSide,
+        FuturesFillResult fill,
+        CancellationToken cancellationToken)
+    {
+        if (!IsMirrorPublisher || !fill.PositionOpened)
+        {
+            return;
+        }
+
+        var sourceSideText = ExposureSide(sourceSide);
+        var targetSideText = config.EntryMirror.InvertSide
+            ? OppositeSide(sourceSideText)
+            : sourceSideText;
+        var filledNotional = fill.Action.FilledNotionalEur
+            ?? fill.Action.GrossNotionalEur;
+        var sizedNotional = fill.Action.SizedNotionalEur;
+        var notional = sizedNotional.HasValue && sizedNotional.Value > 0m
+            ? Math.Min(filledNotional, sizedNotional.Value)
+            : filledNotional;
+        var fillPrice = fill.Action.AverageFillPrice
+            ?? fill.Action.FillPrice;
+        var leverage = fill.Action.EffectiveLeverage
+            ?? fill.Action.Leverage
+            ?? config.Futures.DefaultLeverage;
+
+        if (notional <= 0m || fillPrice <= 0m)
+        {
+            Console.WriteLine(
+                $"MIRROR_PUBLISH_FAILED pair={instrument.Pair} target={config.EntryMirror.PublishToBotInstanceId} reason=missing confirmed fill notional/price");
+            return;
+        }
+
+        try
+        {
+            await _entryMirrorStore.PublishAsync(
+                new FuturesEntryMirrorCommand(
+                    Id: 0,
+                    SourceBotInstanceId: config.BotInstance.Id,
+                    SourceCycleId: cycleId,
+                    TargetBotInstanceId: config.EntryMirror.PublishToBotInstanceId!,
+                    Pair: instrument.Pair,
+                    KrakenSymbol: instrument.KrakenPair,
+                    SourceSide: sourceSideText,
+                    TargetSide: targetSideText,
+                    TargetNotionalUsd: notional,
+                    Leverage: leverage,
+                    SourceFillPrice: fillPrice,
+                    QuantityDecimals: instrument.QuantityDecimals,
+                    PriceDecimals: instrument.PriceDecimals,
+                    CreatedAtUtc: _clock.UtcNow),
+                cancellationToken);
+            fill.Action.Reason = $"{fill.Action.Reason}; mirror command published to {config.EntryMirror.PublishToBotInstanceId} as {targetSideText}";
+            Console.WriteLine(
+                $"MIRROR_PUBLISHED cycle={cycleId} pair={instrument.Pair} source={sourceSideText} target={targetSideText} targetBot={config.EntryMirror.PublishToBotInstanceId} notionalUsd={notional:0.####} leverage={leverage:0.#}x");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(
+                $"MIRROR_PUBLISH_FAILED cycle={cycleId} pair={instrument.Pair} target={config.EntryMirror.PublishToBotInstanceId} error={ex.Message}");
+        }
+    }
+
+    private async Task ProcessMirrorEntriesAsync(
+        PortfolioState state,
+        IReadOnlyList<InstrumentOptions> universe,
+        List<DryRunDecisionRecord> decisions,
+        CancellationToken cancellationToken)
+    {
+        if (!IsMirrorFollower)
+        {
+            return;
+        }
+
+        var sourceBotInstanceId = config.EntryMirror.FollowSourceBotInstanceId!;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var command = await _entryMirrorStore.ClaimNextAsync(
+                sourceBotInstanceId,
+                config.BotInstance.Id,
+                TimeSpan.FromSeconds(config.EntryMirror.MaxCommandAgeSeconds),
+                cancellationToken);
+            if (command is null)
+            {
+                return;
+            }
+
+            var age = _clock.UtcNow - command.CreatedAtUtc;
+            if (age > TimeSpan.FromSeconds(config.EntryMirror.MaxCommandAgeSeconds))
+            {
+                var staleReason = $"mirror command expired at age {age.TotalSeconds:0}s (max {config.EntryMirror.MaxCommandAgeSeconds}s)";
+                await _entryMirrorStore.MarkFailedAsync(command.Id, staleReason, cancellationToken);
+                decisions.Add(BuildMirrorDecisionRecord(command, MirrorNoOrder(state, command, staleReason, "MIRROR_COMMAND_EXPIRED"), false));
+                continue;
+            }
+
+            if (command.AttemptCount > config.EntryMirror.MaxAttempts)
+            {
+                var attemptsReason = $"mirror command exceeded {config.EntryMirror.MaxAttempts} execution attempts";
+                await _entryMirrorStore.MarkFailedAsync(command.Id, attemptsReason, cancellationToken);
+                decisions.Add(BuildMirrorDecisionRecord(command, MirrorNoOrder(state, command, attemptsReason, "MIRROR_ATTEMPTS_EXHAUSTED"), false));
+                continue;
+            }
+
+            var expectedTargetSide = config.EntryMirror.InvertSide
+                ? OppositeSide(command.SourceSide)
+                : command.SourceSide.ToUpperInvariant();
+            if (!command.TargetSide.Equals(expectedTargetSide, StringComparison.OrdinalIgnoreCase))
+            {
+                var sideReason = $"mirror command target side {command.TargetSide} does not match expected {expectedTargetSide}";
+                await _entryMirrorStore.MarkFailedAsync(command.Id, sideReason, cancellationToken);
+                decisions.Add(BuildMirrorDecisionRecord(command, MirrorNoOrder(state, command, sideReason, "MIRROR_SIDE_MISMATCH"), false));
+                continue;
+            }
+
+            var existing = state.Positions.FirstOrDefault(position =>
+                position.Pair.Equals(command.Pair, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                var existingReason = existing.EntryChannel?.Equals("Mirror", StringComparison.OrdinalIgnoreCase) == true
+                    && existing.Side.Equals(command.TargetSide, StringComparison.OrdinalIgnoreCase)
+                    ? "mirror command already represented by the managed position"
+                    : $"mirror command blocked: {command.Pair} already has {existing.Side} position from {existing.Origin ?? "unknown"}";
+                var existingMatches = existing.EntryChannel?.Equals("Mirror", StringComparison.OrdinalIgnoreCase) == true
+                    && existing.Side.Equals(command.TargetSide, StringComparison.OrdinalIgnoreCase);
+                if (existingMatches)
+                {
+                    await _entryMirrorStore.MarkCompletedAsync(command.Id, existingReason, cancellationToken);
+                }
+                else
+                {
+                    await _entryMirrorStore.MarkFailedAsync(command.Id, existingReason, cancellationToken);
+                }
+                decisions.Add(BuildMirrorDecisionRecord(
+                    command,
+                    MirrorNoOrder(state, command, existingReason, existingMatches ? "MIRROR_ALREADY_APPLIED" : "MIRROR_PAIR_ALREADY_HELD"),
+                    existingMatches));
+                continue;
+            }
+
+            var capacityReason = MirrorCapacityBlockReason(state, command.TargetNotionalUsd, command.Leverage);
+            if (capacityReason is not null)
+            {
+                await _entryMirrorStore.MarkFailedAsync(command.Id, capacityReason, cancellationToken);
+                decisions.Add(BuildMirrorDecisionRecord(command, MirrorNoOrder(state, command, capacityReason, "MIRROR_CAPACITY_BLOCK"), false));
+                continue;
+            }
+
+            var configuredInstrument = universe.FirstOrDefault(instrument =>
+                instrument.Pair.Equals(command.Pair, StringComparison.OrdinalIgnoreCase)
+                || instrument.KrakenPair.Equals(command.KrakenSymbol, StringComparison.OrdinalIgnoreCase));
+            if (configuredInstrument is null)
+            {
+                var instrumentReason = $"mirror command instrument {command.Pair}/{command.KrakenSymbol} is absent from the current Kraken universe";
+                await _entryMirrorStore.MarkFailedAsync(command.Id, instrumentReason, cancellationToken);
+                decisions.Add(BuildMirrorDecisionRecord(command, MirrorNoOrder(state, command, instrumentReason, "MIRROR_INSTRUMENT_MISSING"), false));
+                continue;
+            }
+
+            var instrument = new InstrumentOptions
+            {
+                Pair = configuredInstrument.Pair,
+                KrakenPair = configuredInstrument.KrakenPair,
+                Venue = configuredInstrument.Venue,
+                Enabled = configuredInstrument.Enabled,
+                QuantityDecimals = command.QuantityDecimals ?? configuredInstrument.QuantityDecimals,
+                PriceDecimals = command.PriceDecimals ?? configuredInstrument.PriceDecimals
+            };
+            var desired = command.TargetSide.Equals("SHORT", StringComparison.OrdinalIgnoreCase)
+                ? FuturesDesiredExposure.Short
+                : FuturesDesiredExposure.Long;
+            var fill = await ApplyOrExecuteLiveAsync(
+                state,
+                instrument.Pair,
+                desired,
+                command.SourceFillPrice,
+                command.TargetNotionalUsd,
+                command.Leverage,
+                reduceOnly: false,
+                reason: $"mirror entry from {command.SourceBotInstanceId} cycle {command.SourceCycleId}: {command.SourceSide} -> {command.TargetSide}",
+                exitTriggerSource: null,
+                instrument,
+                entryPlan: null,
+                cancellationToken,
+                signalPrice: command.SourceFillPrice,
+                flippedEntry: config.EntryMirror.InvertSide);
+            fill.Action.EntryChannel = "Mirror";
+
+            if (fill.PositionOpened)
+            {
+                var opened = state.Positions.First(position =>
+                    position.Pair.Equals(instrument.Pair, StringComparison.OrdinalIgnoreCase));
+                opened.EntryChannel = "Mirror";
+                opened.FlippedEntry = config.EntryMirror.InvertSide;
+                await _entryMirrorStore.MarkCompletedAsync(
+                    command.Id,
+                    $"opened {command.TargetSide} notional USD {fill.Action.FilledNotionalEur:0.####}",
+                    cancellationToken);
+                Console.WriteLine(
+                    $"MIRROR_EXECUTED id={command.Id} pair={command.Pair} source={command.SourceSide} target={command.TargetSide} notionalUsd={fill.Action.FilledNotionalEur:0.####} fill={fill.Action.AverageFillPrice:0.########}");
+            }
+            else
+            {
+                var failure = fill.Action.Reason;
+                var retryable = fill.Action.HoldReasonCode is "LIVE_FOK_NOT_FILLED" or "LIVE_ENTRY_PRICE_DEVIATION" or "LIVE_LEVERAGE_SET_FAILED";
+                if (retryable
+                    && command.AttemptCount < config.EntryMirror.MaxAttempts
+                    && age < TimeSpan.FromSeconds(config.EntryMirror.MaxCommandAgeSeconds))
+                {
+                    await _entryMirrorStore.MarkForRetryAsync(command.Id, failure, cancellationToken);
+                    decisions.Add(BuildMirrorDecisionRecord(command, fill, false));
+                    Console.WriteLine($"MIRROR_RETRY id={command.Id} pair={command.Pair} attempt={command.AttemptCount} reason={fill.Action.HoldReasonCode}");
+                    return;
+                }
+
+                await _entryMirrorStore.MarkFailedAsync(command.Id, failure, cancellationToken);
+                Console.WriteLine($"MIRROR_FAILED id={command.Id} pair={command.Pair} reason={fill.Action.HoldReasonCode ?? failure}");
+            }
+
+            decisions.Add(BuildMirrorDecisionRecord(command, fill, fill.PositionOpened));
+        }
+    }
+
+    private FuturesFillResult MirrorNoOrder(
+        PortfolioState state,
+        FuturesEntryMirrorCommand command,
+        string reason,
+        string holdReasonCode)
+    {
+        var result = portfolio.Apply(
+            state,
+            command.Pair,
+            FuturesDesiredExposure.Flat,
+            command.SourceFillPrice,
+            0m,
+            command.Leverage,
+            reason: reason);
+        result.Action.HoldReasonCode = holdReasonCode;
+        result.Action.EntryChannel = "Mirror";
+        return result;
+    }
+
+    private string? MirrorCapacityBlockReason(
+        PortfolioState state,
+        decimal targetNotionalUsd,
+        decimal leverage)
+    {
+        leverage = Math.Clamp(leverage, 1m, config.Futures.MaxLeverage);
+        var requiredMargin = targetNotionalUsd / leverage;
+        var entryFee = FuturesExecutionCostModel.FeeEur(targetNotionalUsd, config.Fees.TakerPct);
+        if (state.Positions.Count >= config.Futures.MaxPositions)
+        {
+            return $"mirror capacity blocked: {config.Futures.MaxPositions} position slots already used";
+        }
+        if (targetNotionalUsd <= 0m)
+        {
+            return "mirror capacity blocked: target notional is not positive";
+        }
+        if (config.Futures.MaxNotionalUsd > 0m && targetNotionalUsd > config.Futures.MaxNotionalUsd)
+        {
+            return $"mirror capacity blocked: USD {targetNotionalUsd:0.####} exceeds per-position cap USD {config.Futures.MaxNotionalUsd:0.####}";
+        }
+        if (config.Futures.MaxMarginPerPositionUsd > 0m && requiredMargin > config.Futures.MaxMarginPerPositionUsd)
+        {
+            return $"mirror capacity blocked: margin USD {requiredMargin:0.####} exceeds per-position cap USD {config.Futures.MaxMarginPerPositionUsd:0.####}";
+        }
+        var totalNotional = state.Positions.Sum(position => position.EntryNotionalEur) + targetNotionalUsd;
+        if (config.Futures.MaxTotalNotionalUsd > 0m && totalNotional > config.Futures.MaxTotalNotionalUsd)
+        {
+            return $"mirror capacity blocked: aggregate notional USD {totalNotional:0.####} exceeds cap USD {config.Futures.MaxTotalNotionalUsd:0.####}";
+        }
+        if (state.CashEur < requiredMargin + entryFee)
+        {
+            return $"mirror capacity blocked: need USD {requiredMargin + entryFee:0.####}, available USD {state.CashEur:0.####}";
+        }
+        var equity = state.TotalValueEur;
+        var projectedUtilization = equity <= 0m
+            ? 100m
+            : (portfolio.UsedMarginEur(state) + requiredMargin) / equity * 100m;
+        if (projectedUtilization > config.Margin.MaxAccountMarginUtilizationPercent)
+        {
+            return $"mirror capacity blocked: projected margin utilization {projectedUtilization:0.##}% exceeds {config.Margin.MaxAccountMarginUtilizationPercent:0.##}%";
+        }
+
+        return null;
+    }
+
+    private static string ExposureSide(FuturesDesiredExposure exposure) => exposure switch
+    {
+        FuturesDesiredExposure.Long => "LONG",
+        FuturesDesiredExposure.Short => "SHORT",
+        _ => throw new ArgumentOutOfRangeException(nameof(exposure), exposure, "Mirror entry side must be directional.")
+    };
+
+    internal static string OppositeSide(string side) =>
+        side.Equals("LONG", StringComparison.OrdinalIgnoreCase) ? "SHORT" :
+        side.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? "LONG" :
+        throw new ArgumentException($"Unsupported futures side '{side}'.", nameof(side));
+
+    private void AppendFastCycle(
+        DateTimeOffset utc,
+        PortfolioState portfolioBefore,
+        PortfolioState state,
+        IReadOnlyList<DryRunDecisionRecord> decisions,
+        IEnumerable<string> activePairs)
+    {
+        portfolio.Store.AppendCycle(new DryRunCycleRecord
+        {
+            CycleId = $"{config.BotInstance.Id}-{utc:yyyyMMddHHmmss}-fast",
+            BotInstanceId = config.BotInstance.Id,
+            BotInstanceName = config.BotInstance.Name,
+            Utc = utc,
+            MarketDataMode = config.Kraken.MarketDataMode,
+            AiProvider = "none",
+            Worker = _buildInfo,
+            ActivePairs = activePairs.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            Decisions = decisions,
+            PortfolioBefore = portfolioBefore,
+            PortfolioAfter = state.Clone(),
+            EntryDiagnostics = null
+        });
     }
 
     private static decimal FastExitMarkPrice(InstrumentMarketState marketState) =>
@@ -1160,7 +1518,7 @@ internal sealed class FuturesDecisionWorker(
             return skipped;
         }
 
-        var order = await broker.SendIocLimitOrderAsync(instrument.KrakenPair, side, size, limitPrice, reduceOnly: false, cancellationToken);
+        var order = await broker.SendFillOrKillLimitOrderAsync(instrument.KrakenPair, side, size, limitPrice, reduceOnly: false, cancellationToken);
         if (!order.Accepted)
         {
             var rejectReason = $"live futures entry rejected: {order.Error ?? order.Status}";
@@ -1174,22 +1532,13 @@ internal sealed class FuturesDecisionWorker(
 
         if (!order.FillKnown)
         {
-            var pendingReason = $"live Kraken Futures order accepted id={order.OrderId ?? "-"} status={order.Status} but fill details were not returned; reconciliation pending";
-            Console.WriteLine($"EXECUTION pair={pair} symbol={instrument.KrakenPair} side={side} status=FILL_RECONCILIATION_PENDING orderId={order.OrderId ?? "-"} requestedQty={size:0.########} limit={limitPrice:0.########} priceDecimals={priceDecimals}");
-            state.PendingFuturesOrders.RemoveAll(order => order.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
-            state.PendingFuturesOrders.Add(new PendingFuturesOrder
-            {
-                Pair = pair,
-                ExchangeOrderId = order.OrderId,
-                CreatedAtUtc = _clock.UtcNow,
-                RequestedQuantity = size,
-                SubmittedLimitPrice = limitPrice
-            });
-            var pending = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, entryLeverage, reason: pendingReason);
-            pending.Action.HoldReasonCode = "FILL_RECONCILIATION_PENDING";
-            pending.Action.FillSource = "FILL_RECONCILIATION_PENDING";
-            AttachExecutionDiagnostics(pending.Action, referencePrice, preSubmit, limitPrice, size, order, null);
-            return pending;
+            var noFillReason = $"live Kraken Futures FOK order was not filled id={order.OrderId ?? "-"} status={order.Status}; no position opened";
+            Console.WriteLine($"EXECUTION pair={pair} symbol={instrument.KrakenPair} side={side} status=FOK_NOT_FILLED orderId={order.OrderId ?? "-"} requestedQty={size:0.########} limit={limitPrice:0.########} priceDecimals={priceDecimals}");
+            var noFill = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, entryLeverage, reason: noFillReason);
+            noFill.Action.HoldReasonCode = "LIVE_FOK_NOT_FILLED";
+            noFill.Action.FillSource = "REAL_NO_FILL";
+            AttachExecutionDiagnostics(noFill.Action, referencePrice, preSubmit, limitPrice, size, order, null);
+            return noFill;
         }
 
         var fillDetails = order.Fill!;
@@ -1198,9 +1547,33 @@ internal sealed class FuturesDecisionWorker(
             ? null
             : entryPlan with { FilledNotionalEur = filledNotionalUsd };
 
-        // Record the virtual ledger against the exchange average fill and filled
-        // quantity. Partial IOC fills commit only the filled part; unfilled remainder
-        // is canceled by the exchange.
+        var quantityStep = quantityDecimals <= 0 ? 1m : 1m / Pow10(quantityDecimals);
+        var quantityTolerance = quantityStep / 2m;
+        if (fillDetails.Quantity + quantityTolerance < size)
+        {
+            var unwindSide = desired == FuturesDesiredExposure.Short ? "buy" : "sell";
+            var unwind = await broker.SendOrderAsync(
+                instrument.KrakenPair,
+                unwindSide,
+                fillDetails.Quantity,
+                reduceOnly: true,
+                entryLeverage,
+                cancellationToken);
+            var partialReason = $"Kraken returned an invalid partial FOK fill {fillDetails.Quantity:0.########}/{size:0.########}; emergency reduce-only unwind status={unwind.Status} id={unwind.OrderId ?? "-"}";
+            Console.WriteLine($"EXECUTION pair={pair} symbol={instrument.KrakenPair} side={side} status=INVALID_PARTIAL_FOK requestedQty={size:0.########} filledQty={fillDetails.Quantity:0.########} unwindAccepted={unwind.Accepted}");
+            if (unwind.Accepted)
+            {
+                var unwound = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, entryLeverage, reason: partialReason);
+                unwound.Action.HoldReasonCode = "LIVE_FOK_PARTIAL_FILL_UNWOUND";
+                unwound.Action.FillSource = "REAL_PARTIAL_UNWOUND";
+                AttachExecutionDiagnostics(unwound.Action, referencePrice, preSubmit, limitPrice, size, order, fillDetails);
+                return unwound;
+            }
+
+            reason = $"{partialReason}; emergency unwind was rejected, so the partial exchange position is retained and protected";
+        }
+
+        // Record the ledger only after Kraken confirms the complete FOK quantity.
         var opened = portfolio.Apply(
             state,
             pair,
@@ -1214,7 +1587,7 @@ internal sealed class FuturesDecisionWorker(
             adjustedPlan,
             flippedEntry);
         opened.Action.FillSource = "REAL";
-        opened.Action.Reason = $"live Kraken Futures IOC accepted id={order.OrderId ?? "-"} status={order.Status}; {opened.Action.Reason}";
+        opened.Action.Reason = $"live Kraken Futures FOK accepted id={order.OrderId ?? "-"} status={order.Status}; {opened.Action.Reason}";
         AttachExecutionDiagnostics(opened.Action, referencePrice, preSubmit, limitPrice, size, order, fillDetails);
         if (state.Positions.FirstOrDefault(position => position.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase)) is { } openedPosition)
         {
@@ -1260,6 +1633,17 @@ internal sealed class FuturesDecisionWorker(
         }
 
         return Math.Truncate(value * factor) / factor;
+    }
+
+    private static decimal Pow10(int decimals)
+    {
+        var factor = 1m;
+        for (var i = 0; i < Math.Clamp(decimals, 0, 8); i++)
+        {
+            factor *= 10m;
+        }
+
+        return factor;
     }
 
     private static decimal RoundLimitPrice(decimal value, FuturesDesiredExposure desired, int decimals)
@@ -1978,7 +2362,7 @@ internal sealed class FuturesDecisionWorker(
         var size = FuturesPositionSizer.Size(config, atrPct, costs, leverage);
         size = FuturesPositionSizer.FitToAvailableCollateral(size, config, state, portfolio.UsedMarginEur(state), costs);
         var queueAhead = QueueAheadEur(marketState, desired);
-        // Taker IOC model: plan the full risk-sized notional. Live still refreshes the
+        // Taker FOK model: plan the full risk-sized notional. Live still refreshes the
         // quote and enforces MaxEntryPriceDeviationPct before submit.
         var filledNotional = size.SizedNotionalEur;
         var openRisk = ProjectedConcurrentStopRiskEur(state, markPrice, filledNotional, size.StopDistancePct);
@@ -2572,6 +2956,41 @@ internal sealed class FuturesDecisionWorker(
         PriceActionTrendPercent = null
     };
 
+    private DryRunDecisionRecord BuildMirrorDecisionRecord(
+        FuturesEntryMirrorCommand command,
+        FuturesFillResult fill,
+        bool approved) => new()
+    {
+        Pair = command.Pair,
+        Price = command.SourceFillPrice,
+        FastEma = null,
+        SlowEma = null,
+        Rsi = null,
+        DesiredPosition = command.TargetSide,
+        Score = 0m,
+        RiskApproved = approved,
+        RiskReasons = new[] { fill.Action.Reason },
+        Contributions = Array.Empty<SignalContribution>(),
+        DryRunAction = fill.Action,
+        EntryRejectionReason = approved ? null : fill.Action.HoldReasonCode ?? "REJECT_MIRROR_EXECUTION",
+        SpreadPercent = 0m,
+        HasBullishStructure = false,
+        EmaFullyConfirmed = false,
+        BullishEmaGapPercent = null,
+        EmaGapVelocityPercent = null,
+        AllowsShort = command.TargetSide.Equals("SHORT", StringComparison.OrdinalIgnoreCase),
+        HasBearishStructure = false,
+        BearishEmaGapPercent = null,
+        ShortScore = null,
+        LongScoreThreshold = config.Strategy.MinimumLongScore,
+        ShortScoreThreshold = config.Shorts.MinShortScore,
+        MinimumEmaGapPercent = config.Strategy.MinimumEmaGapPercent,
+        ShortBaseBlockReasonCode = null,
+        ShortBaseBlockReason = null,
+        PriceActionDirection = null,
+        PriceActionTrendPercent = null
+    };
+
     private string ExplainNoEntry(TechnicalSignal signal)
     {
         if (signal.HasBullishStructure
@@ -2701,7 +3120,7 @@ internal sealed class FuturesDecisionWorker(
             RejectionCounts: rejectionCounts,
             TopCandidates: topCandidates,
             ExcludedPairs: excludedPairs,
-            ExecutionMode: FuturesExecutionCostModel.TakerIocRoundTrip,
+            ExecutionMode: FuturesExecutionCostModel.TakerFokRoundTrip,
             FillRate: entryDecisions.Count == 0
                 ? 0m
                 : decimal.Round(entryDecisions.Count(decision => (decision.DryRunAction.MakerFillRate ?? 0m) > 0m) / (decimal)entryDecisions.Count, 4),

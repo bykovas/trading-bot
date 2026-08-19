@@ -288,7 +288,7 @@ public sealed class FuturesRiskCapsAndSizingTests
         Assert.Equal(decimal.Round(plan.ProjectedStopLossEur + slippageAndFees, 8), plan.ProjectedOpenRiskEur);
     }
 
-    // 8. Virtual entry AND exit price the same taker IOC model.
+    // 8. Virtual entry and exit price the same taker FOK model.
     [Fact]
     public void Virtual_entry_and_exit_use_same_taker_model()
     {
@@ -308,7 +308,7 @@ public sealed class FuturesRiskCapsAndSizingTests
             size.SizedNotionalEur, 2m, entryPlan: plan);
         Assert.True(open.PositionOpened);
         Assert.Equal(FuturesExecutionCostModel.FeeEur(size.SizedNotionalEur, config.Fees.TakerPct), open.Action.FeeEur);
-        Assert.Equal("MODELED_TAKER_IOC", open.Action.FillSource);
+        Assert.Equal("MODELED_TAKER_FOK", open.Action.FillSource);
 
         var close = portfolio.Apply(state, "SOL/USD", FuturesDesiredExposure.Flat, 101m, 0m, 2m);
         Assert.True(close.PositionClosed);

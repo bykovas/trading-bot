@@ -912,7 +912,7 @@ public sealed class FuturesDeadManSwitchTests
             CancellationToken cancellationToken) =>
             Task.FromResult(new FuturesOrderResult("placed", "order-1", null));
 
-        public Task<FuturesOrderResult> SendIocLimitOrderAsync(
+        public Task<FuturesOrderResult> SendFillOrKillLimitOrderAsync(
             string symbol,
             string side,
             decimal size,

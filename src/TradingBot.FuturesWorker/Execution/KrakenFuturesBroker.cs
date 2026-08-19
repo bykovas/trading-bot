@@ -202,7 +202,7 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
         return ParseOrderResult(root);
     }
 
-    public async Task<FuturesOrderResult> SendIocLimitOrderAsync(
+    public async Task<FuturesOrderResult> SendFillOrKillLimitOrderAsync(
         string symbol,
         string side,
         decimal size,
@@ -222,7 +222,7 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
 
         var parameters = new List<KeyValuePair<string, string>>
         {
-            new("orderType", "ioc"),
+            new("orderType", "fok"),
             new("symbol", symbol),
             new("side", side.Equals("sell", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy"),
             new("size", FormatDecimal(size)),

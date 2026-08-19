@@ -43,6 +43,49 @@ public sealed class KrakenFuturesBrokerTests
     }
 
     [Fact]
+    public async Task Send_entry_uses_fill_or_kill_limit_and_reads_complete_fill()
+    {
+        var handler = new CapturingHandler("""
+            {
+              "result":"success",
+              "sendStatus":{
+                "status":"filled",
+                "order_id":"entry-1",
+                "orderEvents":[
+                  {"type":"EXECUTION","amount":74,"price":2.02,"fee":0.075}
+                ]
+              }
+            }
+            """);
+        using var client = new HttpClient(handler);
+        var broker = new KrakenFuturesBroker(client, new KrakenOptions
+        {
+            BaseUrl = "https://futures.kraken.test",
+            ApiKey = "public",
+            ApiSecret = Convert.ToBase64String(Encoding.UTF8.GetBytes("secret"))
+        });
+
+        var result = await broker.SendFillOrKillLimitOrderAsync(
+            "PF_MORPHOUSD",
+            "buy",
+            74m,
+            2.02m,
+            reduceOnly: false,
+            CancellationToken.None);
+
+        Assert.True(result.Accepted);
+        Assert.Equal("entry-1", result.OrderId);
+        Assert.Equal(74m, result.Fill?.Quantity);
+        Assert.Equal(2.02m, result.Fill?.AveragePrice);
+        Assert.Contains("orderType=fok", handler.Body);
+        Assert.Contains("symbol=PF_MORPHOUSD", handler.Body);
+        Assert.Contains("side=buy", handler.Body);
+        Assert.Contains("size=74", handler.Body);
+        Assert.Contains("limitPrice=2.02", handler.Body);
+        Assert.Contains("reduceOnly=false", handler.Body);
+    }
+
+    [Fact]
     public async Task Set_leverage_preference_puts_symbol_and_max_leverage()
     {
         var handler = new CapturingHandler("""

@@ -92,10 +92,10 @@ mkdir -p \
 cp infra/docker-compose.prod.yml "${COMPOSE_FILE}"
 cp infra/traefik/trading-bot.yml "${TRAEFIK_DYNAMIC_FILE}"
 
-# appsettings files are repository-owned and refreshed on every deploy. The primary
-# live and virtual workers share the default strategy profile; Lukas receives the
-# matching non-flipped profile. Runtime identity and secrets belong in .env files,
-# never in appsettings.
+# Appsettings files are repository-owned and refreshed on every deploy. The primary
+# live and virtual workers share the default profile, but entry mirroring activates
+# only in live mode. Lukas publishes normal entries; primary live follows them with
+# the opposite side. Runtime identity and secrets belong in .env files.
 #
 # install_config overwrites the destination even when the existing file is owned by
 # another user (e.g. a live appsettings.json created root-owned by an earlier
@@ -113,7 +113,7 @@ install_config "${WORKER_APPSETTINGS_SOURCE}" "${LIVE_APPSETTINGS}"
 echo "Updating virtual worker appsettings from repository config"
 install_config "${WORKER_APPSETTINGS_SOURCE}" "${VIRTUAL_APPSETTINGS}"
 
-echo "Updating futures live appsettings from repository config (identical to virtual)"
+echo "Updating futures live appsettings from repository config (mirror follower in live mode)"
 install_config "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_LIVE_APPSETTINGS}"
 echo "Updating Lukas futures live appsettings from repository config"
 install_config "${FUTURES_LUKAS_APPSETTINGS_SOURCE}" "${FUTURES_LUKAS_LIVE_APPSETTINGS}"
