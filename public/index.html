@@ -626,6 +626,12 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
      the lead is a step smaller; re-measure both if anything is added here. */
   .bc-hero-main .bc-lead{font-size:14px;line-height:1.45}
 }
+
+@container (max-width:899px){
+  /* Six more pixels for the fold budget. 44px is the floor: it is the smallest
+     comfortable tap target, and this is the page's only call to action. */
+  .bc-shell a.bc-cta{height:44px;font-size:15px}
+}
   </style>
 </head>
 <body>
