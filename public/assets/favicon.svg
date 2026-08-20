@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="BlynAI Capital">
+  <!-- The BlynAI mark at icon size. The page and the share card both carry the
+       full lockup — gradient brackets around a 2x2 dot matrix — but at 16px the
+       four dots merge into a bar and the whole thing reads as a gold blob. This
+       is the icon-size variant: same silhouette, flat gold, and the matrix
+       reduced to two dots so the brackets stay open. Verified at 16, 32 and 48. -->
+  <rect width="64" height="64" rx="14" fill="#0A0A0A"/>
+  <g fill="none" stroke="#E8B84B" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 15 11 32 24 49"/>
+    <path d="M40 15 53 32 40 49"/>
+  </g>
+  <g fill="#E8B84B">
+    <circle cx="32" cy="26" r="3.4"/>
+    <circle cx="32" cy="38" r="3.4"/>
+  </g>
+</svg>
