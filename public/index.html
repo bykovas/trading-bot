@@ -797,9 +797,19 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     };
 
     // ---- tenant switching ----------------------------------------------
+    // Each tester's own dashboard opens on their own account. An explicit choice
+    // still wins: the query string, or a switch made earlier on this host.
+    const HOST_TENANTS = {
+      "algo.meetluko.eu": "LUKAS",
+      "algo.bykovas.lt": "DENISAS"
+    };
+
     function tenantFromBotInstance(botInstanceId) {
-      const found = Object.keys(TENANTS).find(key => TENANTS[key].botInstanceId === botInstanceId);
-      return found || "LUKAS";
+      return Object.keys(TENANTS).find(key => TENANTS[key].botInstanceId === botInstanceId) || null;
+    }
+
+    function defaultTenant() {
+      return HOST_TENANTS[location.hostname.toLowerCase()] || "LUKAS";
     }
 
     function applyTenantButtons() {
@@ -826,7 +836,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const fromUrl = new URLSearchParams(location.search).get("botInstanceId");
       let stored = null;
       try { stored = localStorage.getItem(STORAGE_KEY); } catch (error) { /* private mode */ }
-      setTenant(tenantFromBotInstance(fromUrl || stored), false);
+      setTenant(tenantFromBotInstance(fromUrl || stored) || defaultTenant(), false);
       document.querySelectorAll("[data-tenant]").forEach(button => {
         button.addEventListener("click", () => {
           if (button.dataset.tenant === tenant) return;
