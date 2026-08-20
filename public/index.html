@@ -446,6 +446,33 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
   /* A 21px text link is not a finger target; §11's 44px rule applies here too. */
   .bc-fn-more{display:inline-flex;align-items:center;min-height:44px;margin:6px 0 0}
 }
+
+/* ============================================================
+   Chart tooltip, and cards that no longer hide anything.
+   ============================================================ */
+.bc-chart{position:relative}
+.bc-tip{position:absolute;z-index:3;pointer-events:none;min-width:186px;max-width:calc(100% - 12px);padding:9px 11px;
+  border:1px solid var(--hairline);border-radius:var(--r);background:rgba(9,10,8,.97);
+  box-shadow:var(--shadow);font:11.5px/1.5 var(--font-mono);color:var(--ink-soft)}
+.bc-tip-d{margin:0 0 6px;padding-bottom:6px;border-bottom:1px solid var(--hairline-soft);
+  color:var(--cream);font-weight:600}
+.bc-tip-r{display:flex;justify-content:space-between;gap:18px;margin:0}
+.bc-tip-r span{color:var(--muted-3)}
+.bc-tip-r b{font-weight:400;font-variant-numeric:tabular-nums}
+.bc-hit{cursor:crosshair}
+
+/* Every card ships open: the phone shows the same content as the desktop, in
+   reading order, so the disclosure control has nothing left to disclose. */
+.bc-card>.bc-card-sum{cursor:default}
+.bc-card>.bc-card-sum::marker,.bc-card>.bc-card-sum::-webkit-details-marker{display:none}
+@container (max-width:899px){
+  .bc-card-body{padding-top:14px}
+  .bc-card-body .bc-bar-box{margin-top:12px}
+  /* The spec spaces these inside .bc-num, which the narrow body does not use. */
+  .bc-card-body .bc-params{margin-top:14px}
+  .bc-card-body .bc-chips-l{margin-top:16px}
+  .bc-card-body .bc-tech{margin-top:14px}
+}
   </style>
 </head>
 <body>
@@ -535,7 +562,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           </div>
         </div>
       </div>
-      <div class="bc-chart" id="bcChart"></div>
+      <div class="bc-chart" id="bcChart"><div id="bcChartCanvas"></div><div class="bc-tip" id="bcChartTip" hidden></div></div>
       <div class="bc-metrics" id="bcMetrics"></div>
       </section>
 
@@ -806,6 +833,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       liveDelta: el("bcLiveDelta"),
       liveSince: el("bcLiveSince"),
       chart: el("bcChart"),
+      chartCanvas: el("bcChartCanvas"),
       chartCaption: el("bcChartCaption"),
       honestyStat: el("bcHonestyStat"),
       legendDeposit: el("bcLegendDeposit"),
@@ -877,6 +905,15 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     // A native <dialog>: keyboard, focus trap and Esc come for free, and the legal
     // text still ships in the served HTML where crawlers and scam classifiers read
     // it, rather than being injected on open.
+    // Cards are rendered open and nothing is hidden behind the summary, so the
+    // native toggle would only let a reader lose content by accident.
+    function lockCardsOpen() {
+      document.addEventListener("click", event => {
+        const summary = event.target.closest ? event.target.closest(".bc-card > .bc-card-sum") : null;
+        if (summary) event.preventDefault();
+      });
+    }
+
     function initDisclaimer() {
       const dialog = el("bcDisclaimer");
       const open = el("bcDisclaimerOpen");
@@ -953,22 +990,55 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       els.liveDot.className = `bc-dot ${HEALTH_TONE[worst] || ""}`;
     }
 
+    // ---- painting ---------------------------------------------------------
+    // A 10s poll that rewrites a list's innerHTML resizes the document, and the
+    // browser clamps the scroll position while it is short — which is why the page
+    // jumped to the top every refresh. Nothing is rewritten unless it actually
+    // changed, open cards keep their state, and the scroll position is restored.
+    const painted = new Map();
+
+    function paint(node, html) {
+      if (!node || painted.get(node.id) === html) return;
+      painted.set(node.id, html);
+
+      const before = new Map();
+      node.querySelectorAll("details[data-key]").forEach(card => {
+        before.set(card.dataset.key, card.open);
+      });
+
+      const scrollY = window.scrollY;
+      node.innerHTML = html;
+
+      node.querySelectorAll("details[data-key]").forEach(card => {
+        if (before.has(card.dataset.key)) card.open = before.get(card.dataset.key);
+      });
+
+      if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
+    }
+
     // ---- chart ----------------------------------------------------------
     // Two viewBoxes from one series: a tall one for wide containers, a short
     // one for phones. Both plot CLOSED days only — today lives to the right of
     // the gold divider as the dashed live line and the gold pill.
+    //
+    // Money in and out is NOT drawn among the candles. Stacking it there put two
+    // unrelated quantities in one column and made a deposit look like a trading
+    // result. It gets its own band under the price, on its own scale, the way a
+    // terminal puts volume under the chart.
     const CHART_SLOTS = 30;
     const CHART_WIDE = {
       className: "bc-chart-svg bc-only-wide", width: 1180, height: 310,
-      plotWidth: 1112, top: 24, bottom: 278, labelX: 1124, labelSize: 10.5,
-      gridLines: 7, dateTicks: 5, dateY: 296, candleWidth: 20, wickWidth: 1.7,
-      adjustWidth: 14, pillWidth: 62, pillHeight: 23, pillSize: 12.5, annotationSize: 10.5
+      plotWidth: 1112, top: 24, bottom: 278, flowHeight: 54, flowGap: 16,
+      labelX: 1124, labelSize: 10.5, gridLines: 7, dateTicks: 5, dateY: 296,
+      candleWidth: 20, wickWidth: 1.7, flowWidth: 14,
+      pillWidth: 62, pillHeight: 23, pillSize: 12.5, annotationSize: 10.5
     };
     const CHART_NARROW = {
       className: "bc-chart-svg bc-only-narrow", width: 390, height: 168,
-      plotWidth: 364, top: 8, bottom: 138, labelX: 369, labelSize: 8.5,
-      gridLines: 3, dateTicks: 3, dateY: 162, candleWidth: 7, wickWidth: 1.2,
-      adjustWidth: 4.5, pillWidth: 40, pillHeight: 17, pillSize: 9.5, annotationSize: 8
+      plotWidth: 364, top: 8, bottom: 138, flowHeight: 26, flowGap: 10,
+      labelX: 369, labelSize: 8.5, gridLines: 3, dateTicks: 3, dateY: 162,
+      candleWidth: 7, wickWidth: 1.2, flowWidth: 5,
+      pillWidth: 40, pillHeight: 17, pillSize: 9.5, annotationSize: 8
     };
 
     function niceTicks(min, max, count) {
@@ -986,35 +1056,22 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     }
 
     function chartSvg(spec, days, liveValue) {
-      // The grid is always CHART_SLOTS wide and the series is anchored to the
-      // right, against the ŠIANDIEN divider. A young account (LUKAS has two
-      // closed days) gets two normal candles by the divider and empty space to
-      // the left — not two candles stretched across the whole chart.
       const slots = Math.max(days.length, CHART_SLOTS);
       const slot = spec.plotWidth / slots;
+      // The series is anchored right, against the ŠIANDIEN divider, so a young
+      // account gets normal-width candles by the divider rather than a handful
+      // stretched across the whole chart.
       const centre = (index) => spec.plotWidth - (days.length - index - 0.5) * slot;
 
-      // A day's money movement is drawn stacked UNDER that day's candle: the blue
-      // bar runs from yesterday's close to yesterday's close plus the net movement,
-      // and the bot's candle carries on from there. That is what separates "I put
-      // money in" from "the bot earned it". Several movements in one day are already
-      // netted by the API, so there is exactly one bar per day and it has no wick.
-      const segment = (index) => {
-        const manual = Number(days[index].manualAdjustmentEur) || 0;
-        if (!manual) return null;
-        const previous = index > 0 ? Number(days[index - 1].close) : NaN;
-        const base = Number.isFinite(previous) ? previous : Number(days[index].open) - manual;
-        return { manual, base, top: base + manual };
-      };
+      const flows = days.map(day => Number(day.manualAdjustmentEur) || 0);
+      const hasFlow = flows.some(amount => amount !== 0);
+      const priceBottom = hasFlow ? spec.bottom - spec.flowHeight - spec.flowGap : spec.bottom;
 
-      const values = [];
-      days.forEach((day, index) => {
-        values.push(Number(day.high), Number(day.low), Number(day.open), Number(day.close));
-        const move = segment(index);
-        if (move) values.push(move.base, move.top);
-      });
-      if (Number.isFinite(Number(liveValue))) values.push(Number(liveValue));
-      const finite = values.filter(Number.isFinite);
+      const prices = [];
+      days.forEach(day => prices.push(
+        Number(day.high), Number(day.low), Number(day.open), Number(day.close)));
+      if (Number.isFinite(Number(liveValue))) prices.push(Number(liveValue));
+      const finite = prices.filter(Number.isFinite);
       if (!finite.length) return "";
 
       let min = Math.min(...finite);
@@ -1022,11 +1079,12 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const pad = (max - min) * 0.08 || Math.max(Math.abs(max) * 0.02, 0.5);
       min -= pad;
       max += pad;
-      const y = (value) => spec.top + (max - Number(value)) / (max - min) * (spec.bottom - spec.top);
+      const y = (value) => spec.top + (max - Number(value)) / (max - min) * (priceBottom - spec.top);
 
       const out = [];
       niceTicks(min, max, spec.gridLines).forEach(tick => {
         const ty = y(tick);
+        if (ty < spec.top - 1 || ty > priceBottom + 1) return;
         out.push(`<line x1="0" x2="${spec.plotWidth}" y1="${ty.toFixed(2)}" y2="${ty.toFixed(2)}" stroke="rgba(246,218,160,.07)" stroke-width="1"/>`);
         out.push(`<text x="${spec.labelX}" y="${(ty + 4).toFixed(2)}" fill="#5f584e" font-family="IBM Plex Mono, monospace" font-size="${spec.labelSize}">${esc(num(tick, tick % 1 === 0 ? 0 : 1))}</text>`);
       });
@@ -1035,27 +1093,40 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         const x = centre(index);
         const open = Number(day.open);
         const close = Number(day.close);
-        const up = close >= open;
-        const colour = up ? "#41eda0" : "#ff5367";
+        const colour = close >= open ? "#41eda0" : "#ff5367";
         const bodyTop = y(Math.max(open, close));
         const bodyHeight = Math.max(1, Math.abs(y(open) - y(close)));
         out.push(`<line x1="${x.toFixed(2)}" x2="${x.toFixed(2)}" y1="${y(day.high).toFixed(2)}" y2="${y(day.low).toFixed(2)}" stroke="${colour}" stroke-width="${spec.wickWidth}" stroke-linecap="round" opacity="0.62"/>`);
         out.push(`<rect x="${(x - spec.candleWidth / 2).toFixed(2)}" y="${bodyTop.toFixed(2)}" width="${spec.candleWidth.toFixed(2)}" height="${bodyHeight.toFixed(2)}" rx="2" fill="${colour}"/>`);
-
-        const move = segment(index);
-        if (move) {
-          const from = y(move.base);
-          const to = y(move.top);
-          const top = Math.min(from, to);
-          const height = Math.max(2, Math.abs(from - to));
-          const fill = move.manual > 0 ? "#6faeff" : "#2f5d8a";
-          const stroke = move.manual > 0 ? "" : ' stroke="#6faeff" stroke-width="1.6"';
-          out.push(`<rect x="${(x - spec.adjustWidth / 2).toFixed(2)}" y="${top.toFixed(2)}" width="${spec.adjustWidth.toFixed(2)}" height="${height.toFixed(2)}" rx="1" fill="${fill}"${stroke}/>`);
-          const label = signedMoney(move.manual, 2);
-          const labelY = move.manual > 0 ? top - 5 : top + height + spec.annotationSize + 1;
-          out.push(`<text x="${x.toFixed(2)}" y="${labelY.toFixed(2)}" fill="#6FAEFF" font-family="IBM Plex Mono, monospace" font-size="${spec.annotationSize}" font-weight="600" text-anchor="middle">${esc(label)}</text>`);
-        }
       });
+
+      // Cash-flow band: its own scale, its own baseline, never touching the price.
+      if (hasFlow) {
+        const bandTop = priceBottom + spec.flowGap;
+        const bandBottom = bandTop + spec.flowHeight;
+        const maxIn = Math.max(0, ...flows);
+        const maxOut = Math.max(0, ...flows.map(amount => -amount));
+        const span = maxIn + maxOut;
+        const baseline = span === 0
+          ? bandBottom
+          : bandTop + spec.flowHeight * (maxIn / span);
+        const scale = span === 0 ? 0 : spec.flowHeight / span;
+
+        out.push(`<line x1="0" x2="${spec.plotWidth}" y1="${baseline.toFixed(2)}" y2="${baseline.toFixed(2)}" stroke="rgba(246,218,160,.12)" stroke-width="1"/>`);
+
+        days.forEach((day, index) => {
+          const amount = flows[index];
+          if (!amount) return;
+          const x = centre(index);
+          const height = Math.max(2, Math.abs(amount) * scale);
+          const top = amount > 0 ? baseline - height : baseline;
+          const fill = amount > 0 ? "#6faeff" : "#2f5d8a";
+          const stroke = amount > 0 ? "" : ' stroke="#6faeff" stroke-width="1.6"';
+          out.push(`<rect x="${(x - spec.flowWidth / 2).toFixed(2)}" y="${top.toFixed(2)}" width="${spec.flowWidth.toFixed(2)}" height="${height.toFixed(2)}" rx="1" fill="${fill}"${stroke}/>`);
+          const labelY = amount > 0 ? top - 4 : top + height + spec.annotationSize;
+          out.push(`<text x="${x.toFixed(2)}" y="${labelY.toFixed(2)}" fill="#6FAEFF" font-family="IBM Plex Mono, monospace" font-size="${spec.annotationSize}" font-weight="600" text-anchor="middle">${esc(signedMoney(amount, 2))}</text>`);
+        });
+      }
 
       // Today, deliberately outside the candles.
       out.push(`<line x1="${spec.plotWidth}" x2="${spec.plotWidth}" y1="${spec.top}" y2="${spec.bottom}" stroke="#f5b84f" stroke-width="1" stroke-dasharray="3 4" opacity=".55"/>`);
@@ -1077,12 +1148,82 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         out.push(`<text x="${centre(index).toFixed(2)}" y="${spec.dateY}" fill="#5f584e" font-family="IBM Plex Mono, monospace" font-size="${spec.labelSize}" text-anchor="middle">${esc(day.date.slice(5))}</text>`);
       }
 
+      // One invisible hit area per day, full height, so the tooltip has something
+      // to catch that is wider than a 7px candle on a phone.
+      days.forEach((day, index) => {
+        out.push(`<rect class="bc-hit" data-day="${index}" x="${(centre(index) - slot / 2).toFixed(2)}" y="${spec.top}" width="${slot.toFixed(2)}" height="${(spec.bottom - spec.top).toFixed(2)}" fill="transparent"/>`);
+      });
+
       return `<svg class="${spec.className}" viewBox="0 0 ${spec.width} ${spec.height}" width="100%" role="img" aria-label="Portfelio vertė, ${days.length} uždarytų dienų">${out.join("")}</svg>`;
+    }
+
+    // ---- chart tooltip ---------------------------------------------------
+    let chartDays = [];
+
+    function tooltipHtml(day) {
+      const change = Number(day.close) - Number(day.open);
+      const flow = Number(day.manualAdjustmentEur) || 0;
+      const rows = [
+        ["Atidarymas", money(day.open), ""],
+        ["Uždarymas", money(day.close), toneClass(change)],
+        ["Aukščiausia", money(day.high), ""],
+        ["Žemiausia", money(day.low), ""]
+      ];
+      if (flow) rows.push([flow > 0 ? "Įnašas" : "Išėmimas", signedMoney(flow), "bc-t-blue"]);
+      return `<p class="bc-tip-d">${esc(day.date)}</p>` + rows.map(([label, value, tone]) =>
+        `<p class="bc-tip-r"><span>${esc(label)}</span><b class="${tone}">${esc(value)}</b></p>`).join("");
+    }
+
+    function hideChartTip() {
+      const tip = el("bcChartTip");
+      if (tip) tip.hidden = true;
+    }
+
+    function initChartTooltip() {
+      const tip = el("bcChartTip");
+      const chart = els.chart;
+      if (!tip || !chart) return;
+
+      const hide = () => { tip.hidden = true; };
+
+      // A panel positioned for a 1440px chart is far outside a 390px one, and no
+      // mouseleave fires when the viewport changes under a stationary pointer.
+      window.addEventListener("resize", hide);
+
+      const show = (event) => {
+        const hit = event.target.closest ? event.target.closest(".bc-hit") : null;
+        if (!hit) { hide(); return; }
+        const day = chartDays[Number(hit.dataset.day)];
+        if (!day) { hide(); return; }
+
+        tip.innerHTML = tooltipHtml(day);
+        tip.hidden = false;
+
+        // Keep the panel inside the chart box: at the last days it would otherwise
+        // run off the right edge, which is exactly where the newest data sits.
+        const box = chart.getBoundingClientRect();
+        const width = tip.offsetWidth;
+        const x = Math.min(Math.max(event.clientX - box.left + 14, 6), box.width - width - 6);
+        const y = Math.min(Math.max(event.clientY - box.top - 12, 6), box.height - tip.offsetHeight - 6);
+        tip.style.left = `${x}px`;
+        tip.style.top = `${y}px`;
+      };
+
+      chart.addEventListener("mousemove", show);
+      chart.addEventListener("mouseleave", hide);
+      chart.addEventListener("touchstart", (event) => {
+        const touch = event.touches[0];
+        if (touch) show({ target: document.elementFromPoint(touch.clientX, touch.clientY), clientX: touch.clientX, clientY: touch.clientY });
+      }, { passive: true });
+      chart.addEventListener("touchend", hide);
     }
 
     function renderChart(data) {
       const days = (data.equity && data.equity.days) || [];
       const liveValue = data.summary ? Number(data.summary.totalValueEur) : null;
+      chartDays = days;
+      hideChartTip();
+
       els.chartCaption.innerHTML =
         `Grafikas — ${esc(closedDaysPhrase(days.length))}<br>(šiandiena dar neįskaityta)`;
 
@@ -1092,11 +1233,12 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         && days.some(day => Number(day.manualAdjustmentEur));
       els.legendDeposit.hidden = !tracked;
       els.legendWithdrawal.hidden = !tracked;
+
       if (!days.length) {
-        els.chart.innerHTML = '<p class="bc-empty">Istorijos duomenų dar nėra</p>';
+        paint(els.chartCanvas, '<p class="bc-empty">Istorijos duomenų dar nėra</p>');
         return;
       }
-      els.chart.innerHTML = chartSvg(CHART_WIDE, days, liveValue) + chartSvg(CHART_NARROW, days, liveValue);
+      paint(els.chartCanvas, chartSvg(CHART_WIDE, days, liveValue) + chartSvg(CHART_NARROW, days, liveValue));
     }
 
     // ---- headline numbers ------------------------------------------------
@@ -1187,7 +1329,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     function renderMetrics(data) {
       const summary = data.summary;
       if (!summary) {
-        els.metrics.innerHTML = "";
+          paint(els.metrics, "");
         return;
       }
       const positions = data.positions || [];
@@ -1207,7 +1349,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const daily = Number(summary.dailyRealizedPnlEur) || 0;
       const openCount = positions.length;
 
-      els.metrics.innerHTML = [
+      paint(els.metrics, [
         metricCell("Laisva marža", money(cash), "bc-t-cream",
           `Kraken užstatas · ${esc(currencyCode)}${gapNote}`),
         metricCell("Pozicijų marža", money(margin), "bc-t-cream",
@@ -1218,7 +1360,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           "realizuota nuo 00:00 LT"),
         metricCell("Maks. nuosmukis", percent(drawdown, 1), drawdown < 0 ? "bc-t-red" : "bc-t-soft",
           `per ${esc(overDaysPhrase(((data.equity && data.equity.days) || []).length))}`)
-      ].join("");
+      ].join(""));
     }
 
     // ---- prose ------------------------------------------------------------
@@ -1281,20 +1423,20 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     function exitExplanation(code, reason, side) {
       const text = normalizedReason(reason);
       const isShort = String(side || "").toUpperCase() === "SHORT";
-      const closed = isShort ? "Uždarė SHORT" : "Pardavė";
+      const closed = isShort ? "Uždariau SHORT" : "Pardaviau";
       const map = {
         SELL_TAKE_PROFIT: isShort
-          ? "Uždarė SHORT, nes pozicija pasiekė tikslą (take-profit)."
-          : "Pardavė, nes pozicija pasiekė tikslą (take-profit). Tai pelno fiksavimas, o ne panika.",
-        SELL_STOP_LOSS: `${closed}, nes pozicija pasiekė boto darbinį stop-loss.`,
+          ? "Uždariau SHORT, nes pozicija pasiekė tikslą (take-profit)."
+          : "Pardaviau, nes pozicija pasiekė tikslą (take-profit). Tai pelno fiksavimas, o ne panika.",
+        SELL_STOP_LOSS: `${closed}, nes pozicija pasiekė mano darbinį stop-loss.`,
         SELL_SCORE_DECAY: `${closed}, nes pradinis stiprus signalas subyrėjo, kol pozicija buvo minuse.`,
         SELL_POST_ENTRY_ADVERSE: `${closed}, nes iškart po įėjimo kaina pasuko prieš poziciją, o signalas nustojo pasitvirtinti.`,
         SELL_MAX_HOLD: text.includes("stale loss")
-          ? "Uždarė pasenusią futures poziciją pagal laikymo limitą — ji sena ir jau buvo minuse."
-          : "Uždarė pagal maksimalaus laikymo laikmatį.",
+          ? "Uždariau pasenusią futures poziciją pagal laikymo limitą — ji sena ir jau buvo minuse."
+          : "Uždariau pagal maksimalaus laikymo laikmatį.",
         SELL_SIGNAL_FLIP: isShort
-          ? "Uždarė SHORT, nes strategija nebenorėjo laikyti short."
-          : "Pardavė, nes strategija nebenorėjo laikyti long.",
+          ? "Uždariau SHORT, nes nebenorėjau laikyti short."
+          : "Pardaviau, nes nebenorėjau laikyti long.",
         SELL_TRAILING_STOP: `${closed} pagal slenkantį stop: pozicija jau buvo pelne, bet atsitraukė nuo vietinės viršūnės.`,
         SELL_KILL_SWITCH: `${closed} dėl avarinio stabdžio. Tai apsauginė priemonė.`,
         SELL_EMERGENCY_RISK: `${closed} dėl avarinės rizikos taisyklės.`,
@@ -1302,7 +1444,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       };
       const inferred = inferExitCode(code, reason);
       if (inferred && map[inferred]) return map[inferred];
-      return `${closed} pagal išėjimo taisyklę. Tikslus techninis tekstas — žemiau.`;
+      return `${closed} pagal išėjimo taisyklę. Tikslus techninis įrašas — žemiau.`;
     }
 
     function signalAt(signals, name) {
@@ -1341,8 +1483,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const kind = real ? "realų" : "virtualų";
 
       const opening = leveraged
-        ? `Atidarė ${kind} futures ${side}`
-        : (side === "SHORT" ? "Pardavė" : "Pirko");
+        ? `Atidariau ${kind} futures ${side}`
+        : (side === "SHORT" ? "Pardaviau" : "Pirkau");
 
       const threshold = Number(source.scoreThreshold);
       const prefix = source.exploratory
@@ -1359,7 +1501,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     function positionWhy(position, entry) {
       const opening = entry
         ? entryExplanation(entry)
-        : `Atidarė ${String(position.side || "").toUpperCase()} pagal boto signalą.`;
+        : `Atidariau ${String(position.side || "").toUpperCase()} pagal savo signalą.`;
 
       const pnl = Number(position.unrealizedPnlEur) || 0;
       const liquidation = Number(position.liquidationDistancePercent);
@@ -1373,9 +1515,9 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           ? ` Kaina nuėjo tikslo pusėn, todėl pozicija pelne — tikslas ${price(target)}, o stop-loss saugiai toli.`
           : " Pozicija pelne.";
       } else if (nearStop && Number.isFinite(stop)) {
-        state = ` Nuo tada kaina pasisuko prieš poziciją, todėl ji minuse ir jau visai netoli stop-loss — botas ją uždarys automatiškai, jei bus pasiekta ${price(stop)}.`;
+        state = ` Nuo tada kaina pasisuko prieš poziciją, todėl ji minuse ir jau visai netoli stop-loss — uždarysiu ją automatiškai, jei bus pasiekta ${price(stop)}.`;
       } else if (Number.isFinite(stop)) {
-        state = ` Kol kas pozicija minuse; botas ją uždarys automatiškai, jei bus pasiekta ${price(stop)}.`;
+        state = ` Kol kas pozicija minuse; uždarysiu ją automatiškai, jei bus pasiekta ${price(stop)}.`;
       } else {
         state = "";
       }
@@ -1521,7 +1663,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const atRisk = Number.isFinite(liquidation) && liquidation < 8;
 
       const badges = [
-        `<span class="bc-badge bc-badge--${side === "SHORT" ? "red" : "green"}">${esc(side || "—")}</span>`,
+        `<span class="bc-badge bc-badge--${side === "SHORT" ? "red" : "green"}">Atidariau ${esc(side || "—")}</span>`,
         Number.isFinite(leverage) && leverage ? `<span class="bc-badge bc-badge--neutral">${esc(num(leverage, 0))}x</span>` : "",
         Number.isFinite(leverage) && leverage ? '<span class="bc-badge bc-badge--neutral">Futures</span>' : "",
         atRisk ? '<span class="bc-badge bc-badge--warn">Rizika</span>' : ""
@@ -1534,21 +1676,25 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         spreadPercent: null, side: position.side, leverage: position.leverage
       }, atRisk ? ["arti SL"] : []);
       const log = entry && entry.log ? entry.log : "";
+      const bar = riskBar(position);
       const pnl = Number(position.unrealizedPnlEur);
       const tone = toneClass(pnl);
 
-      return `<details class="bc-card bc-card--pos">
+      // The narrow body carries the same content as the wide summary, in the order
+      // a person reads it: what I did and why, then the picture, then the numbers
+      // and the raw exchange record.
+      return `<details class="bc-card bc-card--pos" data-key="pos:${esc(position.pair)}" open>
         <summary class="bc-card-sum">
           <div class="bc-id">
             <span class="bc-pair">${esc(position.pair)}</span>
             <span class="bc-badges">${badges}</span>
-            <span class="bc-when">atidaryta ${esc(ltDateTime(position.openedAtUtc, false))} LT · prieš ${esc(duration(position.openedAtUtc))}</span>
+            <span class="bc-when">atidariau ${esc(ltDateTime(position.openedAtUtc, false))} LT · prieš ${esc(duration(position.openedAtUtc))}</span>
             <span class="bc-params bc-only-wide">${params}</span>
           </div>
           <div class="bc-mid">
-            <p class="bc-why-l bc-only-wide">Kodėl ši pozicija atidaryta</p>
+            <p class="bc-why-l bc-only-wide">Kodėl ją atidariau</p>
             <p class="bc-why bc-only-wide">${esc(why)}</p>
-            ${riskBar(position)}
+            <div class="bc-only-wide">${bar}</div>
             ${log ? `<p class="bc-tech bc-only-wide">${esc(log)}</p>` : ""}
           </div>
           <div class="bc-num">
@@ -1559,24 +1705,25 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
               <p class="bc-chips-l">Kontekstas</p><div class="bc-chips">${context}</div>
             </div>
           </div>
-          <span class="bc-chev bc-only-narrow">detaliau ▾</span>
         </summary>
         <div class="bc-card-body bc-only-narrow">
-          <div class="bc-params">${params}</div>
-          <p class="bc-why-l">Kodėl ši pozicija atidaryta</p>
+          <p class="bc-why-l">Kodėl ją atidariau</p>
           <p class="bc-why">${esc(why)}</p>
-          <div class="bc-chips">${signals}${context}</div>
+          ${bar}
+          <div class="bc-params">${params}</div>
+          <p class="bc-chips-l">Signalai</p><div class="bc-chips">${signals}</div>
+          <p class="bc-chips-l">Kontekstas</p><div class="bc-chips">${context}</div>
           ${log ? `<p class="bc-tech">${esc(log)}</p>` : ""}
         </div>
       </details>`;
     }
 
     const TRADE_BADGES = {
-      WOULD_OPEN_LONG: '<span class="bc-badge bc-badge--green">Atidaryta LONG</span>',
-      WOULD_OPEN_SHORT: '<span class="bc-badge bc-badge--red">Atidaryta SHORT</span>',
-      WOULD_BUY: '<span class="bc-badge bc-badge--green">Atidaryta LONG</span>',
-      WOULD_SELL: '<span class="bc-badge bc-badge--red">Uždaryta</span>',
-      WOULD_CLOSE: '<span class="bc-badge bc-badge--red">Uždaryta</span>'
+      WOULD_OPEN_LONG: '<span class="bc-badge bc-badge--green">Atidariau LONG</span>',
+      WOULD_OPEN_SHORT: '<span class="bc-badge bc-badge--red">Atidariau SHORT</span>',
+      WOULD_BUY: '<span class="bc-badge bc-badge--green">Atidariau LONG</span>',
+      WOULD_SELL: '<span class="bc-badge bc-badge--red">Uždariau</span>',
+      WOULD_CLOSE: '<span class="bc-badge bc-badge--red">Uždariau</span>'
     };
 
     function tradeCard(trade) {
@@ -1613,8 +1760,9 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const why = tradeWhy(trade);
       const signals = signalChips(trade.signals);
       const context = contextChips(trade, trade.reduceOnly ? ["reduce-only"] : []);
+      const key = `trade:${trade.utc}:${trade.pair}:${trade.action}`;
 
-      return `<details class="bc-card bc-card--trade">
+      return `<details class="bc-card bc-card--trade" data-key="${esc(key)}" open>
         <summary class="bc-card-sum">
           <div class="bc-id">
             <span class="bc-pair">${esc(trade.pair)}</span>
@@ -1626,7 +1774,6 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
             <p class="bc-why-l bc-only-wide">Kodėl</p>
             <p class="bc-why bc-only-wide">${esc(why)}</p>
             ${log ? `<p class="bc-tech bc-only-wide">${esc(log)}</p>` : ""}
-            <p class="bc-trade-sum bc-only-narrow">kaina ${esc(price(trade.fillPrice))}</p>
           </div>
           <div class="bc-num">
             <p class="bc-num-l bc-only-wide">Signalai</p>
@@ -1635,13 +1782,13 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
             <div class="bc-chips bc-only-wide">${context}</div>
             <p class="bc-num-v bc-only-narrow"><span class="bc-t-cream">${esc(num(trade.score, 2))} balas</span></p>
           </div>
-          <span class="bc-chev bc-only-narrow">detaliau ▾</span>
         </summary>
         <div class="bc-card-body bc-only-narrow">
-          <div class="bc-params">${params}</div>
           <p class="bc-why-l">Kodėl</p>
           <p class="bc-why">${esc(why)}</p>
-          <div class="bc-chips">${signals}${context}</div>
+          <div class="bc-params">${params}</div>
+          <p class="bc-chips-l">Signalai</p><div class="bc-chips">${signals}</div>
+          <p class="bc-chips-l">Kontekstas</p><div class="bc-chips">${context}</div>
           ${log ? `<p class="bc-tech">${esc(log)}</p>` : ""}
         </div>
       </details>`;
@@ -1653,9 +1800,9 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const contexts = data.entryContexts || {};
       const updated = data.summary ? `atnaujinta ${ltDateTime(data.summary.updatedAt)} LT` : "laukiama duomenų";
       els.posMeta.textContent = `${num(positions.length, 0)} ${positionsWord(positions.length)} · ${updated}`;
-      els.posList.innerHTML = positions.length
+      paint(els.posList, positions.length
         ? positions.map(position => positionCard(position, contexts[position.pair])).join("")
-        : '<p class="bc-empty">Nėra atvirų pozicijų</p>';
+        : '<p class="bc-empty">Nėra atvirų pozicijų</p>');
     }
 
     function renderTrades(data) {
@@ -1671,17 +1818,17 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         today.takeProfit ? `${num(today.takeProfit, 0)} tikslas` : ""
       ].filter(Boolean).join(" · ") || "uždarytos pozicijos";
 
-      els.tradeStats.innerHTML = [
+      paint(els.tradeStats, [
         metricCell("Sandoriai šiandien", num(trades.length, 0), "bc-t-gold", "nuo 00:00 LT"),
         metricCell("Atidaryta", num(today.opened || 0, 0), "bc-t-cream", "naujos pozicijos"),
         metricCell("Uždaryta", num(today.closed || 0, 0), "bc-t-cream", esc(exitNote)),
         metricCell("Realizuotas P/N", signedMoney(today.realizedPnlEur || 0), toneClass(today.realizedPnlEur || 0),
           `iš ${esc(num(exits.length, 0))} ${esc(tradesWord(exits.length))}`)
-      ].join("");
+      ].join(""));
 
-      els.tradeList.innerHTML = trades.length
+      paint(els.tradeList, trades.length
         ? trades.map(tradeCard).join("")
-        : '<p class="bc-empty">Šiandien sandorių dar nebuvo</p>';
+        : '<p class="bc-empty">Šiandien sandorių dar nebuvo</p>');
     }
 
     // ---- loading + failure ------------------------------------------------------
@@ -1689,7 +1836,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       if (lastGood) return;
       els.posList.innerHTML = '<div class="bc-skeleton bc-skeleton--pos"></div><div class="bc-skeleton bc-skeleton--pos"></div>';
       els.tradeList.innerHTML = '<div class="bc-skeleton bc-skeleton--trade"></div>';
-      els.chart.innerHTML = '<div class="bc-skeleton bc-skeleton--chart"></div>';
+      els.chartCanvas.innerHTML = '<div class="bc-skeleton bc-skeleton--chart"></div>';
     }
 
     // The API's warnings are English operator text; the page is Lithuanian.
@@ -1745,6 +1892,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
     initTenant();
     initDisclaimer();
+    initChartTooltip();
+    lockCardsOpen();
     renderSkeleton();
     refresh();
     setInterval(refresh, REFRESH_MS);

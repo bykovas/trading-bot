@@ -1901,6 +1901,11 @@ static async Task EnsureDailyEquityTable(NpgsqlConnection connection, Cancellati
         """,
         connection);
     await command.ExecuteNonQueryAsync(cancellationToken);
+
+    await using var revision = new NpgsqlCommand(
+        "alter table portfolio_daily_equity add column if not exists revision integer",
+        connection);
+    await revision.ExecuteNonQueryAsync(cancellationToken);
 }
 
 // Written by the workers from the exchange ledger; declared here too so the
@@ -1963,37 +1968,92 @@ static async Task BackfillDailyEquity(
     string timeZoneId,
     CancellationToken cancellationToken)
 {
+    // A change to how a day is computed invalidates every stored day, so rows from an
+    // older revision are dropped and rebuilt. Closed days are otherwise write-once.
+    await using (var reset = new NpgsqlCommand(
+        """
+        delete from portfolio_daily_equity
+        where bot_instance_id = @bot_instance_id
+          and revision is distinct from @revision
+        """,
+        connection))
+    {
+        reset.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
+        reset.Parameters.Add("revision", NpgsqlDbType.Integer).Value = DashboardDefaults.RollupRevision;
+        await reset.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     // Only days after the last stored one are aggregated, so the expensive full
     // scan happens once and every later call touches a single day.
+    //
+    // Individual cycles sometimes record a nonsense portfolio value — futures-live
+    // has a 704 USD reading on a day that opened and closed near 52, a 166 on a day
+    // around 32, and zeros from the cycles before the worker first reconciled with
+    // Kraken. One bad cycle would otherwise set the day's high or low and flatten the
+    // whole chart, so values are kept only within a third and triple of the day's
+    // median. Real intraday moves survive that; single-cycle spikes do not.
     await using var command = new NpgsqlCommand(
         """
+        with day_values as (
+            select
+                (utc at time zone @time_zone)::date as local_date,
+                utc,
+                cycle_id,
+                portfolio_value_after_eur as value
+            from dry_run_cycle_facts
+            where bot_instance_id = @bot_instance_id
+              and portfolio_value_after_eur > 0
+              and utc >= coalesce(
+                    (select max(local_date) at time zone @time_zone
+                     from portfolio_daily_equity
+                     where bot_instance_id = @bot_instance_id),
+                    '-infinity'::timestamptz)
+        ),
+        day_median as (
+            select local_date, percentile_cont(0.5) within group (order by value) as median
+            from day_values
+            group by local_date
+        ),
+        -- The typical day, used to throw away whole days that are not a funded
+        -- account: futures-live's first day sits at 3e-6 USD across 329 cycles,
+        -- before the worker had reconciled with Kraken. Left in, it made the
+        -- 30-day change read "+1 637 909,7 %".
+        series as (
+            select percentile_cont(0.5) within group (order by median) as median
+            from day_median
+        ),
+        clean as (
+            select value.local_date, value.utc, value.cycle_id, value.value
+            from day_values value
+            join day_median median on median.local_date = value.local_date
+            cross join series
+            where median.median > 0
+              and series.median > 0
+              and median.median >= series.median / 10.0
+              and value.value between median.median / 3.0 and median.median * 3.0
+        )
         insert into portfolio_daily_equity
             (bot_instance_id, local_date, time_zone, open_value_eur, high_value_eur,
-             low_value_eur, close_value_eur, cycle_count)
+             low_value_eur, close_value_eur, cycle_count, revision)
         select
             @bot_instance_id,
-            (utc at time zone @time_zone)::date,
+            local_date,
             @time_zone,
-            (array_agg(portfolio_value_after_eur order by utc asc, cycle_id asc))[1],
-            max(portfolio_value_after_eur),
-            min(portfolio_value_after_eur),
-            (array_agg(portfolio_value_after_eur order by utc desc, cycle_id desc))[1],
-            count(*)
-        from dry_run_cycle_facts
-        where bot_instance_id = @bot_instance_id
-          and utc >= coalesce(
-                (select max(local_date) at time zone @time_zone
-                 from portfolio_daily_equity
-                 where bot_instance_id = @bot_instance_id),
-                '-infinity'::timestamptz)
-        group by 2
-        having (utc at time zone @time_zone)::date
-             < (now() at time zone @time_zone)::date
+            (array_agg(value order by utc asc, cycle_id asc))[1],
+            max(value),
+            min(value),
+            (array_agg(value order by utc desc, cycle_id desc))[1],
+            count(*),
+            @revision
+        from clean
+        group by local_date
+        having local_date < (now() at time zone @time_zone)::date
         on conflict (bot_instance_id, local_date) do nothing
         """,
         connection);
     command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
     command.Parameters.Add("time_zone", NpgsqlDbType.Text).Value = timeZoneId;
+    command.Parameters.Add("revision", NpgsqlDbType.Integer).Value = DashboardDefaults.RollupRevision;
     await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
@@ -3061,6 +3121,10 @@ internal static class DashboardSchema
 internal static class DashboardDefaults
 {
     public const int EquityWindowDays = 30;
+
+    // Bump when the daily rollup's computation changes: stored days from an older
+    // revision are dropped and rebuilt on the next read.
+    public const int RollupRevision = 2;
 }
 
 internal readonly record struct DecisionKey(string CycleId, int DecisionIndex);

@@ -320,73 +320,93 @@ internal sealed class KrakenBroker(HttpClient httpClient, KrakenOptions options)
     // the only trustworthy source for them: cash on the account also moves when the
     // exchange settles or releases funds, so comparing balances between cycles
     // cannot tell a deposit apart from ordinary account activity.
+    //
+    // The ledger returns 50 entries per page and mixes trades in with money movement,
+    // so an active account needs paging to reach anything but the last few hours.
     public async Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(
         DateTimeOffset since,
         CancellationToken cancellationToken)
     {
-        JsonDocument doc;
-        try
-        {
-            // Kraken takes a single ledger type per call, so ask for everything once
-            // and keep the three entry kinds that represent money moving in or out.
-            doc = await PostPrivateAsync(
-                "/0/private/Ledgers",
-                new Dictionary<string, string>
-                {
-                    ["type"] = "all",
-                    ["start"] = since.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)
-                },
-                cancellationToken);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException)
-        {
-            Console.WriteLine($"broker-ledger: failed ({ex.Message})");
-            return Array.Empty<PortfolioCashEvent>();
-        }
+        const int pageSize = 50;
+        const int maxPages = 40;
 
-        using (doc)
+        var events = new List<PortfolioCashEvent>();
+
+        for (var page = 0; page < maxPages; page++)
         {
-            var root = doc.RootElement;
-            var errors = ReadErrors(root);
-            if (errors.Count > 0)
+            JsonDocument doc;
+            try
             {
-                Console.WriteLine($"broker-ledger: rejected ({string.Join(", ", errors)})");
-                return Array.Empty<PortfolioCashEvent>();
+                // Kraken takes a single ledger type per call, so ask for everything
+                // and keep the three entry kinds that move money in or out.
+                doc = await PostPrivateAsync(
+                    "/0/private/Ledgers",
+                    new Dictionary<string, string>
+                    {
+                        ["type"] = "all",
+                        ["start"] = since.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture),
+                        ["ofs"] = (page * pageSize).ToString(CultureInfo.InvariantCulture)
+                    },
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException)
+            {
+                Console.WriteLine($"broker-ledger: failed on page {page} ({ex.Message})");
+                break;
             }
 
-            if (!root.TryGetProperty("result", out var result)
-                || result.ValueKind != JsonValueKind.Object
-                || !result.TryGetProperty("ledger", out var ledger)
-                || ledger.ValueKind != JsonValueKind.Object)
-            {
-                return Array.Empty<PortfolioCashEvent>();
-            }
+            var rows = 0;
 
-            var events = new List<PortfolioCashEvent>();
-            foreach (var entry in ledger.EnumerateObject())
+            using (doc)
             {
-                var value = entry.Value;
-                var type = (value.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null)
-                    ?? string.Empty;
-                if (!IsCashMovement(type))
+                var root = doc.RootElement;
+                var errors = ReadErrors(root);
+                if (errors.Count > 0)
                 {
-                    continue;
+                    Console.WriteLine($"broker-ledger: rejected ({string.Join(", ", errors)})");
+                    break;
                 }
 
-                var seconds = ReadDouble(value, "time");
-                events.Add(new PortfolioCashEvent(
-                    entry.Name,
-                    seconds > 0d
-                        ? DateTimeOffset.FromUnixTimeMilliseconds((long)(seconds * 1000d))
-                        : DateTimeOffset.UtcNow,
-                    type.ToLowerInvariant(),
-                    ReadDecimal(value, "amount"),
-                    value.TryGetProperty("asset", out var asset) ? asset.GetString() : null,
-                    "kraken-spot-ledger"));
+                if (!root.TryGetProperty("result", out var result)
+                    || result.ValueKind != JsonValueKind.Object
+                    || !result.TryGetProperty("ledger", out var ledger)
+                    || ledger.ValueKind != JsonValueKind.Object)
+                {
+                    break;
+                }
+
+                foreach (var entry in ledger.EnumerateObject())
+                {
+                    rows++;
+
+                    var value = entry.Value;
+                    var type = (value.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null)
+                        ?? string.Empty;
+                    if (!IsCashMovement(type))
+                    {
+                        continue;
+                    }
+
+                    var seconds = ReadDouble(value, "time");
+                    events.Add(new PortfolioCashEvent(
+                        entry.Name,
+                        seconds > 0d
+                            ? DateTimeOffset.FromUnixTimeMilliseconds((long)(seconds * 1000d))
+                            : DateTimeOffset.UtcNow,
+                        type.ToLowerInvariant(),
+                        ReadDecimal(value, "amount"),
+                        value.TryGetProperty("asset", out var asset) ? asset.GetString() : null,
+                        "kraken-spot-ledger"));
+                }
             }
 
-            return events;
+            if (rows < pageSize)
+            {
+                break;
+            }
         }
+
+        return events;
     }
 
     private static bool IsCashMovement(string type) =>

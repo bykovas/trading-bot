@@ -1,3 +1,9 @@
+## 2026-08-20-kraken-ledger-pagination
+
+- Both ledger readers now page through the exchange history instead of taking whatever the first response contained. The futures account log is walked newest-first with `count=500` and a `before` cursor; the spot ledger pages through `ofs`. Both stop at the first short page, once entries fall outside the window, or after a hard page cap.
+- Without this, only the first page of the window was ever read. The futures log interleaves money movement with every funding-rate change and fill, so on a busy account that page never reached the present: `futures-live` recorded no deposit or withdrawal after 2026-07-15 even though the account kept moving. `futures-lukas-live` was unaffected only because its log is sparse enough that one page still reached the current day.
+- Not changed: signal scoring, entry guards, sizing or leverage, TP/SL/trailing, execution, the mirror flow, dead-man switch, or cash and position reconciliation. The sync remains best-effort and throttled to once per 30 minutes; a ledger outage still logs and lets the cycle continue.
+
 ## 2026-08-20-kraken-cash-event-ledger
 
 - Both live workers now read deposits, withdrawals and transfers straight from the exchange ledger and persist them to a new `portfolio_cash_events` table, keyed on the exchange's own entry id so re-reading an overlapping window is idempotent. Spot uses `/0/private/Ledgers` (single call with `type=all`, filtered to the three money-movement kinds); futures uses `/api/history/v3/account-log`, filtered on the `info` field. Kraken retains this history far longer than the bot retains cycles, so the first sync backfills movements that never existed in the database.

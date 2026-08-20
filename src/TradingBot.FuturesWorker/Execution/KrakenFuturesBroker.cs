@@ -400,77 +400,125 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
     // Deposits, withdrawals and transfers from the futures account log. Kraken keeps
     // this history far longer than the bot keeps cycles, so the first sync backfills
     // movements that never existed in our database.
+    //
+    // The log is paginated and mixes money movement in with every funding-rate change
+    // and fill, so a busy account produces thousands of entries per window. Pages are
+    // walked newest-first: asking for the oldest page first means a busy account never
+    // reaches the recent deposits at all, which is exactly what happened on
+    // futures-live — its movements stopped being recorded after 2026-07-15.
     public async Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(
         DateTimeOffset since,
         CancellationToken cancellationToken)
     {
-        JsonDocument doc;
-        try
-        {
-            doc = await SendPrivateAsync(
-                HttpMethod.Get,
-                "/api/history/v3/account-log",
-                new List<KeyValuePair<string, string>>
-                {
-                    new("since", since.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)),
-                    new("sort", "asc")
-                },
-                cancellationToken);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException)
-        {
-            Console.WriteLine($"futures-ledger: failed ({ex.Message})");
-            return Array.Empty<PortfolioCashEvent>();
-        }
+        const int pageSize = 500;
+        const int maxPages = 40;
 
-        using (doc)
+        var events = new List<PortfolioCashEvent>();
+        long? before = null;
+
+        for (var page = 0; page < maxPages; page++)
         {
-            if (!doc.RootElement.TryGetProperty("logs", out var logs) || logs.ValueKind != JsonValueKind.Array)
+            var parameters = new List<KeyValuePair<string, string>>
             {
-                return Array.Empty<PortfolioCashEvent>();
+                new("count", pageSize.ToString(CultureInfo.InvariantCulture)),
+                new("sort", "desc")
+            };
+            if (before is not null)
+            {
+                parameters.Add(new KeyValuePair<string, string>(
+                    "before", before.Value.ToString(CultureInfo.InvariantCulture)));
             }
 
-            var events = new List<PortfolioCashEvent>();
-            foreach (var log in logs.EnumerateArray())
+            JsonDocument doc;
+            try
             {
-                // "info" carries the entry kind as prose, e.g. "deposit",
-                // "futures trade", "funding rate change".
-                var info = GetString(log, "info") ?? string.Empty;
-                var kind = ClassifyCashMovement(info);
-                if (kind is null)
-                {
-                    continue;
-                }
-
-                // "change" is the signed delta; fall back to the balance pair when the
-                // field is absent, which happens on some historical entries.
-                var change = GetDecimal(log, "change")
-                    ?? (GetDecimal(log, "new_balance") - GetDecimal(log, "old_balance"));
-                if (change is null || change.Value == 0m)
-                {
-                    continue;
-                }
-
-                var id = GetString(log, "id")
-                    ?? (log.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.Number
-                        ? idElement.GetRawText()
-                        : null);
-                if (string.IsNullOrWhiteSpace(id))
-                {
-                    continue;
-                }
-
-                events.Add(new PortfolioCashEvent(
-                    id,
-                    ParseTimestamp(GetString(log, "date")) ?? DateTimeOffset.UtcNow,
-                    kind,
-                    change.Value,
-                    GetString(log, "asset"),
-                    "kraken-futures-account-log"));
+                doc = await SendPrivateAsync(
+                    HttpMethod.Get, "/api/history/v3/account-log", parameters, cancellationToken);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException)
+            {
+                Console.WriteLine($"futures-ledger: failed on page {page} ({ex.Message})");
+                break;
             }
 
-            return events;
+            var reachedWindowStart = false;
+            var rows = 0;
+
+            using (doc)
+            {
+                if (!doc.RootElement.TryGetProperty("logs", out var logs) || logs.ValueKind != JsonValueKind.Array)
+                {
+                    break;
+                }
+
+                foreach (var log in logs.EnumerateArray())
+                {
+                    rows++;
+
+                    var id = ReadLogId(log);
+                    if (id is not null && (before is null || id < before))
+                    {
+                        before = id;
+                    }
+
+                    var occurredAt = ParseTimestamp(GetString(log, "date"));
+                    if (occurredAt is not null && occurredAt < since)
+                    {
+                        reachedWindowStart = true;
+                        continue;
+                    }
+
+                    // "info" carries the entry kind as prose, e.g. "deposit",
+                    // "futures trade", "funding rate change".
+                    var kind = ClassifyCashMovement(GetString(log, "info") ?? string.Empty);
+                    if (kind is null || id is null)
+                    {
+                        continue;
+                    }
+
+                    // "change" is the signed delta; fall back to the balance pair when
+                    // the field is absent, which happens on some historical entries.
+                    var change = GetDecimal(log, "change")
+                        ?? (GetDecimal(log, "new_balance") - GetDecimal(log, "old_balance"));
+                    if (change is null || change.Value == 0m)
+                    {
+                        continue;
+                    }
+
+                    events.Add(new PortfolioCashEvent(
+                        id.Value.ToString(CultureInfo.InvariantCulture),
+                        occurredAt ?? DateTimeOffset.UtcNow,
+                        kind,
+                        change.Value,
+                        GetString(log, "asset"),
+                        "kraken-futures-account-log"));
+                }
+            }
+
+            if (rows < pageSize || reachedWindowStart || before is null)
+            {
+                break;
+            }
         }
+
+        return events;
+    }
+
+    private static long? ReadLogId(JsonElement log)
+    {
+        if (!log.TryGetProperty("id", out var id))
+        {
+            return null;
+        }
+
+        if (id.ValueKind == JsonValueKind.Number && id.TryGetInt64(out var numeric))
+        {
+            return numeric;
+        }
+
+        return long.TryParse(id.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
     }
 
     private static string? ClassifyCashMovement(string info)
