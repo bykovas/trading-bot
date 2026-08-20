@@ -1,3 +1,10 @@
+## 2026-08-20-futures-wallet-diagnostics
+
+- Kraken returns every wallet on the futures account (11 on the live accounts) and `SumFuturesAvailableCollateralUsd` adds up `availableMargin` across all of them, so the portfolio value is an all-wallet total.
+- That hides internal moves: on futures-live 2026-08-19 two real `Transfer to futures` entries of 10.61 and 3.88 USD took the futures wallet 49.376 -> 59.986 and 56.1066 -> 59.9866, while the all-wallet total moved only 59.73 -> 60.00. The transfer is still written to `portfolio_cash_events` and then subtracted from the bot's result, so the bot is charged for money that only changed pockets.
+- `FuturesAccountBalance` now carries Kraken's wallet key (optional field, existing call sites unchanged) and every sync logs one `futures-kraken-wallet:` line per wallet with its currency, margin balance and available margin.
+- Diagnostics only. No change to sizing, entries, exits or the collateral sum; the next change will narrow the basis to the futures wallet, and that one WILL change live position sizes.
+
 ## 2026-08-20-kraken-ledger-pagination
 
 - Both ledger readers now page through the exchange history instead of taking whatever the first response contained. The futures account log is walked newest-first with `count=500` and a `before` cursor; the spot ledger pages through `ofs`. Both stop at the first short page, once entries fall outside the window, or after a hard page cap.

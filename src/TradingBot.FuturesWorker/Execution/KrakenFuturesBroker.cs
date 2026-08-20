@@ -48,7 +48,7 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
                 ?? GetDecimal(value, "availableFunds")
                 ?? GetDecimal(value, "availableBalance")
                 ?? marginBalance;
-            balances.Add(new FuturesAccountBalance(currency, marginBalance, availableMargin));
+            balances.Add(new FuturesAccountBalance(currency, marginBalance, availableMargin, account.Name));
         }
 
         return balances;

@@ -70,7 +70,10 @@ internal interface IFuturesBroker
     Task CancelAllAfterAsync(int timeoutSeconds, CancellationToken cancellationToken);
 }
 
-internal sealed record FuturesAccountBalance(string Currency, decimal MarginBalance, decimal AvailableMargin);
+// Name is the key Kraken uses for the wallet ("cash", "flex", "fi_xbtusd", ...).
+// It is optional so existing call sites and tests keep compiling; only the live
+// broker fills it, and only the diagnostics read it.
+internal sealed record FuturesAccountBalance(string Currency, decimal MarginBalance, decimal AvailableMargin, string Name = "");
 
 internal sealed record FuturesOpenPosition(string Symbol, string Side, decimal Size, decimal EntryPrice, decimal MarkPrice, decimal Leverage);
 

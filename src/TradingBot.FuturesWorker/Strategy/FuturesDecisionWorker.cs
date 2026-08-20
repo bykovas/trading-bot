@@ -1872,6 +1872,19 @@ internal sealed class FuturesDecisionWorker(
             imported.Any(position => position.Pair.Equals(order.Pair, StringComparison.OrdinalIgnoreCase)));
         state.UpdatedAt = utc;
         Console.WriteLine($"futures-kraken-sync: accounts={accounts.Count} remotePositions={positions.Count} openOrders={openOrders.Count} trackedPositions={state.Positions.Count} previousTracked={before} availableCollateralUsd={state.CashEur:0.####}");
+
+        // Kraken returns every wallet on the account, and the collateral sum above
+        // spans all of them. That hides an internal move: shifting money from the
+        // holding wallet into the futures wallet leaves the total unchanged while
+        // still writing a "Transfer to futures" entry, which is then subtracted from
+        // the bot's result. Naming each wallet here is the first step to measuring
+        // the futures wallet on its own.
+        foreach (var account in accounts)
+        {
+            Console.WriteLine(
+                $"futures-kraken-wallet: name={account.Name} currency={account.Currency} " +
+                $"marginBalance={account.MarginBalance:0.####} availableMargin={account.AvailableMargin:0.####}");
+        }
     }
 
     internal static decimal SumFuturesAvailableCollateralUsd(IReadOnlyList<FuturesAccountBalance> accounts)
