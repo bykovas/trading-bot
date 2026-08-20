@@ -3,8 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BlynAI Capital — portfelio dashboard</title>
-  <meta name="description" content="BlynAI Capital — automatinio prekybos boto portfelis gyvai: atviros pozicijos, šiandienos sandoriai ir 30 dienų rezultatas.">
+  <title>BlynAI Capital — botas, kuris prekiauja pats. Gyvas žurnalas.</title>
+  <meta name="description" content="Autonominis prekybos botas Kraken biržoje. Prekiauja tik mūsų pačių lėšomis. Gyvi skaičiai — ir raudonos dienos. Prisijungti negalima. Paklausti — galima.">
+  <meta property="og:title" content="BlynAI Capital — botas, kuris prekiauja pats. Gyvas žurnalas.">
+  <meta property="og:description" content="Autonominis prekybos botas Kraken biržoje. Prekiauja tik mūsų pačių lėšomis. Gyvi skaičiai — ir raudonos dienos. Prisijungti negalima. Paklausti — galima.">
+  <meta property="og:type" content="website">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -79,11 +82,11 @@
 .bc-status-line .bc-chev{margin-left:auto;color:var(--muted-4)}
 
 /* --- hero --- */
-.bc-hero{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:30px 44px;
+.bc-hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,552px);gap:30px 44px;
   padding:34px 22px 30px;border-bottom:1px solid var(--hairline)}
 .bc-eyebrow{font:600 11px var(--font-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}
-.bc-h1{margin:13px 0 0;font:700 clamp(27px,4.4cqw,40px)/1.08 var(--font-display);letter-spacing:-.028em;color:var(--cream);text-wrap:pretty;max-width:24ch}
-.bc-lead{margin:16px 0 0;font-size:clamp(15.5px,1.7cqw,17.5px);line-height:1.5;color:#d8cfc0;text-wrap:pretty;max-width:64ch}
+.bc-h1{margin:13px 0 0;font:700 clamp(27px,4.4cqw,40px)/1.08 var(--font-display);letter-spacing:-.028em;color:var(--cream);text-wrap:pretty}
+.bc-lead{margin:16px 0 0;font-size:clamp(15.5px,1.7cqw,17.5px);line-height:1.5;color:#d8cfc0;text-wrap:pretty}
 .bc-coins{grid-row:1;grid-column:2;align-self:start;padding:18px;border:1px solid var(--hairline);border-radius:var(--r-lg);background:rgba(0,0,0,.25)}
 .bc-coins-l{font:10px var(--font-mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted-3)}
 .bc-coins-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
@@ -95,15 +98,25 @@
 .bc-coin-txt{display:flex;flex-direction:column;gap:3px;min-width:0}
 .bc-coin-txt b{font:600 16px var(--font-display);letter-spacing:.02em}
 .bc-coin-txt small{font:11.5px var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Each coin's live bot instance. Dimmer than the coin domain: it is a pointer,
+   not the brand. Hidden on narrow along with the other small lines. */
+
 .bc-coin--luko b{color:#e8d5ac} .bc-coin--luko small{color:#9a8f7d}
 .bc-coin--byko b{color:#bfe2ff} .bc-coin--byko small{color:#7f8b96}
+/* Each coin's live bot instance. Dimmer than the coin domain: it is a pointer,
+   not the brand. Selector matches the coin colours' specificity and sits after
+   them, so no !important is needed. Hidden on narrow with the other small lines. */
+.bc-coin--luko .bc-coin-algo,.bc-coin--byko .bc-coin-algo{
+  margin-top:3px;padding-top:3px;border-top:1px solid rgba(246,218,160,.1);color:var(--muted-3)}
 .bc-hero-wide{grid-column:1/-1;min-width:0}
 .bc-heur{grid-column:1/-1;min-width:0}
-.bc-cta{grid-column:1/-1;justify-self:start}
+.bc-cta-wrap{grid-column:1/-1;min-width:0}
 .bc-proof{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:1px;
   border:1px solid rgba(65,237,160,.22);border-radius:var(--r-lg);overflow:hidden;background:rgba(65,237,160,.16)}
 .bc-proof-cell{padding:18px 20px;background:#0c110e}
-.bc-proof-l{font:600 10px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--green)}
+/* Card labels are metadata, not money — green is reserved for realised
+   figures, so labels use the muted ramp. Only .bc-proof-l--warn is tinted. */
+.bc-proof-l{font:600 10px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted-3)}
 .bc-proof-l--warn{color:var(--amber)}
 .bc-proof-n{display:flex;align-items:baseline;gap:9px;margin-top:10px;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 .bc-from{font-size:26px;color:var(--muted-2)} .bc-arrow{font-size:20px;color:var(--green)} .bc-to{font-size:30px;color:var(--cream)}
@@ -206,16 +219,36 @@
 .bc-num .bc-chips-l{margin-top:18px}
 .bc-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
 .bc-chip{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:7px;font:11.5px var(--font-mono)}
-.bc-chip--sig{border:1px solid rgba(65,237,160,.26);background:rgba(65,237,160,.07);color:var(--green)}
+/* A signal chip is a signed weight, so its colour follows the sign — a bearish
+   weight must not read in the profit colour. .bc-chip--sig is layout only. */
+.bc-chip--sig{border:1px solid var(--hairline);background:rgba(255,255,255,.03);color:var(--ink-soft)}
+.bc-chip--pos{border-color:rgba(65,237,160,.26);background:rgba(65,237,160,.07);color:var(--green)}
+.bc-chip--neg{border-color:rgba(255,83,103,.26);background:rgba(255,83,103,.07);color:var(--red)}
+.bc-chip--zero{border-color:var(--hairline);background:rgba(255,255,255,.03);color:var(--muted-3)}
 .bc-chip--ctx{border:1px solid rgba(111,174,255,.24);background:rgba(111,174,255,.07);color:var(--blue)}
 .bc-chip--warn{border:1px solid rgba(240,166,58,.28);background:rgba(240,166,58,.08);color:var(--amber)}
 .bc-chev{font:10.5px var(--font-mono);color:var(--muted-3)}
 .bc-card-body{padding:0 20px 18px;border-top:1px solid var(--hairline-soft)}
 .bc-trade-sum{font:10.5px var(--font-mono);color:var(--muted-3)}
-.bc-proof-note{margin-top:10px;font-size:12.5px;line-height:1.5;color:var(--amber);text-align:center}
+.bc-proof-note{margin-top:14px;font-size:13.5px;line-height:1.55;color:var(--muted);text-wrap:pretty}
 .bc-proof-note b{color:var(--cream);font-weight:600}
+.bc-proof-fine{margin-top:8px;font:11.5px/1.5 var(--font-mono);color:var(--muted-3);text-wrap:pretty}
+/* Card 2 is a hypothetical, so its figures must not borrow the profit colour. */
+.bc-proof-n--hypo .bc-from,.bc-proof-n--hypo .bc-arrow{color:var(--muted-3)}
+.bc-proof-n--hypo .bc-to{color:var(--muted)}
+.bc-proof-l--hypo{color:var(--muted-4)}
+.bc-fn-mark{color:var(--gold);text-decoration:none}
+.bc-footnote{margin:0;padding:22px;border-top:1px solid var(--hairline);
+  font:12.5px/1.65 var(--font-body);color:var(--muted-2);text-wrap:pretty}
+.bc-footnote b{color:var(--ink-soft);font-weight:600}
+.bc-proof-pct{font:16px var(--font-mono);color:var(--green)}
+.bc-proof-n .bc-to.is-realised{color:var(--green)}
+.bc-cta-note{margin-top:10px;font:12px var(--font-mono);color:var(--muted-3)}
+/* Technical terms: monospace + dotted underline, never coloured. Green is
+   reserved for realised P&L figures, so terminology must not borrow it. */
+.term{font-family:var(--font-mono);font-size:.94em;border-bottom:1px dotted rgba(200,187,166,.5);color:inherit}
 .bc-mobilebar{display:flex;align-items:center;justify-content:space-between;gap:10px;
-  padding:10px 16px;border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline);
+  padding:10px 14px;border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline);
   background:rgba(0,0,0,.4);font:11px var(--font-mono)}
 .bc-mb-status{display:inline-flex;flex:none;align-items:center;gap:8px;white-space:nowrap;color:var(--green)}
 .bc-mb-status em{font-style:normal;color:var(--muted-4)}
@@ -243,11 +276,10 @@
   .bc-topbar-right{display:none}
   .bc-seg button{min-height:24px;padding:0 10px;font-size:10.5px}
   .bc-mobilebar{display:flex}
-  .bc-mb-status em{display:none}
 
   /* HERO = the whole first screen: centred, sells before any scroll */
   /* FOLD BUDGET: on a 390x844 screen everything up to and including the coin
-     pills must sit above 844px. Measured bottom of .bc-coins = 575px.
+     pills must sit above 844px. Measured bottom of .bc-coins = 739px.
      If you add anything to the hero, re-measure .bc-coins bottom. */
   /* The brand is lifted out of flow so the hero starts at y=0 and its glow
      origin coincides with the top of the screen — otherwise a hard seam forms
@@ -257,7 +289,7 @@
     background:radial-gradient(120% 62% at 50% 0%,rgba(245,184,79,.12),rgba(5,5,5,0) 62%)}
   .bc-hero-main{order:1}
   .bc-hero-wide{order:2}
-  .bc-cta{order:3}
+  .bc-cta-wrap{order:3}
   .bc-coins{order:4}
   .bc-heur{order:5}
   .bc-h1{margin:12px auto 0;font-size:30px;max-width:none}
@@ -269,16 +301,20 @@
   .bc-coin-ic svg{width:17px;height:17px}
   .bc-coin-txt small{display:none}
   .bc-coin-txt b{font-size:12.5px}
-  /* one green box carries the proof; cells 2 and 3 collapse into .bc-proof-note */
+  /* card 1 (yesterday) and card 3 (no promises) stay; the 30-day figure in
+     card 2 is dropped because the live section repeats it a screen below */
   .bc-proof{grid-template-columns:1fr;border:0;border-radius:0;background:none;text-align:center}
-  .bc-proof-cell:not(:first-child){display:none}
+  .bc-proof-cell:nth-child(2){display:none}
+  .bc-proof-cell+.bc-proof-cell{margin-top:10px}
   .bc-proof-cell{padding:14px 16px;border:1px solid rgba(65,237,160,.26);border-radius:14px;background:rgba(65,237,160,.05)}
   .bc-proof-n{justify-content:center;margin-top:8px}
   .bc-from{font-size:20px} .bc-arrow{font-size:16px} .bc-to{font-size:26px}
   .bc-proof-s{margin-top:7px;font-size:12.5px}
+  .bc-proof-note{margin-top:12px;font-size:12.5px;text-align:center}
+  .bc-cta-note{text-align:center}
   .bc-heur{grid-template-columns:1fr;gap:9px;margin-top:6px;text-align:center}
   .bc-heur p{font-size:12.5px;line-height:1.6}
-  .bc-shell a.bc-cta{display:flex;justify-content:center;justify-self:stretch;height:50px;
+  .bc-shell a.bc-cta{display:flex;justify-content:center;height:50px;
     margin-top:0;padding:0 20px;border:0;background:var(--gold);color:#120d04;
     font-weight:600;font-size:16px;box-shadow:0 12px 40px rgba(245,184,79,.22)}
   .bc-shell a.bc-cta:hover{background:var(--gold-soft);color:#120d04}
@@ -375,7 +411,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       </a>
       <div class="bc-topbar-right">
         <div class="bc-tenant">
-          <span class="bc-tenant-l">Paskyra</span>
+          <span class="bc-tenant-l">Viešas testuotojas<a class="bc-fn-mark" href="#testuotojas">*</a></span>
           <span class="bc-seg"><button type="button" data-tenant="LUKAS">LUKAS</button><button type="button" data-tenant="DENISAS">DENISAS</button></span>
         </div>
         <div class="bc-status-chips" id="bcStatusChips"></div>
@@ -385,16 +421,16 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
     <section class="bc-hero">
       <div class="bc-hero-main">
-        <p class="bc-eyebrow">Uždaras testavimas · priimame tik kelias sąskaitas</p>
-        <h1 class="bc-h1">Norite gauti pinigų automatiškai — nieko nedarydami?</h1>
-        <p class="bc-lead">Prisijunkite prie mūsų uždaro testavimo. Botas prekiauja pats — jūs tik stebite, kaip auga skaičius.</p>
+        <p class="bc-eyebrow">Uždaras testavimas · tikri pinigai · Kraken</p>
+        <h1 class="bc-h1">Botas prekiauja. Mes uždirbam. Kol kas.</h1>
+        <p class="bc-lead">Jis pats suranda ir atidaro pozicijas, pats valdo riziką, pats uždaro sandorius. Be rankų, be emocijų. Kiekvienas sprendimas įrašytas. Mes tik stebime, kaip keičiasi skaičiai.</p>
       </div>
 
       <aside class="bc-coins">
-        <p class="bc-coins-l">Apmokėjimą priimame tik LUKO ir BYKO</p>
+        <p class="bc-coins-l">Pripažįstame tik dvi valiutas</p>
         <div class="bc-coins-row">
-          <a class="bc-coin bc-coin--luko" href="https://meetluko.eu"><span class="bc-coin-ic"><svg viewBox="0 0 512 512" aria-hidden="true"><circle cx="256" cy="256" r="256" fill="#0A0A0A"/><circle cx="256" cy="256" r="248" fill="none" stroke="#C9A86A" stroke-opacity=".5" stroke-width="8"/><g transform="translate(-117.1 -89.7) scale(1.4463)"><g opacity=".3"><path d="M144 164L182 122V167Z" fill="#C9A86A"/><g fill="none" stroke="#C9A86A" stroke-width="15"><circle cx="306" cy="186" r="58"/><path d="M364 186V312"/></g></g><path d="M182 122h52V312H346l16 16V358H182Z" fill="#C9A86A"/></g></svg></span><span class="bc-coin-txt"><b>LUKO</b><small>meetluko.eu</small></span></a>
-          <a class="bc-coin bc-coin--byko" href="https://byko.bykovas.lt"><span class="bc-coin-ic"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#7CCBFF"/><g transform="translate(2.1875 1.25) scale(.3125)" fill="none" stroke="#0B0D10" stroke-width="13"><path d="M24 14V82"/><path d="M40 20L70 48 40 76"/></g></svg></span><span class="bc-coin-txt"><b>BYKO</b><small>byko.bykovas.lt</small></span></a>
+          <a class="bc-coin bc-coin--luko" href="https://meetluko.eu"><span class="bc-coin-ic"><svg viewBox="0 0 512 512" aria-hidden="true"><circle cx="256" cy="256" r="256" fill="#0A0A0A"/><circle cx="256" cy="256" r="248" fill="none" stroke="#C9A86A" stroke-opacity=".5" stroke-width="8"/><g transform="translate(-117.1 -89.7) scale(1.4463)"><g opacity=".3"><path d="M144 164L182 122V167Z" fill="#C9A86A"/><g fill="none" stroke="#C9A86A" stroke-width="15"><circle cx="306" cy="186" r="58"/><path d="M364 186V312"/></g></g><path d="M182 122h52V312H346l16 16V358H182Z" fill="#C9A86A"/></g></svg></span><span class="bc-coin-txt"><b>LUKO</b><small>meetluko.eu</small><small class="bc-coin-algo">algo.meetluko.eu</small></span></a>
+          <a class="bc-coin bc-coin--byko" href="https://byko.bykovas.lt"><span class="bc-coin-ic"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#7CCBFF"/><g transform="translate(2.1875 1.25) scale(.3125)" fill="none" stroke="#0B0D10" stroke-width="13"><path d="M24 14V82"/><path d="M40 20L70 48 40 76"/></g></svg></span><span class="bc-coin-txt"><b>BYKO</b><small>byko.bykovas.lt</small><small class="bc-coin-algo">algo.bykovas.lt</small></span></a>
         </div>
       </aside>
 
@@ -404,27 +440,30 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
             <p class="bc-proof-l">Vakar · realūs sandoriai</p>
             <p class="bc-proof-n"><span class="bc-from">60 $</span><span class="bc-arrow">→</span><span class="bc-to">89 $</span></p>
             <p class="bc-proof-s"><b>+29 $</b> · +48 % per pusę dienos</p>
+            <p class="bc-proof-fine">Geriausia para per mėnesį — todėl ją ir rodom.</p>
           </div>
           <div class="bc-proof-cell">
-            <p class="bc-proof-l">Ta pati logika, tik nuliai</p>
-            <p class="bc-proof-n"><span class="bc-from">600 $</span><span class="bc-arrow">→</span><span class="bc-to">900 $</span></p>
-            <p class="bc-proof-s"><b>+300 $</b> · botui nesvarbu, kokia suma dirba</p>
+            <p class="bc-proof-l bc-proof-l--hypo">Jei tik būtume žinoję… · ta pati logika, tik nuliai</p>
+            <p class="bc-proof-n bc-proof-n--hypo"><span class="bc-from">600 $</span><span class="bc-arrow">→</span><span class="bc-to">900 $</span></p>
+            <p class="bc-proof-s">+300 $ · botui nerūpi, kokia suma dirba, o mes nepasinaudojom…</p>
           </div>
           <div class="bc-proof-cell">
             <p class="bc-proof-l bc-proof-l--warn">Sąžiningai</p>
-            <p class="bc-proof-p">Taip nutinka <b>ne visada</b> — kartais diena baigiasi minuse. Kol kas mums sekasi, todėl ir testuojame uždarai.</p>
+            <p class="bc-proof-p">Taip nutinka <b>ne visada</b> — kartais diena baigiasi minuse. Buvo savaičių, kai praradom daugiau, nei uždirbom, bet dažniausiai kol kas mums sekasi, todėl ir testuojame uždarai.</p>
+            <p class="bc-proof-fine" id="bcHonestyStat">12/30 dienų — minuse · blogiausia diena −1,37 $</p>
           </div>
         </div>
-        <p class="bc-proof-note bc-only-narrow"><b>Iš 600 $ būtų 900 $</b> — botui nesvarbu, kokia suma dirba. Bet taip nutinka <b>ne visada</b>: kartais diena baigiasi minuse. Kol kas mums sekasi, todėl ir testuojame uždarai.</p>
       </div>
 
       <div class="bc-heur">
-          <p><b>Euristikų rinkinys ir dirbtinis intelektas</b> dirba kartu. Kas minutę sistema nuskaito šimtus Kraken porų ir kiekvieną įvertina pagal šimtus parametrų: EMA 9/21 sankirtas, RSI, momentum, ATR volatilumą, spread'ą, 24 h apimtis, order-book gylį, koreliaciją su BTC, rinkos režimą ir visą kainų istoriją.</p>
-          <p>Iš viso to gimsta vienas balas — o iš balo sprendimas. Pozicijas atidaro pati, dydį parenka pagal rizikos limitus, stop-loss ir tikslus nustato pati, o uždaro anksčiau, nei nuosmukis įsibėgėja. Viskas automatiškai: be rankinio įsikišimo ir be jūsų dalyvavimo.</p>
-        <p class="bc-heur-dim">Kiekvienas sprendimas įrašomas — kodėl įėjo, kurie signalai svėrė, kokia buvo rizika. Viską galima atkartoti.</p>
+          <p><b>Euristikų rinkinys ir dirbtinis intelektas</b> dirba kartu. Sistema nuskaito ~150 Kraken porų kas minutę — gyvas skaičius telemetrijoje. Kiekviena pora vertinama pagal šimtus parametrų: <span class="term">EMA 9/21 sankirtas</span>, <span class="term">RSI</span>, <span class="term">momentum</span>, <span class="term">ATR volatilumą</span>, spread'ą, 24 h apimtis, <span class="term">order-book gylį</span>, <span class="term">koreliaciją su BTC</span>, rinkos režimą ir visą kainų istoriją.</p>
+          <p>Iš viso to gimsta vienas balas — o iš balo sprendimas. Pozicijas atidaro pati, dydį parenka pagal <span class="term">rizikos limitus</span>, <span class="term">stop-loss</span> ir tikslus nustato pati, uždaro anksčiau, nei nuosmukis įsibėgėja, ir užfiksuoja rezultatą. Viskas automatiškai: be rankinio įsikišimo ir be jūsų dalyvavimo.</p>
+        <p class="bc-heur-dim">Netikėk. Patikrink pats. Kiekvienas sprendimas įrašomas — kodėl įėjo, kurie <span class="term">signalai svėrė</span>, kokia buvo rizika. Viską galima atkartoti.</p>
       </div>
 
-      <a class="bc-cta" href="#">Prisijungti prie testavimo</a>
+      <div class="bc-cta-wrap">
+        <a class="bc-cta" href="#" data-contact-link="TODO">Paklausk mūsų, kaip tai veikia</a>
+      </div>
     </section>
 
     <div class="bc-mobilebar bc-only-narrow">
@@ -432,7 +471,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       <span class="bc-seg"><button type="button" data-tenant="LUKAS">LUKAS</button><button type="button" data-tenant="DENISAS">DENISAS</button></span>
     </div>
 
-    <section class="bc-live">
+    <section class="bc-live" id="live">
       <div class="bc-live-head">
         <div>
           <p class="bc-live-l"><i class="bc-dot" id="bcLiveDot"></i><b id="bcLiveTenant">LUKAS</b><span>&#183; Portfelio vert&#279; dabar &#183; gyvai</span></p>
@@ -464,6 +503,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       <div class="bc-tstats" id="bcTradeStats"></div>
       <div class="bc-list" id="bcTradeList"></div>
     </section>
+
+    <footer class="bc-footnote" id="testuotojas">
+      <b>* Viešas testuotojas</b> — asmuo, savo infrastruktūroje įsidiegęs boto programinę įrangą ir prekiaujantis tik savo lėšomis per savo biržos API raktą. BlynAI Capital lėšų nepriima, sąskaitų nevaldo ir investavimo paslaugų neteikia. Tai nėra finansinė rekomendacija.
+    </footer>
   </div>
   </div>
 
@@ -646,6 +689,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       liveSince: el("bcLiveSince"),
       chart: el("bcChart"),
       chartCaption: el("bcChartCaption"),
+      honestyStat: el("bcHonestyStat"),
       legendDeposit: el("bcLegendDeposit"),
       legendWithdrawal: el("bcLegendWithdrawal"),
       metrics: el("bcMetrics"),
@@ -922,6 +966,33 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       return worst;
     }
 
+    // "12/30 dienų — minuse · blogiausia diena −1,37 $". Ships in the served HTML
+    // and is refreshed from the real series; if the series is unusable the line is
+    // removed rather than left showing a stale or templated figure.
+    function renderHonestyStat(days) {
+      if (!els.honestyStat) return;
+      if (!days.length) {
+        els.honestyStat.hidden = true;
+        return;
+      }
+
+      let down = 0;
+      let worst = null;
+      days.forEach(day => {
+        const change = Number(day.close) - Number(day.open);
+        if (!Number.isFinite(change)) return;
+        if (change < 0) {
+          down += 1;
+          if (worst === null || change < worst) worst = change;
+        }
+      });
+
+      els.honestyStat.hidden = false;
+      els.honestyStat.textContent = worst === null
+        ? `${num(days.length, 0)}/${num(days.length, 0)} dienų — nė vienos minuse`
+        : `${num(down, 0)}/${num(days.length, 0)} dienų — minuse · blogiausia diena ${signedMoney(worst)}`;
+    }
+
     function renderHeadline(data) {
       const summary = data.summary;
       const days = (data.equity && data.equity.days) || [];
@@ -1190,23 +1261,23 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         .slice(0, 5);
     }
 
-    // The design has no red chip: amber carries "this limited or forced the
-    // decision", which is exactly what a negative contribution did.
+    // A signal chip is a signed weight, so its colour follows the sign. A bearish
+    // EMA −0,30 rendered in the profit colour is the fastest way to make this
+    // dashboard look dishonest, so the category never decides the colour.
     function signalChipClass(signal) {
       const value = Number(signal.value);
-      if (signal.name === "VolumeCap" || value < 0) return "bc-chip--warn";
-      if (value > 0) return "bc-chip--sig";
-      if (signal.name === "Exploratory" || signal.name === "Volume") return "bc-chip--warn";
-      return "bc-chip--ctx";
+      if (value > 0) return "bc-chip--pos";
+      if (value < 0) return "bc-chip--neg";
+      return "bc-chip--zero";
     }
 
     function signalChips(signals) {
       const shown = topSignals(signals);
       if (!shown.length) {
-        return '<span class="bc-chip bc-chip--ctx">nėra signalų duomenų</span>';
+        return '<span class="bc-chip bc-chip--sig bc-chip--zero">nėra signalų duomenų</span>';
       }
       return shown.map(signal =>
-        `<span class="bc-chip ${signalChipClass(signal)}" title="${esc(signal.reason || "")}">` +
+        `<span class="bc-chip bc-chip--sig ${signalChipClass(signal)}" title="${esc(signal.reason || "")}">` +
         `${esc(signal.name)} ${esc(signed(signal.value, 2))}</span>`).join("");
     }
 
@@ -1249,7 +1320,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         kv("Marža", money(position.initialMarginEur)),
         kv("Mokestis", entry && Number.isFinite(Number(entry.feeEur)) ? money(entry.feeEur, 3) : "—"),
         kv("Stop loss", price(position.stopLossPrice), "bc-t-red"),
-        kv("Tikslas (TP)", price(position.takeProfitPrice), "bc-t-green"),
+        kv("Tikslas (TP)", price(position.takeProfitPrice), "bc-t-soft"),
         kv("Likvidacija", price(position.liquidationPrice), "bc-t-red"),
         kv("Iki likvidacijos", Number.isFinite(liquidation) ? percent(liquidation, 1) : "—",
           Number.isFinite(liquidation) && liquidation < 8 ? "bc-t-red" : "bc-t-soft")
@@ -1504,6 +1575,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       renderStatus(data);
       renderHeadline(data);
       renderChart(data);
+      renderHonestyStat((data.equity && data.equity.days) || []);
       renderMetrics(data);
       renderPositions(data);
       renderTrades(data);
