@@ -1354,20 +1354,21 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         // account somewhere other than where the next day picks it up. That stretch
         // is drawn grey and hung on the day that went dark, running to the next
         // opening: it is neither the bot's result nor a transfer, and pretending
-        // otherwise would be a guess. Only a real silence counts, so tiny rounding
-        // differences between two consecutive cycles do not paint grey slivers.
+        // otherwise would be a guess.
         const previous = columns[columns.length - 1];
-        const prevClose = Number(days[index - 1].close);
-        const blind = Number(day.gapMinutes);
-        if (previous && Number.isFinite(prevClose) && Number.isFinite(blind)
-            && blind > 60 && Math.abs(open - prevClose) >= 0.01) {
-          previous.gap = { from: prevClose, to: open, minutes: blind };
+        if (previous && day.outage) {
+          previous.gap = {
+            from: Number(days[index - 1].close), to: open, minutes: Number(day.gapMinutes)
+          };
         }
 
+        // Everywhere else the day starts where the last one ended, so nothing falls
+        // between two columns.
+        const from = Number(day.chainOpen ?? open);
         const botTo = close - moved;
         columns.push({
-          date: day.date, open, close, moved,
-          bot: { from: open, to: botTo },
+          date: day.date, open: from, close, moved,
+          bot: { from, to: botTo },
           manual: moved ? { from: botTo, to: close, amount: moved } : null
         });
       });
@@ -1456,12 +1457,24 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         if (last && last.date === column.date) last.to = index;
         else spans.push({ date: column.date, from: index, to: index });
       });
+      // Sampling by count alone printed "08-19" and "08-20" on top of each other while
+      // the series was short and its columns sat side by side at the divider. A label
+      // is skipped unless there is room for it.
+      // Right to left, because the series is anchored to the divider and the newest day
+      // is the one worth naming. Sampling by count alone printed "08-19" and "08-20" on
+      // top of each other while the columns still sat side by side, and dropping the
+      // later one would have left the chart labelled with the older date.
       const step = Math.ceil(spans.length / spec.dateTicks);
-      spans.forEach((span, index) => {
-        if (index % step) return;
+      const minGap = spec.labelSize * 3.6;
+      let lastLabelX = Infinity;
+      for (let index = spans.length - 1; index >= 0; index -= 1) {
+        if ((spans.length - 1 - index) % step) continue;
+        const span = spans[index];
         const x = (centre(span.from) + centre(span.to)) / 2;
+        if (lastLabelX - x < minGap) continue;
+        lastLabelX = x;
         out.push(`<text x="${x.toFixed(2)}" y="${spec.dateY}" fill="#5f584e" font-family="IBM Plex Mono, monospace" font-size="${spec.labelSize}" text-anchor="middle">${esc(span.date.slice(5))}</text>`);
-      });
+      }
 
       // One invisible hit area per column, full height, so the tooltip has something
       // to catch that is wider than a 7px candle on a phone.
@@ -1652,8 +1665,14 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
             "botui nerūpi, su kokia suma dirba, o mes nepasinaudojom…";
       }
 
-      // One sentence for every case: it already says results vary, which is what a
-      // losing best day and a single closed day both need it to say.
+      // One sentence for every case - it already says results vary, which is what a
+      // losing best day and a single closed day both need it to say - but which day
+      // it was is a fact, and facts on this page are dated.
+      if (best && els.bestFine) {
+        els.bestFine.textContent =
+          `Geriausia para iki šiol (${best.date}) — bet ne vienintelė, `
+          + "sekasi įvairiai, nes eksperimentuojam.";
+      }
     }
 
     // "12/30 dienų — minuse · blogiausia diena −1,37 $". Ships in the served HTML
@@ -2269,7 +2288,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     // The same arithmetic the API uses for a day's result, applied to the trimmed
     // series so that "best day" means the best day since the launch.
     function dayResult(day) {
-      const open = Number(day.open);
+      const open = Number(day.chainOpen ?? day.open);
       if (!Number.isFinite(open) || open <= 0) return null;
       const moved = Number(day.manualAdjustmentEur) || 0;
       const bot = Number(day.close) - open - moved;
@@ -2281,7 +2300,25 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
     function trimToLaunch(equity) {
       if (!equity || !Array.isArray(equity.days)) return equity;
-      const days = equity.days.filter(day => day.date >= LAUNCH_DATE);
+      const raw = equity.days.filter(day => day.date >= LAUNCH_DATE);
+
+      // A day opens where the previous one closed. Measuring it from its own first
+      // observed cycle instead drops whatever happened between the two: on
+      // futures-lukas-live 2026-08-19 closed at 80,99 and 2026-08-20 opened at 83,82,
+      // and those 2,83 belonged to no day at all - the daily results summed to 24,22
+      // while the account had actually made 27,06. The exception is a stretch nobody
+      // watched, which stays unattributed and is drawn grey.
+      const days = raw.map((day, index) => {
+        if (index === 0) return Object.assign({}, day, { chainOpen: Number(day.open) });
+        const prevClose = Number(raw[index - 1].close);
+        const blind = Number(day.gapMinutes);
+        const outage = Number.isFinite(prevClose) && Number.isFinite(blind) && blind > 60
+          && Math.abs(Number(day.open) - prevClose) >= 0.01;
+        return Object.assign({}, day, {
+          chainOpen: outage || !Number.isFinite(prevClose) ? Number(day.open) : prevClose,
+          outage
+        });
+      });
       const results = days.map(dayResult).filter(Boolean);
       return Object.assign({}, equity, {
         days,
