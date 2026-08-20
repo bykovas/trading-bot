@@ -615,7 +615,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
   .bc-hero{grid-template-columns:minmax(0,1fr)}
   /* Full bleed, cancelling the hero's side padding, so the bar spans edge to edge
      the way it did when it sat outside the hero. */
-  .bc-hero>.bc-mobilebar{order:1;min-width:0;margin:0 -20px;flex-wrap:wrap}
+  /* Tighter than the hero's own 18px rhythm on both sides: this is a thin utility
+     strip, and giving it the same air as a headline or a card makes it read as a
+     section of its own. The negative block margins pull back the grid gap; the
+     negative inline ones cancel the hero padding for the full-bleed rule. */
+  .bc-hero>.bc-mobilebar{order:1;min-width:0;margin:-7px -20px;padding:6px 14px;flex-wrap:wrap}
 }
 
 @container (max-width:899px){
@@ -624,7 +628,12 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
      status bar into the hero cost 72px and pushed the label to 858. The eyebrow
      lost the exchange name (it is still named in the heuristics paragraph) and
      the lead is a step smaller; re-measure both if anything is added here. */
-  .bc-hero-main .bc-lead{font-size:14px;line-height:1.45}
+  .bc-hero-main .bc-lead{font-size:13px;line-height:1.5}
+  .bc-hero-main .bc-h1{font-size:26px}
+  /* A span rather than a <br>: setting display on a <br> stops it breaking in some
+     engines, while a block-level span breaks reliably and leaves the wide layout
+     untouched, where the two halves stay on one line. */
+  .bc-hero-main .bc-h1 .bc-h1-a{display:block}
 }
 
 @container (max-width:899px){
@@ -638,6 +647,25 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     margin-top:0;padding:0 22px;
     border:1px solid rgba(245,184,79,.45);border-radius:9px;background:rgba(245,184,79,.07);
     color:var(--gold-soft);font:500 15px var(--font-display);box-shadow:none}
+}
+
+@container (max-width:899px){
+  /* On a phone the rate belongs under the two coins it compares, not wedged
+     between the heading and them. The heading and the rate live inside
+     .bc-coins-hd, the coins outside it, so the wrapper dissolves and all three
+     become siblings that can be ordered - the same trick .bc-topbar-right uses. */
+  .bc-coins{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .bc-coins-hd{display:contents}
+  .bc-coins-l{order:1}
+  .bc-coins-row{order:2;margin-top:0}
+  .bc-rate{order:3;margin-top:0}
+}
+
+@container (max-width:899px){
+  /* 42px sat between the scroll cue and the coins: the hero's 18px gap plus the
+     block's own 24px top margin, stacked. The cue and what follows it are one
+     thought, so the block keeps only the gap. */
+  .bc-hero>.bc-coins{margin-top:0}
 }
   </style>
 </head>
@@ -664,7 +692,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     <section class="bc-hero">
       <div class="bc-hero-main">
         <p class="bc-eyebrow">Uždaras testavimas · tikri pinigai</p>
-        <h1 class="bc-h1">Botas prekiauja. Mes uždirbam. Kol kas.</h1>
+        <h1 class="bc-h1"><span class="bc-h1-a">Botas prekiauja.</span> <span class="bc-h1-b">Mes uždirbam. Kol kas.</span></h1>
         <p class="bc-lead">Jis pats suranda ir atidaro pozicijas, pats valdo riziką, pats uždaro sandorius. Be rankų, be emocijų. Kiekvienas sprendimas įrašytas. Mes tik stebime, kaip keičiasi skaičiai.</p>
       </div>
 
