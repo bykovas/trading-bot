@@ -729,7 +729,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
             <p class="bc-proof-l">Geriausia para &#183; realūs sandoriai</p>
             <p class="bc-proof-n"><span class="bc-from" id="bcBestFrom">60 $</span><span class="bc-arrow">&#8594;</span><span class="bc-to" id="bcBestTo">89 $</span></p>
             <p class="bc-proof-s" id="bcBestS"><b>+29 $</b> &#183; +48 % &#183; geriausias rezultatas iki šiol</p>
-            <p class="bc-proof-fine" id="bcBestFine">Tai buvo 2026-08-19 diena — bet tai ne vienintelė diena, kuri baigėsi pliusu.</p>
+            <p class="bc-proof-fine" id="bcBestFine">Geriausia para iki šiol — bet ne vienintelė, sekasi įvairiai, nes eksperimentuojam.</p>
           </div>
           <div class="bc-proof-cell">
             <p class="bc-proof-l bc-proof-l--hypo">Jei tada tik būtume žinoję…</p>
@@ -738,7 +738,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           </div>
           <div class="bc-proof-cell">
             <p class="bc-proof-l bc-proof-l--warn">Sąžiningai</p>
-            <p class="bc-proof-p">Taip nutinka <b>ne visada</b> — kartais diena baigiasi minuse. Buvo savaičių, kai praradom daugiau, nei uždirbom, bet dažniausiai kol kas mums sekasi, todėl ir testuojame uždarai.</p>
+            <p class="bc-proof-p">Taip nutinka <b>ne visada</b> — kartais diena baigiasi minuse. Buvo savaičių, kai praradom daugiau, nei uždirbom.</p>
             <p class="bc-proof-fine" id="bcHonestyStat">Buvo ir minusinių dienų.</p>
           </div>
         </div>
@@ -1632,12 +1632,9 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // false, and if that day lost money the words "best result so far" sit over a
       // red number. Each claim is now made only in the case where it is true.
       const best = equity.bestDay;
-      const winners = (equity.days || []).map(dayResult).filter(Boolean)
-        .filter(result => result.botEur > 0).length;
       const lost = !!best && Number(best.botEur) <= 0;
 
-      fillDay(els.bestFrom, els.bestTo, els.bestS, best,
-        lost ? " · geriausia para iki šiol" : " · geriausias rezultatas iki šiol");
+      fillDay(els.bestFrom, els.bestTo, els.bestS, best, " · geriausias rezultatas iki šiol");
 
       if (best && els.hypoFrom) {
         // Muted throughout: this never happened, and §9b forbids dressing a
@@ -1655,14 +1652,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
             "botui nerūpi, su kokia suma dirba, o mes nepasinaudojom…";
       }
 
-      if (best && els.bestFine) {
-        els.bestFine.textContent = lost
-          ? "Strategija eksperimentinė ir šioje sąskaitoje kol kas nepasiteisino. "
-            + "Kitos sąskaitos rezultatas gali būti kitoks — perjunkite ir pamatysite."
-          : winners > 1
-            ? `Tai buvo ${best.date} diena — bet tai ne vienintelė diena, kuri baigėsi pliusu.`
-            : `Tai buvo ${best.date} diena — kol kas vienintelė, kuri baigėsi pliusu, tad spręsti dar anksti.`;
-      }
+      // One sentence for every case: it already says results vary, which is what a
+      // losing best day and a single closed day both need it to say.
     }
 
     // "12/30 dienų — minuse · blogiausia diena −1,37 $". Ships in the served HTML
@@ -1675,21 +1666,24 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         return;
       }
 
-      let down = 0;
+      // The bot's own result, not the raw close minus open: a day that took a deposit
+      // reads as barely down while the bot lost many times that. On 2026-08-19
+      // futures-live closed 1,81 below its open and the bot had lost 16,30 - the
+      // difference was money paid in. Saying -1,81 here would contradict the candle
+      // drawn a few centimetres above.
       let worst = null;
       days.forEach(day => {
-        const change = Number(day.close) - Number(day.open);
-        if (!Number.isFinite(change)) return;
-        if (change < 0) {
-          down += 1;
-          if (worst === null || change < worst) worst = change;
-        }
+        const result = dayResult(day);
+        if (!result || !(result.botEur < 0)) return;
+        if (worst === null || result.botEur < worst) worst = result.botEur;
       });
 
-      els.honestyStat.hidden = false;
-      els.honestyStat.textContent = worst === null
-        ? `0/${num(days.length, 0)} dienų — minuse`
-        : `${num(down, 0)}/${num(days.length, 0)} dienų — minuse · blogiausia diena ${signedMoney(worst)}`;
+      // Nothing to own up to yet: better silent than claiming a worst day that has
+      // not happened.
+      els.honestyStat.hidden = worst === null;
+      if (worst !== null) {
+        els.honestyStat.textContent = `Blogiausia diena ${signedMoney(worst)}`;
+      }
     }
 
     function renderHeadline(data) {
@@ -1719,13 +1713,17 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const first = days.length ? Number(days[0].open) : null;
       const manual = Number(data.equity && data.equity.manualAdjustmentEur) || 0;
       if (Number.isFinite(first) && first !== 0) {
-        const change = total - first;
-        const changePercent = change / Math.abs(first) * 100;
-        const manualPercent = manual / Math.abs(first) * 100;
+        // The bold figure is the bot's, like every other headline number on the page.
+        // It used to be the whole change with "iš jų ..." naming the manual part as a
+        // share of it, which put a green +3,11 in front of a reader on a day the bot
+        // had lost money and the deposits had covered it. The transfer is still shown,
+        // beside the result rather than inside it.
+        const botChange = total - first - manual;
+        const botPercent = botChange / Math.abs(first) * 100;
         const manualText = manual
-          ? ` · iš jų <i>${esc(signedMoney(manual))} (${esc(signedPercent(manualPercent, 1))})</i> rankiniai koregavimai`
+          ? ` · rankiniai koregavimai <i>${esc(signedMoney(manual))}</i>`
           : "";
-        els.liveSince.innerHTML = `Per ${esc(overDaysPhrase(days.length))} <b>${esc(signedMoney(change))} (${esc(signedPercent(changePercent, 1))})</b>${manualText}`;
+        els.liveSince.innerHTML = `Per ${esc(overDaysPhrase(days.length))} botas <b>${esc(signedMoney(botChange))} (${esc(signedPercent(botPercent, 1))})</b>${manualText}`;
       } else {
         els.liveSince.textContent = "";
       }
