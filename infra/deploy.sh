@@ -160,6 +160,11 @@ umask 077
 {
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  # Optional keyed Base RPC for the coin rate; the free endpoints are the
+  # fallback, so an unset secret is not an error.
+  if [[ -n "${TRADINGBOT_BASE_RPC_URL:-}" ]]; then
+    printf 'TRADINGBOT_BASE_RPC_URL=%s\n' "${TRADINGBOT_BASE_RPC_URL}"
+  fi
 } > "${API_ENV_FILE}"
 
 echo "Writing web environment to ${WEB_ENV_FILE}"

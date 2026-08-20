@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
@@ -149,6 +150,7 @@ app.MapGet("/api/dashboard", async (string? botInstanceId, CancellationToken can
         var workers = await ReadWorkers(connection, cancellationToken);
         var equity = await ReadEquityDays(connection, bot, DashboardDefaults.EquityWindowDays, cancellationToken);
         var today = await ReadTodayTrades(connection, bot, cancellationToken);
+        var rates = await CoinRates.ReadAsync(connectionString, connection, cancellationToken);
 
         return Results.Ok(new DashboardResponse(
             DateTimeOffset.UtcNow,
@@ -159,6 +161,7 @@ app.MapGet("/api/dashboard", async (string? botInstanceId, CancellationToken can
             workers,
             equity,
             today,
+            rates,
             summary is null ? "portfolio_state is empty; wait for the worker to persist a cycle" : null));
     }
     catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedObject)
@@ -172,6 +175,7 @@ app.MapGet("/api/dashboard", async (string? botInstanceId, CancellationToken can
             Array.Empty<DashboardWorkerDto>(),
             DashboardEquityDto.Empty(),
             DashboardTodayDto.Empty(),
+            null,
             "portfolio tables/views are not initialized yet; wait for the worker to start with database enabled"));
     }
 });
@@ -3138,6 +3142,7 @@ internal sealed record DashboardResponse(
     IReadOnlyList<DashboardWorkerDto> Workers,
     DashboardEquityDto Equity,
     DashboardTodayDto Today,
+    DashboardRatesDto? Rates,
     string? Warning);
 
 internal sealed record DashboardSignalDto(string Name, decimal Value, string Reason);
@@ -3221,6 +3226,15 @@ internal sealed record DashboardTradeDto(
     bool Exploratory,
     decimal? ScoreThreshold);
 
+internal sealed record DashboardRatesDto(
+    decimal BykoUsd,
+    decimal LukoUsd,
+    decimal LukoInByko,
+    decimal BykoInLuko,
+    long BlockNumber,
+    DateTime ObservedAt,
+    bool Stale);
+
 internal sealed record DashboardTodayDto(
     string LocalDate,
     string TimeZone,
@@ -3235,3 +3249,293 @@ internal sealed record DashboardTodayDto(
         new(string.Empty, "Europe/Vilnius", Array.Empty<DashboardTradeDto>(), 0, 0, 0, 0, 0m);
 }
 
+// Coin cross rate for the hero. The pools live on Base, and the public RPCs
+// rate-limit hard — seven calls from one address already drew a 429 — so this is
+// read server-side, at most once every few minutes, and cached in Postgres.
+// The stored row is also the fallback: when the chain cannot be reached the last
+// observation is served and flagged stale, rather than the line going blank.
+internal static class CoinRates
+{
+    public const string Usdc = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+
+    // Two pools, no direct LUKO/BYKO market: the cross rate is the ratio of the
+    // two dollar prices.
+    public static readonly (string Symbol, string Token, string Pool)[] Markets =
+    {
+        ("BYKO", "0x078bB16e24c8931Fc007928c370422e5e38F4372", "0x02dd4285ad38ea93d021ca854016a839b0b2a6ca"),
+        ("LUKO", "0x4a9DA2831A691E7C4aca594CaFd58c35e0131fD1", "0x2222a01b83db8c533b062aeb6de4f61d6ae792f2")
+    };
+
+    // Rotated on failure: one endpoint throttling must not take the rate down.
+    // A keyed endpoint (dRPC, Alchemy, whatever) goes first when
+    // TRADINGBOT_BASE_RPC_URL is set — the key stays in the environment, next to
+    // the database credentials, and never in the repository.
+    public static readonly string[] Endpoints = BuildEndpoints();
+
+    private static string[] BuildEndpoints()
+    {
+        var free = new[]
+        {
+            "https://base-rpc.publicnode.com",
+            "https://mainnet.base.org",
+            "https://base.drpc.org",
+            "https://1rpc.io/base"
+        };
+
+        var configured = Environment.GetEnvironmentVariable("TRADINGBOT_BASE_RPC_URL");
+        return string.IsNullOrWhiteSpace(configured)
+            ? free
+            : new[] { configured.Trim() }.Concat(free).ToArray();
+    }
+
+    public static readonly TimeSpan RefreshInterval = TimeSpan.FromMinutes(5);
+
+    // Beyond this the figure is still shown, but marked stale for the page.
+    public static readonly TimeSpan StaleAfter = TimeSpan.FromHours(6);
+
+    // A single long-lived client; the default one closes sockets too eagerly for
+    // a process that makes a handful of calls every few minutes.
+    public static readonly HttpClient Http = CreateClient();
+
+    private static HttpClient CreateClient()
+    {
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
+        // mainnet.base.org answers 403 to a bare programmatic agent.
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("BlynAI-dashboard/1.0");
+        return client;
+    }
+
+    private static readonly SemaphoreSlim Gate = new(1, 1);
+
+    public static async Task EnsureTableAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            """
+            create table if not exists token_rate_state (
+                symbol text primary key,
+                price_usdc numeric not null,
+                reserve_token numeric not null,
+                reserve_usdc numeric not null,
+                pool_address text not null,
+                block_number bigint not null,
+                observed_at timestamptz not null,
+                updated_at timestamptz not null default now()
+            )
+            """,
+            connection);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public static async Task<DashboardRatesDto?> ReadAsync(
+        string connectionString,
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await EnsureTableAsync(connection, cancellationToken);
+
+        var stored = await LoadAsync(connection, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+
+        if (stored is null || now - stored.UpdatedAt > RefreshInterval)
+        {
+            // One refresh at a time; concurrent pollers wait for the same result
+            // rather than each hitting the rate limit.
+            if (await Gate.WaitAsync(0, cancellationToken))
+            {
+                try
+                {
+                    var fresh = await FetchAsync(cancellationToken);
+                    if (fresh is not null)
+                    {
+                        await SaveAsync(connection, fresh, cancellationToken);
+                        stored = await LoadAsync(connection, cancellationToken);
+                    }
+                    else if (stored is not null)
+                    {
+                        // Touch nothing: keeping the old observed_at is what makes
+                        // the staleness visible on the page.
+                        Console.WriteLine("coin-rates: refresh failed, serving last known");
+                    }
+                }
+                finally
+                {
+                    Gate.Release();
+                }
+            }
+        }
+
+        if (stored is null)
+        {
+            return null;
+        }
+
+        var byko = stored.Prices.TryGetValue("BYKO", out var b) ? b : 0m;
+        var luko = stored.Prices.TryGetValue("LUKO", out var l) ? l : 0m;
+        if (byko <= 0m || luko <= 0m)
+        {
+            return null;
+        }
+
+        return new DashboardRatesDto(
+            byko,
+            luko,
+            luko / byko,
+            byko / luko,
+            stored.BlockNumber,
+            stored.ObservedAt.UtcDateTime,
+            now - stored.ObservedAt > StaleAfter);
+    }
+
+    private sealed record StoredRates(
+        Dictionary<string, decimal> Prices,
+        long BlockNumber,
+        DateTimeOffset ObservedAt,
+        DateTimeOffset UpdatedAt);
+
+    private static async Task<StoredRates?> LoadAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            "select symbol, price_usdc, block_number, observed_at, updated_at from token_rate_state",
+            connection);
+
+        var prices = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        long block = 0;
+        DateTimeOffset observed = default, updated = default;
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            prices[reader.GetString(0)] = reader.GetDecimal(1);
+            block = Math.Max(block, reader.GetInt64(2));
+            var rowObserved = reader.GetFieldValue<DateTimeOffset>(3);
+            var rowUpdated = reader.GetFieldValue<DateTimeOffset>(4);
+            if (rowObserved > observed) observed = rowObserved;
+            if (rowUpdated > updated) updated = rowUpdated;
+        }
+
+        return prices.Count == 0 ? null : new StoredRates(prices, block, observed, updated);
+    }
+
+    private static async Task SaveAsync(
+        NpgsqlConnection connection,
+        IReadOnlyList<(string Symbol, decimal Price, decimal Token, decimal UsdcSide, string Pool, long Block, DateTimeOffset At)> rows,
+        CancellationToken cancellationToken)
+    {
+        foreach (var row in rows)
+        {
+            await using var command = new NpgsqlCommand(
+                """
+                insert into token_rate_state
+                    (symbol, price_usdc, reserve_token, reserve_usdc, pool_address, block_number, observed_at, updated_at)
+                values (@symbol, @price, @reserve_token, @reserve_usdc, @pool, @block, @observed_at, now())
+                on conflict (symbol) do update set
+                    price_usdc = excluded.price_usdc,
+                    reserve_token = excluded.reserve_token,
+                    reserve_usdc = excluded.reserve_usdc,
+                    pool_address = excluded.pool_address,
+                    block_number = excluded.block_number,
+                    observed_at = excluded.observed_at,
+                    updated_at = now()
+                """,
+                connection);
+            command.Parameters.Add("symbol", NpgsqlDbType.Text).Value = row.Symbol;
+            command.Parameters.Add("price", NpgsqlDbType.Numeric).Value = row.Price;
+            command.Parameters.Add("reserve_token", NpgsqlDbType.Numeric).Value = row.Token;
+            command.Parameters.Add("reserve_usdc", NpgsqlDbType.Numeric).Value = row.UsdcSide;
+            command.Parameters.Add("pool", NpgsqlDbType.Text).Value = row.Pool;
+            command.Parameters.Add("block", NpgsqlDbType.Bigint).Value = row.Block;
+            command.Parameters.Add("observed_at", NpgsqlDbType.TimestampTz).Value = row.At;
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static async Task<List<(string, decimal, decimal, decimal, string, long, DateTimeOffset)>?> FetchAsync(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var block = await RpcAsync("eth_getBlockByNumber", "[\"latest\", false]", cancellationToken);
+            if (block is null) return null;
+
+            var blockNumber = FromHex(block.Value.GetProperty("number").GetString());
+            var observedAt = DateTimeOffset.FromUnixTimeSeconds(
+                (long)FromHex(block.Value.GetProperty("timestamp").GetString()));
+
+            var rows = new List<(string, decimal, decimal, decimal, string, long, DateTimeOffset)>();
+            foreach (var (symbol, _, pool) in Markets)
+            {
+                // token0() tells which side of the pair is USDC.
+                var token0 = await CallAsync(pool, "0x0dfe1681", cancellationToken);
+                var reserves = await CallAsync(pool, "0x0902f1ac", cancellationToken);
+                if (token0 is null || reserves is null) return null;
+
+                var usdcIsFirst = token0.EndsWith(Usdc[2..], StringComparison.OrdinalIgnoreCase);
+                var first = Word(reserves, 0);
+                var second = Word(reserves, 1);
+                var usdcRaw = usdcIsFirst ? first : second;
+                var tokenRaw = usdcIsFirst ? second : first;
+
+                // USDC carries 6 decimals, both coins 18.
+                var usdc = (decimal)usdcRaw / 1_000_000m;
+                var token = (decimal)tokenRaw / 1_000_000_000_000_000_000m;
+                if (usdc <= 0m || token <= 0m) return null;
+
+                rows.Add((symbol, usdc / token, token, usdc, pool, (long)blockNumber, observedAt));
+            }
+
+            return rows;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"coin-rates: fetch failed ({ex.Message})");
+            return null;
+        }
+    }
+
+    private static async Task<string?> CallAsync(string to, string data, CancellationToken cancellationToken)
+    {
+        var result = await RpcAsync(
+            "eth_call",
+            $"[{{\"to\":\"{to}\",\"data\":\"{data}\"}}, \"latest\"]",
+            cancellationToken);
+        return result?.GetString();
+    }
+
+    private static async Task<JsonElement?> RpcAsync(string method, string paramsJson, CancellationToken cancellationToken)
+    {
+        foreach (var endpoint in Endpoints)
+        {
+            try
+            {
+                var payload = $"{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"{method}\",\"params\":{paramsJson}}}";
+                using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+                using var response = await Http.PostAsync(endpoint, content, cancellationToken);
+                if (!response.IsSuccessStatusCode) continue;
+
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("error", out _)) continue;
+                if (!doc.RootElement.TryGetProperty("result", out var result)) continue;
+
+                return result.Clone();
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+            {
+                // Try the next endpoint.
+            }
+        }
+
+        return null;
+    }
+
+    private static ulong FromHex(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? 0UL : Convert.ToUInt64(value[2..], 16);
+
+    private static System.Numerics.BigInteger Word(string data, int index)
+    {
+        var slice = data.AsSpan(2 + index * 64, 64);
+        return System.Numerics.BigInteger.Parse("0" + slice.ToString(), NumberStyles.HexNumber);
+    }
+}

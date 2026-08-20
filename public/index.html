@@ -515,6 +515,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 .bc-modal--pages .bc-tabs{flex-direction:column;gap:8px;padding:0}
 .bc-modal--pages .bc-tabs a{justify-content:space-between;min-height:44px}
 
+
+/* A rate nobody has been able to refresh for hours still shows, but dimmed:
+   hiding it would be worse than admitting it is old. */
+.bc-rate--stale{opacity:.55}
   </style>
 </head>
 <body>
@@ -546,7 +550,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       <aside class="bc-coins">
         <div class="bc-coins-hd">
           <p class="bc-coins-l">Pripažįstame tik dvi valiutas</p>
-          <p class="bc-rate">1 LUKO &#8776; <b class="bc-rate-b">12,96</b> BYKO<span class="bc-rate-x"> &#183; </span>1 BYKO &#8776; <b class="bc-rate-l">0,08</b> LUKO</p>
+          <p class="bc-rate" id="bcRate">1 LUKO &#8776; <b class="bc-rate-b" id="bcRateB">9,28</b> BYKO<span class="bc-rate-x"> &#183; </span>1 BYKO &#8776; <b class="bc-rate-l" id="bcRateL">0,11</b> LUKO</p>
         </div>
         <div class="bc-coins-row">
           <a class="bc-coin bc-coin--luko" href="https://meetluko.eu"><span class="bc-coin-ic"><svg viewBox="0 0 512 512" aria-hidden="true"><circle cx="256" cy="256" r="256" fill="#0A0A0A"/><circle cx="256" cy="256" r="248" fill="none" stroke="#C9A86A" stroke-opacity=".5" stroke-width="8"/><g transform="translate(-117.1 -89.7) scale(1.4463)"><g opacity=".3"><path d="M144 164L182 122V167Z" fill="#C9A86A"/><g fill="none" stroke="#C9A86A" stroke-width="15"><circle cx="306" cy="186" r="58"/><path d="M364 186V312"/></g></g><path d="M182 122h52V312H346l16 16V358H182Z" fill="#C9A86A"/></g></svg></span><span class="bc-coin-txt"><b>LUKO</b><small>meetluko.eu</small><small class="bc-coin-algo">algo.meetluko.eu</small></span></a>
@@ -894,6 +898,9 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       chartCanvas: el("bcChartCanvas"),
       chartCaption: el("bcChartCaption"),
       honestyStat: el("bcHonestyStat"),
+      rate: el("bcRate"),
+      rateB: el("bcRateB"),
+      rateL: el("bcRateL"),
       legendDeposit: el("bcLegendDeposit"),
       legendWithdrawal: el("bcLegendWithdrawal"),
       metrics: el("bcMetrics"),
@@ -1342,6 +1349,28 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       els.honestyStat.textContent = worst === null
         ? `0/${num(days.length, 0)} dienų — minuse`
         : `${num(down, 0)}/${num(days.length, 0)} dienų — minuse · blogiausia diena ${signedMoney(worst)}`;
+    }
+
+    // The coin cross rate. Read from the chain by the API and cached there, so the
+    // page never talks to an RPC itself. Three levels of fallback: a live figure,
+    // the last one the API stored (shown with its age, because a rate nobody has
+    // refreshed for hours should say so), and the figures baked into the served
+    // HTML if the API cannot be reached at all.
+    function renderRate(rates) {
+      if (!els.rate || !rates) return;
+
+      const lukoInByko = Number(rates.lukoInByko);
+      const bykoInLuko = Number(rates.bykoInLuko);
+      if (!Number.isFinite(lukoInByko) || !Number.isFinite(bykoInLuko)) return;
+
+      els.rateB.textContent = num(lukoInByko, 2);
+      els.rateL.textContent = num(bykoInLuko, 2);
+
+      const observed = rates.observedAt ? ltDateTime(rates.observedAt) : null;
+      els.rate.title = observed
+        ? `Kursas iš Aerodrome telkinių Base tinkle · blokas ${num(rates.blockNumber, 0)} · ${observed} LT`
+        : "";
+      els.rate.classList.toggle("bc-rate--stale", !!rates.stale);
     }
 
     function renderHeadline(data) {
@@ -1930,6 +1959,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       notice(data.warning || null);
       renderStatus(data);
       renderHeadline(data);
+      renderRate(data.rates);
       renderChart(data);
       renderHonestyStat((data.equity && data.equity.days) || []);
       renderMetrics(data);
