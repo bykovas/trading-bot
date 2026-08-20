@@ -628,9 +628,16 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 }
 
 @container (max-width:899px){
-  /* Six more pixels for the fold budget. 44px is the floor: it is the smallest
-     comfortable tap target, and this is the page's only call to action. */
-  .bc-shell a.bc-cta{height:44px;font-size:15px}
+  /* The phone rule turned this into a filled gold slab across the full width, sitting
+     at the bottom of the first screen. In that position and that shape it reads as a
+     "next" control: the thumb goes for it instead of scrolling, and the reader skips
+     the live half of the page. Restoring the desktop treatment - outlined, sized to
+     its own text - makes it an offer rather than a way forward. 44px stays: it is the
+     smallest comfortable tap target, and this is the page's only call to action. */
+  .bc-shell a.bc-cta{display:inline-flex;justify-content:center;width:auto;height:44px;
+    margin-top:0;padding:0 22px;
+    border:1px solid rgba(245,184,79,.45);border-radius:9px;background:rgba(245,184,79,.07);
+    color:var(--gold-soft);font:500 15px var(--font-display);box-shadow:none}
 }
   </style>
 </head>
