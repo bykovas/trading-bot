@@ -161,9 +161,12 @@ umask 077
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
   # Optional keyed Base RPC for the coin rate; the free endpoints are the
-  # fallback, so an unset secret is not an error.
+  # fallback, so an unset secret is not an error. DRPC_API_KEY carries the bare
+  # key, so the URL is assembled here; an explicit TRADINGBOT_BASE_RPC_URL wins.
   if [[ -n "${TRADINGBOT_BASE_RPC_URL:-}" ]]; then
     printf 'TRADINGBOT_BASE_RPC_URL=%s\n' "${TRADINGBOT_BASE_RPC_URL}"
+  elif [[ -n "${DRPC_API_KEY:-}" ]]; then
+    printf 'TRADINGBOT_BASE_RPC_URL=https://lb.drpc.live/base/%s\n' "${DRPC_API_KEY}"
   fi
 } > "${API_ENV_FILE}"
 

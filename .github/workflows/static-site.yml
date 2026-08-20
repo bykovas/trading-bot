@@ -177,8 +177,9 @@ jobs:
       TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY: ${{ secrets.TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY }}
       TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET: ${{ secrets.TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET }}
       # Optional: a keyed Base RPC for the coin rate. Unset falls back to the
-      # public endpoints the API already rotates through.
-      TRADINGBOT_BASE_RPC_URL: ${{ secrets.TRADINGBOT_BASE_RPC_URL }}
+      # public endpoints the API already rotates through. deploy.sh builds the
+      # URL from the bare key.
+      DRPC_API_KEY: ${{ secrets.DRPC_API_KEY }}
 
     steps:
       - name: Download deploy bundle
