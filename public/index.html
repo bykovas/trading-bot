@@ -572,6 +572,51 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
    handoff calls out for .bc-shell a.bc-cta. */
 .bc-proof-n .bc-to.is-loss{color:var(--red)}
 .bc-proof-s b.bc-t-red{color:var(--red)}
+
+/* The delta pill fixed its height at 32px and used the `font` shorthand, which
+   resets line-height to the font's own "normal". IBM Plex Mono reports a tall
+   ascent, so the glyphs sit low in that line box and the Lithuanian descender in
+   "šiandien" ends up against the bottom edge. A stated line-height re-centres the
+   text, and real vertical padding with a minimum height keeps it off both edges
+   however tall the line turns out to be. */
+.bc-delta{height:auto;min-height:32px;padding-top:4px;padding-bottom:5px;line-height:1.15}
+/* The spec asks for 10px under the live value, but `.bc-shell p{margin:0}` is a
+   class plus a type selector and outranks `.bc-live-s`, so that margin never
+   applied: the blue "iš jų ..." line sat flush against the pill's border. Same
+   trap as the [hidden] and card-colour rules - matching the specificity is the
+   fix, not a bigger number. */
+.bc-shell .bc-live-s{margin-top:10px}
+
+/* A blue piece is money that was carried in or out, not a trading result. The
+   tooltip says so outright, so nobody reads the deposit that funded the account
+   as a day the bot had. */
+.bc-tip-n{margin:6px 0 0;padding-top:6px;border-top:1px solid var(--hairline-soft);
+  color:var(--muted-3);font-size:11px;line-height:1.35}
+
+/* A stretch nobody observed: the worker was down, so the account moved with no
+   record of who moved it. Grey because it is neither the bot's result nor a
+   transfer - crediting it to either would be a guess. */
+.bc-sq--gap{background:#7a7367}
+.bc-t-grey{color:#9a9184}
+
+/* The bot's swatches carry a triangle each; the transfer pair carries a plus and
+   a minus, so the legend reads the same way for both. The shared `.bc-sq svg`
+   rule sizes a 7x6 triangle, and these glyphs are square. */
+.bc-sq--dep svg,.bc-sq--wdr svg{width:7px;height:7px}
+
+@container (max-width:899px){
+  /* The status line and the account switch belong with the numbers they
+     describe, so on a phone they sit directly above the proof cards instead of
+     below the whole hero. Same order value as .bc-hero-main, so document order
+     places it right after the headline and still ahead of .bc-hero-wide. */
+  /* `1fr` is `minmax(auto,1fr)`, so any child wider than the screen stretches the
+     track and the whole page scrolls sideways. The status text is flex:none and
+     nowrap by design, which makes it exactly such a child. */
+  .bc-hero{grid-template-columns:minmax(0,1fr)}
+  /* Full bleed, cancelling the hero's side padding, so the bar spans edge to edge
+     the way it did when it sat outside the hero. */
+  .bc-hero>.bc-mobilebar{order:1;min-width:0;margin:0 -20px;flex-wrap:wrap}
+}
   </style>
 </head>
 <body>
@@ -617,6 +662,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <p class="bc-next-l">Arba pamatyk pats gyvai</p>
       </div>
 
+      <div class="bc-mobilebar bc-only-narrow">
+        <span class="bc-mb-status"><i class="bc-dot" id="bcMbDot"></i><span id="bcMbText">Kraunama</span><em id="bcMbAge"></em></span>
+        <span class="bc-seg"><button type="button" data-tenant="LUKAS">LUKAS</button><button type="button" data-tenant="DENISAS">DENISAS</button></span>
+      </div>
+
       <div class="bc-hero-wide">
         <div class="bc-proof">
           <div class="bc-proof-cell">
@@ -660,11 +710,6 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       </div>
     </section>
 
-    <div class="bc-mobilebar bc-only-narrow">
-      <span class="bc-mb-status"><i class="bc-dot" id="bcMbDot"></i><span id="bcMbText">Kraunama</span><em id="bcMbAge"></em></span>
-      <span class="bc-seg"><button type="button" data-tenant="LUKAS">LUKAS</button><button type="button" data-tenant="DENISAS">DENISAS</button></span>
-    </div>
-
     <section class="bc-live" id="live">
       <div class="bc-live-head">
         <div>
@@ -676,8 +721,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           <p class="bc-legend-l" id="bcChartCaption">Grafikas — 30 uždarytų dienų<br>(šiandiena dar neįskaityta)</p>
           <div class="bc-legend-row">
             <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span></span>Boto prekyba</span>
-            <span class="bc-lg" id="bcLegendDeposit" hidden><span class="bc-sq bc-sq--dep"></span>Įnašas</span>
-            <span class="bc-lg" id="bcLegendWithdrawal" hidden><span class="bc-sq bc-sq--wdr"></span>Išėmimas</span>
+            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--dep"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#0e2a48"/></svg></span><span class="bc-sq bc-sq--wdr"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#6faeff"/></svg></span></span>Pervedimai</span>
+            <span class="bc-lg" id="bcLegendGap" hidden><span class="bc-sq bc-sq--gap"></span>Trūksta duomenų</span>
           </div>
         </div>
       </div>
@@ -981,8 +1026,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       rate: el("bcRate"),
       rateB: el("bcRateB"),
       rateL: el("bcRateL"),
-      legendDeposit: el("bcLegendDeposit"),
-      legendWithdrawal: el("bcLegendWithdrawal"),
+      legendGap: el("bcLegendGap"),
       metrics: el("bcMetrics"),
       posMeta: el("bcPosMeta"),
       posList: el("bcPosList"),
@@ -1134,7 +1178,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       els.statusLineText.textContent = summaryText;
       els.statusLineAge.textContent = summaryAge;
       els.statusLineDot.className = `bc-dot ${HEALTH_TONE[worst] || ""}`;
-      els.mbText.textContent = summaryText;
+      // The phone bar has ~200px for the status once the account switch has taken its
+      // share, and the full sentence needs 214. These are the same words with the
+      // subject dropped, so nothing new has to be learned to read them.
+      els.mbText.textContent = worst === "ok" ? "Gyvai"
+        : worst === "stale" ? "Pasenę" : "Neatsako";
       els.mbAge.textContent = summaryAge;
       els.mbDot.className = `bc-dot ${HEALTH_TONE[worst] || ""}`;
       els.liveDot.className = `bc-dot ${HEALTH_TONE[worst] || ""}`;
@@ -1180,14 +1228,14 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       className: "bc-chart-svg bc-only-wide", width: 1180, height: 310,
       plotWidth: 1112, top: 24, bottom: 278, flowHeight: 54, flowGap: 16,
       labelX: 1124, labelSize: 10.5, gridLines: 7, dateTicks: 5, dateY: 296,
-      candleWidth: 20, wickWidth: 1.7, flowWidth: 14,
+      candleWidth: 26, wickWidth: 1.7, flowWidth: 14,
       pillWidth: 62, pillHeight: 23, pillSize: 12.5, annotationSize: 10.5
     };
     const CHART_NARROW = {
       className: "bc-chart-svg bc-only-narrow", width: 390, height: 168,
       plotWidth: 364, top: 8, bottom: 138, flowHeight: 26, flowGap: 10,
       labelX: 369, labelSize: 8.5, gridLines: 3, dateTicks: 3, dateY: 162,
-      candleWidth: 7, wickWidth: 1.2, flowWidth: 5,
+      candleWidth: 10, wickWidth: 1.2, flowWidth: 5,
       pillWidth: 40, pillHeight: 17, pillSize: 9.5, annotationSize: 8
     };
 
@@ -1205,80 +1253,141 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       return ticks;
     }
 
-    function chartSvg(spec, days, liveValue) {
-      const slots = Math.max(days.length, CHART_SLOTS);
+    // The launch. Nothing on this page reaches back before it - not the chart, not the
+    // cards, not the honesty line - and there is no way to ask it to: whatever the
+    // account did earlier belongs to a run that is not being shown, and letting one
+    // number quietly come from there while the others do not is how a page starts
+    // lying without anyone deciding to.
+    const LAUNCH_DATE = "2026-08-19";
+
+    // One column per day, built of at most two parts, because a day only ever has two
+    // authors: the bot and the hands. The coloured part is what the bot did, the blue
+    // part is what was moved in or out, and they are laid end to end so the column
+    // starts on the day's real opening value and finishes on its real closing value.
+    // Money moved is not money earned, and a single body from open to close cannot say
+    // that - it reports a deposit as profit.
+    //
+    // The blue part is drawn narrower and on top. When the two authors pull the same
+    // way it simply sits beyond the coloured part; when they pull against each other it
+    // runs back through it, which is the honest picture: on 2026-08-19 futures-live's
+    // bot lost 16,30 and the hands put 14,49 back, and the thin blue rod inside the red
+    // body is exactly that story.
+    function buildColumns(days) {
+      const columns = [];
+      days.forEach((day, index) => {
+        const open = Number(day.open);
+        const close = Number(day.close);
+        const moved = Number(day.manualAdjustmentEur) || 0;
+        if (!Number.isFinite(open) || !Number.isFinite(close)) return;
+
+        // The first day carries the capital the account started with as well as
+        // whatever was moved that day. Both are the same hand on the same date, so
+        // they are one blue part, drawn from zero and ahead of the bot: the account
+        // was funded first and traded afterwards. Later days put their blue part
+        // after the bot's, since by then the money was already there.
+        if (index === 0) {
+          // Only what was actually transferred around the launch counts as hands.
+          // The rest of the opening value is a balance carried over from before the
+          // series starts - painting that blue would credit the hands with money the
+          // bot had already been trading, and it pins the axis to zero for no reason.
+          const carried = open - (Number(day.preWindowEur) || 0);
+          const handsIn = (Number(day.preWindowEur) || 0) + moved;
+          columns.push({
+            date: day.date, opening: true, open: carried, close, moved: handsIn,
+            manual: handsIn ? { from: carried, to: carried + handsIn, amount: handsIn } : null,
+            bot: { from: carried + handsIn, to: close }
+          });
+          return;
+        }
+
+        // A day whose close was never observed - the worker was down - leaves the
+        // account somewhere other than where the next day picks it up. That stretch
+        // is drawn grey and hung on the day that went dark, running to the next
+        // opening: it is neither the bot's result nor a transfer, and pretending
+        // otherwise would be a guess. Only a real silence counts, so tiny rounding
+        // differences between two consecutive cycles do not paint grey slivers.
+        const previous = columns[columns.length - 1];
+        const prevClose = Number(days[index - 1].close);
+        const blind = Number(day.gapMinutes);
+        if (previous && Number.isFinite(prevClose) && Number.isFinite(blind)
+            && blind > 60 && Math.abs(open - prevClose) >= 0.01) {
+          previous.gap = { from: prevClose, to: open, minutes: blind };
+        }
+
+        const botTo = close - moved;
+        columns.push({
+          date: day.date, open, close, moved,
+          bot: { from: open, to: botTo },
+          manual: moved ? { from: botTo, to: close, amount: moved } : null
+        });
+      });
+      return columns;
+    }
+
+    function chartSvg(spec, columns, liveValue) {
+      const slots = Math.max(columns.length, CHART_SLOTS);
       const slot = spec.plotWidth / slots;
-      // The series is anchored right, against the ŠIANDIEN divider, so a young
-      // account gets normal-width candles by the divider rather than a handful
-      // stretched across the whole chart.
-      const centre = (index) => spec.plotWidth - (days.length - index - 0.5) * slot;
+      // Anchored right, against the ŠIANDIEN divider, so a young account gets
+      // normal-width candles by the divider rather than a few stretched across.
+      const centre = (index) => spec.plotWidth - (columns.length - index - 0.5) * slot;
 
-      const flows = days.map(day => Number(day.manualAdjustmentEur) || 0);
-      const hasFlow = flows.some(amount => amount !== 0);
-      const priceBottom = hasFlow ? spec.bottom - spec.flowHeight - spec.flowGap : spec.bottom;
-
-      const prices = [];
-      days.forEach(day => prices.push(
-        Number(day.high), Number(day.low), Number(day.open), Number(day.close)));
-      if (Number.isFinite(Number(liveValue))) prices.push(Number(liveValue));
-      const finite = prices.filter(Number.isFinite);
+      const values = [];
+      columns.forEach(column => {
+        if (column.bot) values.push(column.bot.from, column.bot.to);
+        if (column.manual) values.push(column.manual.from, column.manual.to);
+        if (column.gap) values.push(column.gap.from, column.gap.to);
+      });
+      if (Number.isFinite(Number(liveValue))) values.push(Number(liveValue));
+      const finite = values.filter(Number.isFinite);
       if (!finite.length) return "";
 
-      let min = Math.min(...finite);
+      // The axis always reaches zero, so the height of a bar means the same thing on
+      // every chart and between the two accounts: a column half the plot tall is half
+      // the money, not half of some floating window. Only the top is padded - padding
+      // the bottom would push the baseline below zero, which has no meaning here.
+      let min = Math.min(0, ...finite);
       let max = Math.max(...finite);
-      const pad = (max - min) * 0.08 || Math.max(Math.abs(max) * 0.02, 0.5);
-      min -= pad;
-      max += pad;
-      const y = (value) => spec.top + (max - Number(value)) / (max - min) * (priceBottom - spec.top);
+      max += (max - min) * 0.08 || Math.max(Math.abs(max) * 0.02, 0.5);
+      const y = (value) => spec.top + (max - Number(value)) / (max - min) * (spec.bottom - spec.top);
 
       const out = [];
       niceTicks(min, max, spec.gridLines).forEach(tick => {
         const ty = y(tick);
-        if (ty < spec.top - 1 || ty > priceBottom + 1) return;
+        if (ty < spec.top - 1 || ty > spec.bottom + 1) return;
         out.push(`<line x1="0" x2="${spec.plotWidth}" y1="${ty.toFixed(2)}" y2="${ty.toFixed(2)}" stroke="rgba(246,218,160,.07)" stroke-width="1"/>`);
         out.push(`<text x="${spec.labelX}" y="${(ty + 4).toFixed(2)}" fill="#5f584e" font-family="IBM Plex Mono, monospace" font-size="${spec.labelSize}">${esc(num(tick, tick % 1 === 0 ? 0 : 1))}</text>`);
       });
 
-      days.forEach((day, index) => {
+      // Bodies only, no wicks: the stored high and low belong to the day as a whole,
+      // transfer included, so hanging them off one part would be inventing a range.
+      const bar = (x, width, from, to, fill, stroke) => {
+        const top = y(Math.max(from, to));
+        const height = Math.max(1.5, Math.abs(y(from) - y(to)));
+        // Square corners. The handoff rounded the bodies by 2px, but a flat day is
+        // only 1.5px tall and the radius swallowed it whole, turning half of August
+        // into a row of pills.
+        return `<rect x="${(x - width / 2).toFixed(2)}" y="${top.toFixed(2)}" width="${width.toFixed(2)}" height="${height.toFixed(2)}" fill="${fill}"${stroke}/>`;
+      };
+
+      columns.forEach((column, index) => {
         const x = centre(index);
-        const open = Number(day.open);
-        const close = Number(day.close);
-        const colour = close >= open ? "#41eda0" : "#ff5367";
-        const bodyTop = y(Math.max(open, close));
-        const bodyHeight = Math.max(1, Math.abs(y(open) - y(close)));
-        out.push(`<line x1="${x.toFixed(2)}" x2="${x.toFixed(2)}" y1="${y(day.high).toFixed(2)}" y2="${y(day.low).toFixed(2)}" stroke="${colour}" stroke-width="${spec.wickWidth}" stroke-linecap="round" opacity="0.62"/>`);
-        out.push(`<rect x="${(x - spec.candleWidth / 2).toFixed(2)}" y="${bodyTop.toFixed(2)}" width="${spec.candleWidth.toFixed(2)}" height="${bodyHeight.toFixed(2)}" rx="2" fill="${colour}"/>`);
+        if (column.bot) {
+          out.push(bar(x, spec.candleWidth, column.bot.from, column.bot.to,
+            column.bot.to >= column.bot.from ? "#41eda0" : "#ff5367", ""));
+        }
+        if (column.manual) {
+          // Filled for money in, hollow for money out - the legend's own convention.
+          const paidIn = column.manual.amount >= 0;
+          out.push(bar(x, spec.flowWidth, column.manual.from, column.manual.to,
+            paidIn ? "#6faeff" : "#12100b",
+            paidIn ? "" : ' stroke="#6faeff" stroke-width="1.6"'));
+        }
+        if (column.gap) {
+          out.push(bar(x, spec.flowWidth, column.gap.from, column.gap.to, "#7a7367", ""));
+        }
       });
 
-      // Cash-flow band: its own scale, its own baseline, never touching the price.
-      if (hasFlow) {
-        const bandTop = priceBottom + spec.flowGap;
-        const bandBottom = bandTop + spec.flowHeight;
-        const maxIn = Math.max(0, ...flows);
-        const maxOut = Math.max(0, ...flows.map(amount => -amount));
-        const span = maxIn + maxOut;
-        const baseline = span === 0
-          ? bandBottom
-          : bandTop + spec.flowHeight * (maxIn / span);
-        const scale = span === 0 ? 0 : spec.flowHeight / span;
-
-        out.push(`<line x1="0" x2="${spec.plotWidth}" y1="${baseline.toFixed(2)}" y2="${baseline.toFixed(2)}" stroke="rgba(246,218,160,.12)" stroke-width="1"/>`);
-
-        days.forEach((day, index) => {
-          const amount = flows[index];
-          if (!amount) return;
-          const x = centre(index);
-          const height = Math.max(2, Math.abs(amount) * scale);
-          const top = amount > 0 ? baseline - height : baseline;
-          const fill = amount > 0 ? "#6faeff" : "#2f5d8a";
-          const stroke = amount > 0 ? "" : ' stroke="#6faeff" stroke-width="1.6"';
-          out.push(`<rect x="${(x - spec.flowWidth / 2).toFixed(2)}" y="${top.toFixed(2)}" width="${spec.flowWidth.toFixed(2)}" height="${height.toFixed(2)}" rx="1" fill="${fill}"${stroke}/>`);
-          const labelY = amount > 0 ? top - 4 : top + height + spec.annotationSize;
-          out.push(`<text x="${x.toFixed(2)}" y="${labelY.toFixed(2)}" fill="#6FAEFF" font-family="IBM Plex Mono, monospace" font-size="${spec.annotationSize}" font-weight="600" text-anchor="middle">${esc(signedMoney(amount, 2))}</text>`);
-        });
-      }
-
-      // Today, deliberately outside the candles.
+      // Today, deliberately outside the series.
       out.push(`<line x1="${spec.plotWidth}" x2="${spec.plotWidth}" y1="${spec.top}" y2="${spec.bottom}" stroke="#f5b84f" stroke-width="1" stroke-dasharray="3 4" opacity=".55"/>`);
       if (spec.gridLines > 3) {
         out.push(`<text x="${spec.plotWidth}" y="18" fill="#f5b84f" font-family="IBM Plex Mono, monospace" font-size="10" font-weight="600" letter-spacing="1.4" text-anchor="end">ŠIANDIEN →</text>`);
@@ -1290,38 +1399,67 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         out.push(`<text x="${spec.plotWidth + 4 + spec.pillWidth / 2}" y="${(ly + spec.pillSize / 2 - 1).toFixed(2)}" fill="#12100b" font-family="IBM Plex Mono, monospace" font-weight="700" font-size="${spec.pillSize}" text-anchor="middle">${esc(num(liveValue, 2))}</text>`);
       }
 
-      const tickCount = Math.min(spec.dateTicks, days.length);
-      for (let i = 0; i < tickCount; i += 1) {
-        const index = tickCount === 1 ? 0 : Math.round(i * (days.length - 1) / (tickCount - 1));
-        const day = days[index];
-        if (!day) continue;
-        out.push(`<text x="${centre(index).toFixed(2)}" y="${spec.dateY}" fill="#5f584e" font-family="IBM Plex Mono, monospace" font-size="${spec.labelSize}" text-anchor="middle">${esc(day.date.slice(5))}</text>`);
-      }
+      // One date label per day, centred over that day's columns.
+      const spans = [];
+      columns.forEach((column, index) => {
+        const last = spans[spans.length - 1];
+        if (last && last.date === column.date) last.to = index;
+        else spans.push({ date: column.date, from: index, to: index });
+      });
+      const step = Math.ceil(spans.length / spec.dateTicks);
+      spans.forEach((span, index) => {
+        if (index % step) return;
+        const x = (centre(span.from) + centre(span.to)) / 2;
+        out.push(`<text x="${x.toFixed(2)}" y="${spec.dateY}" fill="#5f584e" font-family="IBM Plex Mono, monospace" font-size="${spec.labelSize}" text-anchor="middle">${esc(span.date.slice(5))}</text>`);
+      });
 
-      // One invisible hit area per day, full height, so the tooltip has something
+      // One invisible hit area per column, full height, so the tooltip has something
       // to catch that is wider than a 7px candle on a phone.
-      days.forEach((day, index) => {
+      columns.forEach((column, index) => {
         out.push(`<rect class="bc-hit" data-day="${index}" x="${(centre(index) - slot / 2).toFixed(2)}" y="${spec.top}" width="${slot.toFixed(2)}" height="${(spec.bottom - spec.top).toFixed(2)}" fill="transparent"/>`);
       });
 
-      return `<svg class="${spec.className}" viewBox="0 0 ${spec.width} ${spec.height}" width="100%" role="img" aria-label="Portfelio vertė, ${days.length} uždarytų dienų">${out.join("")}</svg>`;
+      return `<svg class="${spec.className}" viewBox="0 0 ${spec.width} ${spec.height}" width="100%" role="img" aria-label="Portfelio vertė, ${spans.length} uždarytų dienų">${out.join("")}</svg>`;
     }
 
     // ---- chart tooltip ---------------------------------------------------
-    let chartDays = [];
+    let chartSegments = [];
 
-    function tooltipHtml(day) {
-      const change = Number(day.close) - Number(day.open);
-      const flow = Number(day.manualAdjustmentEur) || 0;
+    function hoursPhrase(minutes) {
+      const hours = Math.max(1, Math.round(minutes / 60));
+      const last = hours % 10;
+      const teen = hours % 100 >= 11 && hours % 100 <= 19;
+      if (hours === 1) return "1 valandą";
+      if (!teen && last >= 2 && last <= 9) return `${hours} valandas`;
+      return `${hours} valandų`;
+    }
+
+    function tooltipHtml(column) {
+      const bot = column.bot ? column.bot.to - column.bot.from : 0;
+      if (column.opening) {
+        return `<p class="bc-tip-d">${esc(column.date)}</p>` +
+          `<p class="bc-tip-r"><span>Atidarymas</span><b>${esc(money(column.open))}</b></p>` +
+          `<p class="bc-tip-r"><span>Įnešta</span><b class="bc-t-blue">${esc(money(column.moved))}</b></p>` +
+          `<p class="bc-tip-r"><span>Botas</span><b class="${toneClass(bot)}">${esc(signedMoney(bot))}</b></p>` +
+          `<p class="bc-tip-r"><span>Uždarymas</span><b class="${toneClass(bot)}">${esc(money(column.close))}</b></p>` +
+          `<p class="bc-tip-n">Mėlyna dalis — įneštos lėšos, ne boto pelnas</p>`;
+      }
       const rows = [
-        ["Atidarymas", money(day.open), ""],
-        ["Uždarymas", money(day.close), toneClass(change)],
-        ["Aukščiausia", money(day.high), ""],
-        ["Žemiausia", money(day.low), ""]
+        ["Atidarymas", money(column.open), ""],
+        ["Uždarymas", money(column.close), toneClass(column.close - column.open)],
+        ["Botas", signedMoney(bot), toneClass(bot)]
       ];
-      if (flow) rows.push([flow > 0 ? "Įnašas" : "Išėmimas", signedMoney(flow), "bc-t-blue"]);
-      return `<p class="bc-tip-d">${esc(day.date)}</p>` + rows.map(([label, value, tone]) =>
-        `<p class="bc-tip-r"><span>${esc(label)}</span><b class="${tone}">${esc(value)}</b></p>`).join("");
+      if (column.moved) {
+        rows.push([column.moved > 0 ? "Įnašas" : "Išėmimas", signedMoney(column.moved), "bc-t-blue"]);
+      }
+      if (column.gap) {
+        rows.push(["Trūksta duomenų", signedMoney(column.gap.to - column.gap.from), "bc-t-grey"]);
+      }
+      const note = column.gap
+        ? `<p class="bc-tip-n">Sistema nerašė ${esc(hoursPhrase(column.gap.minutes))} — kas per tą laiką pajudino sąskaitą, nežinoma</p>`
+        : (column.moved ? `<p class="bc-tip-n">Mėlyna dalis — perkeltos lėšos, ne boto pelnas</p>` : "");
+      return `<p class="bc-tip-d">${esc(column.date)}</p>` + rows.map(([label, value, tone]) =>
+        `<p class="bc-tip-r"><span>${esc(label)}</span><b class="${tone}">${esc(value)}</b></p>`).join("") + note;
     }
 
     function hideChartTip() {
@@ -1343,7 +1481,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const show = (event) => {
         const hit = event.target.closest ? event.target.closest(".bc-hit") : null;
         if (!hit) { hide(); return; }
-        const day = chartDays[Number(hit.dataset.day)];
+        const day = chartSegments[Number(hit.dataset.day)];
         if (!day) { hide(); return; }
 
         tip.innerHTML = tooltipHtml(day);
@@ -1371,24 +1509,24 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     function renderChart(data) {
       const days = (data.equity && data.equity.days) || [];
       const liveValue = data.summary ? Number(data.summary.totalValueEur) : null;
-      chartDays = days;
+      const columns = buildColumns(days);
+      chartSegments = columns;
       hideChartTip();
 
       els.chartCaption.innerHTML =
         `Grafikas — ${esc(closedDaysPhrase(days.length))}<br>(šiandiena dar neįskaityta)`;
 
-      // Deposits and withdrawals are only in the legend once the API can actually
-      // report them; a swatch for a mark that never appears is worse than no swatch.
-      const tracked = !!(data.equity && data.equity.manualAdjustmentsTracked)
-        && days.some(day => Number(day.manualAdjustmentEur));
-      els.legendDeposit.hidden = !tracked;
-      els.legendWithdrawal.hidden = !tracked;
+      // Money in and money out share one entry with a filled and a hollow swatch, the
+      // way the bot's two directions share one. It is the notation being explained,
+      // not the contents of a particular day, so it never hides. Grey is different:
+      // it means something went wrong, and it is announced only when it happened.
+      if (els.legendGap) els.legendGap.hidden = !columns.some(column => column.gap);
 
-      if (!days.length) {
+      if (!columns.length) {
         paint(els.chartCanvas, '<p class="bc-empty">Istorijos duomenų dar nėra</p>');
         return;
       }
-      paint(els.chartCanvas, chartSvg(CHART_WIDE, days, liveValue) + chartSvg(CHART_NARROW, days, liveValue));
+      paint(els.chartCanvas, chartSvg(CHART_WIDE, columns, liveValue) + chartSvg(CHART_NARROW, columns, liveValue));
     }
 
     // The coin cross rate. Read from the chain by the API and cached there, so the
@@ -1438,8 +1576,18 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
       fillDay(els.yestFrom, els.yestTo, els.yestS, equity.yesterday, " per parą");
 
+      // The copy under the best day was written for an account with a long history
+      // behind it. Once the series starts at the launch, that stops being the case:
+      // with one closed day "not the only day that ended in the plus" is simply
+      // false, and if that day lost money the words "best result so far" sit over a
+      // red number. Each claim is now made only in the case where it is true.
       const best = equity.bestDay;
-      fillDay(els.bestFrom, els.bestTo, els.bestS, best, " · geriausias rezultatas iki šiol");
+      const winners = (equity.days || []).map(dayResult).filter(Boolean)
+        .filter(result => result.botEur > 0).length;
+      const lost = !!best && Number(best.botEur) <= 0;
+
+      fillDay(els.bestFrom, els.bestTo, els.bestS, best,
+        lost ? " · geriausia para iki šiol" : " · geriausias rezultatas iki šiol");
 
       if (best && els.hypoFrom) {
         // Muted throughout: this never happened, and §9b forbids dressing a
@@ -1448,14 +1596,22 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         // the mock this replaces was whole-dollar too ("600 $ -> 900 $").
         els.hypoFrom.textContent = money(Number(best.open) * HYPO_MULTIPLIER, 0);
         els.hypoTo.textContent = money(Number(best.close) * HYPO_MULTIPLIER, 0);
-        els.hypoS.textContent =
-          `${signedMoney(Number(best.botEur) * HYPO_MULTIPLIER, 0)} · ta pati logika, tik nuliai, ` +
-          "botui nerūpi, su kokia suma dirba, o mes nepasinaudojom…";
+        els.hypoS.textContent = lost
+          // Ten times a losing day is not a missed opportunity, and pretending to
+          // regret it would be the one dishonest line on the page.
+          ? `${signedMoney(Number(best.botEur) * HYPO_MULTIPLIER, 0)} · ta pati logika, tik nuliai. ` +
+            "Šįkart gerai, kad nepasinaudojom…"
+          : `${signedMoney(Number(best.botEur) * HYPO_MULTIPLIER, 0)} · ta pati logika, tik nuliai, ` +
+            "botui nerūpi, su kokia suma dirba, o mes nepasinaudojom…";
       }
 
       if (best && els.bestFine) {
-        els.bestFine.textContent =
-          `Tai buvo ${best.date} diena — bet tai ne vienintelė diena, kuri baigėsi pliusu.`;
+        els.bestFine.textContent = lost
+          ? "Strategija eksperimentinė ir šioje sąskaitoje kol kas nepasiteisino. "
+            + "Kitos sąskaitos rezultatas gali būti kitoks — perjunkite ir pamatysite."
+          : winners > 1
+            ? `Tai buvo ${best.date} diena — bet tai ne vienintelė diena, kuri baigėsi pliusu.`
+            : `Tai buvo ${best.date} diena — kol kas vienintelė, kuri baigėsi pliusu, tad spręsti dar anksti.`;
       }
     }
 
@@ -2062,7 +2218,35 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
     let currencyCode = "USD";
 
+    // The same arithmetic the API uses for a day's result, applied to the trimmed
+    // series so that "best day" means the best day since the launch.
+    function dayResult(day) {
+      const open = Number(day.open);
+      if (!Number.isFinite(open) || open <= 0) return null;
+      const moved = Number(day.manualAdjustmentEur) || 0;
+      const bot = Number(day.close) - open - moved;
+      return {
+        date: day.date, open, close: open + bot,
+        manualAdjustmentEur: moved, botEur: bot, botPercent: bot / open * 100
+      };
+    }
+
+    function trimToLaunch(equity) {
+      if (!equity || !Array.isArray(equity.days)) return equity;
+      const days = equity.days.filter(day => day.date >= LAUNCH_DATE);
+      const results = days.map(dayResult).filter(Boolean);
+      return Object.assign({}, equity, {
+        days,
+        manualAdjustmentEur: days.reduce((sum, day) => sum + (Number(day.manualAdjustmentEur) || 0), 0),
+        yesterday: results.length ? results[results.length - 1] : null,
+        bestDay: results.length
+          ? results.reduce((best, result) => result.botPercent > best.botPercent ? result : best)
+          : null
+      });
+    }
+
     function render(data) {
+      data = Object.assign({}, data, { equity: trimToLaunch(data.equity) });
       currencyCode = (data.summary && data.summary.cashQuoteCurrency) || "USD";
       currencySymbol = currencyCode === "EUR" ? "€" : "$";
 
@@ -2078,11 +2262,32 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       renderTrades(data);
     }
 
+    // In production the page is served from the same host as the API, so /api is
+    // a plain same-origin path. Opened as a local file or from a dev server there
+    // is no /api next to it, so it falls back to the deployed host: the endpoint
+    // is public, read-only and sends CORS headers, which lets a local copy show
+    // the very same live numbers without a proxy.
+    const REMOTE_API = "https://algo.meetluko.eu";
+    const SERVED_OVER_HTTP = /^https?:$/.test(location.protocol) && !!location.hostname;
+    // Same origin first, because that is how the page is served in production. A copy
+    // opened from a file, or from a dev server with no /api behind it, falls back to
+    // the deployed host: the endpoint is public, read-only and sends CORS headers, so
+    // a local copy shows the very same live numbers without a proxy.
+    let apiBase = SERVED_OVER_HTTP ? "" : REMOTE_API;
+
     async function refresh() {
       const botInstanceId = TENANTS[tenant].botInstanceId;
       try {
-        const response = await fetch(`/api/dashboard?botInstanceId=${encodeURIComponent(botInstanceId)}`, { cache: "no-store" });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        let response;
+        try {
+          response = await fetch(`${apiBase}/api/dashboard?botInstanceId=${encodeURIComponent(botInstanceId)}`, { cache: "no-store" });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        } catch (sameOrigin) {
+          if (apiBase === REMOTE_API) throw sameOrigin;
+          apiBase = REMOTE_API;
+          response = await fetch(`${apiBase}/api/dashboard?botInstanceId=${encodeURIComponent(botInstanceId)}`, { cache: "no-store" });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        }
         const data = await response.json();
         lastGood = data;
         render(data);

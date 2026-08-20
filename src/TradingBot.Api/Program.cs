@@ -1947,7 +1947,7 @@ static async Task EnsureCashEventsTable(NpgsqlConnection connection, Cancellatio
 // it again is not a rounding error: futures-lukas-live was funded with 60 USD at
 // 08:21 and the worker's first cycle at 09:11 opened at exactly 60, so treating
 // that transfer as same-day inflow turned an +18.54 day into a reported -41.46.
-static async Task<Dictionary<string, decimal>> ReadDailyCashMovement(
+static async Task<(Dictionary<string, decimal> InWindow, Dictionary<string, decimal> BeforeWindow)> ReadDailyCashMovement(
     NpgsqlConnection connection,
     string botInstanceId,
     string timeZoneId,
@@ -1957,28 +1957,38 @@ static async Task<Dictionary<string, decimal>> ReadDailyCashMovement(
         """
         select
             day.local_date,
-            coalesce(sum(event.amount), 0) as net_amount
+            coalesce(sum(event.amount) filter (
+                where event.occurred_at >= day.first_utc
+                  and event.occurred_at <= day.last_utc), 0) as net_amount,
+            -- Money that arrived on the same local day but before the bot's first
+            -- cycle. It is already inside that day's opening value, so it must not
+            -- count as same-day inflow - but on the first day of a series it is the
+            -- capital the account was started with, and the chart draws it as such.
+            coalesce(sum(event.amount) filter (
+                where event.occurred_at < day.first_utc
+                  and (event.occurred_at at time zone @time_zone)::date = day.local_date), 0) as before_window
         from portfolio_daily_equity day
         left join portfolio_cash_events event
             on event.bot_instance_id = day.bot_instance_id
-           and event.occurred_at >= day.first_utc
-           and event.occurred_at <= day.last_utc
         where day.bot_instance_id = @bot_instance_id
           and day.first_utc is not null
         group by day.local_date
         """,
         connection);
     command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
+    command.Parameters.Add("time_zone", NpgsqlDbType.Text).Value = timeZoneId;
 
     var byDate = new Dictionary<string, decimal>();
+    var beforeWindow = new Dictionary<string, decimal>();
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
     while (await reader.ReadAsync(cancellationToken))
     {
-        byDate[reader.GetFieldValue<DateTime>(0).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)] =
-            reader.GetDecimal(1);
+        var date = reader.GetFieldValue<DateTime>(0).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        byDate[date] = reader.GetDecimal(1);
+        beforeWindow[date] = reader.GetDecimal(2);
     }
 
-    return byDate;
+    return (byDate, beforeWindow);
 }
 
 static async Task BackfillDailyEquity(
@@ -2204,7 +2214,7 @@ static async Task<DashboardEquityDto> ReadEquityDays(
     }
 
     await BackfillDailyEquity(connection, botInstanceId, timeZoneId, cancellationToken);
-    var movements = await ReadDailyCashMovement(connection, botInstanceId, timeZoneId, cancellationToken);
+    var (movements, beforeWindow) = await ReadDailyCashMovement(connection, botInstanceId, timeZoneId, cancellationToken);
 
     await using var command = new NpgsqlCommand(
         """
@@ -2214,9 +2224,25 @@ static async Task<DashboardEquityDto> ReadEquityDays(
             high_value_eur,
             low_value_eur,
             close_value_eur,
-            cycle_count
-        from portfolio_daily_equity
-        where bot_instance_id = @bot_instance_id
+            cycle_count,
+            gap_minutes
+        from (
+            select
+                local_date,
+                open_value_eur,
+                high_value_eur,
+                low_value_eur,
+                close_value_eur,
+                cycle_count,
+                -- Minutes between the previous day's last observed cycle and this
+                -- day's first one. Normally a couple of minutes; a long silence means
+                -- the worker was down and nobody saw what the account did, which is
+                -- not the same as the bot doing nothing.
+                extract(epoch from (first_utc - lag(last_utc) over (order by local_date))) / 60
+                    as gap_minutes
+            from portfolio_daily_equity
+            where bot_instance_id = @bot_instance_id
+        ) day
         order by local_date desc
         limit @days
         """,
@@ -2238,7 +2264,11 @@ static async Task<DashboardEquityDto> ReadEquityDays(
                 movements.TryGetValue(
                     reader.GetFieldValue<DateTime>(0).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     out var movement) ? movement : 0m,
-                reader.GetInt32(5)));
+                reader.GetInt32(5),
+                beforeWindow.TryGetValue(
+                    reader.GetFieldValue<DateTime>(0).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    out var opening) ? opening : 0m,
+                await reader.IsDBNullAsync(6, cancellationToken) ? null : reader.GetDouble(6)));
         }
     }
 
@@ -3328,7 +3358,14 @@ internal sealed record DashboardEquityDayDto(
     decimal Low,
     decimal Close,
     decimal ManualAdjustmentEur,
-    long Cycles);
+    long Cycles,
+    // Transfers made on this day but before the bot's first cycle. Zero on almost
+    // every day; on the first day of a series it is the capital the account began
+    // with, which the chart must not attribute to the bot.
+    decimal PreWindowEur,
+    // How long the account went unobserved before this day's first cycle. Null on the
+    // first day of the series, which has nothing before it.
+    double? GapMinutes);
 
 internal sealed record DashboardEquityDto(
     string TimeZone,
