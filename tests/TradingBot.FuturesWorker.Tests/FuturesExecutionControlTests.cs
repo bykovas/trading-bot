@@ -175,6 +175,9 @@ public sealed class FuturesExecutionControlTests
 
     private sealed class StubBroker : IFuturesBroker
     {
+        public Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(DateTimeOffset since, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<PortfolioCashEvent>>(Array.Empty<PortfolioCashEvent>());
+
         public bool IsConfigured => true;
         public FuturesTickerQuote? Ticker { get; init; }
         public FuturesOrderResult FokResult { get; init; } = FuturesOrderResult.Rejected("not configured");
@@ -249,5 +252,6 @@ public sealed class FuturesExecutionControlTests
         public void AppendCycle(DryRunCycleRecord record) { }
         public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots) { }
         public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc) => Array.Empty<MarketSnapshotRecord>();
+        public void SaveCashEvents(IReadOnlyList<PortfolioCashEvent> events) { }
     }
 }

@@ -15,6 +15,12 @@ internal interface IFuturesBroker
 
     Task<FuturesTickerQuote?> GetTickerAsync(string symbol, CancellationToken cancellationToken);
 
+    // Deposits, withdrawals and transfers since the given instant, from the futures
+    // account log. Best-effort: an outage returns an empty list.
+    Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(
+        DateTimeOffset since,
+        CancellationToken cancellationToken);
+
     // reduceOnly MUST be true for every exit order; leverage applies to entries.
     Task<FuturesOrderResult> SendOrderAsync(
         string symbol,

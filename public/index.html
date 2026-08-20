@@ -804,11 +804,24 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const slot = spec.plotWidth / slots;
       const centre = (index) => spec.plotWidth - (days.length - index - 0.5) * slot;
 
+      // A day's money movement is drawn stacked UNDER that day's candle: the blue
+      // bar runs from yesterday's close to yesterday's close plus the net movement,
+      // and the bot's candle carries on from there. That is what separates "I put
+      // money in" from "the bot earned it". Several movements in one day are already
+      // netted by the API, so there is exactly one bar per day and it has no wick.
+      const segment = (index) => {
+        const manual = Number(days[index].manualAdjustmentEur) || 0;
+        if (!manual) return null;
+        const previous = index > 0 ? Number(days[index - 1].close) : NaN;
+        const base = Number.isFinite(previous) ? previous : Number(days[index].open) - manual;
+        return { manual, base, top: base + manual };
+      };
+
       const values = [];
-      days.forEach(day => {
+      days.forEach((day, index) => {
         values.push(Number(day.high), Number(day.low), Number(day.open), Number(day.close));
-        const manual = Number(day.manualAdjustmentEur) || 0;
-        if (manual) values.push(Number(day.close) - manual);
+        const move = segment(index);
+        if (move) values.push(move.base, move.top);
       });
       if (Number.isFinite(Number(liveValue))) values.push(Number(liveValue));
       const finite = values.filter(Number.isFinite);
@@ -839,17 +852,17 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         out.push(`<line x1="${x.toFixed(2)}" x2="${x.toFixed(2)}" y1="${y(day.high).toFixed(2)}" y2="${y(day.low).toFixed(2)}" stroke="${colour}" stroke-width="${spec.wickWidth}" stroke-linecap="round" opacity="0.62"/>`);
         out.push(`<rect x="${(x - spec.candleWidth / 2).toFixed(2)}" y="${bodyTop.toFixed(2)}" width="${spec.candleWidth.toFixed(2)}" height="${bodyHeight.toFixed(2)}" rx="2" fill="${colour}"/>`);
 
-        const manual = Number(day.manualAdjustmentEur) || 0;
-        if (manual) {
-          const from = y(close - manual);
-          const to = y(close);
+        const move = segment(index);
+        if (move) {
+          const from = y(move.base);
+          const to = y(move.top);
           const top = Math.min(from, to);
           const height = Math.max(2, Math.abs(from - to));
-          const fill = manual > 0 ? "#6faeff" : "#2f5d8a";
-          const stroke = manual > 0 ? "" : ' stroke="#6faeff" stroke-width="1.6"';
+          const fill = move.manual > 0 ? "#6faeff" : "#2f5d8a";
+          const stroke = move.manual > 0 ? "" : ' stroke="#6faeff" stroke-width="1.6"';
           out.push(`<rect x="${(x - spec.adjustWidth / 2).toFixed(2)}" y="${top.toFixed(2)}" width="${spec.adjustWidth.toFixed(2)}" height="${height.toFixed(2)}" rx="1" fill="${fill}"${stroke}/>`);
-          const label = signedMoney(manual, 2);
-          const labelY = manual > 0 ? top - 5 : top + height + spec.annotationSize + 1;
+          const label = signedMoney(move.manual, 2);
+          const labelY = move.manual > 0 ? top - 5 : top + height + spec.annotationSize + 1;
           out.push(`<text x="${x.toFixed(2)}" y="${labelY.toFixed(2)}" fill="#6FAEFF" font-family="IBM Plex Mono, monospace" font-size="${spec.annotationSize}" font-weight="600" text-anchor="middle">${esc(label)}</text>`);
         }
       });

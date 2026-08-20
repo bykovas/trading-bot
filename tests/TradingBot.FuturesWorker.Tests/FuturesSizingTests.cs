@@ -28,6 +28,7 @@ public sealed class FuturesSizingTests
         public void AppendCycle(DryRunCycleRecord record) { }
         public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots) { }
         public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc) => Array.Empty<MarketSnapshotRecord>();
+        public void SaveCashEvents(IReadOnlyList<PortfolioCashEvent> events) { }
     }
 
     private static (FuturesVirtualPortfolio Portfolio, PortfolioState State, FuturesBotConfiguration Config) Setup(

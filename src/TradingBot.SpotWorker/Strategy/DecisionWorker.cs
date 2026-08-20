@@ -845,12 +845,60 @@ internal sealed class DecisionWorker(
         }
     }
 
+
+    // Ledger sync is throttled: money movement is rare, the exchange rate-limits
+    // private calls, and the trading cycle must never wait on it.
+    private static readonly TimeSpan CashEventSyncInterval = TimeSpan.FromMinutes(30);
+
+    // Re-read a generous window every time. The store dedupes on the exchange's own
+    // entry id, so an overlap costs nothing and a missed sync heals itself.
+    private static readonly TimeSpan CashEventSyncWindow = TimeSpan.FromDays(45);
+
+    private DateTimeOffset _lastCashEventSync = DateTimeOffset.MinValue;
+
+    private async Task SyncCashEventsAsync(DateTimeOffset utc, CancellationToken cancellationToken)
+    {
+        if (utc - _lastCashEventSync < CashEventSyncInterval)
+        {
+            return;
+        }
+
+        _lastCashEventSync = utc;
+
+        try
+        {
+            var events = await FetchCashEventsAsync(utc - CashEventSyncWindow, cancellationToken);
+            if (events.Count == 0)
+            {
+                return;
+            }
+
+            dryRunPortfolio.Store.SaveCashEvents(events);
+            Console.WriteLine($"cash-events: stored {events.Count} ledger entr{(events.Count == 1 ? "y" : "ies")}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"cash-events: sync failed ({ex.Message})");
+        }
+    }
+
+    private Task<IReadOnlyList<PortfolioCashEvent>> FetchCashEventsAsync(
+        DateTimeOffset since,
+        CancellationToken cancellationToken) =>
+        broker is null
+            ? Task.FromResult<IReadOnlyList<PortfolioCashEvent>>(Array.Empty<PortfolioCashEvent>())
+            : broker.GetCashEventsAsync(since, cancellationToken);
+
     private async Task ReconcileWithKrakenAsync(
         PortfolioState state,
         IReadOnlyList<InstrumentMarketState> marketStates,
         DateTimeOffset utc,
         CancellationToken cancellationToken)
     {
+        // Deposits and withdrawals are read from the ledger, not inferred from the
+        // cash drift below: that drift also moves when the exchange settles funds.
+        await SyncCashEventsAsync(utc, cancellationToken);
+
         IReadOnlyDictionary<string, decimal> balances;
         try
         {

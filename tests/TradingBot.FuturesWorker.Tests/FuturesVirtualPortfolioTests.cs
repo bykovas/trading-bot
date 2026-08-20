@@ -25,6 +25,7 @@ public sealed class FuturesVirtualPortfolioTests
         public void AppendCycle(DryRunCycleRecord record) { }
         public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots) { }
         public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc) => Array.Empty<MarketSnapshotRecord>();
+        public void SaveCashEvents(IReadOnlyList<PortfolioCashEvent> events) { }
     }
 
     [Fact]

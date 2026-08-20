@@ -40,6 +40,24 @@ public sealed class PortfolioState
     };
 }
 
+// One money movement into or out of the account that the bot did not cause:
+// a deposit, a withdrawal, or a transfer between wallets. Read from the exchange
+// ledger rather than inferred, because cash also moves between cycles when the
+// exchange releases or re-commits margin, and the two are indistinguishable from
+// the bot's own balance snapshots.
+public sealed record PortfolioCashEvent(
+    // The exchange's own ledger entry id. Used as the dedupe key, so re-reading an
+    // overlapping window costs nothing.
+    string EventId,
+    DateTimeOffset OccurredAt,
+    // deposit | withdrawal | transfer
+    string EventType,
+    // Signed in account currency: positive into the account, negative out of it.
+    decimal Amount,
+    string? Asset,
+    // Which ledger it came from, e.g. kraken-spot-ledger.
+    string Source);
+
 public sealed class PendingFuturesOrder
 {
     public string Pair { get; set; } = string.Empty;

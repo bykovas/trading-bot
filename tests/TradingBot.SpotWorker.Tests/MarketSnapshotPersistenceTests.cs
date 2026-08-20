@@ -139,6 +139,8 @@ public class MarketSnapshotPersistenceTests
 
         public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc) =>
             SnapshotBatches.SelectMany(batch => batch).Where(snapshot => snapshot.Utc >= sinceUtc).ToList();
+
+        public void SaveCashEvents(IReadOnlyList<PortfolioCashEvent> events) { }
     }
 
     private sealed class FixedAdvisor(params string[] pairs) : IWatchlistAdvisor

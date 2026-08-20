@@ -900,6 +900,10 @@ public sealed class FuturesDeadManSwitchTests
         public Task<IReadOnlyList<FuturesOpenOrder>> GetOpenOrdersAsync(CancellationToken cancellationToken) =>
             Task.FromResult(OpenOrders);
 
+        public Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(
+            DateTimeOffset since, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<PortfolioCashEvent>>(Array.Empty<PortfolioCashEvent>());
+
         public Task<FuturesTickerQuote?> GetTickerAsync(string symbol, CancellationToken cancellationToken) =>
             Task.FromResult<FuturesTickerQuote?>(TickerQuote ?? new FuturesTickerQuote(symbol, 100m, 100.1m, 100m, 100m, DateTimeOffset.UtcNow));
 

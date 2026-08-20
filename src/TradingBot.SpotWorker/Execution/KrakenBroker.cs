@@ -315,6 +315,85 @@ internal sealed class KrakenBroker(HttpClient httpClient, KrakenOptions options)
         }
     }
 
+
+    // Deposits, withdrawals and transfers straight from the Kraken ledger. This is
+    // the only trustworthy source for them: cash on the account also moves when the
+    // exchange settles or releases funds, so comparing balances between cycles
+    // cannot tell a deposit apart from ordinary account activity.
+    public async Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(
+        DateTimeOffset since,
+        CancellationToken cancellationToken)
+    {
+        JsonDocument doc;
+        try
+        {
+            // Kraken takes a single ledger type per call, so ask for everything once
+            // and keep the three entry kinds that represent money moving in or out.
+            doc = await PostPrivateAsync(
+                "/0/private/Ledgers",
+                new Dictionary<string, string>
+                {
+                    ["type"] = "all",
+                    ["start"] = since.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)
+                },
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException)
+        {
+            Console.WriteLine($"broker-ledger: failed ({ex.Message})");
+            return Array.Empty<PortfolioCashEvent>();
+        }
+
+        using (doc)
+        {
+            var root = doc.RootElement;
+            var errors = ReadErrors(root);
+            if (errors.Count > 0)
+            {
+                Console.WriteLine($"broker-ledger: rejected ({string.Join(", ", errors)})");
+                return Array.Empty<PortfolioCashEvent>();
+            }
+
+            if (!root.TryGetProperty("result", out var result)
+                || result.ValueKind != JsonValueKind.Object
+                || !result.TryGetProperty("ledger", out var ledger)
+                || ledger.ValueKind != JsonValueKind.Object)
+            {
+                return Array.Empty<PortfolioCashEvent>();
+            }
+
+            var events = new List<PortfolioCashEvent>();
+            foreach (var entry in ledger.EnumerateObject())
+            {
+                var value = entry.Value;
+                var type = (value.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null)
+                    ?? string.Empty;
+                if (!IsCashMovement(type))
+                {
+                    continue;
+                }
+
+                var seconds = ReadDouble(value, "time");
+                events.Add(new PortfolioCashEvent(
+                    entry.Name,
+                    seconds > 0d
+                        ? DateTimeOffset.FromUnixTimeMilliseconds((long)(seconds * 1000d))
+                        : DateTimeOffset.UtcNow,
+                    type.ToLowerInvariant(),
+                    ReadDecimal(value, "amount"),
+                    value.TryGetProperty("asset", out var asset) ? asset.GetString() : null,
+                    "kraken-spot-ledger"));
+            }
+
+            return events;
+        }
+    }
+
+    private static bool IsCashMovement(string type) =>
+        type.Equals("deposit", StringComparison.OrdinalIgnoreCase)
+        || type.Equals("withdrawal", StringComparison.OrdinalIgnoreCase)
+        || type.Equals("transfer", StringComparison.OrdinalIgnoreCase);
+
     private static double ReadDouble(JsonElement element, string property) =>
         element.TryGetProperty(property, out var value)
         && value.ValueKind == JsonValueKind.Number

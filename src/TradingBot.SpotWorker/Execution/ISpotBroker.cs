@@ -51,6 +51,12 @@ internal interface ISpotBroker
     // throws) when the call fails, so a history outage degrades to the prior
     // balance-only behaviour rather than blocking the trading cycle.
     Task<IReadOnlyList<SpotTradeHistoryEntry>> GetTradeHistoryAsync(CancellationToken cancellationToken);
+
+    // Deposits, withdrawals and transfers since the given instant, from the
+    // exchange ledger. Best-effort: an outage returns an empty list.
+    Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(
+        DateTimeOffset since,
+        CancellationToken cancellationToken);
 }
 
 // One executed spot trade as reported by Kraken TradesHistory. Cost and Fee are in

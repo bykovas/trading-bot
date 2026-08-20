@@ -15,6 +15,8 @@ internal sealed class DryRunPortfolio(
     BotConfiguration? fullConfig = null)
 {
     private readonly IDryRunPortfolioStore _store = store ?? new FileDryRunPortfolioStore(options);
+
+    public IDryRunPortfolioStore Store => _store;
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly StrategyOptions _strategy = strategy ?? new StrategyOptions();
     private readonly CorrelationRiskOptions _correlationRisk = correlationRisk ?? new CorrelationRiskOptions();

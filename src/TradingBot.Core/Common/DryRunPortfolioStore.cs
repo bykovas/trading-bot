@@ -20,6 +20,11 @@ public interface IDryRunPortfolioStore
     // hydrate the price-action history after a restart so the anti-lag guard is not
     // blind for several cycles. Callers wrap this: a failure only skips hydration.
     IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc);
+
+    // Deposits, withdrawals and transfers read from the exchange ledger. Idempotent
+    // on the exchange's entry id, so overlapping windows can be re-synced freely.
+    // Callers wrap this: a failure must never block the trading cycle.
+    void SaveCashEvents(IReadOnlyList<PortfolioCashEvent> events);
 }
 
 public sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunPortfolioStore
@@ -122,6 +127,12 @@ public sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunPor
         }
 
         return results.OrderBy(record => record.Utc).ToList();
+    }
+
+    // File mode backs a local dry run with no dashboard behind it, so ledger events
+    // have nowhere to go. Kept as an explicit no-op rather than an interface split.
+    public void SaveCashEvents(IReadOnlyList<PortfolioCashEvent> events)
+    {
     }
 }
 
@@ -479,6 +490,48 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
         return results;
     }
 
+    public void SaveCashEvents(IReadOnlyList<PortfolioCashEvent> events)
+    {
+        if (events.Count == 0)
+        {
+            return;
+        }
+
+        EnsureSchema();
+
+        using var connection = OpenConnection();
+        using var command = new NpgsqlCommand(
+            """
+            insert into portfolio_cash_events
+                (bot_instance_id, event_id, occurred_at, event_type, amount, asset, source)
+            select
+                @bot_instance_id,
+                unnest(@event_ids),
+                unnest(@occurred_at),
+                unnest(@event_types),
+                unnest(@amounts),
+                unnest(@assets),
+                unnest(@sources)
+            on conflict (bot_instance_id, event_id) do nothing
+            """,
+            connection);
+        command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
+        command.Parameters.Add("event_ids", NpgsqlDbType.Array | NpgsqlDbType.Text).Value =
+            events.Select(item => item.EventId).ToArray();
+        command.Parameters.Add("occurred_at", NpgsqlDbType.Array | NpgsqlDbType.TimestampTz).Value =
+            events.Select(item => item.OccurredAt.UtcDateTime).ToArray();
+        command.Parameters.Add("event_types", NpgsqlDbType.Array | NpgsqlDbType.Text).Value =
+            events.Select(item => item.EventType).ToArray();
+        command.Parameters.Add("amounts", NpgsqlDbType.Array | NpgsqlDbType.Numeric).Value =
+            events.Select(item => item.Amount).ToArray();
+        command.Parameters.Add("assets", NpgsqlDbType.Array | NpgsqlDbType.Text).Value =
+            events.Select(item => (object?)item.Asset ?? DBNull.Value).ToArray();
+        command.Parameters.Add("sources", NpgsqlDbType.Array | NpgsqlDbType.Text).Value =
+            events.Select(item => item.Source).ToArray();
+        command.ExecuteNonQuery();
+    }
+
+
     private void EnsureSchema()
     {
         if (_schemaReady)
@@ -624,6 +677,21 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             alter table portfolio_state_summary
                 add column if not exists cash_quote_value numeric,
                 add column if not exists cash_quote_currency text;
+
+            create table if not exists portfolio_cash_events (
+                bot_instance_id text not null,
+                event_id text not null,
+                occurred_at timestamptz not null,
+                event_type text not null,
+                amount numeric not null,
+                asset text,
+                source text not null,
+                recorded_at timestamptz not null default now(),
+                primary key (bot_instance_id, event_id)
+            );
+
+            create index if not exists ix_portfolio_cash_events_bot_occurred
+                on portfolio_cash_events (bot_instance_id, occurred_at desc);
 
             create table if not exists portfolio_action_history_state (
                 bot_instance_id text not null,

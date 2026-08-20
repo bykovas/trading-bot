@@ -1903,6 +1903,60 @@ static async Task EnsureDailyEquityTable(NpgsqlConnection connection, Cancellati
     await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
+// Written by the workers from the exchange ledger; declared here too so the
+// dashboard keeps working on a database where no worker has synced yet.
+static async Task EnsureCashEventsTable(NpgsqlConnection connection, CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand(
+        """
+        create table if not exists portfolio_cash_events (
+            bot_instance_id text not null,
+            event_id text not null,
+            occurred_at timestamptz not null,
+            event_type text not null,
+            amount numeric not null,
+            asset text,
+            source text not null,
+            recorded_at timestamptz not null default now(),
+            primary key (bot_instance_id, event_id)
+        )
+        """,
+        connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
+// Net money movement per local day. Several movements in one day collapse to one
+// figure on the chart — the individual entries stay in portfolio_cash_events.
+static async Task<Dictionary<string, decimal>> ReadDailyCashMovement(
+    NpgsqlConnection connection,
+    string botInstanceId,
+    string timeZoneId,
+    CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand(
+        """
+        select
+            (occurred_at at time zone @time_zone)::date as local_date,
+            sum(amount) as net_amount
+        from portfolio_cash_events
+        where bot_instance_id = @bot_instance_id
+        group by local_date
+        """,
+        connection);
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
+    command.Parameters.Add("time_zone", NpgsqlDbType.Text).Value = timeZoneId;
+
+    var byDate = new Dictionary<string, decimal>();
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    while (await reader.ReadAsync(cancellationToken))
+    {
+        byDate[reader.GetFieldValue<DateTime>(0).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)] =
+            reader.GetDecimal(1);
+    }
+
+    return byDate;
+}
+
 static async Task BackfillDailyEquity(
     NpgsqlConnection connection,
     string botInstanceId,
@@ -1961,7 +2015,9 @@ static async Task<DashboardEquityDto> ReadEquityDays(
     }
 
     await EnsureDailyEquityTable(connection, cancellationToken);
+    await EnsureCashEventsTable(connection, cancellationToken);
     await BackfillDailyEquity(connection, botInstanceId, timeZoneId, cancellationToken);
+    var movements = await ReadDailyCashMovement(connection, botInstanceId, timeZoneId, cancellationToken);
 
     await using var command = new NpgsqlCommand(
         """
@@ -1992,19 +2048,25 @@ static async Task<DashboardEquityDto> ReadEquityDays(
                 reader.GetDecimal(2),
                 reader.GetDecimal(3),
                 reader.GetDecimal(4),
-                0m,
+                movements.TryGetValue(
+                    reader.GetFieldValue<DateTime>(0).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    out var movement) ? movement : 0m,
                 reader.GetInt32(5)));
         }
     }
 
     closed.Reverse();
 
-    // Manual money movement is NOT derivable from what is stored today: on the live
-    // accounts cash jumps by 15-45 USD between cycles while total portfolio value
-    // stays flat, because the exchange releases and re-commits margin outside the
-    // bot's own action log. Reporting those as deposits would be fiction, so the
-    // series carries no adjustments until the worker records the real events.
-    return new DashboardEquityDto(timeZoneId, todayLocal, closed, 0m, false);
+    // Deposits and withdrawals come from the exchange ledger, which the workers sync
+    // into portfolio_cash_events. They are never inferred from cash moving between
+    // cycles: on the live accounts that also happens when the exchange releases or
+    // re-commits margin, and the two are indistinguishable from balances alone.
+    return new DashboardEquityDto(
+        timeZoneId,
+        todayLocal,
+        closed,
+        closed.Sum(day => day.ManualAdjustmentEur),
+        true);
 }
 
 static async Task<DashboardTodayDto> ReadTodayTrades(

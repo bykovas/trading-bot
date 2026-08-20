@@ -238,6 +238,9 @@ public sealed class FuturesEntryMirrorTests
 
     private sealed class StubBroker : IFuturesBroker
     {
+        public Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(DateTimeOffset since, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<PortfolioCashEvent>>(Array.Empty<PortfolioCashEvent>());
+
         public bool IsConfigured => true;
         public int EntryCalls { get; private set; }
         public string? EntrySide { get; private set; }
@@ -329,5 +332,6 @@ public sealed class FuturesEntryMirrorTests
         public void AppendCycle(DryRunCycleRecord record) { }
         public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots) { }
         public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc) => [];
+        public void SaveCashEvents(IReadOnlyList<PortfolioCashEvent> events) { }
     }
 }

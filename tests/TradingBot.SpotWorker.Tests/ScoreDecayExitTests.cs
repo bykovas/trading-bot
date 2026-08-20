@@ -266,5 +266,6 @@ public class ScoreDecayExitTests
         public void AppendCycle(DryRunCycleRecord record) { }
         public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots) { }
         public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc) => [];
+        public void SaveCashEvents(IReadOnlyList<PortfolioCashEvent> events) { }
     }
 }

@@ -1711,6 +1711,50 @@ internal sealed class FuturesDecisionWorker(
         Console.WriteLine($"futures dead-man-switch: refreshed timeout={config.Futures.DeadManSwitchSeconds}s");
     }
 
+
+    // Ledger sync is throttled: money movement is rare, the exchange rate-limits
+    // private calls, and the trading cycle must never wait on it.
+    private static readonly TimeSpan CashEventSyncInterval = TimeSpan.FromMinutes(30);
+
+    // Re-read a generous window every time. The store dedupes on the exchange's own
+    // entry id, so an overlap costs nothing and a missed sync heals itself.
+    private static readonly TimeSpan CashEventSyncWindow = TimeSpan.FromDays(45);
+
+    private DateTimeOffset _lastCashEventSync = DateTimeOffset.MinValue;
+
+    private async Task SyncCashEventsAsync(DateTimeOffset utc, CancellationToken cancellationToken)
+    {
+        if (utc - _lastCashEventSync < CashEventSyncInterval)
+        {
+            return;
+        }
+
+        _lastCashEventSync = utc;
+
+        try
+        {
+            var events = await FetchCashEventsAsync(utc - CashEventSyncWindow, cancellationToken);
+            if (events.Count == 0)
+            {
+                return;
+            }
+
+            portfolio.Store.SaveCashEvents(events);
+            Console.WriteLine($"cash-events: stored {events.Count} ledger entr{(events.Count == 1 ? "y" : "ies")}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"cash-events: sync failed ({ex.Message})");
+        }
+    }
+
+    private Task<IReadOnlyList<PortfolioCashEvent>> FetchCashEventsAsync(
+        DateTimeOffset since,
+        CancellationToken cancellationToken) =>
+        broker is null
+            ? Task.FromResult<IReadOnlyList<PortfolioCashEvent>>(Array.Empty<PortfolioCashEvent>())
+            : broker.GetCashEventsAsync(since, cancellationToken);
+
     private async Task ReconcileWithKrakenAsync(
         PortfolioState state,
         IReadOnlyList<InstrumentOptions> universe,
@@ -1722,6 +1766,11 @@ internal sealed class FuturesDecisionWorker(
         {
             throw new InvalidOperationException("futures live reconciliation requested but broker is not configured.");
         }
+
+        // Real deposits and withdrawals, from the futures account log. Collateral
+        // that the exchange releases or re-commits looks identical in the balances
+        // below, so only the ledger can tell the two apart.
+        await SyncCashEventsAsync(utc, cancellationToken);
 
         var accounts = await broker.GetAccountsAsync(cancellationToken);
         var positions = await broker.GetOpenPositionsAsync(cancellationToken);

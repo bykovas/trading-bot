@@ -396,6 +396,91 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
         EnsureSuccess(doc.RootElement, "cancelallordersafter");
     }
 
+
+    // Deposits, withdrawals and transfers from the futures account log. Kraken keeps
+    // this history far longer than the bot keeps cycles, so the first sync backfills
+    // movements that never existed in our database.
+    public async Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(
+        DateTimeOffset since,
+        CancellationToken cancellationToken)
+    {
+        JsonDocument doc;
+        try
+        {
+            doc = await SendPrivateAsync(
+                HttpMethod.Get,
+                "/api/history/v3/account-log",
+                new List<KeyValuePair<string, string>>
+                {
+                    new("since", since.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)),
+                    new("sort", "asc")
+                },
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException)
+        {
+            Console.WriteLine($"futures-ledger: failed ({ex.Message})");
+            return Array.Empty<PortfolioCashEvent>();
+        }
+
+        using (doc)
+        {
+            if (!doc.RootElement.TryGetProperty("logs", out var logs) || logs.ValueKind != JsonValueKind.Array)
+            {
+                return Array.Empty<PortfolioCashEvent>();
+            }
+
+            var events = new List<PortfolioCashEvent>();
+            foreach (var log in logs.EnumerateArray())
+            {
+                // "info" carries the entry kind as prose, e.g. "deposit",
+                // "futures trade", "funding rate change".
+                var info = GetString(log, "info") ?? string.Empty;
+                var kind = ClassifyCashMovement(info);
+                if (kind is null)
+                {
+                    continue;
+                }
+
+                // "change" is the signed delta; fall back to the balance pair when the
+                // field is absent, which happens on some historical entries.
+                var change = GetDecimal(log, "change")
+                    ?? (GetDecimal(log, "new_balance") - GetDecimal(log, "old_balance"));
+                if (change is null || change.Value == 0m)
+                {
+                    continue;
+                }
+
+                var id = GetString(log, "id")
+                    ?? (log.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.Number
+                        ? idElement.GetRawText()
+                        : null);
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    continue;
+                }
+
+                events.Add(new PortfolioCashEvent(
+                    id,
+                    ParseTimestamp(GetString(log, "date")) ?? DateTimeOffset.UtcNow,
+                    kind,
+                    change.Value,
+                    GetString(log, "asset"),
+                    "kraken-futures-account-log"));
+            }
+
+            return events;
+        }
+    }
+
+    private static string? ClassifyCashMovement(string info)
+    {
+        if (info.Contains("deposit", StringComparison.OrdinalIgnoreCase)) return "deposit";
+        if (info.Contains("withdrawal", StringComparison.OrdinalIgnoreCase)) return "withdrawal";
+        if (info.Contains("transfer", StringComparison.OrdinalIgnoreCase)) return "transfer";
+        return null;
+    }
+
     internal string SignForTest(string endpointPath, string nonce, string postData) =>
         Sign(endpointPath, nonce, postData, _options.ApiSecret);
 
