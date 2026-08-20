@@ -56,3 +56,6 @@ docker-data/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Node tooling for the Open Graph card generator (tools/build-og.mjs).
+node_modules/

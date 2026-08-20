@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<title>LUKO ALGO — og:image 1200×630</title>
+<!--
+  Šis failas yra og:image šaltinis. Jį atidaro build skriptas (tools/build-og.mjs)
+  ir nufotografuoja į public/assets/og-algo-1200x630.png.
+
+  PRIEŠ PALEIDŽIANT BUILD'Ą: pakeisk žemiau esantį Google Fonts <link> į vietinius
+  @font-face (šriftai tools/fonts/), kad generavimas nepriklausytų nuo tinklo:
+
+  <style>
+    @font-face{font-family:Anton;src:url('./fonts/Anton-Regular.woff2') format('woff2');font-weight:400;font-display:block}
+    @font-face{font-family:Archivo;src:url('./fonts/Archivo-ExtraLight.woff2') format('woff2');font-weight:200;font-display:block}
+    @font-face{font-family:'DM Mono';src:url('./fonts/DMMono-Medium.woff2') format('woff2');font-weight:500;font-display:block}
+  </style>
+-->
+<style>
+  /* Local faces, as the comment above requires: the build must not depend on the
+     network. TrueType rather than woff2 because the Google Fonts CSS API only
+     serves woff2 as unicode-range subsets, and the subset a modern browser is
+     handed first is vietnamese — "uždirbam" would have rasterised as tofu.
+     Space Grotesk is embedded too: the credit name is Space Grotesk 700, and
+     without it that line falls back to Helvetica and stops matching the layout. */
+  @font-face{font-family:Anton;src:url('./fonts/Anton-Regular.ttf') format('truetype');font-weight:400;font-display:block}
+  @font-face{font-family:Archivo;src:url('./fonts/Archivo-ExtraLight.ttf') format('truetype');font-weight:200;font-display:block}
+  @font-face{font-family:'DM Mono';src:url('./fonts/DMMono-Medium.ttf') format('truetype');font-weight:500;font-display:block}
+  @font-face{font-family:'Space Grotesk';src:url('./fonts/SpaceGrotesk-Bold.ttf') format('truetype');font-weight:700;font-display:block}
+</style>
+<style>
+  html,body{margin:0;padding:0;background:#FFDFAF}
+  #card{
+    width:1200px;height:630px;box-sizing:border-box;overflow:hidden;
+    background:#FFDFAF radial-gradient(#00000018 3px,transparent 3px) 0 0/12px 12px;
+    color:#1E1408;display:flex;flex-direction:column;justify-content:space-between;
+    font-family:Archivo,'Helvetica Neue',Helvetica,Arial,sans-serif;
+  }
+  .top{flex:1;display:flex;align-items:center;justify-content:space-between;gap:40px;padding:32px 72px 24px;min-height:0}
+  .lead{display:flex;flex-direction:column;align-items:flex-start;gap:18px;min-width:0}
+  .algo{font-family:Anton,'Arial Narrow',sans-serif;font-size:280px;line-height:.9;letter-spacing:.01em;color:#8BFF6B;-webkit-text-stroke:6px #1E1408;paint-order:stroke fill}
+  .brand{flex:none;display:flex;flex-direction:column;align-items:center;gap:20px}
+  .disc{flex:none;width:270px;height:270px;display:flex;align-items:center;justify-content:center;background:#1E1408;border-radius:50%}
+  .disc svg{display:block;width:155px;height:155px}
+  .wordmark{font-family:Archivo,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:52px;font-weight:200;line-height:1;letter-spacing:.2em;padding-left:.2em;color:#1E1408}
+  /* Engine credit. BlynAI's mark and wordmark keep their own colours, so they
+     ride on an ink plate instead of sitting on apricot — the plate reads as an
+     inserted badge and neither brand has to be repainted. Rounded to 14px so it
+     answers the coin instead of fighting it, and kept third in the size ladder:
+     ALGO (what) > LUKO (whose) > BlynAI Capital (which engine) > the hook. */
+  .credit{display:flex;align-items:center;gap:12px;padding:11px 18px 11px 13px;background:#1E1408;border-radius:14px}
+  .credit-tile{flex:none;display:block;width:42px;height:42px}
+  .credit-txt{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .credit-name{font-family:'Space Grotesk',Archivo,Helvetica,Arial,sans-serif;font-weight:700;font-size:21px;line-height:1;letter-spacing:-.01em;color:#F6EFE1;white-space:nowrap}
+  .credit-name em{font-style:normal;color:#E8B84B}
+  .credit-sub{font-family:'DM Mono',ui-monospace,Menlo,monospace;font-weight:500;font-size:10.5px;line-height:1;letter-spacing:.22em;color:#9B8FD8;white-space:nowrap}
+  .band{flex:none;background:#B0007F;color:#FFDFAF;border-top:6px solid #1E1408;padding:30px 72px;display:flex;align-items:flex-end;justify-content:space-between;gap:32px}
+  .claim{font-family:Anton,'Arial Narrow',sans-serif;font-size:52px;line-height:1.1}
+  .claim em{font-style:normal;color:#8BFF6B}
+  .domain{font-family:'DM Mono',ui-monospace,Menlo,monospace;font-weight:500;font-size:30px;line-height:1;letter-spacing:.04em;white-space:nowrap}
+</style>
+</head>
+<body>
+<div id="card">
+  <div class="top">
+    <div class="lead">
+      <div class="algo">ALGO</div>
+      <div class="credit">
+        <svg class="credit-tile" viewBox="0 0 64 64" aria-hidden="true">
+          <rect x="1.5" y="1.5" width="61" height="61" rx="17" fill="#0A0A0A" stroke="#C9A86A" stroke-opacity=".55" stroke-width="1.6"></rect>
+          <g fill="none" stroke="#E8B84B" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 22 15.5 32 23 42"></path>
+            <path d="M41 22 48.5 32 41 42"></path>
+          </g>
+          <g fill="#E8B84B">
+            <circle cx="27.5" cy="27.5" r="2.5"></circle><circle cx="36.5" cy="27.5" r="2.5"></circle>
+            <circle cx="27.5" cy="36.5" r="2.5"></circle><circle cx="36.5" cy="36.5" r="2.5"></circle>
+          </g>
+        </svg>
+        <span class="credit-txt">
+          <span class="credit-name">Blyn<em>AI</em> Capital</span>
+          <span class="credit-sub">L&amp;D FINANCE LAB</span>
+        </span>
+      </div>
+    </div>
+    <div class="brand">
+      <div class="disc">
+        <svg viewBox="137 118 242 242" aria-hidden="true">
+          <g opacity=".3">
+            <path d="M144 164L182 122V167Z" fill="#C9A86A"></path>
+            <g fill="none" stroke="#C9A86A" stroke-width="15"><circle cx="306" cy="186" r="58"></circle><path d="M364 186V312"></path></g>
+          </g>
+          <path d="M182 122h52V312H346l16 16V358H182Z" fill="#C9A86A"></path>
+        </svg>
+      </div>
+      <div class="wordmark">LUKO</div>
+    </div>
+  </div>
+  <div class="band">
+    <div class="claim">Botas prekiauja. <em>Mes uždirbam.</em> Kol kas.</div>
+    <div class="domain">algo.meetluko.eu</div>
+  </div>
+</div>
+</body>
+</html>
