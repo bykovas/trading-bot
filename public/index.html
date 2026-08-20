@@ -357,6 +357,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
   .bc-skeleton--trade{height:104px}
   .bc-skeleton--chart{height:168px}
 }
+
+/* The spec gives .bc-lg an explicit display:inline-flex, which outranks the user
+   agent's [hidden] rule — so a hidden legend chip still took up space. State it
+   once for the whole shell. */
+.bc-shell [hidden]{display:none!important}
   </style>
 </head>
 <body>
@@ -762,6 +767,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     // Two viewBoxes from one series: a tall one for wide containers, a short
     // one for phones. Both plot CLOSED days only — today lives to the right of
     // the gold divider as the dashed live line and the gold pill.
+    const CHART_SLOTS = 30;
     const CHART_WIDE = {
       className: "bc-chart-svg bc-only-wide", width: 1180, height: 310,
       plotWidth: 1112, top: 24, bottom: 278, labelX: 1124, labelSize: 10.5,
@@ -790,9 +796,13 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     }
 
     function chartSvg(spec, days, liveValue) {
-      const slots = Math.max(days.length, 1);
+      // The grid is always CHART_SLOTS wide and the series is anchored to the
+      // right, against the ŠIANDIEN divider. A young account (LUKAS has two
+      // closed days) gets two normal candles by the divider and empty space to
+      // the left — not two candles stretched across the whole chart.
+      const slots = Math.max(days.length, CHART_SLOTS);
       const slot = spec.plotWidth / slots;
-      const centre = (index) => (index + 0.5) * slot;
+      const centre = (index) => spec.plotWidth - (days.length - index - 0.5) * slot;
 
       const values = [];
       days.forEach(day => {
@@ -982,38 +992,144 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     }
 
     // ---- prose ------------------------------------------------------------
-    // The bot's own vocabulary, in Lithuanian. Signals above the noise floor
-    // become the "because" clause; the rest is state.
-    const SIGNAL_WORDS = {
-      EMA: ["EMA buvo bullish", "EMA persisuko žemyn"],
-      Momentum: ["momentum patvirtino kilimą", "momentum buvo negatyvus"],
-      RSI: ["RSI buvo palankus", "RSI rodė silpnumą"],
-      Volatility: ["volatilumas dar leido saugiai įeiti", "volatilumas buvo per didelis"],
-      Trend: ["kaina laikėsi virš trendo filtro", "kaina nusileido žemiau trendo filtro"],
-      Volume: ["apimtis patvirtino judėjimą", "apimtis nepatvirtino judėjimo"],
-      PriceAction: ["paskutinių žvakių eiga kilo", "paskutinių žvakių eiga smuko"]
+    // Ported from the humaniser in public/trades.html and translated to
+    // Lithuanian. Three defects from the original are fixed on the way:
+    //  * a LONG futures entry no longer describes an exchange-confirmed fill as
+    //    a "dry-run" (the original built that sentence by string-replacing the
+    //    spot wording, dragging "dry-run" along with it);
+    //  * the entry threshold is quoted from the decision instead of a hardcoded
+    //    0.90, which matches nothing — futures use 0.8, spot 0.85;
+    //  * EmaGapVelocity, which the worker itself labels "not used for trading",
+    //    stays out of the signal chips.
+
+    function normalizedReason(reason) {
+      return String(reason || "").toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+    }
+
+    const EXIT_BADGES = {
+      SELL_TAKE_PROFIT: { text: "Tikslas", tone: "green" },
+      SELL_STOP_LOSS: { text: "Stop loss", tone: "red" },
+      SELL_SCORE_DECAY: { text: "Balas nuslūgo", tone: "warn" },
+      SELL_POST_ENTRY_ADVERSE: { text: "Pasuko prieš", tone: "warn" },
+      SELL_MAX_HOLD: { text: "Laikymo limitas", tone: "warn" },
+      SELL_SIGNAL_FLIP: { text: "Signalas apsivertė", tone: "warn" },
+      SELL_TRAILING_STOP: { text: "Slenkantis stop", tone: "green" },
+      SELL_KILL_SWITCH: { text: "Avarinis stabdys", tone: "red" },
+      SELL_EMERGENCY_RISK: { text: "Avarinė rizika", tone: "red" },
+      SELL_BROKER_SAFETY: { text: "Brokerio apsauga", tone: "red" }
     };
 
-    function signalClause(signals) {
-      const strong = (signals || [])
-        .filter(signal => Math.abs(Number(signal.value) || 0) >= 0.05)
-        .sort((a, b) => Math.abs(Number(b.value)) - Math.abs(Number(a.value)))
-        .slice(0, 3)
-        .map(signal => {
-          const words = SIGNAL_WORDS[signal.name];
-          if (!words) return null;
-          return Number(signal.value) >= 0 ? words[0] : words[1];
-        })
-        .filter(Boolean);
-      return strong.length ? strong.join(", ") : null;
+    // The original returned a structured code unchanged and looked it straight up
+    // in the SELL_* map. The worker stores it without that prefix (STOP_LOSS, not
+    // SELL_STOP_LOSS), so every structured code missed the map and fell through to
+    // the generic "closed by an exit rule" sentence. Canonicalise first, and only
+    // fall back to reading the log when the code is unknown.
+    function inferExitCode(code, reason) {
+      const raw = String(code || "").trim().toUpperCase().replace(/^SELL_/, "");
+      if (raw && EXIT_BADGES[`SELL_${raw}`]) return `SELL_${raw}`;
+      const text = normalizedReason(reason);
+      if (text.includes("take profit")) return "SELL_TAKE_PROFIT";
+      if (text.includes("stop loss")) return "SELL_STOP_LOSS";
+      if (text.includes("score decay")) return "SELL_SCORE_DECAY";
+      if (text.includes("post entry adverse")) return "SELL_POST_ENTRY_ADVERSE";
+      if (text.includes("conditional max hold") || text.includes("max hold")) return "SELL_MAX_HOLD";
+      if (text.includes("trailing stop")) return "SELL_TRAILING_STOP";
+      if (text.includes("kill switch")) return "SELL_KILL_SWITCH";
+      if (text.includes("emergency risk")) return "SELL_EMERGENCY_RISK";
+      if (text.includes("broker safety")) return "SELL_BROKER_SAFETY";
+      if (text.includes("signal flip")
+        || text.includes("signal reversal close")
+        || text.includes("desired exposure flipped to flat")
+        || text.includes("confirmed bearish flip")
+        || text.includes("strategy no longer wanted")
+        || text.includes("strategy no longer wants")) {
+        return "SELL_SIGNAL_FLIP";
+      }
+      return null;
+    }
+
+    function exitExplanation(code, reason, side) {
+      const text = normalizedReason(reason);
+      const isShort = String(side || "").toUpperCase() === "SHORT";
+      const closed = isShort ? "Uždarė SHORT" : "Pardavė";
+      const map = {
+        SELL_TAKE_PROFIT: isShort
+          ? "Uždarė SHORT, nes pozicija pasiekė tikslą (take-profit)."
+          : "Pardavė, nes pozicija pasiekė tikslą (take-profit). Tai pelno fiksavimas, o ne panika.",
+        SELL_STOP_LOSS: `${closed}, nes pozicija pasiekė boto darbinį stop-loss.`,
+        SELL_SCORE_DECAY: `${closed}, nes pradinis stiprus signalas subyrėjo, kol pozicija buvo minuse.`,
+        SELL_POST_ENTRY_ADVERSE: `${closed}, nes iškart po įėjimo kaina pasuko prieš poziciją, o signalas nustojo pasitvirtinti.`,
+        SELL_MAX_HOLD: text.includes("stale loss")
+          ? "Uždarė pasenusią futures poziciją pagal laikymo limitą — ji sena ir jau buvo minuse."
+          : "Uždarė pagal maksimalaus laikymo laikmatį.",
+        SELL_SIGNAL_FLIP: isShort
+          ? "Uždarė SHORT, nes strategija nebenorėjo laikyti short."
+          : "Pardavė, nes strategija nebenorėjo laikyti long.",
+        SELL_TRAILING_STOP: `${closed} pagal slenkantį stop: pozicija jau buvo pelne, bet atsitraukė nuo vietinės viršūnės.`,
+        SELL_KILL_SWITCH: `${closed} dėl avarinio stabdžio. Tai apsauginė priemonė.`,
+        SELL_EMERGENCY_RISK: `${closed} dėl avarinės rizikos taisyklės.`,
+        SELL_BROKER_SAFETY: `${closed} dėl brokerio arba sąskaitos saugos taisyklės.`
+      };
+      const inferred = inferExitCode(code, reason);
+      if (inferred && map[inferred]) return map[inferred];
+      return `${closed} pagal išėjimo taisyklę. Tikslus techninis tekstas — žemiau.`;
+    }
+
+    function signalAt(signals, name) {
+      return (signals || []).find(signal => signal.name === name) || null;
+    }
+
+    function entryClause(signals, source) {
+      const parts = [];
+      const at = (name) => Number((signalAt(signals, name) || {}).value);
+      const isShort = String(source.side || "").toUpperCase() === "SHORT";
+
+      if (isShort) {
+        if (at("ShortMomentum") > 0) parts.push("kritimo momentum patvirtino judėjimą");
+        if (at("ShortVolume") > 0) parts.push("apimtis patvirtino short setup");
+        if (at("ShortTrend") > 0) parts.push("kaina buvo žemiau trendo filtro");
+        if (at("EMA") < 0) parts.push("EMA persisuko žemyn");
+        if (at("Momentum") < 0) parts.push("momentum buvo negatyvus");
+      } else {
+        if (at("EMA") > 0) parts.push("EMA buvo bullish");
+        if (at("Momentum") > 0) parts.push("momentum patvirtino judėjimą");
+        if (at("Volume") > 0) parts.push("apimtis patvirtino įėjimą");
+        if (at("PriceAction") >= 0 && source.priceActionDirection === "RISING") {
+          parts.push("paskutinių kainų eiga kilo");
+        }
+        if (at("RSI") < 0) parts.push("RSI buvo perkaitęs, todėl įėjimas silpnesnis");
+      }
+      return parts;
+    }
+
+    function entryExplanation(source) {
+      const side = String(source.side || "").toUpperCase() || "LONG";
+      const leveraged = Number.isFinite(Number(source.leverage)) && Number(source.leverage) > 1;
+      // A live instance commits an exchange-confirmed fill (fillSource REAL*);
+      // only a dry-run instance books a simulated one.
+      const real = /^REAL/i.test(String(source.fillSource || ""));
+      const kind = real ? "realų" : "virtualų";
+
+      const opening = leveraged
+        ? `Atidarė ${kind} futures ${side}`
+        : (side === "SHORT" ? "Pardavė" : "Pirko");
+
+      const threshold = Number(source.scoreThreshold);
+      const prefix = source.exploratory
+        ? `${opening} kaip žvalgomąjį įėjimą žemiau pagrindinės ${Number.isFinite(threshold) ? num(threshold, 2) : "įprastos"} ribos.`
+        : `${opening} kaip įprastą įėjimą pagal pilną signalą.`;
+
+      const parts = entryClause(source.signals, source);
+      const detail = parts.length
+        ? ` Pagrindas: ${parts.join(", ")}.`
+        : " Signalo detalės — chipuose ir techniniame įraše.";
+      return prefix + detail;
     }
 
     function positionWhy(position, entry) {
-      const side = String(position.side || "").toUpperCase();
-      const clause = entry ? signalClause(entry.signals) : null;
-      const opening = clause
-        ? `Atidarė ${side}: ${clause}.`
-        : `Atidarė ${side} pagal boto signalą.`;
+      const opening = entry
+        ? entryExplanation(entry)
+        : `Atidarė ${String(position.side || "").toUpperCase()} pagal boto signalą.`;
 
       const pnl = Number(position.unrealizedPnlEur) || 0;
       const liquidation = Number(position.liquidationDistancePercent);
@@ -1036,33 +1152,49 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       return opening + state;
     }
 
+    function isExitAction(action) {
+      return action === "WOULD_CLOSE" || action === "WOULD_SELL";
+    }
+
     function tradeWhy(trade) {
-      const isExit = trade.action === "WOULD_CLOSE" || trade.action === "WOULD_SELL";
-      const log = String(trade.log || "");
-      if (isExit) {
-        if (/STOP_LOSS/i.test(log) || /STOP/i.test(trade.exitReasonCode || "")) {
-          return "Uždarė, nes pozicija pasiekė boto darbinį stop-loss lygį. Nuostolis fiksuotas iš karto, kad nuosmukis neįsibėgėtų.";
-        }
-        if (/TAKE_PROFIT/i.test(log) || /TAKE_PROFIT/i.test(trade.exitReasonCode || "")) {
-          return "Uždarė pelningai — kaina pasiekė boto tikslą. Pelnas užfiksuotas nelaukiant grįžimo.";
-        }
-        return "Uždarė poziciją, nes signalas nebepatvirtino laikymo.";
-      }
-      const side = String(trade.side || "").toUpperCase() || "LONG";
-      const clause = signalClause(trade.signals);
-      const channel = trade.entryChannel ? ` (${trade.entryChannel})` : "";
-      return clause
-        ? `Atidarė realų futures ${side}${channel} pagal pilną signalą. Pagrindas: ${clause}.`
-        : `Atidarė realų futures ${side}${channel} pagal boto signalą.`;
+      return isExitAction(trade.action)
+        ? exitExplanation(trade.exitReasonCode, trade.log, trade.side)
+        : entryExplanation(trade);
     }
 
     // ---- chips --------------------------------------------------------------
+    // PositionSizing and ExitSignal are bookkeeping, and the worker's own reason
+    // text for EmaGapVelocity says it is "not used for trading" — none of the
+    // three belong in a chip row that claims to show what drove the decision.
+    const IGNORED_SIGNALS = new Set(["PositionSizing", "ExitSignal", "EmaGapVelocity"]);
+    const ALWAYS_SHOWN_SIGNALS = ["EMA", "RSI", "Volume", "PriceAction"];
+
+    function topSignals(signals) {
+      return (signals || [])
+        .filter(signal => !IGNORED_SIGNALS.has(signal.name))
+        .filter(signal => Number(signal.value) !== 0 || ALWAYS_SHOWN_SIGNALS.includes(signal.name))
+        .sort((a, b) => Math.abs(Number(b.value) || 0) - Math.abs(Number(a.value) || 0))
+        .slice(0, 5);
+    }
+
+    // The design has no red chip: amber carries "this limited or forced the
+    // decision", which is exactly what a negative contribution did.
+    function signalChipClass(signal) {
+      const value = Number(signal.value);
+      if (signal.name === "VolumeCap" || value < 0) return "bc-chip--warn";
+      if (value > 0) return "bc-chip--sig";
+      if (signal.name === "Exploratory" || signal.name === "Volume") return "bc-chip--warn";
+      return "bc-chip--ctx";
+    }
+
     function signalChips(signals) {
-      if (!signals || !signals.length) {
-        return '<span class="bc-chip bc-chip--sig">nėra signalų duomenų</span>';
+      const shown = topSignals(signals);
+      if (!shown.length) {
+        return '<span class="bc-chip bc-chip--ctx">nėra signalų duomenų</span>';
       }
-      return signals.map(signal =>
-        `<span class="bc-chip bc-chip--sig">${esc(signal.name)} ${esc(signed(signal.value, 2))}</span>`).join("");
+      return shown.map(signal =>
+        `<span class="bc-chip ${signalChipClass(signal)}" title="${esc(signal.reason || "")}">` +
+        `${esc(signal.name)} ${esc(signed(signal.value, 2))}</span>`).join("");
     }
 
     function contextChips(source, extras) {
@@ -1079,10 +1211,13 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       if (side) chips.push(`pusė ${side}`);
       const leverage = Number(source.leverage);
       if (Number.isFinite(leverage) && leverage) chips.push(`svertas ${num(leverage, 0)}x`);
+      if (/^REAL/i.test(String(source.fillSource || ""))) chips.push("realus vykdymas");
 
-      const html = chips.map(text => `<span class="bc-chip bc-chip--ctx">${esc(text)}</span>`).join("");
-      const warn = (extras || []).map(text => `<span class="bc-chip bc-chip--warn">${esc(text)}</span>`).join("");
-      return html + warn;
+      const warnings = (extras || []).slice();
+      if (source.exploratory) warnings.push("žvalgomasis įėjimas");
+
+      return chips.map(text => `<span class="bc-chip bc-chip--ctx">${esc(text)}</span>`).join("")
+        + warnings.map(text => `<span class="bc-chip bc-chip--warn">${esc(text)}</span>`).join("");
     }
 
     // ---- cards ---------------------------------------------------------------
@@ -1207,22 +1342,23 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     }
 
     const TRADE_BADGES = {
-      WOULD_OPEN_LONG: ['<span class="bc-badge bc-badge--green">Atidaryta LONG</span>'],
-      WOULD_OPEN_SHORT: ['<span class="bc-badge bc-badge--red">Atidaryta SHORT</span>'],
-      WOULD_BUY: ['<span class="bc-badge bc-badge--green">Atidaryta LONG</span>'],
-      WOULD_SELL: ['<span class="bc-badge bc-badge--red">Uždaryta</span>'],
-      WOULD_CLOSE: ['<span class="bc-badge bc-badge--red">Uždaryta</span>']
+      WOULD_OPEN_LONG: '<span class="bc-badge bc-badge--green">Atidaryta LONG</span>',
+      WOULD_OPEN_SHORT: '<span class="bc-badge bc-badge--red">Atidaryta SHORT</span>',
+      WOULD_BUY: '<span class="bc-badge bc-badge--green">Atidaryta LONG</span>',
+      WOULD_SELL: '<span class="bc-badge bc-badge--red">Uždaryta</span>',
+      WOULD_CLOSE: '<span class="bc-badge bc-badge--red">Uždaryta</span>'
     };
 
     function tradeCard(trade) {
-      const isExit = trade.action === "WOULD_CLOSE" || trade.action === "WOULD_SELL";
+      const isExit = isExitAction(trade.action);
       const log = String(trade.log || "");
-      const badges = (TRADE_BADGES[trade.action] || []).slice();
-      if (isExit && (/STOP_LOSS/i.test(log) || /STOP/i.test(trade.exitReasonCode || ""))) {
-        badges.push('<span class="bc-badge bc-badge--red">Stop loss</span>');
-      }
-      if (isExit && (/TAKE_PROFIT/i.test(log) || /TAKE_PROFIT/i.test(trade.exitReasonCode || ""))) {
-        badges.push('<span class="bc-badge bc-badge--green">Tikslas</span>');
+      const badges = [];
+      if (TRADE_BADGES[trade.action]) badges.push(TRADE_BADGES[trade.action]);
+      if (isExit) {
+        // Every exit reason the worker can emit gets its own badge, inferred from
+        // the log when the structured code is missing.
+        const exit = EXIT_BADGES[inferExitCode(trade.exitReasonCode, log)];
+        if (exit) badges.push(`<span class="bc-badge bc-badge--${exit.tone}">${esc(exit.text)}</span>`);
       }
       if (Number.isFinite(Number(trade.leverage)) && Number(trade.leverage)) {
         badges.push('<span class="bc-badge bc-badge--neutral">Futures</span>');

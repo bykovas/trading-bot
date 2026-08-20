@@ -1644,7 +1644,10 @@ static async Task<IReadOnlyDictionary<string, DashboardEntryDto>> ReadEntryConte
             entry.spread_percent,
             entry.price_action_direction,
             entry.price_action_trend_percent,
-            entry.bullish_ema_gap_percent
+            entry.bullish_ema_gap_percent,
+            entry.fill_source,
+            entry.exploratory,
+            entry.score_threshold
         from unnest(@pairs, @opened_at) as target(pair, opened_at)
         join lateral (
             select
@@ -1661,7 +1664,11 @@ static async Task<IReadOnlyDictionary<string, DashboardEntryDto>> ReadEntryConte
                 decision.spread_percent,
                 decision.price_action_direction,
                 decision.price_action_trend_percent,
-                decision.bullish_ema_gap_percent
+                decision.bullish_ema_gap_percent,
+                action.fill_source,
+                decision.exploratory,
+                case when action.side = 'SHORT' then decision.short_score_threshold
+                     else decision.long_score_threshold end as score_threshold
             from dry_run_decision_facts decision
             join dry_run_actions action
                 on action.cycle_id = decision.cycle_id and action.decision_index = decision.decision_index
@@ -1705,7 +1712,10 @@ static async Task<IReadOnlyDictionary<string, DashboardEntryDto>> ReadEntryConte
                 reader.IsDBNull(11) ? 0m : reader.GetDecimal(11),
                 ReadNullableString(reader, 12),
                 reader.IsDBNull(13) ? null : reader.GetDecimal(13),
-                reader.IsDBNull(14) ? null : reader.GetDecimal(14))));
+                reader.IsDBNull(14) ? null : reader.GetDecimal(14),
+                ReadNullableString(reader, 15),
+                !reader.IsDBNull(16) && reader.GetBoolean(16),
+                reader.IsDBNull(17) ? null : reader.GetDecimal(17))));
         }
     }
 
@@ -2046,7 +2056,11 @@ static async Task<DashboardTodayDto> ReadTodayTrades(
             decision.spread_percent,
             decision.price_action_direction,
             decision.price_action_trend_percent,
-            decision.bullish_ema_gap_percent
+            decision.bullish_ema_gap_percent,
+            action.fill_source,
+            decision.exploratory,
+            case when action.side = 'SHORT' then decision.short_score_threshold
+                 else decision.long_score_threshold end as score_threshold
         from traded action
         join today_cycles cycle on cycle.cycle_id = action.cycle_id
         join dry_run_decision_facts decision
@@ -2097,7 +2111,10 @@ static async Task<DashboardTodayDto> ReadTodayTrades(
                 reader.IsDBNull(20) ? 0m : reader.GetDecimal(20),
                 ReadNullableString(reader, 21),
                 reader.IsDBNull(22) ? null : reader.GetDecimal(22),
-                reader.IsDBNull(23) ? null : reader.GetDecimal(23))));
+                reader.IsDBNull(23) ? null : reader.GetDecimal(23),
+                ReadNullableString(reader, 24),
+                !reader.IsDBNull(25) && reader.GetBoolean(25),
+                reader.IsDBNull(26) ? null : reader.GetDecimal(26))));
         }
     }
 
@@ -2999,7 +3016,10 @@ internal sealed record DashboardEntryDto(
     decimal SpreadPercent,
     string? PriceActionDirection,
     decimal? PriceActionTrendPercent,
-    decimal? EmaGapPercent);
+    decimal? EmaGapPercent,
+    string? FillSource,
+    bool Exploratory,
+    decimal? ScoreThreshold);
 
 internal sealed record DashboardWorkerDto(
     string BotInstanceId,
@@ -3055,7 +3075,10 @@ internal sealed record DashboardTradeDto(
     decimal SpreadPercent,
     string? PriceActionDirection,
     decimal? PriceActionTrendPercent,
-    decimal? EmaGapPercent);
+    decimal? EmaGapPercent,
+    string? FillSource,
+    bool Exploratory,
+    decimal? ScoreThreshold);
 
 internal sealed record DashboardTodayDto(
     string LocalDate,
