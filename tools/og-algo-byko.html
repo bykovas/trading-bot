@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<title>BYKO ALGO — og:image 1200×630</title>
+<!--
+  og:image šaltinis. Jį atidaro tools/build-og-byko.mjs ir nufotografuoja į
+  public/assets/og-algo-byko-1200x630.png.
+
+  PRIEŠ BUILD'Ą pakeisk Google Fonts <link> į vietinius @font-face (tools/fonts/),
+  kad generavimas nepriklausytų nuo tinklo:
+
+  <style>
+    @font-face{font-family:Inter;src:url('./fonts/Inter-SemiBold.woff2') format('woff2');font-weight:600;font-display:block}
+    @font-face{font-family:Inter;src:url('./fonts/Inter-Medium.woff2') format('woff2');font-weight:500;font-display:block}
+    @font-face{font-family:Archivo;src:url('./fonts/Archivo-Bold.woff2') format('woff2');font-weight:700;font-display:block}
+    @font-face{font-family:'JetBrains Mono';src:url('./fonts/JetBrainsMono-Medium.woff2') format('woff2');font-weight:500;font-display:block}
+    @font-face{font-family:'Space Grotesk';src:url('./fonts/SpaceGrotesk-Bold.woff2') format('woff2');font-weight:700;font-display:block}
+  </style>
+-->
+<style>
+  /* Local faces, as the comment above requires. TrueType rather than woff2 for
+     the same reason as the LUKO card: the Google Fonts CSS API serves woff2 only
+     as unicode-range subsets, and the first one a modern browser is handed is
+     vietnamese — "uždirbam" would rasterise as tofu. All five faces are here;
+     a missing one is silently replaced by a system face in a permanent PNG. */
+  @font-face{font-family:Inter;src:url('./fonts/Inter-SemiBold.ttf') format('truetype');font-weight:600;font-display:block}
+  @font-face{font-family:Inter;src:url('./fonts/Inter-Medium.ttf') format('truetype');font-weight:500;font-display:block}
+  @font-face{font-family:Archivo;src:url('./fonts/Archivo-Bold.ttf') format('truetype');font-weight:700;font-display:block}
+  @font-face{font-family:'JetBrains Mono';src:url('./fonts/JetBrainsMono-Medium.ttf') format('truetype');font-weight:500;font-display:block}
+  @font-face{font-family:'Space Grotesk';src:url('./fonts/SpaceGrotesk-Bold.ttf') format('truetype');font-weight:700;font-display:block}
+</style>
+<style>html,body{margin:0;padding:0;background:#0B0D10}</style>
+</head>
+<body>
+<div id="card" style="width:1200px;height:630px;box-sizing:border-box;overflow:hidden;position:relative;background:#0B0D10;color:#E8EAEE;font-family:Inter,system-ui,Helvetica,Arial,sans-serif;display:flex;flex-direction:column;justify-content:space-between;padding:40px 64px">
+    <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px);background-size:60px 60px;-webkit-mask-image:radial-gradient(circle at 50% 0%,#000 0%,transparent 72%);mask-image:radial-gradient(circle at 50% 0%,#000 0%,transparent 72%)"></div>
+    <div style="position:relative;display:flex;align-items:flex-start;justify-content:space-between;gap:24px">
+      <span style="display:flex;align-items:center;gap:16px">
+        <svg style="flex:none;display:block;width:60px;height:60px" viewBox="0 0 64 64" aria-hidden="true"><rect x="1.5" y="1.5" width="61" height="61" rx="17" fill="#0A0A0A" stroke="#C9A86A" stroke-opacity=".55" stroke-width="1.6"></rect><g fill="none" stroke="#E8B84B" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 22 15.5 32 23 42"></path><path d="M41 22 48.5 32 41 42"></path></g><g fill="#E8B84B"><circle cx="27.5" cy="27.5" r="2.5"></circle><circle cx="36.5" cy="27.5" r="2.5"></circle><circle cx="27.5" cy="36.5" r="2.5"></circle><circle cx="36.5" cy="36.5" r="2.5"></circle></g></svg>
+        <span style="display:flex;flex-direction:column;gap:6px">
+          <span style="font:700 30px/1 'Space Grotesk',Inter,sans-serif;letter-spacing:-.01em;color:#F6EFE1;white-space:nowrap">Blyn<span style="color:#E8B84B">AI</span> Capital</span>
+          <span style="font:500 14px/1 'JetBrains Mono',monospace;letter-spacing:.22em;color:#9B8FD8;white-space:nowrap">L&amp;D FINANCE LAB</span>
+        </span>
+      </span>
+      <span style="display:flex;flex-direction:column;gap:7px;align-items:flex-end">
+        <span style="font:500 19px/1 'JetBrains Mono',monospace;letter-spacing:.04em;color:#7CCBFF;white-space:nowrap">algo.bykovas.lt</span>
+        <span style="font:700 26px/1 Archivo,system-ui,sans-serif;letter-spacing:.2em;padding-left:.2em;color:#E8EAEE">BYKO</span>
+      </span>
+    </div>
+    <div style="position:relative;display:flex;align-items:center;justify-content:space-between;gap:48px">
+      <svg viewBox="0 0 32 32" style="flex:none;width:186px;height:186px;display:block" role="img" aria-label="BYKO coin"><circle cx="16" cy="16" r="16" fill="#7CCBFF"></circle><g transform="translate(2.1875 1.25) scale(.3125)" fill="none" stroke="#0B0D10" stroke-width="13" stroke-linecap="butt" stroke-linejoin="miter"><path d="M24 14V82"></path><path d="M40 20L70 48 40 76"></path></g></svg>
+      <span style="font:600 250px/.84 Inter,sans-serif;letter-spacing:-.05em;background:linear-gradient(90deg,#7CCBFF,#FFB088);-webkit-background-clip:text;background-clip:text;color:transparent">ALGO</span>
+    </div>
+    <div style="position:relative;border-top:2px solid rgba(255,255,255,.1);padding-top:26px">
+      <span style="font-size:44px;line-height:1.15;font-weight:500;text-wrap:pretty">Botas prekiauja. <span style="color:#FFB088">Mes uždirbam.</span> Kol kas.</span>
+    </div>
+  </div>
+</body>
+</html>
