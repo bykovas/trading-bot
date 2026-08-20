@@ -756,6 +756,28 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       return "atviros pozicijos";
     }
 
+    // "diena" after a number: 1 diena / 2-9 dienos / 0 and 10-20 dienų, and the
+    // adjective agrees with it. Live counts start at one, so the plural-only
+    // wording of the mock ("1 uždarytų dienų") reads wrong on day one.
+    function countForm(count, one, few, many) {
+      const n = Math.abs(Math.round(Number(count) || 0));
+      const last = n % 10;
+      const lastTwo = n % 100;
+      if (lastTwo >= 11 && lastTwo <= 19) return many;
+      if (last === 1) return one;
+      if (last === 0) return many;
+      return few;
+    }
+
+    function closedDaysPhrase(count) {
+      return `${num(count, 0)} ${countForm(count, "uždaryta diena", "uždarytos dienos", "uždarytų dienų")}`;
+    }
+
+    // Accusative, because it follows "per".
+    function overDaysPhrase(count) {
+      return `${num(count, 0)} ${countForm(count, "dieną", "dienas", "dienų")}`;
+    }
+
     function tradesWord(count) {
       const n = Math.abs(Math.round(Number(count) || 0));
       const last = n % 10;
@@ -1062,7 +1084,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const days = (data.equity && data.equity.days) || [];
       const liveValue = data.summary ? Number(data.summary.totalValueEur) : null;
       els.chartCaption.innerHTML =
-        `Grafikas — ${esc(num(days.length, 0))} uždarytų dienų<br>(šiandiena dar neįskaityta)`;
+        `Grafikas — ${esc(closedDaysPhrase(days.length))}<br>(šiandiena dar neįskaityta)`;
 
       // Deposits and withdrawals are only in the legend once the API can actually
       // report them; a swatch for a mark that never appears is worse than no swatch.
@@ -1113,7 +1135,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
       els.honestyStat.hidden = false;
       els.honestyStat.textContent = worst === null
-        ? `${num(days.length, 0)}/${num(days.length, 0)} dienų — nė vienos minuse`
+        ? `0/${num(days.length, 0)} dienų — minuse`
         : `${num(down, 0)}/${num(days.length, 0)} dienų — minuse · blogiausia diena ${signedMoney(worst)}`;
     }
 
@@ -1150,7 +1172,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         const manualText = manual
           ? ` · iš jų <i>${esc(signedMoney(manual))} (${esc(signedPercent(manualPercent, 1))})</i> rankiniai koregavimai`
           : "";
-        els.liveSince.innerHTML = `Per ${days.length} dienų <b>${esc(signedMoney(change))} (${esc(signedPercent(changePercent, 1))})</b>${manualText}`;
+        els.liveSince.innerHTML = `Per ${esc(overDaysPhrase(days.length))} <b>${esc(signedMoney(change))} (${esc(signedPercent(changePercent, 1))})</b>${manualText}`;
       } else {
         els.liveSince.textContent = "";
       }
@@ -1195,7 +1217,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         metricCell("Boto pelnas šiandien", signedMoney(daily), toneClass(daily),
           "realizuota nuo 00:00 LT"),
         metricCell("Maks. nuosmukis", percent(drawdown, 1), drawdown < 0 ? "bc-t-red" : "bc-t-soft",
-          `per ${esc(num(((data.equity && data.equity.days) || []).length, 0))} dienų`)
+          `per ${esc(overDaysPhrase(((data.equity && data.equity.days) || []).length))}`)
       ].join("");
     }
 

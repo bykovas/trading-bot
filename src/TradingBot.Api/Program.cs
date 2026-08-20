@@ -2014,8 +2014,16 @@ static async Task<DashboardEquityDto> ReadEquityDays(
         return new DashboardEquityDto(timeZoneId, todayLocal, Array.Empty<DashboardEquityDayDto>(), 0m, false);
     }
 
-    await EnsureDailyEquityTable(connection, cancellationToken);
-    await EnsureCashEventsTable(connection, cancellationToken);
+    // "create table if not exists" is cheap but not free: it is a DDL round trip on
+    // every poll, against a database five workers are writing to continuously. Once
+    // per process is enough — the tables cannot vanish underneath us.
+    if (!DashboardSchema.Ready)
+    {
+        await EnsureDailyEquityTable(connection, cancellationToken);
+        await EnsureCashEventsTable(connection, cancellationToken);
+        DashboardSchema.Ready = true;
+    }
+
     await BackfillDailyEquity(connection, botInstanceId, timeZoneId, cancellationToken);
     var movements = await ReadDailyCashMovement(connection, botInstanceId, timeZoneId, cancellationToken);
 
@@ -3041,6 +3049,13 @@ partial class Program
             totalCount > 0 ? Math.Round(totalPnl / totalCount, 4) : 0,
             returnedTrades, pnlByPair, pnlByRegime, null);
     }
+}
+
+internal static class DashboardSchema
+{
+    // Set once the dashboard's own tables have been declared in this process.
+    // A racing second request just repeats an idempotent statement.
+    public static volatile bool Ready;
 }
 
 internal static class DashboardDefaults
