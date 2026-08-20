@@ -1391,46 +1391,6 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       paint(els.chartCanvas, chartSvg(CHART_WIDE, days, liveValue) + chartSvg(CHART_NARROW, days, liveValue));
     }
 
-    // ---- headline numbers ------------------------------------------------
-    function maxDrawdownPercent(days) {
-      let peak = null;
-      let worst = 0;
-      days.forEach(day => {
-        const close = Number(day.close);
-        if (!Number.isFinite(close)) return;
-        if (peak === null || close > peak) peak = close;
-        if (peak > 0) worst = Math.min(worst, (close - peak) / peak * 100);
-      });
-      return worst;
-    }
-
-    // "12/30 dienų — minuse · blogiausia diena −1,37 $". Ships in the served HTML
-    // and is refreshed from the real series; if the series is unusable the line is
-    // removed rather than left showing a stale or templated figure.
-    function renderHonestyStat(days) {
-      if (!els.honestyStat) return;
-      if (!days.length) {
-        els.honestyStat.hidden = true;
-        return;
-      }
-
-      let down = 0;
-      let worst = null;
-      days.forEach(day => {
-        const change = Number(day.close) - Number(day.open);
-        if (!Number.isFinite(change)) return;
-        if (change < 0) {
-          down += 1;
-          if (worst === null || change < worst) worst = change;
-        }
-      });
-
-      els.honestyStat.hidden = false;
-      els.honestyStat.textContent = worst === null
-        ? `0/${num(days.length, 0)} dienų — minuse`
-        : `${num(down, 0)}/${num(days.length, 0)} dienų — minuse · blogiausia diena ${signedMoney(worst)}`;
-    }
-
     // The coin cross rate. Read from the chain by the API and cached there, so the
     // page never talks to an RPC itself. Three levels of fallback: a live figure,
     // the last one the API stored (shown with its age, because a rate nobody has
@@ -1453,6 +1413,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       els.rate.classList.toggle("bc-rate--stale", !!rates.stale);
     }
 
+    // ---- headline numbers ------------------------------------------------
     // Proof cards 1-3, all from the same closed-day series and all on the bot's own
     // trading with money movement taken out: a day that received a deposit is not a
     // day the bot earned it. The served copy stays as the fallback until a day
@@ -1496,6 +1457,33 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         els.bestFine.textContent =
           `Tai buvo ${best.date} diena — bet tai ne vienintelė diena, kuri baigėsi pliusu.`;
       }
+    }
+
+    // "12/30 dienų — minuse · blogiausia diena −1,37 $". Ships in the served HTML
+    // and is refreshed from the real series; if the series is unusable the line is
+    // removed rather than left showing a stale or templated figure.
+    function renderHonestyStat(days) {
+      if (!els.honestyStat) return;
+      if (!days.length) {
+        els.honestyStat.hidden = true;
+        return;
+      }
+
+      let down = 0;
+      let worst = null;
+      days.forEach(day => {
+        const change = Number(day.close) - Number(day.open);
+        if (!Number.isFinite(change)) return;
+        if (change < 0) {
+          down += 1;
+          if (worst === null || change < worst) worst = change;
+        }
+      });
+
+      els.honestyStat.hidden = false;
+      els.honestyStat.textContent = worst === null
+        ? `0/${num(days.length, 0)} dienų — minuse`
+        : `${num(down, 0)}/${num(days.length, 0)} dienų — minuse · blogiausia diena ${signedMoney(worst)}`;
     }
 
     function renderHeadline(data) {
@@ -1562,8 +1550,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         ? `<br><span class="bc-t-amber">nesutampa ${esc(signedMoney(gap))}</span>`
         : "";
 
-      const drawdown = maxDrawdownPercent((data.equity && data.equity.days) || []);
-      const daily = Number(summary.dailyRealizedPnlEur) || 0;
+      const drawdown = Number(data.equity && data.equity.maxDrawdownPercent) || 0;
       const openCount = positions.length;
 
       paint(els.metrics, [
@@ -1573,10 +1560,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           `${esc(num(openCount, 0))} ${esc(positionsWord(openCount))}`),
         metricCell("Nerealizuotas P/N", signedMoney(unrealized), toneClass(unrealized),
           "iš atvirų pozicijų"),
-        metricCell("Boto pelnas šiandien", signedMoney(daily), toneClass(daily),
-          "realizuota nuo 00:00 LT"),
         metricCell("Maks. nuosmukis", percent(drawdown, 1), drawdown < 0 ? "bc-t-red" : "bc-t-soft",
-          `per ${esc(overDaysPhrase(((data.equity && data.equity.days) || []).length))}`)
+          "giliausias kritimas nuo piko")
       ].join(""));
     }
 

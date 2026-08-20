@@ -2078,6 +2078,103 @@ static async Task BackfillDailyEquity(
     await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
+// True peak-to-trough over the ordered per-cycle series. Close-to-close, which is
+// what the page used to show, cannot see an intraday fall at all and reported a
+// structural 0.0% on an account with one closed day. The daily rollup cannot fix
+// it either: it stores a day's high and low but not which came first.
+//
+// The window slides, so this is not incrementally maintainable; it is one ordered
+// scan, cached per instance. ~320ms once every ten minutes is affordable where the
+// same scan on every 10s poll was not.
+static async Task<decimal> ReadMaxDrawdownPercent(
+    NpgsqlConnection connection,
+    string botInstanceId,
+    int days,
+    CancellationToken cancellationToken)
+{
+    var now = DateTimeOffset.UtcNow;
+
+    lock (DrawdownCache.Values)
+    {
+        if (DrawdownCache.Values.TryGetValue(botInstanceId, out var cached)
+            && now - cached.At < TimeSpan.FromMinutes(10))
+        {
+            return cached.Percent;
+        }
+    }
+
+    await DrawdownCache.Gate.WaitAsync(cancellationToken);
+    try
+    {
+        lock (DrawdownCache.Values)
+        {
+            if (DrawdownCache.Values.TryGetValue(botInstanceId, out var cached)
+                && now - cached.At < TimeSpan.FromMinutes(10))
+            {
+                return cached.Percent;
+            }
+        }
+
+        await using var command = new NpgsqlCommand(
+            """
+            with day_values as (
+                select
+                    (utc at time zone @time_zone)::date as local_date,
+                    utc,
+                    cycle_id,
+                    portfolio_value_after_eur as value
+                from dry_run_cycle_facts
+                where bot_instance_id = @bot_instance_id
+                  and portfolio_value_after_eur > 0
+                  and utc >= @utc_start
+            ),
+            day_median as (
+                select local_date, percentile_cont(0.5) within group (order by value) as median
+                from day_values group by local_date
+            ),
+            series as (
+                select percentile_cont(0.5) within group (order by median) as median from day_median
+            ),
+            clean as (
+                select value.utc, value.cycle_id, value.value
+                from day_values value
+                join day_median median on median.local_date = value.local_date
+                cross join series
+                where median.median > 0
+                  and series.median > 0
+                  and median.median >= series.median / 10.0
+                  and value.value between median.median / 3.0 and median.median * 3.0
+            ),
+            running as (
+                select value,
+                       max(value) over (order by utc, cycle_id
+                                        rows between unbounded preceding and current row) as peak
+                from clean
+            )
+            select coalesce(min((value - peak) / nullif(peak, 0)) * 100, 0)
+            from running
+            """,
+            connection);
+        command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
+        command.Parameters.Add("time_zone", NpgsqlDbType.Text).Value = "Europe/Vilnius";
+        command.Parameters.Add("utc_start", NpgsqlDbType.TimestampTz).Value = now.AddDays(-days);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        var percent = result is decimal value ? value : 0m;
+
+        lock (DrawdownCache.Values)
+        {
+            DrawdownCache.Values[botInstanceId] = (percent, now);
+        }
+
+        return percent;
+    }
+    finally
+    {
+        DrawdownCache.Gate.Release();
+    }
+}
+
 static async Task<DashboardEquityDto> ReadEquityDays(
     NpgsqlConnection connection,
     string? botInstanceId,
@@ -2093,7 +2190,7 @@ static async Task<DashboardEquityDto> ReadEquityDays(
     {
         // The curve is per account; without one there is nothing meaningful to plot.
         return new DashboardEquityDto(
-            timeZoneId, todayLocal, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null);
+            timeZoneId, todayLocal, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null, 0m);
     }
 
     // "create table if not exists" is cheap but not free: it is a DDL round trip on
@@ -2157,6 +2254,7 @@ static async Task<DashboardEquityDto> ReadEquityDays(
             day.Date, day.Open, day.Open + bot, day.ManualAdjustmentEur, bot, bot / day.Open * 100m);
     }
 
+    var drawdown = await ReadMaxDrawdownPercent(connection, botInstanceId, days, cancellationToken);
     var yesterday = Result(closed.Count > 0 ? closed[^1] : null);
     var best = closed
         .Select(Result)
@@ -2175,7 +2273,8 @@ static async Task<DashboardEquityDto> ReadEquityDays(
         closed.Sum(day => day.ManualAdjustmentEur),
         true,
         yesterday,
-        best);
+        best,
+        drawdown);
 }
 
 static async Task<DashboardTodayDto> ReadTodayTrades(
@@ -3152,6 +3251,14 @@ partial class Program
     }
 }
 
+// Per-instance cache for the drawdown scan; top-level statements cannot hold
+// static state, so it lives here next to the schema flag.
+internal static class DrawdownCache
+{
+    public static readonly Dictionary<string, (decimal Percent, DateTimeOffset At)> Values = new();
+    public static readonly SemaphoreSlim Gate = new(1, 1);
+}
+
 internal static class DashboardSchema
 {
     // Set once the dashboard's own tables have been declared in this process.
@@ -3230,10 +3337,11 @@ internal sealed record DashboardEquityDto(
     decimal ManualAdjustmentEur,
     bool ManualAdjustmentsTracked,
     DashboardDayResultDto? Yesterday,
-    DashboardDayResultDto? BestDay)
+    DashboardDayResultDto? BestDay,
+    decimal MaxDrawdownPercent)
 {
     public static DashboardEquityDto Empty() =>
-        new("Europe/Vilnius", string.Empty, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null);
+        new("Europe/Vilnius", string.Empty, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null, 0m);
 }
 
 // One day's result with money movement stripped out: Close is where the day would
