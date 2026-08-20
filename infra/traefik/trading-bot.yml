@@ -43,11 +43,30 @@ http:
       entryPoints:
         - websecure
       priority: 1000
+      middlewares:
+        - trading-bot-cors
       tls:
         certResolver: letsencrypt
       service: trading-bot-api
 
   middlewares:
+    # Every /api route is a GET with no authentication and no write endpoint, so
+    # the data behind it is already fetchable with curl from anywhere. CORS only
+    # decides whether a browser on another origin may read the same bytes, which
+    # makes the wildcard the honest setting rather than a loosened one — and it
+    # lets design previews and one-off tools pull live figures without a proxy.
+    # Revisit the moment anything here stops being public and read-only.
+    trading-bot-cors:
+      headers:
+        accessControlAllowOriginList:
+          - "*"
+        accessControlAllowMethods:
+          - GET
+          - OPTIONS
+        accessControlAllowHeaders:
+          - "*"
+        accessControlMaxAge: 3600
+
     trading-bot-https-redirect:
       redirectScheme:
         scheme: https
