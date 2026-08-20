@@ -52,6 +52,8 @@
   linear-gradient(120deg,rgba(5,5,5,.98),rgba(14,15,12,.96) 52%,rgba(4,15,12,.94)),#050505;
   color:var(--ink);font-family:var(--font-body);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
 .bc-shell *,.bc-shell *::before,.bc-shell *::after{box-sizing:border-box}
+/* (0,1,1) — outranks every single-class .bc-* rule, so margin-top on a <p> class
+   is silently dead. Space paragraphs with the parent's gap, or use padding. */
 .bc-shell p{margin:0}
 .bc-shell a{color:var(--gold);text-decoration:none}
 .bc-shell a:hover{color:var(--gold-soft)}
@@ -76,6 +78,13 @@
 .bc-brand-txt b i{font-style:normal;color:var(--gold)}
 .bc-brand-txt small{font:10px var(--font-mono);text-transform:uppercase;letter-spacing:.14em;color:var(--purple);white-space:nowrap}
 .bc-topbar-right{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+/* Page chrome, not a data control — deliberately quieter than the tenant switch
+   next to it, so two pill pairs never read as one four-state toggle. */
+.bc-lang{margin:0;display:flex;font:10px var(--font-mono);letter-spacing:.14em;text-transform:uppercase}
+.bc-lang b{font-weight:500;color:var(--gold-soft)}
+.bc-lang a{color:var(--muted-3);text-decoration:none}
+.bc-lang a:hover{color:var(--cream)}
+.bc-lang-x{color:var(--muted-4)}
 .bc-tenant{display:flex;align-items:center;gap:8px}
 .bc-tenant-l{font:10px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted-3)}
 .bc-seg{display:inline-flex;gap:3px;padding:3px;border:1px solid rgba(246,218,160,.14);border-radius:var(--r);background:rgba(17,18,15,.82)}
@@ -128,6 +137,15 @@
 .bc-rate .bc-rate-l{color:#e8d5ac}
 .bc-rate-x{color:var(--muted-4)}
 .bc-hero-wide{grid-column:1/-1;min-width:0}
+/* Mobile-only "this is not the end" cue. The splash finishes inside one screen,
+   which is exactly why it reads as a complete page: CTA, then pills, then what
+   looks like footer prose. The cue sits ABOVE the coin pills (order 4, pills 5)
+   because that is the only slot left where the fold still cuts it — a half-visible
+   section heading is the one unambiguous signal that scrolling pays off, and it is
+   worth more on the first screen than the brand pills. Re-measure if the hero grows. */
+.bc-next{display:none;grid-column:1/-1;min-width:0}
+@keyframes bcNudge{0%,100%{transform:translateY(0)}50%{transform:translateY(4px)}}
+@media (prefers-reduced-motion:reduce){.bc-next-ar{animation:none}}
 .bc-heur{grid-column:1/-1;min-width:0}
 .bc-cta-wrap{grid-column:1/-1;min-width:0}
 .bc-proof{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:1px;
@@ -158,7 +176,7 @@
 .bc-live-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap}
 .bc-live-l{display:flex;align-items:center;gap:9px;font:600 11px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--green)}
 .bc-live-l b{font-weight:700;color:var(--gold)}
-.bc-live-n{display:flex;align-items:baseline;gap:14px;margin-top:9px;flex-wrap:wrap}
+.bc-live-n{display:flex;align-items:baseline;gap:14px;padding-top:16px;flex-wrap:wrap}
 .bc-big{font:clamp(34px,5.8cqw,54px)/1 var(--font-mono);font-variant-numeric:tabular-nums;color:var(--cream)}
 .bc-delta{display:inline-flex;align-items:center;height:32px;padding:0 13px;white-space:nowrap;
   border:1px solid rgba(65,237,160,.34);border-radius:var(--pill);background:rgba(65,237,160,.07);
@@ -275,6 +293,8 @@
 
 /* =========================== WIDE (desktop) =========================== */
 @container (min-width:900px){
+  /* four fixed columns: auto-fit would orphan the fourth card onto its own row */
+  .bc-proof{grid-template-columns:repeat(4,1fr)}
   /* cards are always expanded on desktop; the toggle is mobile-only */
   .bc-card>.bc-card-sum{cursor:default}
   .bc-only-narrow{display:none!important}
@@ -292,14 +312,23 @@
   .bc-mark{width:32px;height:32px;border-radius:10px}
   .bc-mark svg{width:23px;height:23px}
   .bc-brand-txt b{font-size:14.5px}
-  .bc-topbar-right{display:none}
+  /* The column itself dissolves so the language toggle can survive it; the three
+     data controls it held are hidden one by one (the mobile bar carries them). */
+  .bc-topbar-right{display:contents}
+  .bc-topbar-right>.bc-tenant,.bc-topbar-right>.bc-status-chips,
+  .bc-topbar-right>.bc-status-line{display:none}
+  /* Pinned into the empty corner beside the centred brand — costs no fold budget. */
+  .bc-lang{position:absolute;top:31px;right:16px;z-index:3}
   .bc-seg button{min-height:24px;padding:0 10px;font-size:10.5px}
   .bc-mobilebar{display:flex}
 
   /* HERO = the whole first screen: centred, sells before any scroll */
-  /* FOLD BUDGET: on a 390x844 screen everything up to and including the coin
-     pills must sit above 844px. Measured bottom of .bc-coins = 784px.
-     If you add anything to the hero, re-measure .bc-coins bottom. */
+  /* FOLD BUDGET: on a 390x844 screen the ".bc-next-l" label must sit above 844px —
+     it is what tells the reader the page continues. Measured: arrow 784-818,
+     label 825-839 — both read in full above the fold, and the rule they sit on is
+     the visible break that says the page continues. Do not let the label slip past
+     844. A second identical cue sits after the heuristics block. The coin pills now
+     fall below the fold by design. If you add anything to the hero, re-measure. */
   /* The brand is lifted out of flow so the hero starts at y=0 and its glow
      origin coincides with the top of the screen — otherwise a hard seam forms
      across the shell right under the centred logo. */
@@ -309,8 +338,13 @@
   .bc-hero-main{order:1}
   .bc-hero-wide{order:2}
   .bc-cta-wrap{order:3}
-  .bc-coins{order:4}
-  .bc-heur{order:5}
+  .bc-next{display:block;position:relative;order:4;margin-top:4px;padding-top:24px;border-top:2px solid rgba(201,168,106,.34);text-align:center}
+  .bc-next--live{order:7;margin-top:30px}
+  .bc-next-ar{position:absolute;top:-17px;left:50%;margin-left:-17px;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;border:2px solid rgba(201,168,106,.34);background:var(--bg-void);color:var(--gold);animation:bcNudge 2.2s ease-in-out infinite}
+  .bc-next-ar svg{width:18px;height:18px;display:block}
+  .bc-next-l{margin:0;font:600 11px var(--font-mono);letter-spacing:.18em;text-transform:uppercase;color:var(--gold)}
+  .bc-coins{order:5;margin-top:24px}
+  .bc-heur{order:6}
   .bc-h1{margin:12px auto 0;font-size:30px;max-width:none}
   .bc-lead{margin:12px auto 0;font-size:15px;max-width:none}
   .bc-coins{grid-row:auto;grid-column:auto;padding:0;border:0;background:none}
@@ -324,15 +358,26 @@
   /* Stacked and centred under the label; the fold budget below assumes one line. */
   .bc-coins-hd{flex-direction:column;align-items:center;gap:5px}
   .bc-rate{font-size:10px}
-  /* card 1 (yesterday) and card 3 (no promises) stay; the 30-day figure in
-     card 2 is dropped because the live section repeats it a screen below */
-  .bc-proof{grid-template-columns:1fr;border:0;border-radius:0;background:none;text-align:center}
-  .bc-proof-cell:nth-child(2){display:none}
-  .bc-proof-cell+.bc-proof-cell{margin-top:10px}
-  .bc-proof-cell{padding:14px 16px;border:1px solid rgba(65,237,160,.26);border-radius:14px;background:rgba(65,237,160,.05)}
-  .bc-proof-n{justify-content:center;margin-top:8px}
-  .bc-from{font-size:20px} .bc-arrow{font-size:16px} .bc-to{font-size:26px}
-  .bc-proof-s{margin-top:7px;font-size:12.5px}
+  /* 2×2: all four cards fit the splash. Stacked they cost 545px and pushed the
+     CTA off-screen; paired they cost ~360px. Rows are equal-height (stretch),
+     so the two cells in a row share a baseline even with unequal copy. */
+  /* minmax(0,1fr), not 1fr: 1fr is minmax(auto,1fr), so a figure row wider than
+     its share stretched the column instead of shrinking it, and cards 2 and 4 ran
+     51px past a 390px screen. The mock's "60 $ -> 89 $" fit; live values carry
+     cents and need 265px. */
+  .bc-proof{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;border:0;border-radius:0;background:none;text-align:center}
+  .bc-proof-cell{padding:12px 10px;border:1px solid rgba(65,237,160,.26);border-radius:14px;background:rgba(65,237,160,.05)}
+  /* stays at the base 10px: below that the muted ramp drops under 4.5:1, and these
+     labels are the only thing distinguishing cards 1 and 2, which print the same figure */
+  .bc-proof-l{letter-spacing:.09em}
+  .bc-proof-n{justify-content:center;margin-top:6px;gap:4px}
+  /* 16/21 were measured against the mock's "60 $ -> 89 $". A live figure carries
+     cents and needs 173.2px in a 149px cell — the leading digit was being clipped.
+     Scaled by the measured 0.86 so every character survives; the arrow stays. */
+  .bc-from{font-size:13.5px} .bc-arrow{font-size:13px} .bc-to{font-size:18px}
+  .bc-proof-s{margin-top:6px;font-size:11.5px;line-height:1.4}
+  .bc-proof-p{margin-top:6px;font-size:11.5px;line-height:1.45}
+  .bc-proof-fine{margin-top:6px;font-size:10px;line-height:1.4}
   .bc-proof-note{margin-top:12px;font-size:12.5px;text-align:center}
   .bc-cta-note{text-align:center}
   .bc-heur{grid-template-columns:1fr;gap:9px;margin-top:6px;text-align:center}
@@ -539,6 +584,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <span class="bc-brand-txt"><b>Blyn<i>AI</i> Capital</b><small>L&amp;D Finance Lab<sup class="bc-fn-mark">1</sup></small></span>
       </a>
       <div class="bc-topbar-right">
+          <p class="bc-lang"><b class="is-active" aria-current="true">LT</b><span class="bc-lang-x"> &#183; </span><a href="/en/" hreflang="en">EN</a></p>
         <div class="bc-tenant">
           <span class="bc-tenant-l">Viešas testuotojas<a class="bc-fn-mark" href="#fn-testuotojas" aria-label="Viešo testuotojo apibrėžimas">2</a></span>
           <span class="bc-seg"><button type="button" data-tenant="LUKAS">LUKAS</button><button type="button" data-tenant="DENISAS">DENISAS</button></span>
@@ -557,7 +603,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
       <aside class="bc-coins">
         <div class="bc-coins-hd">
-          <p class="bc-coins-l">Pripažįstame tik dvi valiutas</p>
+          <p class="bc-coins-l">Beje, pripažįstame tik dvi valiutas</p>
           <p class="bc-rate" id="bcRate">1 LUKO &#8776; <b class="bc-rate-b" id="bcRateB">9,28</b> BYKO<span class="bc-rate-x"> &#183; </span>1 BYKO &#8776; <b class="bc-rate-l" id="bcRateL">0,11</b> LUKO</p>
         </div>
         <div class="bc-coins-row">
@@ -566,23 +612,34 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         </div>
       </aside>
 
+      <div class="bc-next">
+        <span class="bc-next-ar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v15"/><path d="M5.5 13.5 12 20l6.5-6.5"/></svg></span>
+        <p class="bc-next-l">Arba pamatyk pats gyvai</p>
+      </div>
+
       <div class="bc-hero-wide">
         <div class="bc-proof">
           <div class="bc-proof-cell">
             <p class="bc-proof-l">Vakar · realūs sandoriai</p>
-            <p class="bc-proof-n" id="bcProofN"><span class="bc-from" id="bcProofFrom">60 $</span><span class="bc-arrow">→</span><span class="bc-to" id="bcProofTo">89 $</span></p>
-            <p class="bc-proof-s" id="bcProofS"><b>+29 $</b> · +48 % per parą</p>
-            <p class="bc-proof-fine" id="bcProofBest">Geriausia para per mėnesį — todėl ją ir rodom.</p>
+            <p class="bc-proof-n"><span class="bc-from" id="bcYestFrom">60 $</span><span class="bc-arrow">&#8594;</span><span class="bc-to" id="bcYestTo">89 $</span></p>
+            <p class="bc-proof-s" id="bcYestS"><b>+29 $</b> &#183; +48 % per parą</p>
+            <p class="bc-proof-fine">Uždaryti sandoriai, ne popierinis pelnas.</p>
           </div>
           <div class="bc-proof-cell">
-            <p class="bc-proof-l bc-proof-l--hypo">Jei tik būtume žinoję… · ta pati logika, tik nuliai</p>
-            <p class="bc-proof-n bc-proof-n--hypo"><span class="bc-from">600 $</span><span class="bc-arrow">→</span><span class="bc-to">900 $</span></p>
-            <p class="bc-proof-s">+300 $ · botui nerūpi, kokia suma dirba, o mes nepasinaudojom…</p>
+            <p class="bc-proof-l">Geriausia para &#183; realūs sandoriai</p>
+            <p class="bc-proof-n"><span class="bc-from" id="bcBestFrom">60 $</span><span class="bc-arrow">&#8594;</span><span class="bc-to" id="bcBestTo">89 $</span></p>
+            <p class="bc-proof-s" id="bcBestS"><b>+29 $</b> &#183; +48 % &#183; geriausias rezultatas iki šiol</p>
+            <p class="bc-proof-fine" id="bcBestFine">Tai buvo 2026-08-19 diena — bet tai ne vienintelė diena, kuri baigėsi pliusu.</p>
+          </div>
+          <div class="bc-proof-cell">
+            <p class="bc-proof-l bc-proof-l--hypo">Jei tada tik būtume žinoję…</p>
+            <p class="bc-proof-n bc-proof-n--hypo"><span class="bc-from" id="bcHypoFrom">600 $</span><span class="bc-arrow">&#8594;</span><span class="bc-to" id="bcHypoTo">900 $</span></p>
+            <p class="bc-proof-s" id="bcHypoS">+300 $ &#183; ta pati logika, tik nuliai, botui nerūpi, su kokia suma dirba, o mes nepasinaudojom…</p>
           </div>
           <div class="bc-proof-cell">
             <p class="bc-proof-l bc-proof-l--warn">Sąžiningai</p>
             <p class="bc-proof-p">Taip nutinka <b>ne visada</b> — kartais diena baigiasi minuse. Buvo savaičių, kai praradom daugiau, nei uždirbom, bet dažniausiai kol kas mums sekasi, todėl ir testuojame uždarai.</p>
-            <p class="bc-proof-fine" id="bcHonestyStat">12/30 dienų — minuse · blogiausia diena −1,37 $</p>
+            <p class="bc-proof-fine" id="bcHonestyStat">Buvo ir minusinių dienų.</p>
           </div>
         </div>
       </div>
@@ -591,6 +648,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           <p><b>Euristikų rinkinys ir dirbtinis intelektas</b> dirba kartu. Sistema nuskaito ~150 Kraken porų kas minutę — gyvas skaičius telemetrijoje. Kiekviena pora vertinama pagal šimtus parametrų: <span class="term">EMA 9/21 sankirtas</span>, <span class="term">RSI</span>, <span class="term">momentum</span>, <span class="term">ATR volatilumą</span>, spread'ą, 24 h apimtis, <span class="term">order-book gylį</span>, <span class="term">koreliaciją su BTC</span>, rinkos režimą ir visą kainų istoriją.</p>
           <p>Iš viso to gimsta vienas balas — o iš balo sprendimas. Pozicijas atidaro pati, dydį parenka pagal <span class="term">rizikos limitus</span>, <span class="term">stop-loss</span> ir tikslus nustato pati, uždaro anksčiau, nei nuosmukis įsibėgėja, ir užfiksuoja rezultatą. Viskas automatiškai: be rankinio įsikišimo ir be jūsų dalyvavimo.</p>
         <p class="bc-heur-dim">Netikėk. Patikrink pats. Kiekvienas sprendimas įrašomas — kodėl įėjo, kurie <span class="term">signalai svėrė</span>, kokia buvo rizika. Viską galima atkartoti.</p>
+      </div>
+
+      <div class="bc-next bc-next--live">
+        <span class="bc-next-ar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v15"/><path d="M5.5 13.5 12 20l6.5-6.5"/></svg></span>
+        <p class="bc-next-l">Toliau — gyvas pulsas</p>
       </div>
 
       <div class="bc-cta-wrap">
@@ -906,10 +968,16 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       chartCanvas: el("bcChartCanvas"),
       chartCaption: el("bcChartCaption"),
       honestyStat: el("bcHonestyStat"),
-      proofFrom: el("bcProofFrom"),
-      proofTo: el("bcProofTo"),
-      proofS: el("bcProofS"),
-      proofBest: el("bcProofBest"),
+      yestFrom: el("bcYestFrom"),
+      yestTo: el("bcYestTo"),
+      yestS: el("bcYestS"),
+      bestFrom: el("bcBestFrom"),
+      bestTo: el("bcBestTo"),
+      bestS: el("bcBestS"),
+      bestFine: el("bcBestFine"),
+      hypoFrom: el("bcHypoFrom"),
+      hypoTo: el("bcHypoTo"),
+      hypoS: el("bcHypoS"),
       rate: el("bcRate"),
       rateB: el("bcRateB"),
       rateL: el("bcRateL"),
@@ -1385,30 +1453,48 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       els.rate.classList.toggle("bc-rate--stale", !!rates.stale);
     }
 
-    // Proof card 1: yesterday's real closed day for the selected account, with
-    // money you moved taken out — a day that received a deposit is not a day the
-    // bot earned it. The served copy stays as the fallback until a day closes.
-    function renderProof(equity) {
-      if (!els.proofFrom || !equity) return;
+    // Proof cards 1-3, all from the same closed-day series and all on the bot's own
+    // trading with money movement taken out: a day that received a deposit is not a
+    // day the bot earned it. The served copy stays as the fallback until a day
+    // closes. Card 3 is the same best day at ten times the size — a hypothetical,
+    // so it never takes a colour (§9b).
+    const HYPO_MULTIPLIER = 10;
 
-      const day = equity.yesterday;
-      if (day && Number.isFinite(Number(day.open))) {
-        const bot = Number(day.botEur);
-        els.proofFrom.textContent = money(day.open);
-        els.proofTo.textContent = money(day.close);
-        // Green is for a realised gain only; a losing day says so in red.
-        els.proofTo.classList.toggle("is-realised", bot > 0);
-        els.proofTo.classList.toggle("is-loss", bot < 0);
-        els.proofS.innerHTML =
-          `<b class="${bot < 0 ? "bc-t-red" : ""}">${esc(signedMoney(bot))}</b> · ` +
-          `${esc(signedPercent(day.botPercent, 1))} per parą`;
-      }
+    function fillDay(fromEl, toEl, sumEl, day, tail) {
+      if (!fromEl || !day || !Number.isFinite(Number(day.open))) return;
+      const bot = Number(day.botEur);
+      fromEl.textContent = money(day.open);
+      toEl.textContent = money(day.close);
+      // Green is for a realised gain only; a losing day says so in red.
+      toEl.classList.toggle("is-realised", bot > 0);
+      toEl.classList.toggle("is-loss", bot < 0);
+      sumEl.innerHTML = `<b class="${bot < 0 ? "bc-t-red" : ""}">${esc(signedMoney(bot))}</b> · ` +
+        `${esc(signedPercent(day.botPercent, 1))}${tail}`;
+    }
+
+    function renderProof(equity) {
+      if (!equity) return;
+
+      fillDay(els.yestFrom, els.yestTo, els.yestS, equity.yesterday, " per parą");
 
       const best = equity.bestDay;
-      if (els.proofBest && best) {
-        els.proofBest.textContent = best.date === (day && day.date)
-          ? "Geriausia para iki šiol — ji pati ir rodoma."
-          : `Geriausia para iki šiol: ${best.date} · ${signedMoney(best.botEur)} (${signedPercent(best.botPercent, 1)}).`;
+      fillDay(els.bestFrom, els.bestTo, els.bestS, best, " · geriausias rezultatas iki šiol");
+
+      if (best && els.hypoFrom) {
+        // Muted throughout: this never happened, and §9b forbids dressing a
+        // hypothetical like a realised figure.
+        // Whole dollars: cents on a sum that never existed are false precision, and
+        // the mock this replaces was whole-dollar too ("600 $ -> 900 $").
+        els.hypoFrom.textContent = money(Number(best.open) * HYPO_MULTIPLIER, 0);
+        els.hypoTo.textContent = money(Number(best.close) * HYPO_MULTIPLIER, 0);
+        els.hypoS.textContent =
+          `${signedMoney(Number(best.botEur) * HYPO_MULTIPLIER, 0)} · ta pati logika, tik nuliai, ` +
+          "botui nerūpi, su kokia suma dirba, o mes nepasinaudojom…";
+      }
+
+      if (best && els.bestFine) {
+        els.bestFine.textContent =
+          `Tai buvo ${best.date} diena — bet tai ne vienintelė diena, kuri baigėsi pliusu.`;
       }
     }
 
