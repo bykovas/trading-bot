@@ -1907,7 +1907,12 @@ static async Task EnsureDailyEquityTable(NpgsqlConnection connection, Cancellati
     await command.ExecuteNonQueryAsync(cancellationToken);
 
     await using var revision = new NpgsqlCommand(
-        "alter table portfolio_daily_equity add column if not exists revision integer",
+        """
+        alter table portfolio_daily_equity
+            add column if not exists revision integer,
+            add column if not exists first_utc timestamptz,
+            add column if not exists last_utc timestamptz
+        """,
         connection);
     await revision.ExecuteNonQueryAsync(cancellationToken);
 }
@@ -1936,6 +1941,12 @@ static async Task EnsureCashEventsTable(NpgsqlConnection connection, Cancellatio
 
 // Net money movement per local day. Several movements in one day collapse to one
 // figure on the chart — the individual entries stay in portfolio_cash_events.
+//
+// A movement counts for a day only if it landed inside that day's observed window.
+// Anything earlier is already contained in the day's opening value, and counting
+// it again is not a rounding error: futures-lukas-live was funded with 60 USD at
+// 08:21 and the worker's first cycle at 09:11 opened at exactly 60, so treating
+// that transfer as same-day inflow turned an +18.54 day into a reported -41.46.
 static async Task<Dictionary<string, decimal>> ReadDailyCashMovement(
     NpgsqlConnection connection,
     string botInstanceId,
@@ -1945,15 +1956,19 @@ static async Task<Dictionary<string, decimal>> ReadDailyCashMovement(
     await using var command = new NpgsqlCommand(
         """
         select
-            (occurred_at at time zone @time_zone)::date as local_date,
-            sum(amount) as net_amount
-        from portfolio_cash_events
-        where bot_instance_id = @bot_instance_id
-        group by local_date
+            day.local_date,
+            coalesce(sum(event.amount), 0) as net_amount
+        from portfolio_daily_equity day
+        left join portfolio_cash_events event
+            on event.bot_instance_id = day.bot_instance_id
+           and event.occurred_at >= day.first_utc
+           and event.occurred_at <= day.last_utc
+        where day.bot_instance_id = @bot_instance_id
+          and day.first_utc is not null
+        group by day.local_date
         """,
         connection);
     command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
-    command.Parameters.Add("time_zone", NpgsqlDbType.Text).Value = timeZoneId;
 
     var byDate = new Dictionary<string, decimal>();
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -2038,7 +2053,7 @@ static async Task BackfillDailyEquity(
         )
         insert into portfolio_daily_equity
             (bot_instance_id, local_date, time_zone, open_value_eur, high_value_eur,
-             low_value_eur, close_value_eur, cycle_count, revision)
+             low_value_eur, close_value_eur, cycle_count, revision, first_utc, last_utc)
         select
             @bot_instance_id,
             local_date,
@@ -2048,7 +2063,9 @@ static async Task BackfillDailyEquity(
             min(value),
             (array_agg(value order by utc desc, cycle_id desc))[1],
             count(*),
-            @revision
+            @revision,
+            min(utc),
+            max(utc)
         from clean
         group by local_date
         having local_date < (now() at time zone @time_zone)::date
@@ -2075,7 +2092,8 @@ static async Task<DashboardEquityDto> ReadEquityDays(
     if (string.IsNullOrWhiteSpace(botInstanceId))
     {
         // The curve is per account; without one there is nothing meaningful to plot.
-        return new DashboardEquityDto(timeZoneId, todayLocal, Array.Empty<DashboardEquityDayDto>(), 0m, false);
+        return new DashboardEquityDto(
+            timeZoneId, todayLocal, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null);
     }
 
     // "create table if not exists" is cheap but not free: it is a DDL round trip on
@@ -2129,6 +2147,23 @@ static async Task<DashboardEquityDto> ReadEquityDays(
 
     closed.Reverse();
 
+    // What the bot did, with money you moved taken out: a day that received a
+    // deposit is not a day the bot earned it.
+    static DashboardDayResultDto? Result(DashboardEquityDayDto? day)
+    {
+        if (day is null || day.Open <= 0m) return null;
+        var bot = day.Close - day.Open - day.ManualAdjustmentEur;
+        return new DashboardDayResultDto(
+            day.Date, day.Open, day.Open + bot, day.ManualAdjustmentEur, bot, bot / day.Open * 100m);
+    }
+
+    var yesterday = Result(closed.Count > 0 ? closed[^1] : null);
+    var best = closed
+        .Select(Result)
+        .Where(result => result is not null)
+        .OrderByDescending(result => result!.BotPercent)
+        .FirstOrDefault();
+
     // Deposits and withdrawals come from the exchange ledger, which the workers sync
     // into portfolio_cash_events. They are never inferred from cash moving between
     // cycles: on the live accounts that also happens when the exchange releases or
@@ -2138,7 +2173,9 @@ static async Task<DashboardEquityDto> ReadEquityDays(
         todayLocal,
         closed,
         closed.Sum(day => day.ManualAdjustmentEur),
-        true);
+        true,
+        yesterday,
+        best);
 }
 
 static async Task<DashboardTodayDto> ReadTodayTrades(
@@ -3128,7 +3165,7 @@ internal static class DashboardDefaults
 
     // Bump when the daily rollup's computation changes: stored days from an older
     // revision are dropped and rebuilt on the next read.
-    public const int RollupRevision = 2;
+    public const int RollupRevision = 3;
 }
 
 internal readonly record struct DecisionKey(string CycleId, int DecisionIndex);
@@ -3191,11 +3228,23 @@ internal sealed record DashboardEquityDto(
     string TodayLocalDate,
     IReadOnlyList<DashboardEquityDayDto> Days,
     decimal ManualAdjustmentEur,
-    bool ManualAdjustmentsTracked)
+    bool ManualAdjustmentsTracked,
+    DashboardDayResultDto? Yesterday,
+    DashboardDayResultDto? BestDay)
 {
     public static DashboardEquityDto Empty() =>
-        new("Europe/Vilnius", string.Empty, Array.Empty<DashboardEquityDayDto>(), 0m, false);
+        new("Europe/Vilnius", string.Empty, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null);
 }
+
+// One day's result with money movement stripped out: Close is where the day would
+// have ended on the bot's own trading alone.
+internal sealed record DashboardDayResultDto(
+    string Date,
+    decimal Open,
+    decimal Close,
+    decimal ManualAdjustmentEur,
+    decimal BotEur,
+    decimal BotPercent);
 
 internal sealed record DashboardTradeDto(
     DateTime Utc,

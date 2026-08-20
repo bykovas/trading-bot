@@ -519,6 +519,14 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 /* A rate nobody has been able to refresh for hours still shows, but dimmed:
    hiding it would be worse than admitting it is old. */
 .bc-rate--stale{opacity:.55}
+
+/* A losing day in proof card 1. The spec only had .is-realised for a gain,
+   because the mock's day was green; the sign decides the colour either way.
+   The element selector is load-bearing: .bc-proof-s b is (0,1,1) and outranks a
+   bare .bc-t-red, which painted a loss in the profit colour — the same trap the
+   handoff calls out for .bc-shell a.bc-cta. */
+.bc-proof-n .bc-to.is-loss{color:var(--red)}
+.bc-proof-s b.bc-t-red{color:var(--red)}
   </style>
 </head>
 <body>
@@ -562,9 +570,9 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <div class="bc-proof">
           <div class="bc-proof-cell">
             <p class="bc-proof-l">Vakar · realūs sandoriai</p>
-            <p class="bc-proof-n"><span class="bc-from">60 $</span><span class="bc-arrow">→</span><span class="bc-to">89 $</span></p>
-            <p class="bc-proof-s"><b>+29 $</b> · +48 % per pusę dienos</p>
-            <p class="bc-proof-fine">Geriausia para per mėnesį — todėl ją ir rodom.</p>
+            <p class="bc-proof-n" id="bcProofN"><span class="bc-from" id="bcProofFrom">60 $</span><span class="bc-arrow">→</span><span class="bc-to" id="bcProofTo">89 $</span></p>
+            <p class="bc-proof-s" id="bcProofS"><b>+29 $</b> · +48 % per parą</p>
+            <p class="bc-proof-fine" id="bcProofBest">Geriausia para per mėnesį — todėl ją ir rodom.</p>
           </div>
           <div class="bc-proof-cell">
             <p class="bc-proof-l bc-proof-l--hypo">Jei tik būtume žinoję… · ta pati logika, tik nuliai</p>
@@ -898,6 +906,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       chartCanvas: el("bcChartCanvas"),
       chartCaption: el("bcChartCaption"),
       honestyStat: el("bcHonestyStat"),
+      proofFrom: el("bcProofFrom"),
+      proofTo: el("bcProofTo"),
+      proofS: el("bcProofS"),
+      proofBest: el("bcProofBest"),
       rate: el("bcRate"),
       rateB: el("bcRateB"),
       rateL: el("bcRateL"),
@@ -1371,6 +1383,33 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         ? `Kursas iš Aerodrome telkinių Base tinkle · blokas ${num(rates.blockNumber, 0)} · ${observed} LT`
         : "";
       els.rate.classList.toggle("bc-rate--stale", !!rates.stale);
+    }
+
+    // Proof card 1: yesterday's real closed day for the selected account, with
+    // money you moved taken out — a day that received a deposit is not a day the
+    // bot earned it. The served copy stays as the fallback until a day closes.
+    function renderProof(equity) {
+      if (!els.proofFrom || !equity) return;
+
+      const day = equity.yesterday;
+      if (day && Number.isFinite(Number(day.open))) {
+        const bot = Number(day.botEur);
+        els.proofFrom.textContent = money(day.open);
+        els.proofTo.textContent = money(day.close);
+        // Green is for a realised gain only; a losing day says so in red.
+        els.proofTo.classList.toggle("is-realised", bot > 0);
+        els.proofTo.classList.toggle("is-loss", bot < 0);
+        els.proofS.innerHTML =
+          `<b class="${bot < 0 ? "bc-t-red" : ""}">${esc(signedMoney(bot))}</b> · ` +
+          `${esc(signedPercent(day.botPercent, 1))} per parą`;
+      }
+
+      const best = equity.bestDay;
+      if (els.proofBest && best) {
+        els.proofBest.textContent = best.date === (day && day.date)
+          ? "Geriausia para iki šiol — ji pati ir rodoma."
+          : `Geriausia para iki šiol: ${best.date} · ${signedMoney(best.botEur)} (${signedPercent(best.botPercent, 1)}).`;
+      }
     }
 
     function renderHeadline(data) {
@@ -1960,6 +1999,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       renderStatus(data);
       renderHeadline(data);
       renderRate(data.rates);
+      renderProof(data.equity);
       renderChart(data);
       renderHonestyStat((data.equity && data.equity.days) || []);
       renderMetrics(data);
