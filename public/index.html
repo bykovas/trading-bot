@@ -1,1567 +1,1385 @@
-<!DOCTYPE html>
-<html lang="en">
-
+<!doctype html>
+<html lang="lt">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BlynAI Capital — Decision Explanation</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BlynAI Capital — portfelio dashboard</title>
+  <meta name="description" content="BlynAI Capital — automatinio prekybos boto portfelis gyvai: atviros pozicijos, šiandienos sandoriai ir 30 dienų rezultatas.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
-    rel="stylesheet">
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    :root {
-      --font-display: "Space Grotesk", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
-      --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
-      --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-      --lh-body: 1.5;
-      --ls-mono: 0.01em;
-
-      --bg-void: #050505;
-      --surface-panel: rgba(17, 18, 15, 0.92);
-      --line: rgba(246, 218, 160, 0.12);
-      --ink: #F6EFE1;
-      --ink-soft: #C8BBA6;
-      --muted: #82796D;
-      --cream: #F7E6C1;
-      --gold: #F5B84F;
-      --gold-soft: #FFD987;
-      --gold-wash: rgba(245, 184, 79, 0.09);
-      --green: #41EDA0;
-      --green-bright: #6BFFBE;
-      --green-deep: #0B6B4E;
-      --green-dim: #1E8F68;
-      --green-glow: rgba(65, 237, 160, 0.35);
-      --green-wash: rgba(65, 237, 160, 0.09);
-      --red: #FF5367;
-      --red-bright: #FF7C8B;
-      --red-dim: #B32C3A;
-      --red-glow: rgba(255, 83, 103, 0.40);
-      --blue: #6FAEFF;
-      --blue-bright: #9AC6FF;
-      --blue-dim: #345F9E;
-      --blue-glow: rgba(111, 174, 255, 0.32);
-
-      --r-pill: 999px;
-      --r-md: 8px;
-      --r-lg: 12px;
-      --panel-radius: 8px;
-      --shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 22px 70px rgba(0, 0, 0, 0.30);
-      --shadow-hero: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 28px 80px rgba(0, 0, 0, 0.42);
-      --dur: 220ms;
-      --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-      --pancake-field:
-        repeating-radial-gradient(circle at 17% 12%, rgba(247, 213, 143, 0.12) 0 1px, transparent 1px 52px),
-        repeating-radial-gradient(circle at 82% 18%, rgba(65, 237, 160, 0.10) 0 1px, transparent 1px 64px);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    html {
-      background: var(--bg-void);
-    }
-
-    body {
-      font-family: var(--font-body);
-      color: var(--ink);
-      font-size: 14px;
-      line-height: var(--lh-body);
-      -webkit-font-smoothing: antialiased;
-      min-height: 100vh;
-      overflow-x: hidden;
-      background:
-        linear-gradient(120deg, rgba(5, 5, 5, 0.98), rgba(12, 13, 11, 0.96) 42%, rgba(4, 14, 12, 0.94) 100%),
-        var(--pancake-field),
-        var(--bg-void);
-    }
-
-    body::before,
-    body::after {
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    body::before {
-      opacity: 0.6;
-      background:
-        linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.016) 1px, transparent 1px);
-      background-size: 74px 74px;
-      -webkit-mask-image: linear-gradient(to bottom, black, transparent 78%);
-      mask-image: linear-gradient(to bottom, black, transparent 78%);
-    }
-
-    body::after {
-      opacity: 0.7;
-      background:
-        radial-gradient(680px 460px at 84% -6%, rgba(245, 184, 79, 0.10), transparent 60%),
-        radial-gradient(620px 480px at 4% 106%, rgba(65, 237, 160, 0.07), transparent 60%),
-        linear-gradient(to bottom, rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.55));
-    }
-
-    .num {
-      font-family: var(--font-mono);
-      font-variant-numeric: tabular-nums;
-      letter-spacing: var(--ls-mono);
-    }
-
-    .label {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--muted);
-      font-weight: 600;
-    }
-
-    .lucide {
-      width: 15px;
-      height: 15px;
-      stroke-width: 2;
-    }
-
-    .shell {
-      position: relative;
-      z-index: 1;
-      width: min(100%, 1440px);
-      margin: 0 auto;
-    }
-
-    /* ============ TOP STATUS STRIP ============ */
-    .topbar {
-      position: sticky;
-      top: 0;
-      z-index: 20;
-      display: flex;
-      align-items: center;
-      gap: 18px;
-      padding: 12px 28px;
-      min-height: 66px;
-      border-bottom: 1px solid var(--line);
-      background: rgba(5, 6, 6, 0.72);
-      backdrop-filter: blur(18px);
-      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
-    }
-
-    .brand-lockup {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      color: inherit;
-      text-decoration: none;
-    }
-
-    .brand-copy .n,
-    .brand-copy .s {
-      transition: color var(--dur) var(--ease-out);
-    }
-
-    .brand-lockup .n {
-      color: #B9A6F5;
-    }
-
-    .brand-lockup .s {
-      color: #9C8AE0;
-    }
-
-    .brand-lockup:hover .n {
-      color: var(--gold);
-    }
-
-    .brand-lockup:hover .s {
-      color: var(--gold-soft);
-    }
-
-    .coin {
-      position: relative;
-      width: 40px;
-      height: 40px;
-      flex: none;
-      border-radius: 50%;
-      display: grid;
-      place-items: center;
-      color: #1a1206;
-      font-family: var(--font-mono);
-      font-weight: 800;
-      font-size: 11px;
-      background: linear-gradient(145deg, rgba(255, 246, 215, 0.96), rgba(248, 184, 78, 0.94) 46%, rgba(129, 75, 28, 0.9));
-      border: 1px solid rgba(255, 226, 166, 0.5);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 0 22px rgba(245, 184, 79, 0.28);
-    }
-
-    .coin::before {
-      content: "";
-      position: absolute;
-      inset: 6px;
-      border: 1px solid rgba(42, 23, 7, 0.32);
-      border-radius: 50%;
-    }
-
-    .coin::after {
-      content: "";
-      position: absolute;
-      left: 8px;
-      right: 8px;
-      bottom: 10px;
-      height: 6px;
-      border-top: 1px solid rgba(43, 25, 8, 0.4);
-      border-bottom: 1px solid rgba(43, 25, 8, 0.3);
-    }
-
-    .coin span {
-      position: relative;
-      z-index: 1;
-    }
-
-    .brand-copy {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .brand-copy .n {
-      font-family: var(--font-display);
-      font-weight: 600;
-      font-size: 16px;
-      letter-spacing: 0.01em;
-      line-height: 1.05;
-      white-space: nowrap;
-    }
-
-    .brand-copy .s {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.14em;
-      white-space: nowrap;
-    }
-
-    .status-rail {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-left: 8px;
-    }
-
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      white-space: nowrap;
-      padding: 6px 11px;
-      border-radius: var(--r-pill);
-      font-family: var(--font-mono);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.035);
-      color: var(--ink-soft);
-    }
-
-    .pill .dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: currentColor;
-      box-shadow: 0 0 12px currentColor;
-    }
-
-    .pill.ok {
-      color: var(--green);
-      border-color: var(--green-glow);
-      background: var(--green-wash);
-    }
-
-    .pill.ok .dot {
-      animation: pulse 2.2s var(--ease-out) infinite;
-    }
-
-    .pill.muted {
-      color: #7e8491;
-      border-color: rgba(126, 132, 145, 0.2);
-      background: rgba(126, 132, 145, 0.07);
-    }
-
-    .pill.muted .dot {
-      box-shadow: none;
-    }
-
-    @keyframes pulse {
-
-      0%,
-      100% {
-        opacity: 1
-      }
-
-      50% {
-        opacity: 0.35
-      }
-    }
-
-    .spacer {
-      flex: 1;
-    }
-
-    .cycle {
-      display: grid;
-      gap: 2px;
-      justify-items: end;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--muted);
-      white-space: nowrap;
-    }
-
-    .cycle .lb {
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
-
-    .cycle .t {
-      color: var(--ink-soft);
-      font-weight: 600;
-    }
-
-    .cycle .t b {
-      color: var(--green);
-      font-weight: 600;
-    }
-
-    .kill {
-      display: inline-flex;
-      align-items: center;
-      gap: 9px;
-      padding: 0 18px;
-      min-height: 42px;
-      border-radius: var(--r-md);
-      cursor: pointer;
-      font-family: var(--font-mono);
-      font-weight: 700;
-      font-size: 12px;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: #ffdce1;
-      border: 1px solid rgba(255, 83, 103, 0.62);
-      background: linear-gradient(180deg, rgba(255, 83, 103, 0.22), rgba(255, 83, 103, 0.07)), rgba(31, 7, 11, 0.96);
-      box-shadow: 0 0 24px rgba(255, 83, 103, 0.2);
-      transition: all var(--dur) var(--ease-out);
-    }
-
-    .kill:hover {
-      color: #fff;
-      box-shadow: 0 0 32px rgba(255, 83, 103, 0.32);
-    }
-
-    .kill:active {
-      transform: scale(0.98);
-    }
-
-    .kill.armed {
-      background: var(--red);
-      color: #fff;
-      border-color: var(--red);
-      box-shadow: 0 0 0 1px var(--red), 0 0 40px rgba(255, 83, 103, 0.55);
-    }
-
-    .kill .ring {
-      width: 13px;
-      height: 13px;
-      border: 2px solid currentColor;
-      border-radius: 50%;
-      position: relative;
-    }
-
-    .kill .ring::after {
-      content: "";
-      position: absolute;
-      left: 50%;
-      top: -2px;
-      width: 2px;
-      height: 7px;
-      background: currentColor;
-      transform: translateX(-50%);
-    }
-
-    .stage {
-      padding: 20px 28px 30px;
-    }
-
-    /* ============ HERO BAND ============ */
-    .hero {
-      position: relative;
-      overflow: hidden;
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 512px;
-      gap: 20px;
-      align-items: stretch;
-      margin-bottom: 18px;
-      padding: 30px 34px;
-      border: 1px solid rgba(246, 218, 160, 0.16);
-      border-radius: var(--panel-radius);
-      background:
-        linear-gradient(90deg, rgba(23, 19, 13, 0.94), rgba(11, 18, 15, 0.86)),
-        repeating-radial-gradient(circle at 70% 46%, rgba(245, 184, 79, 0.14) 0 1px, transparent 1px 40px);
-      box-shadow: var(--shadow-hero);
-    }
-
-    .hero::before {
-      content: "";
-      position: absolute;
-      top: -140px;
-      left: 38%;
-      width: 460px;
-      height: 460px;
-      border-radius: 50%;
-      border: 1px solid rgba(245, 184, 79, 0.13);
-      background: repeating-radial-gradient(circle, rgba(245, 184, 79, 0.075) 0 2px, transparent 2px 34px);
-    }
-
-    .hero::after {
-      content: "";
-      position: absolute;
-      right: 20px;
-      bottom: -120px;
-      width: 320px;
-      height: 320px;
-      border-radius: 50%;
-      border: 1px solid rgba(65, 237, 160, 0.14);
-      background: repeating-radial-gradient(circle, rgba(65, 237, 160, 0.07) 0 1px, transparent 1px 32px);
-    }
-
-    .hero-copy {
-      position: relative;
-      z-index: 1;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      min-width: 0;
-    }
-
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--gold-soft);
-      margin-bottom: 14px;
-    }
-
-    .eyebrow .lucide {
-      width: 13px;
-      height: 13px;
-    }
-
-    .hero h1 {
-      font-family: var(--font-display);
-      font-weight: 700;
-      font-size: clamp(40px, 5.4vw, 62px);
-      line-height: 0.94;
-      letter-spacing: -0.02em;
-      color: var(--cream);
-      text-shadow: 0 0 40px rgba(245, 184, 79, 0.16);
-    }
-
-    .hero h1 .ai {
-      color: var(--gold);
-    }
-
-    .hero-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 18px;
-    }
-
-    .hero-meta span {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      min-height: 28px;
-      padding: 5px 11px;
-      border-radius: var(--r-pill);
-      border: 1px solid rgba(246, 218, 160, 0.16);
-      background: rgba(0, 0, 0, 0.22);
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--ink-soft);
-    }
-
-    .hero-meta span b {
-      color: var(--cream);
-      font-weight: 600;
-    }
-
-    .verdict {
-      position: relative;
-      z-index: 1;
-      display: grid;
-      grid-template-columns: 128px minmax(0, 1fr);
-      gap: 20px;
-      align-items: center;
-      padding: 22px 24px;
-      border-radius: var(--r-lg);
-      background: linear-gradient(135deg, rgba(65, 237, 160, 0.10), rgba(245, 184, 79, 0.05)), rgba(5, 14, 11, 0.62);
-      border: 1px solid var(--green-glow);
-      box-shadow: inset 0 0 40px rgba(65, 237, 160, 0.06), 0 0 30px -6px rgba(65, 237, 160, 0.2);
-    }
-
-    .seal {
-      position: relative;
-      width: 118px;
-      height: 118px;
-      display: grid;
-      place-items: center;
-      border-radius: 50%;
-      border: 1px solid rgba(255, 226, 166, 0.4);
-      background: repeating-radial-gradient(circle, rgba(255, 226, 166, 0.17) 0 1px, transparent 1px 11px), linear-gradient(145deg, rgba(248, 208, 128, 0.3), rgba(13, 16, 14, 0.94));
-      box-shadow: inset 0 0 34px rgba(245, 184, 79, 0.12), 0 0 34px rgba(65, 237, 160, 0.14);
-    }
-
-    .seal::before {
-      content: "";
-      position: absolute;
-      inset: 13px;
-      border-radius: 50%;
-      border: 1px dashed rgba(255, 226, 166, 0.34);
-      animation: spin 34s linear infinite;
-    }
-
-    .seal::after {
-      content: "";
-      position: absolute;
-      inset: 34px;
-      border-radius: 50%;
-      border: 1px solid rgba(65, 237, 160, 0.36);
-      background: rgba(65, 237, 160, 0.09);
-    }
-
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
-    }
-
-    .seal .core {
-      position: relative;
-      z-index: 1;
-      text-align: center;
-    }
-
-    .seal .core .lucide {
-      width: 20px;
-      height: 20px;
-      color: var(--green-bright);
-      margin-bottom: 2px;
-    }
-
-    .seal .core .m {
-      display: block;
-      font-family: var(--font-mono);
-      font-size: 10px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--green);
-    }
-
-    .verdict .vc .lb {
-      display: block;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--muted);
-      margin-bottom: 6px;
-    }
-
-    .verdict .vc .big {
-      font-family: var(--font-display);
-      font-weight: 700;
-      font-size: 40px;
-      line-height: 1;
-      color: var(--green-bright);
-      text-shadow: 0 0 30px var(--green-glow);
-    }
-
-    .verdict .vc .big small {
-      font-size: 19px;
-      color: var(--green);
-      font-weight: 600;
-    }
-
-    .verdict .vc p {
-      margin-top: 10px;
-      font-size: 12.5px;
-      color: var(--ink-soft);
-      line-height: 1.5;
-      max-width: 30rem;
-    }
-
-    /* ============ COCKPIT GRID ============ */
-    .cockpit {
-      display: grid;
-      grid-template-columns: minmax(0, 1.62fr) minmax(360px, 0.78fr);
-      grid-template-areas: "chart score" "risk exec" "audit audit";
-      gap: 16px;
-    }
-
-    .panel {
-      position: relative;
-      overflow: hidden;
-      border: 1px solid var(--line);
-      border-radius: var(--panel-radius);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.01)), var(--surface-panel);
-      box-shadow: var(--shadow-card);
-    }
-
-    .p-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      min-height: 62px;
-      padding: 15px 20px;
-      border-bottom: 1px solid rgba(246, 218, 160, 0.09);
-    }
-
-    .p-head .kicker {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--gold-soft);
-      margin-bottom: 5px;
-    }
-
-    .p-head h2 {
-      font-family: var(--font-display);
-      font-weight: 600;
-      font-size: 19px;
-      letter-spacing: -0.01em;
-      color: var(--ink);
-    }
-
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 11px;
-      border-radius: var(--r-pill);
-      border: 1px solid var(--line);
-      font-family: var(--font-mono);
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--ink-soft);
-      background: rgba(0, 0, 0, 0.2);
-      white-space: nowrap;
-    }
-
-    .chip.ok {
-      color: var(--green);
-      border-color: var(--green-glow);
-      background: var(--green-wash);
-    }
-
-    .chart-panel {
-      grid-area: chart;
-    }
-
-    .chart-head {
-      align-items: flex-end;
-    }
-
-    .chart-head h2 {
-      font-family: var(--font-mono);
-      font-weight: 500;
-      font-size: clamp(28px, 3.4vw, 34px);
-      color: var(--cream);
-      letter-spacing: 0;
-    }
-
-    .chart-head h2 .cur {
-      font-size: 16px;
-      color: var(--muted);
-    }
-
-    .chart-stats {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      gap: 8px;
-    }
-
-    .chart-stats span {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      min-height: 26px;
-      padding: 4px 10px;
-      border-radius: var(--r-pill);
-      border: 1px solid rgba(246, 218, 160, 0.12);
-      background: rgba(0, 0, 0, 0.18);
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--ink-soft);
-    }
-
-    .chart-stats .up {
-      color: var(--green);
-      border-color: var(--green-glow);
-      background: var(--green-wash);
-    }
-
-    .chart-stats .sw {
-      width: 14px;
-      height: 3px;
-      border-radius: 2px;
-    }
-
-    .chart-wrap {
-      padding: 8px 16px 6px;
-    }
-
-    svg.chart {
-      display: block;
-      width: 100%;
-      height: auto;
-      aspect-ratio: 820 / 348;
-    }
-
-    .chart-foot {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      padding: 4px 20px 16px;
-    }
-
-    .chart-foot span {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      min-height: 24px;
-      padding: 4px 10px;
-      border-radius: var(--r-pill);
-      border: 1px solid rgba(246, 218, 160, 0.1);
-      background: rgba(0, 0, 0, 0.16);
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--ink-soft);
-    }
-
-    .chart-foot span b {
-      color: var(--gold-soft);
-      font-weight: 600;
-    }
-
-    .score-panel {
-      grid-area: score;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .score-list {
-      display: grid;
-      gap: 11px;
-      padding: 18px 20px 6px;
-    }
-
-    .score-row {
-      display: grid;
-      grid-template-columns: 104px 1fr 56px;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .score-row .nm {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--ink-soft);
-    }
-
-    .score-row .nm .lucide {
-      width: 13px;
-      height: 13px;
-      color: var(--muted);
-    }
-
-    .track {
-      position: relative;
-      height: 22px;
-      border-radius: 5px;
-      background: rgba(0, 0, 0, 0.4);
-      box-shadow: inset 0 0 0 1px rgba(246, 218, 160, 0.06);
-      overflow: hidden;
-    }
-
-    .track .mid {
-      position: absolute;
-      left: 50%;
-      top: 0;
-      bottom: 0;
-      width: 1px;
-      background: rgba(246, 218, 160, 0.14);
-    }
-
-    .track .fill {
-      position: absolute;
-      top: 3px;
-      bottom: 3px;
-      border-radius: 4px;
-    }
-
-    .track .fill.pos {
-      background: linear-gradient(90deg, var(--green-deep), var(--green));
-      box-shadow: 0 0 16px var(--green-glow);
-    }
-
-    .track .fill.neg {
-      background: linear-gradient(90deg, var(--red), var(--red-dim));
-      box-shadow: 0 0 16px var(--red-glow);
-    }
-
-    .track .fill.info {
-      background: linear-gradient(90deg, var(--blue-dim), var(--blue));
-      box-shadow: 0 0 14px var(--blue-glow);
-    }
-
-    .score-row .v {
-      justify-self: end;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .score-row .v.pos {
-      color: var(--green-bright);
-    }
-
-    .score-row .v.neg {
-      color: var(--red-bright);
-    }
-
-    .score-row .v.info {
-      color: var(--blue-bright);
-    }
-
-    .final {
-      margin: 12px 20px 0;
-      padding: 18px 20px;
-      border-radius: var(--r-md);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      border: 1px solid var(--green-glow);
-      background: linear-gradient(135deg, rgba(65, 237, 160, 0.14), rgba(245, 184, 79, 0.06)), rgba(5, 14, 11, 0.7);
-    }
-
-    .final .lb {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--ink-soft);
-    }
-
-    .final .th {
-      font-family: var(--font-mono);
-      font-size: 10.5px;
-      color: var(--green-dim);
-      margin-top: 4px;
-    }
-
-    .final .sc {
-      text-align: right;
-    }
-
-    .final .sc b {
-      font-family: var(--font-mono);
-      font-weight: 600;
-      font-size: 46px;
-      line-height: 0.9;
-      color: var(--green-bright);
-      text-shadow: 0 0 30px var(--green-glow);
-    }
-
-    .final .sc span {
-      display: block;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--muted);
-      margin-top: 2px;
-    }
-
-    .explain {
-      display: flex;
-      gap: 12px;
-      padding: 16px 20px 20px;
-      margin-top: auto;
-    }
-
-    .explain .qi {
-      flex: none;
-      width: 32px;
-      height: 32px;
-      border-radius: var(--r-md);
-      display: grid;
-      place-items: center;
-      background: var(--gold-wash);
-      color: var(--gold);
-      box-shadow: 0 0 0 1px rgba(245, 184, 79, 0.24);
-    }
-
-    .explain .qi .lucide {
-      width: 16px;
-      height: 16px;
-    }
-
-    .explain .tx h3 {
-      font-family: var(--font-display);
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--gold-soft);
-      margin-bottom: 5px;
-    }
-
-    .explain .tx p {
-      font-size: 12.5px;
-      color: var(--ink-soft);
-      line-height: 1.55;
-    }
-
-    .explain .tx p .mono {
-      font-family: var(--font-mono);
-      color: var(--cream);
-    }
-
-    .explain .tx p .g {
-      color: var(--green-bright);
-      font-weight: 600;
-    }
-
-    .risk-panel {
-      grid-area: risk;
-    }
-
-    .risk-timeline {
-      position: relative;
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      padding: 20px 20px 22px;
-    }
-
-    .risk-timeline::before {
-      content: "";
-      position: absolute;
-      top: 30px;
-      left: 44px;
-      right: 44px;
-      height: 2px;
-      background: var(--green-glow);
-    }
-
-    .risk-item {
-      display: grid;
-      grid-template-rows: auto auto auto auto;
-      gap: 6px;
-      padding: 0 8px;
-      text-align: left;
-    }
-
-    .rdot {
-      position: relative;
-      z-index: 1;
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      display: grid;
-      place-items: center;
-      border: 1px solid var(--green-glow);
-      background: var(--green-wash);
-      color: var(--green);
-      box-shadow: 0 0 18px rgba(65, 237, 160, 0.18);
-    }
-
-    .rdot .lucide {
-      width: 13px;
-      height: 13px;
-    }
-
-    .risk-item .nm {
-      font-family: var(--font-display);
-      font-size: 12.5px;
-      font-weight: 500;
-      color: var(--ink);
-      line-height: 1.2;
-      word-break: break-word;
-    }
-
-    .risk-item .dt {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--muted);
-      line-height: 1.4;
-    }
-
-    .risk-item .st {
-      font-family: var(--font-mono);
-      font-size: 10.5px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--green);
-    }
-
-    .exec-panel {
-      grid-area: exec;
-    }
-
-    .trace {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-    }
-
-    .trace .cell {
-      padding: 16px 18px;
-      border-right: 1px solid rgba(246, 218, 160, 0.09);
-      border-bottom: 1px solid rgba(246, 218, 160, 0.09);
-      background: rgba(0, 0, 0, 0.12);
-    }
-
-    .trace .cell:nth-child(3n) {
-      border-right: 0;
-    }
-
-    .trace .cell:nth-last-child(-n+3) {
-      border-bottom: 0;
-    }
-
-    .trace .cell .label {
-      margin-bottom: 7px;
-    }
-
-    .trace .cell .v {
-      font-family: var(--font-mono);
-      font-size: 21px;
-      font-variant-numeric: tabular-nums;
-      color: var(--ink);
-      line-height: 1.05;
-    }
-
-    .trace .cell .v.g {
-      color: var(--green-bright);
-    }
-
-    .trace .cell .v.a {
-      color: var(--gold);
-    }
-
-    .trace .cell .sub {
-      margin-top: 6px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    .audit-panel {
-      grid-area: audit;
-    }
-
-    .audit-stack {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      padding: 18px 20px 20px;
-    }
-
-    .audit-stack .item {
-      padding: 14px 16px;
-      border: 1px solid rgba(246, 218, 160, 0.1);
-      border-radius: var(--r-md);
-      background: rgba(0, 0, 0, 0.16);
-    }
-
-    .audit-stack .item .k {
-      display: block;
-      font-family: var(--font-mono);
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--muted);
-      margin-bottom: 6px;
-    }
-
-    .audit-stack .item .val {
-      font-family: var(--font-mono);
-      font-size: 12.5px;
-      color: var(--ink-soft);
-      line-height: 1.4;
-    }
-
-    .audit-stack .item .val b {
-      color: var(--cream);
-      font-weight: 600;
-    }
-
-    /* ============ RESPONSIVE ============ */
-    @media (max-width: 1120px) {
-      .hero {
-        grid-template-columns: 1fr;
-      }
-
-      .cockpit {
-        grid-template-columns: 1fr;
-        grid-template-areas: "chart" "score" "risk" "exec" "audit";
-      }
-
-      .topbar {
-        flex-wrap: wrap;
-      }
-
-      .status-rail {
-        order: 4;
-        width: 100%;
-        margin-left: 0;
-      }
-
-      .spacer {
-        display: none;
-      }
-    }
-
-    @media (max-width: 860px) {
-      .topbar {
-        gap: 12px 14px;
-        padding: 12px 18px;
-      }
-
-      .cycle {
-        justify-items: start;
-      }
-
-      .stage {
-        padding: 14px 16px 24px;
-      }
-
-      .hero {
-        padding: 22px 20px;
-      }
-
-      .audit-stack {
-        grid-template-columns: repeat(2, 1fr);
-      }
-    }
-
-    @media (max-width: 620px) {
-      .verdict {
-        grid-template-columns: 1fr;
-        justify-items: center;
-        text-align: center;
-        gap: 14px;
-      }
-
-      .verdict .vc {
-        text-align: center;
-      }
-
-      .verdict .vc p {
-        margin-inline: auto;
-      }
-
-      .p-head {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-
-      .chart-head {
-        align-items: flex-start;
-      }
-
-      .chart-stats {
-        justify-content: flex-start;
-      }
-
-      .risk-timeline {
-        grid-template-columns: 1fr;
-        gap: 0;
-        padding: 8px 20px 16px;
-      }
-
-      .risk-timeline::before {
-        top: 18px;
-        bottom: 26px;
-        left: 31px;
-        right: auto;
-        width: 2px;
-        height: auto;
-      }
-
-      .risk-item {
-        grid-template-columns: 28px minmax(0, 1fr) auto;
-        grid-template-areas: "dot nm st" "dot dt st";
-        gap: 2px 10px;
-        padding: 10px 0;
-        align-items: center;
-      }
-
-      .risk-item .rdot {
-        grid-area: dot;
-      }
-
-      .risk-item .nm {
-        grid-area: nm;
-      }
-
-      .risk-item .dt {
-        grid-area: dt;
-      }
-
-      .risk-item .st {
-        grid-area: st;
-        align-self: center;
-      }
-
-      .trace {
-        grid-template-columns: 1fr 1fr;
-      }
-
-      .kill {
-        flex: 1;
-        justify-content: center;
-      }
-    }
-
-    @media (max-width: 420px) {
-      .audit-stack {
-        grid-template-columns: 1fr;
-      }
-
-      .trace {
-        grid-template-columns: 1fr;
-      }
-
-      .trace .cell,
-      .trace .cell:nth-child(3n) {
-        border-right: 0;
-      }
-
-      .final .sc b {
-        font-size: 38px;
-      }
-    }
+/* ============================================================
+   BlynAI Capital — portfelio dashboard
+   ONE stylesheet drives BOTH desktop and mobile.
+   Breakpoint is a CONTAINER query on .bc-shell at 900px.
+   Wide  (>=900px container) = desktop layout
+   Narrow (<900px container) = mobile layout
+   Swap @container for @media (width:...) if you prefer, but then
+   .bc-shell must be full-viewport width. Do not change the 900px value.
+   ============================================================ */
+:root{
+  --bg-void:#050505; --bg-1:#0b0c0a; --surface:rgba(17,18,15,.9); --surface-2:#0d0e0b;
+  --hairline:rgba(246,218,160,.13); --hairline-soft:rgba(246,218,160,.08);
+  --ink:#f6efe1; --cream:#f7e6c1; --ink-soft:#c8bba6;
+  --muted:#a89e8e; --muted-2:#81786b; --muted-3:#6e675c; --muted-4:#5f584e;
+  --gold:#f5b84f; --gold-soft:#ffd987; --purple:#9b87f5;
+  --green:#41eda0; --red:#ff5367; --amber:#f0a63a; --blue:#6faeff; --blue-deep:#2f5d8a;
+  --luko:#c9a86a; --byko:#7ccbff;
+  --font-display:"Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body:"IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --r-sm:6px; --r:8px; --r-md:11px; --r-lg:12px; --pill:999px;
+  --shadow:0 22px 60px rgba(0,0,0,.28);
+}
+@keyframes bcBlink{0%,100%{opacity:1;box-shadow:0 0 12px currentColor}50%{opacity:.28;box-shadow:0 0 2px currentColor}}
+
+.bc-shell{container-type:inline-size;position:relative;box-sizing:border-box;width:100%;background:
+  linear-gradient(120deg,rgba(5,5,5,.98),rgba(14,15,12,.96) 52%,rgba(4,15,12,.94)),#050505;
+  color:var(--ink);font-family:var(--font-body);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.bc-shell *,.bc-shell *::before,.bc-shell *::after{box-sizing:border-box}
+.bc-shell p{margin:0}
+.bc-shell a{color:var(--gold);text-decoration:none}
+.bc-shell a:hover{color:var(--gold-soft)}
+.bc-shell summary{list-style:none;cursor:pointer}
+.bc-shell summary::-webkit-details-marker{display:none}
+.bc-dot{width:7px;height:7px;flex:none;border-radius:50%;background:var(--green);color:var(--green);animation:bcBlink 1.6s ease-in-out infinite}
+
+/* tone helpers */
+.bc-t-green{color:var(--green)} .bc-t-red{color:var(--red)} .bc-t-cream{color:var(--cream)}
+.bc-t-soft{color:var(--ink-soft)} .bc-t-gold{color:var(--gold)} .bc-t-blue{color:var(--blue)}
+
+/* --- topbar --- */
+.bc-topbar{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:20px 24px;
+  padding:18px 22px;border-bottom:1px solid var(--hairline)}
+.bc-brand{display:inline-flex;align-items:center;gap:12px;color:inherit}
+.bc-mark{width:42px;height:42px;flex:none;display:grid;place-items:center;border-radius:var(--r-lg);
+  background:rgba(0,0,0,.28);border:1px solid rgba(245,184,79,.28);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 0 22px rgba(245,184,79,.14)}
+.bc-mark svg{width:31px;height:31px}
+.bc-brand-txt{display:flex;flex-direction:column;gap:2px}
+.bc-brand-txt b{font:600 17px/1.05 var(--font-display);letter-spacing:.01em;color:var(--cream);white-space:nowrap}
+.bc-brand-txt b i{font-style:normal;color:var(--gold)}
+.bc-brand-txt small{font:10px var(--font-mono);text-transform:uppercase;letter-spacing:.14em;color:var(--purple);white-space:nowrap}
+.bc-topbar-right{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.bc-tenant{display:flex;align-items:center;gap:8px}
+.bc-tenant-l{font:10px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted-3)}
+.bc-seg{display:inline-flex;gap:3px;padding:3px;border:1px solid rgba(246,218,160,.14);border-radius:var(--r);background:rgba(17,18,15,.82)}
+.bc-seg button{min-height:28px;padding:0 15px;border:0;border-radius:var(--r-sm);background:transparent;
+  color:var(--muted-2);font:600 12px var(--font-mono);letter-spacing:.06em;cursor:pointer}
+.bc-seg button.is-active{background:rgba(245,184,79,.16);color:var(--gold-soft);box-shadow:inset 0 0 0 1px rgba(245,184,79,.3)}
+.bc-status-chips{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+.bc-status{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 11px;white-space:nowrap;
+  border:1px solid rgba(246,218,160,.12);border-radius:7px;background:rgba(17,18,15,.82);font:11.5px var(--font-mono)}
+.bc-status-l{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-2)}
+.bc-status-v{color:var(--green);font-weight:500}
+.bc-status-m{color:var(--muted-4)}
+.bc-status-line{display:none;align-items:center;gap:9px;width:100%;height:34px;padding:0;border:0;background:none;
+  font:11.5px var(--font-mono);color:var(--muted);cursor:pointer}
+.bc-status-line .bc-chev{margin-left:auto;color:var(--muted-4)}
+
+/* --- hero --- */
+.bc-hero{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:30px 44px;
+  padding:34px 22px 30px;border-bottom:1px solid var(--hairline)}
+.bc-eyebrow{font:600 11px var(--font-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}
+.bc-h1{margin:13px 0 0;font:700 clamp(27px,4.4cqw,40px)/1.08 var(--font-display);letter-spacing:-.028em;color:var(--cream);text-wrap:pretty;max-width:24ch}
+.bc-lead{margin:16px 0 0;font-size:clamp(15.5px,1.7cqw,17.5px);line-height:1.5;color:#d8cfc0;text-wrap:pretty;max-width:64ch}
+.bc-coins{grid-row:1;grid-column:2;align-self:start;padding:18px;border:1px solid var(--hairline);border-radius:var(--r-lg);background:rgba(0,0,0,.25)}
+.bc-coins-l{font:10px var(--font-mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted-3)}
+.bc-coins-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
+.bc-coin{display:flex;align-items:center;gap:13px;min-width:0;padding:13px 14px;border-radius:var(--r-md)}
+.bc-coin--luko{border:1px solid rgba(201,168,106,.28);background:rgba(201,168,106,.06)}
+.bc-coin--byko{border:1px solid rgba(124,203,255,.28);background:rgba(124,203,255,.06)}
+.bc-coin-ic{flex:none;display:block}
+.bc-coin-ic svg{width:40px;height:40px;display:block}
+.bc-coin-txt{display:flex;flex-direction:column;gap:3px;min-width:0}
+.bc-coin-txt b{font:600 16px var(--font-display);letter-spacing:.02em}
+.bc-coin-txt small{font:11.5px var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bc-coin--luko b{color:#e8d5ac} .bc-coin--luko small{color:#9a8f7d}
+.bc-coin--byko b{color:#bfe2ff} .bc-coin--byko small{color:#7f8b96}
+.bc-hero-wide{grid-column:1/-1;min-width:0}
+.bc-heur{grid-column:1/-1;min-width:0}
+.bc-cta{grid-column:1/-1;justify-self:start}
+.bc-proof{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:1px;
+  border:1px solid rgba(65,237,160,.22);border-radius:var(--r-lg);overflow:hidden;background:rgba(65,237,160,.16)}
+.bc-proof-cell{padding:18px 20px;background:#0c110e}
+.bc-proof-l{font:600 10px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--green)}
+.bc-proof-l--warn{color:var(--amber)}
+.bc-proof-n{display:flex;align-items:baseline;gap:9px;margin-top:10px;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.bc-from{font-size:26px;color:var(--muted-2)} .bc-arrow{font-size:20px;color:var(--green)} .bc-to{font-size:30px;color:var(--cream)}
+.bc-proof-s{margin-top:8px;font-size:13px;color:var(--muted)}
+.bc-proof-s b{color:var(--green);font-weight:600}
+.bc-proof-p{margin-top:10px;font-size:14.5px;line-height:1.5;color:#c9bfae;text-wrap:pretty}
+.bc-proof-p b{color:var(--cream);font-weight:600}
+.bc-heur{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:26px 30px;margin-top:26px}
+.bc-heur p{font-size:15.5px;line-height:1.64;color:#c9bfae;text-wrap:pretty}
+.bc-heur p b{color:var(--cream);font-weight:600}
+.bc-heur p+p{color:var(--muted)}
+.bc-heur .bc-heur-dim{color:var(--muted-2)}
+.bc-shell a.bc-cta{display:inline-flex;align-items:center;height:46px;margin-top:26px;padding:0 24px;
+  border:1px solid rgba(245,184,79,.45);border-radius:9px;background:rgba(245,184,79,.07);
+  color:var(--gold-soft);font:500 15.5px var(--font-display)}
+.bc-shell a.bc-cta:hover{background:rgba(245,184,79,.14);color:var(--gold-soft)}
+
+/* --- live / chart / metrics --- */
+.bc-live{padding:26px 22px 0}
+.bc-live-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.bc-live-l{display:flex;align-items:center;gap:9px;font:600 11px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--green)}
+.bc-live-l b{font-weight:700;color:var(--gold)}
+.bc-live-n{display:flex;align-items:baseline;gap:14px;margin-top:9px;flex-wrap:wrap}
+.bc-big{font:clamp(34px,5.8cqw,54px)/1 var(--font-mono);font-variant-numeric:tabular-nums;color:var(--cream)}
+.bc-delta{display:inline-flex;align-items:center;height:32px;padding:0 13px;white-space:nowrap;
+  border:1px solid rgba(65,237,160,.34);border-radius:var(--pill);background:rgba(65,237,160,.07);
+  color:var(--green);font:13.5px var(--font-mono)}
+.bc-live-s{margin-top:10px;font:12.5px var(--font-mono);color:var(--muted-2)}
+.bc-live-s b{color:var(--ink-soft);font-weight:400} .bc-live-s i{font-style:normal;color:var(--blue)}
+.bc-legend{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.bc-legend-l{font:10.5px var(--font-mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted-3);text-align:right}
+.bc-legend-row{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+.bc-lg{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 11px;border:1px solid var(--hairline);
+  border-radius:var(--r);background:rgba(17,18,15,.7);font:11.5px var(--font-mono);color:var(--ink-soft)}
+.bc-sq-pair{display:inline-flex;gap:3px}
+.bc-sq{width:14px;height:14px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center}
+.bc-sq svg{width:7px;height:6px;display:block}
+.bc-sq--up{background:var(--green)} .bc-sq--dn{background:var(--red)}
+.bc-sq--dep{background:var(--blue)} .bc-sq--wdr{background:var(--blue-deep);box-shadow:inset 0 0 0 1.5px var(--blue)}
+.bc-chart{margin-top:16px}
+.bc-chart-svg{display:block;overflow:visible}
+.bc-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,175px),1fr));gap:1px;margin-top:18px;
+  border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline);background:rgba(246,218,160,.09)}
+.bc-metric{padding:15px 4px 18px;background:var(--surface-2)}
+.bc-metric-l{font:600 10px var(--font-mono);letter-spacing:.11em;text-transform:uppercase;color:var(--muted-3)}
+.bc-metric-v{margin-top:8px;font:22px/1 var(--font-mono);font-variant-numeric:tabular-nums;color:var(--cream)}
+.bc-metric-s{margin-top:6px;font-size:12px;color:var(--muted-2)}
+
+/* --- tabs --- */
+.bc-tabs{display:flex;gap:8px;flex-wrap:wrap;padding:20px 22px}
+.bc-tabs a{display:inline-flex;align-items:center;min-height:34px;padding:0 13px;border:1px solid var(--hairline);
+  border-radius:var(--r);background:rgba(17,18,15,.72);font:13px var(--font-mono)}
+.bc-tabs a:hover{border-color:rgba(245,184,79,.38);background:rgba(245,184,79,.08)}
+
+/* --- sections & cards --- */
+.bc-sec{padding:8px 22px 0}
+.bc-sec+.bc-sec{padding-top:34px}
+.bc-sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+.bc-sec-head h2{margin:0;font:600 clamp(19px,2.6cqw,22px) var(--font-display);letter-spacing:-.01em;color:var(--cream)}
+.bc-sec-head span{font:12px var(--font-mono);color:var(--muted-3)}
+.bc-tstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,165px),1fr));gap:12px;margin-bottom:14px}
+.bc-tstats .bc-metric{padding:16px 18px;border:1px solid var(--hairline);border-radius:var(--r-lg);background:rgba(17,18,15,.85)}
+.bc-tstats .bc-metric-v{font-size:28px}
+.bc-list{display:grid;gap:12px}
+.bc-card{border:1px solid var(--hairline);border-radius:var(--r-lg);
+  background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.008)),var(--surface)}
+.bc-card-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,272px),1fr));gap:22px 26px;padding:20px}
+.bc-pair{font:600 19px var(--font-display);letter-spacing:-.01em;color:var(--cream)}
+.bc-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.bc-badge{display:inline-flex;align-items:center;height:23px;padding:0 9px;border-radius:var(--pill);
+  font:600 10.5px var(--font-mono);letter-spacing:.06em;text-transform:uppercase}
+.bc-badge--green{color:var(--green);background:rgba(65,237,160,.1);border:1px solid rgba(65,237,160,.3)}
+.bc-badge--red{color:var(--red);background:rgba(255,83,103,.1);border:1px solid rgba(255,83,103,.32)}
+.bc-badge--warn{color:var(--amber);background:rgba(240,166,58,.09);border:1px solid rgba(240,166,58,.3)}
+.bc-badge--neutral{color:var(--muted);background:rgba(255,255,255,.03);border:1px solid rgba(246,218,160,.18)}
+.bc-when{display:block;margin-top:11px;font:11.5px var(--font-mono);color:var(--muted-3)}
+.bc-params{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 14px;margin-top:13px}
+.bc-kv{display:flex;flex-direction:column;gap:3px}
+.bc-kv-l{font:9.5px var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted-4)}
+.bc-kv-v{font:13px var(--font-mono);font-variant-numeric:tabular-nums}
+.bc-why-l,.bc-chips-l,.bc-num-l{font:600 10px var(--font-mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted-3)}
+.bc-chips-l,.bc-num-l+.bc-chips{margin-top:0}
+.bc-why{margin-top:9px;font-size:14.5px;line-height:1.6;color:#d8cfc0;text-wrap:pretty}
+.bc-tech{margin-top:14px;font:11.5px/1.6 var(--font-mono);color:var(--muted-3);word-break:break-word}
+.bc-bar-box{margin-top:18px;padding:14px 14px 10px;border:1px solid rgba(246,218,160,.1);border-radius:10px;background:rgba(0,0,0,.24)}
+.bc-bar-ends{display:flex;justify-content:space-between;font:10px var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted-4)}
+.bc-bar{height:8px;margin-top:9px;border-radius:var(--pill)}
+.bc-bar--long{background:linear-gradient(90deg,rgba(255,83,103,.55),rgba(240,166,58,.4) 45%,rgba(65,237,160,.55))}
+.bc-bar--short{background:linear-gradient(90deg,rgba(65,237,160,.55),rgba(240,166,58,.4) 55%,rgba(255,83,103,.55))}
+.bc-bar-marks{position:relative;height:33px;margin-top:-8px}
+.bc-tick{position:absolute;top:0;width:2px;height:8px;background:var(--cream);opacity:.55}
+.bc-now{position:absolute;top:-3px;width:14px;height:14px;margin-left:-7px;border-radius:50%;
+  border:2.5px solid var(--surface-2);background:var(--cream);box-shadow:0 0 12px rgba(247,230,193,.5)}
+.bc-now-l{position:absolute;top:15px;transform:translateX(-50%);white-space:nowrap;font:11px var(--font-mono);color:var(--cream)}
+.bc-bar-foot{font:11px var(--font-mono);color:var(--muted-4)}
+.bc-num-l{font-size:9.5px;letter-spacing:.11em}
+.bc-num-v{display:flex;align-items:baseline;gap:10px;margin-top:7px}
+.bc-num-v span{font:30px/1 var(--font-mono);font-variant-numeric:tabular-nums}
+.bc-num-v em{font-style:normal;font:14px var(--font-mono)}
+.bc-num .bc-chips-l{margin-top:18px}
+.bc-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.bc-chip{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:7px;font:11.5px var(--font-mono)}
+.bc-chip--sig{border:1px solid rgba(65,237,160,.26);background:rgba(65,237,160,.07);color:var(--green)}
+.bc-chip--ctx{border:1px solid rgba(111,174,255,.24);background:rgba(111,174,255,.07);color:var(--blue)}
+.bc-chip--warn{border:1px solid rgba(240,166,58,.28);background:rgba(240,166,58,.08);color:var(--amber)}
+.bc-chev{font:10.5px var(--font-mono);color:var(--muted-3)}
+.bc-card-body{padding:0 20px 18px;border-top:1px solid var(--hairline-soft)}
+.bc-trade-sum{font:10.5px var(--font-mono);color:var(--muted-3)}
+.bc-proof-note{margin-top:10px;font-size:12.5px;line-height:1.5;color:var(--amber);text-align:center}
+.bc-proof-note b{color:var(--cream);font-weight:600}
+.bc-mobilebar{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 16px;border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline);
+  background:rgba(0,0,0,.4);font:11px var(--font-mono)}
+.bc-mb-status{display:inline-flex;flex:none;align-items:center;gap:8px;white-space:nowrap;color:var(--green)}
+.bc-mb-status em{font-style:normal;color:var(--muted-4)}
+.bc-only-narrow{display:none}
+
+/* =========================== WIDE (desktop) =========================== */
+@container (min-width:900px){
+  /* cards are always expanded on desktop; the toggle is mobile-only */
+  .bc-card>.bc-card-sum{cursor:default}
+  .bc-only-narrow{display:none!important}
+  .bc-status-line{display:none}
+}
+
+/* =========================== NARROW (mobile) ========================== */
+@container (max-width:899px){
+  .bc-only-wide{display:none!important}
+  .bc-only-narrow{display:block}
+  span.bc-only-narrow{display:inline-block}
+
+  .bc-topbar{position:absolute;top:0;left:0;right:0;z-index:2;
+    justify-content:center;align-items:center;padding:26px 16px 0;gap:12px;border-bottom:0;background:none}
+  .bc-mark{width:32px;height:32px;border-radius:10px}
+  .bc-mark svg{width:23px;height:23px}
+  .bc-brand-txt b{font-size:14.5px}
+  .bc-topbar-right{display:none}
+  .bc-seg button{min-height:24px;padding:0 10px;font-size:10.5px}
+  .bc-mobilebar{display:flex}
+  .bc-mb-status em{display:none}
+
+  /* HERO = the whole first screen: centred, sells before any scroll */
+  /* FOLD BUDGET: on a 390x844 screen everything up to and including the coin
+     pills must sit above 844px. Measured bottom of .bc-coins = 575px.
+     If you add anything to the hero, re-measure .bc-coins bottom. */
+  /* The brand is lifted out of flow so the hero starts at y=0 and its glow
+     origin coincides with the top of the screen — otherwise a hard seam forms
+     across the shell right under the centred logo. */
+  .bc-hero{grid-template-columns:1fr;gap:18px;min-height:700px;align-content:center;
+    padding:84px 20px 22px;text-align:center;
+    background:radial-gradient(120% 62% at 50% 0%,rgba(245,184,79,.12),rgba(5,5,5,0) 62%)}
+  .bc-hero-main{order:1}
+  .bc-hero-wide{order:2}
+  .bc-cta{order:3}
+  .bc-coins{order:4}
+  .bc-heur{order:5}
+  .bc-h1{margin:12px auto 0;font-size:30px;max-width:none}
+  .bc-lead{margin:12px auto 0;font-size:15px;max-width:none}
+  .bc-coins{grid-row:auto;grid-column:auto;padding:0;border:0;background:none}
+  .bc-coins-l{font-size:9.5px}
+  .bc-coins-row{display:flex;justify-content:center;gap:8px;margin-top:10px}
+  .bc-coin{gap:7px;height:30px;padding:0 11px;border-radius:var(--pill)}
+  .bc-coin-ic svg{width:17px;height:17px}
+  .bc-coin-txt small{display:none}
+  .bc-coin-txt b{font-size:12.5px}
+  /* one green box carries the proof; cells 2 and 3 collapse into .bc-proof-note */
+  .bc-proof{grid-template-columns:1fr;border:0;border-radius:0;background:none;text-align:center}
+  .bc-proof-cell:not(:first-child){display:none}
+  .bc-proof-cell{padding:14px 16px;border:1px solid rgba(65,237,160,.26);border-radius:14px;background:rgba(65,237,160,.05)}
+  .bc-proof-n{justify-content:center;margin-top:8px}
+  .bc-from{font-size:20px} .bc-arrow{font-size:16px} .bc-to{font-size:26px}
+  .bc-proof-s{margin-top:7px;font-size:12.5px}
+  .bc-heur{grid-template-columns:1fr;gap:9px;margin-top:6px;text-align:center}
+  .bc-heur p{font-size:12.5px;line-height:1.6}
+  .bc-shell a.bc-cta{display:flex;justify-content:center;justify-self:stretch;height:50px;
+    margin-top:0;padding:0 20px;border:0;background:var(--gold);color:#120d04;
+    font-weight:600;font-size:16px;box-shadow:0 12px 40px rgba(245,184,79,.22)}
+  .bc-shell a.bc-cta:hover{background:var(--gold-soft);color:#120d04}
+
+  .bc-live{padding:20px 16px 0}
+  .bc-legend{align-items:flex-start;order:2;margin-top:10px}
+  .bc-legend-l{text-align:left}
+  .bc-legend-row{justify-content:flex-start}
+  .bc-live-head{flex-direction:column;gap:0}
+  .bc-metrics{grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid rgba(246,218,160,.12);border-radius:10px;overflow:hidden}
+  .bc-metric{padding:12px 13px}
+  .bc-metric-v{font-size:17px}
+  .bc-metric-s{display:none}
+
+  .bc-tabs{padding:18px 16px;gap:7px}
+  .bc-tabs a{min-height:32px;padding:0 11px;font-size:11.5px}
+
+  .bc-sec{padding:4px 16px 0}
+  .bc-sec+.bc-sec{padding-top:24px}
+  .bc-sec-head h2{font-size:17px}
+  .bc-tstats{grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;
+    border:1px solid rgba(246,218,160,.12);border-radius:10px;overflow:hidden;background:rgba(246,218,160,.1)}
+  .bc-tstats .bc-metric{border:0;border-radius:0;padding:12px 13px}
+  .bc-tstats .bc-metric-v{font-size:17px}
+
+  /* collapsed rows: headline + risk bar visible, everything else behind the tap */
+  .bc-card-sum{display:block;padding:13px 14px}
+  .bc-pair{font-size:16px}
+  .bc-badges{margin-top:8px}
+  .bc-when{margin-top:8px;font-size:10.5px}
+  .bc-num{display:flex;align-items:baseline;gap:10px;margin-top:10px}
+  .bc-num-l{display:none}
+  .bc-num-v{margin-top:0}
+  .bc-num-v span{font-size:19px}
+  .bc-bar-box{margin-top:11px;padding:0;border:0;background:none}
+  .bc-bar{height:6px}
+  .bc-bar-marks{height:26px}
+  .bc-now{width:12px;height:12px;margin-left:-6px;border-width:2px}
+  .bc-chev{display:block;margin-top:8px;text-align:right}
+  .bc-card-body{padding:0 14px 14px}
+  .bc-card-body .bc-params{margin-top:13px}
+  .bc-card-body .bc-why{font-size:13.5px}
+  .bc-card-body .bc-tech{font-size:10.5px}
+}
+
+/* ============================================================
+   Additions beyond the handoff stylesheet: page frame, live-data
+   states (loading, failure, empty) and the status tones the spec
+   describes in prose but does not declare.
+   ============================================================ */
+html,body{margin:0;background:var(--bg-void);color:var(--ink)}
+.bc-page{width:100%;max-width:1440px;margin:0 auto}
+
+.bc-t-amber{color:var(--amber)}
+.bc-dot--warn{background:var(--amber);color:var(--amber)}
+/* A service that is down stops blinking — a steady red reads as broken,
+   a blinking one reads as alive. */
+.bc-dot--down{background:var(--red);color:var(--red);animation:none;box-shadow:0 0 8px currentColor}
+.bc-delta--down{border-color:rgba(255,83,103,.34);background:rgba(255,83,103,.07);color:var(--red)}
+
+.bc-notice{margin:0;padding:11px 22px;border-bottom:1px solid rgba(240,166,58,.3);
+  background:rgba(240,166,58,.08);color:var(--amber);font:12.5px var(--font-mono)}
+
+.bc-empty{margin:0;padding:22px 20px;border:1px solid var(--hairline);border-radius:var(--r-lg);
+  background:var(--surface);color:var(--muted-2);font:13px var(--font-mono);text-align:center}
+
+/* First paint renders the real card heights rather than a spinner. */
+@keyframes bcSkeleton{0%,100%{opacity:.35}50%{opacity:.6}}
+.bc-skeleton{border:1px solid var(--hairline);border-radius:var(--r-lg);background:var(--surface);
+  animation:bcSkeleton 1.6s ease-in-out infinite}
+.bc-skeleton--pos{height:232px;margin-bottom:12px}
+.bc-skeleton--trade{height:186px}
+.bc-skeleton--chart{height:310px;border-radius:var(--r)}
+@container (max-width:899px){
+  .bc-skeleton--pos{height:118px}
+  .bc-skeleton--trade{height:104px}
+  .bc-skeleton--chart{height:168px}
+}
   </style>
 </head>
-
 <body>
-  <div class="shell">
-
-    <header class="topbar">
-      <a class="brand-lockup" href="#" aria-label="BlynAI Capital">
-        <span class="coin"><span>BC</span></span>
-        <span class="brand-copy">
-          <span class="n">BlynAI Capital</span>
-          <span class="s">Bykovas-Finance Lab</span>
-        </span>
+  <div class="bc-page">
+  <div class="bc-shell">
+    <p class="bc-notice" id="bcNotice" hidden></p>
+    <header class="bc-topbar">
+      <a class="bc-brand" href="/">
+        <span class="bc-mark"><svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><defs><linearGradient id="bcm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD987"/><stop offset="1" stop-color="#F5B84F"/></linearGradient></defs><path d="M16.5 9 L8.5 20 L16.5 31" stroke="url(#bcm)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M23.5 9 L31.5 20 L23.5 31" stroke="url(#bcm)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="17" cy="17.5" r="2.1" fill="#FFD987"/><circle cx="23" cy="17.5" r="2.1" fill="#C8963B"/><circle cx="17" cy="22.5" r="2.1" fill="#C8963B"/><circle cx="23" cy="22.5" r="2.1" fill="#FFD987"/></svg></span>
+        <span class="bc-brand-txt"><b>Blyn<i>AI</i> Capital</b><small>L&amp;D Finance Lab</small></span>
       </a>
-      <div class="status-rail">
-        <span class="pill ok"><span class="dot"></span>Bot Running</span>
-        <span class="pill ok"><span class="dot"></span>Live Trading</span>
-        <span class="pill ok"><span class="dot"></span>Kraken OK</span>
-        <span class="pill muted"><span class="dot"></span>Trading212 Off</span>
+      <div class="bc-topbar-right">
+        <div class="bc-tenant">
+          <span class="bc-tenant-l">Paskyra</span>
+          <span class="bc-seg"><button type="button" data-tenant="LUKAS">LUKAS</button><button type="button" data-tenant="DENISAS">DENISAS</button></span>
+        </div>
+        <div class="bc-status-chips" id="bcStatusChips"></div>
+        <button type="button" class="bc-status-line" id="bcStatusLine" aria-expanded="false"><i class="bc-dot" id="bcStatusLineDot"></i><span class="bc-status-v" id="bcStatusLineText">Kraunama</span><span class="bc-status-m" id="bcStatusLineAge"></span><span class="bc-chev">detaliau &#9662;</span></button>
       </div>
-      <div class="spacer"></div>
-      <div class="cycle">
-        <span class="lb">Last cycle</span>
-        <span class="t">2026-07-02 17:38:11 LT · <b>+2.4s</b></span>
-      </div>
-      <button class="kill" id="kill"><span class="ring"></span>Kill Switch</button>
     </header>
 
-    <div class="stage">
+    <section class="bc-hero">
+      <div class="bc-hero-main">
+        <p class="bc-eyebrow">Uždaras testavimas · priimame tik kelias sąskaitas</p>
+        <h1 class="bc-h1">Norite gauti pinigų automatiškai — nieko nedarydami?</h1>
+        <p class="bc-lead">Prisijunkite prie mūsų uždaro testavimo. Botas prekiauja pats — jūs tik stebite, kaip auga skaičius.</p>
+      </div>
 
-      <section class="hero">
-        <div class="hero-copy">
-          <span class="eyebrow"><i data-lucide="fingerprint" class="lucide"></i>Deterministic replay · Decision
-            #4182</span>
-          <h1>Blyn<span class="ai">AI</span> Capital</h1>
-          <div class="hero-meta">
-            <span>Decision Explanation</span>
-            <span><b>SOL/EUR</b></span>
-            <span>Kraken Pro</span>
-            <span>EMA-Cross <b>v1.2</b></span>
-            <span>RSI filter</span>
+      <aside class="bc-coins">
+        <p class="bc-coins-l">Apmokėjimą priimame tik LUKO ir BYKO</p>
+        <div class="bc-coins-row">
+          <a class="bc-coin bc-coin--luko" href="https://meetluko.eu"><span class="bc-coin-ic"><svg viewBox="0 0 512 512" aria-hidden="true"><circle cx="256" cy="256" r="256" fill="#0A0A0A"/><circle cx="256" cy="256" r="248" fill="none" stroke="#C9A86A" stroke-opacity=".5" stroke-width="8"/><g transform="translate(-117.1 -89.7) scale(1.4463)"><g opacity=".3"><path d="M144 164L182 122V167Z" fill="#C9A86A"/><g fill="none" stroke="#C9A86A" stroke-width="15"><circle cx="306" cy="186" r="58"/><path d="M364 186V312"/></g></g><path d="M182 122h52V312H346l16 16V358H182Z" fill="#C9A86A"/></g></svg></span><span class="bc-coin-txt"><b>LUKO</b><small>meetluko.eu</small></span></a>
+          <a class="bc-coin bc-coin--byko" href="https://byko.bykovas.lt"><span class="bc-coin-ic"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#7CCBFF"/><g transform="translate(2.1875 1.25) scale(.3125)" fill="none" stroke="#0B0D10" stroke-width="13"><path d="M24 14V82"/><path d="M40 20L70 48 40 76"/></g></svg></span><span class="bc-coin-txt"><b>BYKO</b><small>byko.bykovas.lt</small></span></a>
+        </div>
+      </aside>
+
+      <div class="bc-hero-wide">
+        <div class="bc-proof">
+          <div class="bc-proof-cell">
+            <p class="bc-proof-l">Vakar · realūs sandoriai</p>
+            <p class="bc-proof-n"><span class="bc-from">60 $</span><span class="bc-arrow">→</span><span class="bc-to">89 $</span></p>
+            <p class="bc-proof-s"><b>+29 $</b> · +48 % per pusę dienos</p>
+          </div>
+          <div class="bc-proof-cell">
+            <p class="bc-proof-l">Ta pati logika, tik nuliai</p>
+            <p class="bc-proof-n"><span class="bc-from">600 $</span><span class="bc-arrow">→</span><span class="bc-to">900 $</span></p>
+            <p class="bc-proof-s"><b>+300 $</b> · botui nesvarbu, kokia suma dirba</p>
+          </div>
+          <div class="bc-proof-cell">
+            <p class="bc-proof-l bc-proof-l--warn">Sąžiningai</p>
+            <p class="bc-proof-p">Taip nutinka <b>ne visada</b> — kartais diena baigiasi minuse. Kol kas mums sekasi, todėl ir testuojame uždarai.</p>
           </div>
         </div>
-        <div class="verdict">
-          <div class="seal">
-            <div class="core"><i data-lucide="trending-up" class="lucide"></i><span class="m">micro</span></div>
-          </div>
-          <div class="vc">
-            <span class="lb">Desired position</span>
-            <div class="big">BUY <small>/ LONG micro</small></div>
-            <p>Approved by risk. Execute one tiny position, then keep every number replayable.</p>
+        <p class="bc-proof-note bc-only-narrow"><b>Iš 600 $ būtų 900 $</b> — botui nesvarbu, kokia suma dirba. Bet taip nutinka <b>ne visada</b>: kartais diena baigiasi minuse. Kol kas mums sekasi, todėl ir testuojame uždarai.</p>
+      </div>
+
+      <div class="bc-heur">
+          <p><b>Euristikų rinkinys ir dirbtinis intelektas</b> dirba kartu. Kas minutę sistema nuskaito šimtus Kraken porų ir kiekvieną įvertina pagal šimtus parametrų: EMA 9/21 sankirtas, RSI, momentum, ATR volatilumą, spread'ą, 24 h apimtis, order-book gylį, koreliaciją su BTC, rinkos režimą ir visą kainų istoriją.</p>
+          <p>Iš viso to gimsta vienas balas — o iš balo sprendimas. Pozicijas atidaro pati, dydį parenka pagal rizikos limitus, stop-loss ir tikslus nustato pati, o uždaro anksčiau, nei nuosmukis įsibėgėja. Viskas automatiškai: be rankinio įsikišimo ir be jūsų dalyvavimo.</p>
+        <p class="bc-heur-dim">Kiekvienas sprendimas įrašomas — kodėl įėjo, kurie signalai svėrė, kokia buvo rizika. Viską galima atkartoti.</p>
+      </div>
+
+      <a class="bc-cta" href="#">Prisijungti prie testavimo</a>
+    </section>
+
+    <div class="bc-mobilebar bc-only-narrow">
+      <span class="bc-mb-status"><i class="bc-dot" id="bcMbDot"></i><span id="bcMbText">Kraunama</span><em id="bcMbAge"></em></span>
+      <span class="bc-seg"><button type="button" data-tenant="LUKAS">LUKAS</button><button type="button" data-tenant="DENISAS">DENISAS</button></span>
+    </div>
+
+    <section class="bc-live">
+      <div class="bc-live-head">
+        <div>
+          <p class="bc-live-l"><i class="bc-dot" id="bcLiveDot"></i><b id="bcLiveTenant">LUKAS</b><span>&#183; Portfelio vert&#279; dabar &#183; gyvai</span></p>
+          <p class="bc-live-n"><span class="bc-big" id="bcLiveValue">&#8212;</span><span class="bc-delta" id="bcLiveDelta"></span></p>
+          <p class="bc-live-s" id="bcLiveSince"></p>
+        </div>
+        <div class="bc-legend">
+          <p class="bc-legend-l" id="bcChartCaption">Grafikas — 30 uždarytų dienų<br>(šiandiena dar neįskaityta)</p>
+          <div class="bc-legend-row">
+            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span></span>Boto prekyba</span>
+            <span class="bc-lg" id="bcLegendDeposit" hidden><span class="bc-sq bc-sq--dep"></span>Įnašas</span>
+            <span class="bc-lg" id="bcLegendWithdrawal" hidden><span class="bc-sq bc-sq--wdr"></span>Išėmimas</span>
           </div>
         </div>
+      </div>
+      <div class="bc-chart" id="bcChart"></div>
+      <div class="bc-metrics" id="bcMetrics"></div>
       </section>
 
-      <div class="cockpit">
+    <nav class="bc-tabs"><a href="/trades.html">Sandori&#371; &#382;urnalas</a><a href="/cycles.html">Cikl&#371; lentel&#279;</a><a href="/cycle-decisions.html">Cikl&#371; sprendimai</a><a href="/market-snapshots.html">Rinkos momentin&#279;s nuotraukos</a><a href="/api/export/cycles-and-snapshots.csv">Eksportuoti CSV</a><a href="/sim.html">Modeliavimas &#8222;kas jei&#8220;</a></nav>
 
-        <article class="panel chart-panel">
-          <div class="p-head chart-head">
-            <div>
-              <div class="kicker">SOL/EUR · 5M</div>
-              <h2>68.28 <span class="cur">EUR</span></h2>
-            </div>
-            <div class="chart-stats">
-              <span class="up">▲ 0.94%</span>
-              <span><span class="sw" style="background:var(--blue)"></span>EMA 9</span>
-              <span><span class="sw" style="background:var(--gold)"></span>EMA 21</span>
-              <span><span class="sw" style="background:var(--green);height:10px;border-radius:3px"></span>Bullish
-                regime</span>
-            </div>
-          </div>
-          <div class="chart-wrap"><svg class="chart" id="chart" viewBox="0 0 820 348" preserveAspectRatio="none"></svg>
-          </div>
-          <div class="chart-foot">
-            <span><i data-lucide="git-fork" class="lucide" style="width:12px;height:12px;color:var(--green)"></i>EMA9
-              crossed above EMA21</span>
-            <span>RSI filter <b>58.2</b></span>
-            <span>Notional <b>€4.10</b></span>
-            <span>Replay hash <b>9f42-a13</b></span>
-          </div>
-        </article>
+    <section class="bc-sec">
+      <div class="bc-sec-head"><h2>Aktyvios pozicijos</h2><span id="bcPosMeta">kraunama</span></div>
+      <div class="bc-list" id="bcPosList"></div>
+    </section>
 
-        <aside class="panel score-panel">
-          <div class="p-head">
-            <div>
-              <div class="kicker">Weighted signal</div>
-              <h2>Score Waterfall</h2>
-            </div>
-            <span class="chip">threshold +0.50</span>
-          </div>
-          <div class="score-list" id="score"></div>
-          <div class="final">
-            <div>
-              <div class="lb">Final score</div>
-              <div class="th">≥ +0.50 → BUY</div>
-            </div>
-            <div class="sc"><b>+0.74</b><span>/ 1.00</span></div>
-          </div>
-          <div class="explain">
-            <div class="qi"><i data-lucide="message-square-quote" class="lucide"></i></div>
-            <div class="tx">
-              <h3>Why the bot bought</h3>
-              <p>EMA9 turned <span class="g">above</span> EMA21 inside a bullish regime at <span
-                  class="mono">68.05</span>, RSI constructive at 58. Volatility is calm, so risk clears only a
-                <b>micro</b> entry — sized to <span class="mono">€4.10</span>.</p>
-            </div>
-          </div>
-        </aside>
-
-        <article class="panel risk-panel">
-          <div class="p-head">
-            <div>
-              <div class="kicker">Risk manager</div>
-              <h2>5 / 5 Checks Passed</h2>
-            </div>
-            <span class="chip ok"><i data-lucide="shield-check" class="lucide"
-                style="width:12px;height:12px"></i>approved</span>
-          </div>
-          <div class="risk-timeline" id="risk"></div>
-        </article>
-
-        <article class="panel exec-panel">
-          <div class="p-head">
-            <div>
-              <div class="kicker">Execution trace</div>
-              <h2>Filled on Kraken Pro</h2>
-            </div>
-            <span class="chip ok"><i data-lucide="check" class="lucide" style="width:12px;height:12px"></i>filled</span>
-          </div>
-          <div class="trace">
-            <div class="cell">
-              <div class="label">Requested qty</div>
-              <div class="v">0.0601</div>
-              <div class="sub">SOL · ≈ €4.10</div>
-            </div>
-            <div class="cell">
-              <div class="label">Filled price</div>
-              <div class="v g">68.22</div>
-              <div class="sub">EUR · post-only</div>
-            </div>
-            <div class="cell">
-              <div class="label">Slippage</div>
-              <div class="v">−0.06</div>
-              <div class="sub">bps · within band</div>
-            </div>
-            <div class="cell">
-              <div class="label">Fee</div>
-              <div class="v a">0.011</div>
-              <div class="sub">EUR · 0.26%</div>
-            </div>
-            <div class="cell">
-              <div class="label">Order type</div>
-              <div class="v" style="font-size:17px">LIMIT</div>
-              <div class="sub">post-only maker</div>
-            </div>
-            <div class="cell">
-              <div class="label">Status</div>
-              <div class="v g" style="font-size:17px">FILLED</div>
-              <div class="sub">order #KRK-70b2</div>
-            </div>
-          </div>
-        </article>
-
-        <article class="panel audit-panel">
-          <div class="p-head">
-            <div>
-              <div class="kicker">Audit snapshot</div>
-              <h2>Traceable Inputs</h2>
-            </div>
-            <span class="chip"><i data-lucide="repeat" class="lucide"
-                style="width:12px;height:12px"></i>replayable</span>
-          </div>
-          <div class="audit-stack">
-            <div class="item"><span class="k">Market data</span>
-              <div class="val"><b>Kraken OHLC</b> · 5m · 720 window</div>
-            </div>
-            <div class="item"><span class="k">Strategy config</span>
-              <div class="val"><b>EMA-Cross v1.2</b> + RSI filter</div>
-            </div>
-            <div class="item"><span class="k">AI advisory</span>
-              <div class="val"><b>42 sources</b> · net positive · 0.10×</div>
-            </div>
-            <div class="item"><span class="k">Portfolio state</span>
-              <div class="val"><b>NONE → LONG</b> micro</div>
-            </div>
-          </div>
-        </article>
-      </div>
-    </div>
+    <section class="bc-sec">
+      <div class="bc-sec-head"><h2>&#352;iandienos sandoriai</h2><span id="bcTradeMeta">kraunama</span></div>
+      <div class="bc-tstats" id="bcTradeStats"></div>
+      <div class="bc-list" id="bcTradeList"></div>
+    </section>
+  </div>
   </div>
 
   <script>
-    document.getElementById('kill').addEventListener('click', function () { this.classList.toggle('armed'); });
+    // --------------------------------------------------------------------
+    // BlynAI Capital — portfelio dashboard
+    // One markup tree, one stylesheet, one endpoint: /api/dashboard.
+    // --------------------------------------------------------------------
 
-    var factors = [
-      { nm: 'Trend', icon: 'trending-up', v: 0.34, k: 'pos' },
-      { nm: 'Momentum', icon: 'gauge', v: 0.22, k: 'pos' },
-      { nm: 'Volume', icon: 'bar-chart-2', v: 0.12, k: 'pos' },
-      { nm: 'Volatility', icon: 'waves', v: -0.08, k: 'neg' },
-      { nm: 'Regime adj.', icon: 'layers', v: 0.10, k: 'pos' },
-      { nm: 'AI sentiment', icon: 'sparkles', v: 0.04, k: 'info' }
-    ];
-    var MAX = 0.40, sc = document.getElementById('score');
-    factors.forEach(function (f) {
-      var pct = Math.min(Math.abs(f.v) / MAX, 1) * 50;
-      var side = f.v >= 0 ? 'left:50%;width:' + pct + '%' : 'right:50%;width:' + pct + '%';
-      sc.insertAdjacentHTML('beforeend',
-        '<div class="score-row">' +
-        '<div class="nm"><i data-lucide="' + f.icon + '" class="lucide"></i>' + f.nm + '</div>' +
-        '<div class="track"><div class="mid"></div><div class="fill ' + f.k + '" style="' + side + '"></div></div>' +
-        '<div class="v ' + f.k + '">' + (f.v >= 0 ? '+' : '−') + Math.abs(f.v).toFixed(2) + '</div>' +
-        '</div>');
+    // Two tenants, two live futures accounts. Everything below re-fetches when
+    // this changes; the choice is persisted the way /dash.html already does it.
+    const TENANTS = {
+      LUKAS: { botInstanceId: "futures-lukas-live", label: "LUKAS" },
+      DENISAS: { botInstanceId: "futures-live", label: "DENISAS" }
+    };
+    const STORAGE_KEY = "tradingBot.botInstanceId";
+    const REFRESH_MS = 10000;
+    const MINUS = "−";
+    const NBSP = " ";
+
+    let tenant = "LUKAS";
+    let lastGood = null;
+
+    // ---- formatting ----------------------------------------------------
+    // Lithuanian throughout: comma decimals, non-breaking space before the
+    // unit, currency symbol after the number, U+2212 for minus.
+    const nf = (digits) => new Intl.NumberFormat("lt-LT", {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits
     });
 
-    var risks = [
-      { nm: 'MaxPositionSize', dt: '€4.10 / €5.00 · 82%' },
-      { nm: 'OnePositionPerInstrument', dt: 'No open SOL/EUR' },
-      { nm: 'MaxDailyLoss', dt: '−€1.20 / €10.00' },
-      { nm: 'CooldownAfterLosses(3)', dt: '0 recent · not throttled' },
-      { nm: 'KillSwitch', dt: 'Disarmed · permitted' }
-    ];
-    var rk = document.getElementById('risk');
-    risks.forEach(function (r) {
-      rk.insertAdjacentHTML('beforeend',
-        '<div class="risk-item">' +
-        '<div class="rdot"><i data-lucide="check" class="lucide"></i></div>' +
-        '<div class="nm">' + r.nm + '</div>' +
-        '<div class="dt">' + r.dt + '</div>' +
-        '<div class="st">Pass</div>' +
-        '</div>');
-    });
+    function fixMinus(text) {
+      return text.replace(/-/g, MINUS).replace(/−−/g, MINUS);
+    }
 
-    (function () {
-      var W = 820, H = 348, padL = 8, padR = 54, padT = 14, padB = 20;
-      var iw = W - padL - padR, ih = H - padT - padB;
-      var closes = [67.71, 67.66, 67.58, 67.63, 67.55, 67.49, 67.52, 67.6, 67.57, 67.64, 67.7, 67.68, 67.79, 67.86, 67.82, 67.93, 68.01, 67.97, 68.08, 68.14, 68.1, 68.19, 68.06, 68.13, 68.2, 68.16, 68.25, 68.31, 68.24, 68.22, 68.28];
-      var candles = closes.map(function (c, i) {
-        var prev = i ? closes[i - 1] : c - 0.03; var o = prev + Math.sin(i * 1.7) * 0.012;
-        var hi = Math.max(o, c) + 0.03 + Math.abs(Math.cos(i * 2.3)) * 0.02, lo = Math.min(o, c) - 0.03 - Math.abs(Math.sin(i * 1.9)) * 0.02;
-        return { o: o, h: hi, l: lo, c: c };
-      });
-      function ema(a, p) { var k = 2 / (p + 1), o = [], pr; a.forEach(function (v, i) { pr = i ? v * k + pr * (1 - k) : v; o.push(pr); }); return o; }
-      var e9 = ema(closes, 9), e21 = ema(closes, 21);
-      var lo = Math.min.apply(null, candles.map(function (c) { return c.l; })) - 0.02;
-      var hi = Math.max.apply(null, candles.map(function (c) { return c.h; })) + 0.02;
-      var x = function (i) { return padL + iw * (i / (closes.length - 1)); };
-      var y = function (v) { return padT + ih * (1 - (v - lo) / (hi - lo)); };
-      var cw = iw / closes.length * 0.55;
-      var cross = 0; for (var i = 1; i < closes.length; i++) { if (e9[i - 1] <= e21[i - 1] && e9[i] > e21[i]) { cross = i; break; } } if (!cross) cross = 17;
-      var svg = document.getElementById('chart'), ns = 'http://www.w3.org/2000/svg';
-      function el(t, a) { var e = document.createElementNS(ns, t); for (var k in a) e.setAttribute(k, a[k]); return e; }
-      svg.innerHTML = '<defs>' +
-        '<linearGradient id="reg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(65,237,160,0.16)"/><stop offset="1" stop-color="rgba(65,237,160,0.01)"/></linearGradient>' +
-        '<filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>' +
-        '</defs>';
-      for (var g = 0; g <= 4; g++) {
-        var gv = lo + (hi - lo) * g / 4;
-        svg.appendChild(el('line', { x1: padL, x2: W - padR, y1: y(gv), y2: y(gv), stroke: 'rgba(246,218,160,0.07)', 'stroke-width': 1 }));
-        var t = el('text', { x: W - padR + 6, y: y(gv) + 3.5, fill: 'rgba(200,187,166,0.55)', 'font-size': 10, 'font-family': 'IBM Plex Mono' }); t.textContent = gv.toFixed(2); svg.appendChild(t);
-      }
-      svg.appendChild(el('rect', { x: x(cross), y: padT, width: x(closes.length - 1) - x(cross), height: ih, fill: 'url(#reg)' }));
-      var rt = el('text', { x: x(cross) + 8, y: padT + 14, fill: '#41EDA0', 'font-size': 9.5, 'font-family': 'Space Grotesk', 'font-weight': 700, 'letter-spacing': '0.12em' }); rt.textContent = 'BULLISH REGIME'; svg.appendChild(rt);
-      candles.forEach(function (c, i) {
-        var up = c.c >= c.o, col = up ? '#2fce8c' : '#e04558';
-        svg.appendChild(el('line', { x1: x(i), x2: x(i), y1: y(c.h), y2: y(c.l), stroke: col, 'stroke-width': 1, opacity: 0.55 }));
-        var yy = Math.min(y(c.o), y(c.c)), hh = Math.max(2, Math.abs(y(c.o) - y(c.c)));
-        svg.appendChild(el('rect', { x: x(i) - cw / 2, y: yy, width: cw, height: hh, fill: col, opacity: up ? 0.9 : 0.85, rx: 1.5 }));
-      });
-      function line(vals, st, w) {
-        var d = vals.map(function (v, i) { return (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1); }).join(' ');
-        svg.appendChild(el('path', { d: d, fill: 'none', stroke: st, 'stroke-width': w, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
-      }
-      line(e21, '#F5B84F', 2.5); line(e9, '#6FAEFF', 2.75);
-      var bx = x(cross), by = y(closes[cross]);
-      var bg = el('g', { filter: 'url(#glow)' });
-      bg.appendChild(el('line', { x1: bx, x2: bx, y1: padT, y2: padT + ih, stroke: 'rgba(65,237,160,0.34)', 'stroke-width': 1.5, 'stroke-dasharray': '3 6' }));
-      bg.appendChild(el('circle', { cx: bx, cy: by, r: 13, fill: 'rgba(65,237,160,0.15)', stroke: '#41EDA0', 'stroke-width': 1.75 }));
-      bg.appendChild(el('circle', { cx: bx, cy: by, r: 4.5, fill: '#6BFFBE' }));
-      bg.appendChild(el('rect', { x: bx - 18, y: by - 44, width: 38, height: 21, rx: 6, fill: '#41EDA0' }));
-      var bt = el('text', { x: bx + 1, y: by - 29.5, fill: '#03140d', 'font-size': 12, 'font-weight': 800, 'font-family': 'Space Grotesk', 'text-anchor': 'middle' }); bt.textContent = 'BUY';
-      bg.appendChild(el('line', { x1: bx, x2: bx, y1: by - 13, y2: by - 23, stroke: '#41EDA0', 'stroke-width': 1.75 })); bg.appendChild(bt);
-      svg.appendChild(bg);
-      var lY = y(closes[closes.length - 1]);
-      svg.appendChild(el('line', { x1: padL, x2: W - padR, y1: lY, y2: lY, stroke: '#F7E6C1', 'stroke-width': 1, 'stroke-dasharray': '2 5', opacity: 0.4 }));
-      svg.appendChild(el('circle', { cx: x(closes.length - 1), cy: lY, r: 4.5, fill: '#F7E6C1', stroke: '#050505', 'stroke-width': 2 }));
-      svg.appendChild(el('rect', { x: W - padR + 1, y: lY - 9, width: 50, height: 18, rx: 4, fill: '#F7E6C1' }));
-      var pt = el('text', { x: W - padR + 26, y: lY + 3.5, fill: '#0d0d0b', 'font-size': 11, 'font-weight': 700, 'font-family': 'IBM Plex Mono', 'text-anchor': 'middle' }); pt.textContent = '68.28'; svg.appendChild(pt);
-    })();
+    function num(value, digits = 2) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "—";
+      return fixMinus(nf(digits).format(n));
+    }
 
-    lucide.createIcons();
+    function signed(value, digits = 2) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "—";
+      return (n > 0 ? "+" : "") + num(n, digits);
+    }
+
+    let currencySymbol = "$";
+
+    function money(value, digits = 2) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "—";
+      return num(n, digits) + NBSP + currencySymbol;
+    }
+
+    function signedMoney(value, digits = 2) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "—";
+      return signed(n, digits) + NBSP + currencySymbol;
+    }
+
+    function percent(value, digits = 2) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "—";
+      return num(n, digits) + NBSP + "%";
+    }
+
+    function signedPercent(value, digits = 2) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "—";
+      return signed(n, digits) + NBSP + "%";
+    }
+
+    // Prices span eight orders of magnitude here (0,0851 and 174,74 on the same
+    // screen), so significant digits beat a fixed scale.
+    function price(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "—";
+      const magnitude = Math.abs(n);
+      const digits = magnitude === 0 ? 2 : magnitude >= 100 ? 2 : magnitude >= 1 ? 3 : magnitude >= 0.01 ? 4 : 6;
+      return num(n, digits);
+    }
+
+    function quantity(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "—";
+      return num(n, Math.abs(n) >= 100 ? 0 : Math.abs(n) >= 1 ? 2 : 4);
+    }
+
+    function esc(value) {
+      return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
+    function toneClass(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n === 0) return "bc-t-soft";
+      return n > 0 ? "bc-t-green" : "bc-t-red";
+    }
+
+    function ltDateTime(value, withSeconds = true) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "—";
+      const parts = new Intl.DateTimeFormat("lt-LT", {
+        timeZone: "Europe/Vilnius",
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit",
+        second: withSeconds ? "2-digit" : undefined,
+        hourCycle: "h23"
+      }).formatToParts(date);
+      const at = Object.fromEntries(parts.map(part => [part.type, part.value]));
+      const clock = withSeconds ? `${at.hour}:${at.minute}:${at.second}` : `${at.hour}:${at.minute}`;
+      return `${at.year}-${at.month}-${at.day} ${clock}`;
+    }
+
+    // "prieš 12 s" / "prieš 4 min." / "prieš 2 val."
+    function ago(seconds) {
+      const s = Number(seconds);
+      if (!Number.isFinite(s)) return "";
+      if (s < 90) return `prieš ${Math.max(0, Math.round(s))} s`;
+      if (s < 5400) return `prieš ${Math.round(s / 60)} min.`;
+      return `prieš ${Math.round(s / 3600)} val.`;
+    }
+
+    function duration(fromUtc) {
+      const date = new Date(fromUtc);
+      if (Number.isNaN(date.getTime())) return "—";
+      const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
+      return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`;
+    }
+
+    // Lithuanian plurals: 1 pora, 2–9 poros, 10–20 porų, 21 pora, 22 poros …
+    function pairsWord(count) {
+      const n = Math.abs(Math.round(Number(count) || 0));
+      const last = n % 10;
+      const lastTwo = n % 100;
+      if (lastTwo >= 11 && lastTwo <= 19) return "porų";
+      if (last === 0) return "porų";
+      if (last === 1) return "pora";
+      return "poros";
+    }
+
+    function positionsWord(count) {
+      const n = Math.abs(Math.round(Number(count) || 0));
+      const last = n % 10;
+      const lastTwo = n % 100;
+      if (lastTwo >= 11 && lastTwo <= 19) return "atvirų pozicijų";
+      if (last === 0) return "atvirų pozicijų";
+      if (last === 1) return "atvira pozicija";
+      return "atviros pozicijos";
+    }
+
+    function tradesWord(count) {
+      const n = Math.abs(Math.round(Number(count) || 0));
+      const last = n % 10;
+      const lastTwo = n % 100;
+      if (lastTwo >= 11 && lastTwo <= 19) return "sandorių";
+      if (last === 0) return "sandorių";
+      if (last === 1) return "sandoris";
+      return "sandoriai";
+    }
+
+    // ---- elements ------------------------------------------------------
+    const el = (id) => document.getElementById(id);
+    const els = {
+      notice: el("bcNotice"),
+      statusChips: el("bcStatusChips"),
+      statusLine: el("bcStatusLine"),
+      statusLineDot: el("bcStatusLineDot"),
+      statusLineText: el("bcStatusLineText"),
+      statusLineAge: el("bcStatusLineAge"),
+      mbDot: el("bcMbDot"),
+      mbText: el("bcMbText"),
+      mbAge: el("bcMbAge"),
+      liveDot: el("bcLiveDot"),
+      liveTenant: el("bcLiveTenant"),
+      liveValue: el("bcLiveValue"),
+      liveDelta: el("bcLiveDelta"),
+      liveSince: el("bcLiveSince"),
+      chart: el("bcChart"),
+      chartCaption: el("bcChartCaption"),
+      legendDeposit: el("bcLegendDeposit"),
+      legendWithdrawal: el("bcLegendWithdrawal"),
+      metrics: el("bcMetrics"),
+      posMeta: el("bcPosMeta"),
+      posList: el("bcPosList"),
+      tradeMeta: el("bcTradeMeta"),
+      tradeStats: el("bcTradeStats"),
+      tradeList: el("bcTradeList")
+    };
+
+    // ---- tenant switching ----------------------------------------------
+    function tenantFromBotInstance(botInstanceId) {
+      const found = Object.keys(TENANTS).find(key => TENANTS[key].botInstanceId === botInstanceId);
+      return found || "LUKAS";
+    }
+
+    function applyTenantButtons() {
+      document.querySelectorAll("[data-tenant]").forEach(button => {
+        const active = button.dataset.tenant === tenant;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      els.liveTenant.textContent = tenant;
+    }
+
+    function setTenant(next, persist) {
+      tenant = TENANTS[next] ? next : "LUKAS";
+      applyTenantButtons();
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, TENANTS[tenant].botInstanceId); } catch (error) { /* private mode */ }
+        const url = new URL(location.href);
+        url.searchParams.set("botInstanceId", TENANTS[tenant].botInstanceId);
+        history.replaceState(null, "", url);
+      }
+    }
+
+    function initTenant() {
+      const fromUrl = new URLSearchParams(location.search).get("botInstanceId");
+      let stored = null;
+      try { stored = localStorage.getItem(STORAGE_KEY); } catch (error) { /* private mode */ }
+      setTenant(tenantFromBotInstance(fromUrl || stored), false);
+      document.querySelectorAll("[data-tenant]").forEach(button => {
+        button.addEventListener("click", () => {
+          if (button.dataset.tenant === tenant) return;
+          setTenant(button.dataset.tenant, true);
+          renderSkeleton();
+          refresh();
+        });
+      });
+      els.statusLine.addEventListener("click", () => {
+        const open = document.body.classList.toggle("bc-status-open");
+        els.statusLine.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+    }
+
+    // ---- status ---------------------------------------------------------
+    // Green under two minutes, amber while data goes stale, red once the
+    // worker is effectively down (or has never reported).
+    function health(ageSeconds) {
+      if (!Number.isFinite(Number(ageSeconds))) return "down";
+      if (ageSeconds <= 120) return "ok";
+      if (ageSeconds <= 600) return "stale";
+      return "down";
+    }
+
+    const HEALTH_TONE = { ok: "", stale: "bc-dot--warn", down: "bc-dot--down" };
+
+    function chip(label, value, meta, state) {
+      return `<span class="bc-status"><i class="bc-dot ${HEALTH_TONE[state] || ""}"></i>` +
+        `<span class="bc-status-l">${esc(label)}</span>` +
+        `<span class="bc-status-v ${state === "down" ? "bc-t-red" : state === "stale" ? "bc-t-amber" : ""}">${esc(value)}</span>` +
+        `<span class="bc-status-m">${esc(meta)}</span></span>`;
+    }
+
+    function renderStatus(data) {
+      const workers = data.workers || [];
+      const byId = Object.fromEntries(workers.map(worker => [worker.botInstanceId, worker]));
+      const mine = byId[TENANTS[tenant].botInstanceId] || null;
+
+      const chips = Object.keys(TENANTS).map(key => {
+        const worker = byId[TENANTS[key].botInstanceId];
+        const state = worker ? health(worker.latestCycleAgeSeconds) : "down";
+        const value = state === "down"
+          ? `${key} neatsako`
+          : state === "stale" ? `${key} duomenys pasenę` : `${key} veikia`;
+        return chip("worker", value, worker ? ago(worker.latestCycleAgeSeconds) : "nėra duomenų", state);
+      });
+
+      const krakenState = mine ? health(mine.latestCycleAgeSeconds) : "down";
+      const pairs = mine ? mine.activePairsCount : 0;
+      chips.push(chip("kraken", krakenState === "ok" ? "OK" : krakenState === "stale" ? "pasenę" : "neatsako",
+        pairs ? `${num(pairs, 0)} ${pairsWord(pairs)}/min.` : "nėra duomenų", krakenState));
+
+      const dbState = data.summary ? health(mine ? mine.latestCycleAgeSeconds : null) : "down";
+      chips.push(chip("duomenų bazė", dbState === "down" ? "neatsako" : "OK",
+        data.summary ? ago((Date.now() - new Date(data.summary.updatedAt).getTime()) / 1000) : "nėra duomenų", dbState));
+
+      els.statusChips.innerHTML = chips.join("");
+
+      const worst = [krakenState, dbState].concat(Object.keys(TENANTS).map(key => {
+        const worker = byId[TENANTS[key].botInstanceId];
+        return worker ? health(worker.latestCycleAgeSeconds) : "down";
+      })).reduce((acc, state) => (state === "down" ? "down" : state === "stale" && acc !== "down" ? "stale" : acc), "ok");
+
+      const summaryText = worst === "ok" ? "Visos sistemos OK"
+        : worst === "stale" ? "Duomenys pasenę" : "Sistema neatsako";
+      const summaryAge = mine ? `· ${ago(mine.latestCycleAgeSeconds)}` : "";
+
+      els.statusLineText.textContent = summaryText;
+      els.statusLineAge.textContent = summaryAge;
+      els.statusLineDot.className = `bc-dot ${HEALTH_TONE[worst] || ""}`;
+      els.mbText.textContent = summaryText;
+      els.mbAge.textContent = summaryAge;
+      els.mbDot.className = `bc-dot ${HEALTH_TONE[worst] || ""}`;
+      els.liveDot.className = `bc-dot ${HEALTH_TONE[worst] || ""}`;
+    }
+
+    // ---- chart ----------------------------------------------------------
+    // Two viewBoxes from one series: a tall one for wide containers, a short
+    // one for phones. Both plot CLOSED days only — today lives to the right of
+    // the gold divider as the dashed live line and the gold pill.
+    const CHART_WIDE = {
+      className: "bc-chart-svg bc-only-wide", width: 1180, height: 310,
+      plotWidth: 1112, top: 24, bottom: 278, labelX: 1124, labelSize: 10.5,
+      gridLines: 7, dateTicks: 5, dateY: 296, candleWidth: 20, wickWidth: 1.7,
+      adjustWidth: 14, pillWidth: 62, pillHeight: 23, pillSize: 12.5, annotationSize: 10.5
+    };
+    const CHART_NARROW = {
+      className: "bc-chart-svg bc-only-narrow", width: 390, height: 168,
+      plotWidth: 364, top: 8, bottom: 138, labelX: 369, labelSize: 8.5,
+      gridLines: 3, dateTicks: 3, dateY: 162, candleWidth: 7, wickWidth: 1.2,
+      adjustWidth: 4.5, pillWidth: 40, pillHeight: 17, pillSize: 9.5, annotationSize: 8
+    };
+
+    function niceTicks(min, max, count) {
+      const span = max - min;
+      if (!(span > 0)) return [min];
+      const rough = span / Math.max(1, count - 1);
+      const magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
+      const step = [1, 2, 2.5, 5, 10].map(factor => factor * magnitude)
+        .find(candidate => candidate >= rough) || 10 * magnitude;
+      const ticks = [];
+      for (let value = Math.ceil(min / step) * step; value <= max + step * 0.001; value += step) {
+        ticks.push(Number(value.toFixed(10)));
+      }
+      return ticks;
+    }
+
+    function chartSvg(spec, days, liveValue) {
+      const slots = Math.max(days.length, 1);
+      const slot = spec.plotWidth / slots;
+      const centre = (index) => (index + 0.5) * slot;
+
+      const values = [];
+      days.forEach(day => {
+        values.push(Number(day.high), Number(day.low), Number(day.open), Number(day.close));
+        const manual = Number(day.manualAdjustmentEur) || 0;
+        if (manual) values.push(Number(day.close) - manual);
+      });
+      if (Number.isFinite(Number(liveValue))) values.push(Number(liveValue));
+      const finite = values.filter(Number.isFinite);
+      if (!finite.length) return "";
+
+      let min = Math.min(...finite);
+      let max = Math.max(...finite);
+      const pad = (max - min) * 0.08 || Math.max(Math.abs(max) * 0.02, 0.5);
+      min -= pad;
+      max += pad;
+      const y = (value) => spec.top + (max - Number(value)) / (max - min) * (spec.bottom - spec.top);
+
+      const out = [];
+      niceTicks(min, max, spec.gridLines).forEach(tick => {
+        const ty = y(tick);
+        out.push(`<line x1="0" x2="${spec.plotWidth}" y1="${ty.toFixed(2)}" y2="${ty.toFixed(2)}" stroke="rgba(246,218,160,.07)" stroke-width="1"/>`);
+        out.push(`<text x="${spec.labelX}" y="${(ty + 4).toFixed(2)}" fill="#5f584e" font-family="IBM Plex Mono, monospace" font-size="${spec.labelSize}">${esc(num(tick, tick % 1 === 0 ? 0 : 1))}</text>`);
+      });
+
+      days.forEach((day, index) => {
+        const x = centre(index);
+        const open = Number(day.open);
+        const close = Number(day.close);
+        const up = close >= open;
+        const colour = up ? "#41eda0" : "#ff5367";
+        const bodyTop = y(Math.max(open, close));
+        const bodyHeight = Math.max(1, Math.abs(y(open) - y(close)));
+        out.push(`<line x1="${x.toFixed(2)}" x2="${x.toFixed(2)}" y1="${y(day.high).toFixed(2)}" y2="${y(day.low).toFixed(2)}" stroke="${colour}" stroke-width="${spec.wickWidth}" stroke-linecap="round" opacity="0.62"/>`);
+        out.push(`<rect x="${(x - spec.candleWidth / 2).toFixed(2)}" y="${bodyTop.toFixed(2)}" width="${spec.candleWidth.toFixed(2)}" height="${bodyHeight.toFixed(2)}" rx="2" fill="${colour}"/>`);
+
+        const manual = Number(day.manualAdjustmentEur) || 0;
+        if (manual) {
+          const from = y(close - manual);
+          const to = y(close);
+          const top = Math.min(from, to);
+          const height = Math.max(2, Math.abs(from - to));
+          const fill = manual > 0 ? "#6faeff" : "#2f5d8a";
+          const stroke = manual > 0 ? "" : ' stroke="#6faeff" stroke-width="1.6"';
+          out.push(`<rect x="${(x - spec.adjustWidth / 2).toFixed(2)}" y="${top.toFixed(2)}" width="${spec.adjustWidth.toFixed(2)}" height="${height.toFixed(2)}" rx="1" fill="${fill}"${stroke}/>`);
+          const label = signedMoney(manual, 2);
+          const labelY = manual > 0 ? top - 5 : top + height + spec.annotationSize + 1;
+          out.push(`<text x="${x.toFixed(2)}" y="${labelY.toFixed(2)}" fill="#6FAEFF" font-family="IBM Plex Mono, monospace" font-size="${spec.annotationSize}" font-weight="600" text-anchor="middle">${esc(label)}</text>`);
+        }
+      });
+
+      // Today, deliberately outside the candles.
+      out.push(`<line x1="${spec.plotWidth}" x2="${spec.plotWidth}" y1="${spec.top}" y2="${spec.bottom}" stroke="#f5b84f" stroke-width="1" stroke-dasharray="3 4" opacity=".55"/>`);
+      if (spec.gridLines > 3) {
+        out.push(`<text x="${spec.plotWidth}" y="18" fill="#f5b84f" font-family="IBM Plex Mono, monospace" font-size="10" font-weight="600" letter-spacing="1.4" text-anchor="end">ŠIANDIEN →</text>`);
+      }
+      if (Number.isFinite(Number(liveValue))) {
+        const ly = y(liveValue);
+        out.push(`<line x1="0" x2="${spec.plotWidth}" y1="${ly.toFixed(2)}" y2="${ly.toFixed(2)}" stroke="#f5b84f" stroke-width="1" stroke-dasharray="2 5" opacity=".5"/>`);
+        out.push(`<rect x="${spec.plotWidth + 4}" y="${(ly - spec.pillHeight / 2).toFixed(2)}" width="${spec.pillWidth}" height="${spec.pillHeight}" rx="6" fill="#f5b84f"/>`);
+        out.push(`<text x="${spec.plotWidth + 4 + spec.pillWidth / 2}" y="${(ly + spec.pillSize / 2 - 1).toFixed(2)}" fill="#12100b" font-family="IBM Plex Mono, monospace" font-weight="700" font-size="${spec.pillSize}" text-anchor="middle">${esc(num(liveValue, 2))}</text>`);
+      }
+
+      const tickCount = Math.min(spec.dateTicks, days.length);
+      for (let i = 0; i < tickCount; i += 1) {
+        const index = tickCount === 1 ? 0 : Math.round(i * (days.length - 1) / (tickCount - 1));
+        const day = days[index];
+        if (!day) continue;
+        out.push(`<text x="${centre(index).toFixed(2)}" y="${spec.dateY}" fill="#5f584e" font-family="IBM Plex Mono, monospace" font-size="${spec.labelSize}" text-anchor="middle">${esc(day.date.slice(5))}</text>`);
+      }
+
+      return `<svg class="${spec.className}" viewBox="0 0 ${spec.width} ${spec.height}" width="100%" role="img" aria-label="Portfelio vertė, ${days.length} uždarytų dienų">${out.join("")}</svg>`;
+    }
+
+    function renderChart(data) {
+      const days = (data.equity && data.equity.days) || [];
+      const liveValue = data.summary ? Number(data.summary.totalValueEur) : null;
+      els.chartCaption.innerHTML =
+        `Grafikas — ${esc(num(days.length, 0))} uždarytų dienų<br>(šiandiena dar neįskaityta)`;
+
+      // Deposits and withdrawals are only in the legend once the API can actually
+      // report them; a swatch for a mark that never appears is worse than no swatch.
+      const tracked = !!(data.equity && data.equity.manualAdjustmentsTracked)
+        && days.some(day => Number(day.manualAdjustmentEur));
+      els.legendDeposit.hidden = !tracked;
+      els.legendWithdrawal.hidden = !tracked;
+      if (!days.length) {
+        els.chart.innerHTML = '<p class="bc-empty">Istorijos duomenų dar nėra</p>';
+        return;
+      }
+      els.chart.innerHTML = chartSvg(CHART_WIDE, days, liveValue) + chartSvg(CHART_NARROW, days, liveValue);
+    }
+
+    // ---- headline numbers ------------------------------------------------
+    function maxDrawdownPercent(days) {
+      let peak = null;
+      let worst = 0;
+      days.forEach(day => {
+        const close = Number(day.close);
+        if (!Number.isFinite(close)) return;
+        if (peak === null || close > peak) peak = close;
+        if (peak > 0) worst = Math.min(worst, (close - peak) / peak * 100);
+      });
+      return worst;
+    }
+
+    function renderHeadline(data) {
+      const summary = data.summary;
+      const days = (data.equity && data.equity.days) || [];
+      if (!summary) {
+        els.liveValue.textContent = "—";
+        els.liveDelta.textContent = "";
+        els.liveSince.textContent = "Laukiama pirmojo boto ciklo";
+        return;
+      }
+
+      const total = Number(summary.totalValueEur);
+      els.liveValue.textContent = money(total);
+
+      const lastClose = days.length ? Number(days[days.length - 1].close) : null;
+      if (Number.isFinite(lastClose) && lastClose !== 0) {
+        const delta = total - lastClose;
+        const deltaPercent = delta / Math.abs(lastClose) * 100;
+        els.liveDelta.className = `bc-delta ${delta >= 0 ? "" : "bc-delta--down"}`;
+        els.liveDelta.innerHTML = `${delta >= 0 ? "▲" : "▼"} ${esc(signedMoney(delta))} (${esc(signedPercent(deltaPercent))}) šiandien`;
+      } else {
+        els.liveDelta.className = "bc-delta";
+        els.liveDelta.textContent = "";
+      }
+
+      const first = days.length ? Number(days[0].open) : null;
+      const manual = Number(data.equity && data.equity.manualAdjustmentEur) || 0;
+      if (Number.isFinite(first) && first !== 0) {
+        const change = total - first;
+        const changePercent = change / Math.abs(first) * 100;
+        const manualPercent = manual / Math.abs(first) * 100;
+        const manualText = manual
+          ? ` · iš jų <i>${esc(signedMoney(manual))} (${esc(signedPercent(manualPercent, 1))})</i> rankiniai koregavimai`
+          : "";
+        els.liveSince.innerHTML = `Per ${days.length} dienų <b>${esc(signedMoney(change))} (${esc(signedPercent(changePercent, 1))})</b>${manualText}`;
+      } else {
+        els.liveSince.textContent = "";
+      }
+    }
+
+    function metricCell(label, value, tone, sub) {
+      return `<div class="bc-metric"><p class="bc-metric-l">${esc(label)}</p>` +
+        `<p class="bc-metric-v ${tone}">${esc(value)}</p>` +
+        `<p class="bc-metric-s">${sub}</p></div>`;
+    }
+
+    function renderMetrics(data) {
+      const summary = data.summary;
+      if (!summary) {
+        els.metrics.innerHTML = "";
+        return;
+      }
+      const positions = data.positions || [];
+      const margin = positions.reduce((sum, position) => sum + (Number(position.initialMarginEur) || 0), 0);
+      const unrealized = positions.reduce((sum, position) => sum + (Number(position.unrealizedPnlEur) || 0), 0);
+      const cash = Number(summary.cashEur) || 0;
+      const total = Number(summary.totalValueEur) || 0;
+
+      // The three parts must add up to the headline. When they do not, the gap
+      // is shown rather than hidden.
+      const gap = total - (cash + margin + unrealized);
+      const gapNote = Math.abs(gap) > 0.01
+        ? `<br><span class="bc-t-amber">nesutampa ${esc(signedMoney(gap))}</span>`
+        : "";
+
+      const drawdown = maxDrawdownPercent((data.equity && data.equity.days) || []);
+      const daily = Number(summary.dailyRealizedPnlEur) || 0;
+      const openCount = positions.length;
+
+      els.metrics.innerHTML = [
+        metricCell("Laisva marža", money(cash), "bc-t-cream",
+          `Kraken užstatas · ${esc(currencyCode)}${gapNote}`),
+        metricCell("Pozicijų marža", money(margin), "bc-t-cream",
+          `${esc(num(openCount, 0))} ${esc(positionsWord(openCount))}`),
+        metricCell("Nerealizuotas P/N", signedMoney(unrealized), toneClass(unrealized),
+          "iš atvirų pozicijų"),
+        metricCell("Boto pelnas šiandien", signedMoney(daily), toneClass(daily),
+          "realizuota nuo 00:00 LT"),
+        metricCell("Maks. nuosmukis", percent(drawdown, 1), drawdown < 0 ? "bc-t-red" : "bc-t-soft",
+          `per ${esc(num(((data.equity && data.equity.days) || []).length, 0))} dienų`)
+      ].join("");
+    }
+
+    // ---- prose ------------------------------------------------------------
+    // The bot's own vocabulary, in Lithuanian. Signals above the noise floor
+    // become the "because" clause; the rest is state.
+    const SIGNAL_WORDS = {
+      EMA: ["EMA buvo bullish", "EMA persisuko žemyn"],
+      Momentum: ["momentum patvirtino kilimą", "momentum buvo negatyvus"],
+      RSI: ["RSI buvo palankus", "RSI rodė silpnumą"],
+      Volatility: ["volatilumas dar leido saugiai įeiti", "volatilumas buvo per didelis"],
+      Trend: ["kaina laikėsi virš trendo filtro", "kaina nusileido žemiau trendo filtro"],
+      Volume: ["apimtis patvirtino judėjimą", "apimtis nepatvirtino judėjimo"],
+      PriceAction: ["paskutinių žvakių eiga kilo", "paskutinių žvakių eiga smuko"]
+    };
+
+    function signalClause(signals) {
+      const strong = (signals || [])
+        .filter(signal => Math.abs(Number(signal.value) || 0) >= 0.05)
+        .sort((a, b) => Math.abs(Number(b.value)) - Math.abs(Number(a.value)))
+        .slice(0, 3)
+        .map(signal => {
+          const words = SIGNAL_WORDS[signal.name];
+          if (!words) return null;
+          return Number(signal.value) >= 0 ? words[0] : words[1];
+        })
+        .filter(Boolean);
+      return strong.length ? strong.join(", ") : null;
+    }
+
+    function positionWhy(position, entry) {
+      const side = String(position.side || "").toUpperCase();
+      const clause = entry ? signalClause(entry.signals) : null;
+      const opening = clause
+        ? `Atidarė ${side}: ${clause}.`
+        : `Atidarė ${side} pagal boto signalą.`;
+
+      const pnl = Number(position.unrealizedPnlEur) || 0;
+      const liquidation = Number(position.liquidationDistancePercent);
+      const stop = Number(position.stopLossPrice);
+      const target = Number(position.takeProfitPrice);
+      const nearStop = Number.isFinite(liquidation) && liquidation < 8;
+
+      let state;
+      if (pnl > 0) {
+        state = Number.isFinite(target)
+          ? ` Kaina nuėjo tikslo pusėn, todėl pozicija pelne — tikslas ${price(target)}, o stop-loss saugiai toli.`
+          : " Pozicija pelne.";
+      } else if (nearStop && Number.isFinite(stop)) {
+        state = ` Nuo tada kaina pasisuko prieš poziciją, todėl ji minuse ir jau visai netoli stop-loss — botas ją uždarys automatiškai, jei bus pasiekta ${price(stop)}.`;
+      } else if (Number.isFinite(stop)) {
+        state = ` Kol kas pozicija minuse; botas ją uždarys automatiškai, jei bus pasiekta ${price(stop)}.`;
+      } else {
+        state = "";
+      }
+      return opening + state;
+    }
+
+    function tradeWhy(trade) {
+      const isExit = trade.action === "WOULD_CLOSE" || trade.action === "WOULD_SELL";
+      const log = String(trade.log || "");
+      if (isExit) {
+        if (/STOP_LOSS/i.test(log) || /STOP/i.test(trade.exitReasonCode || "")) {
+          return "Uždarė, nes pozicija pasiekė boto darbinį stop-loss lygį. Nuostolis fiksuotas iš karto, kad nuosmukis neįsibėgėtų.";
+        }
+        if (/TAKE_PROFIT/i.test(log) || /TAKE_PROFIT/i.test(trade.exitReasonCode || "")) {
+          return "Uždarė pelningai — kaina pasiekė boto tikslą. Pelnas užfiksuotas nelaukiant grįžimo.";
+        }
+        return "Uždarė poziciją, nes signalas nebepatvirtino laikymo.";
+      }
+      const side = String(trade.side || "").toUpperCase() || "LONG";
+      const clause = signalClause(trade.signals);
+      const channel = trade.entryChannel ? ` (${trade.entryChannel})` : "";
+      return clause
+        ? `Atidarė realų futures ${side}${channel} pagal pilną signalą. Pagrindas: ${clause}.`
+        : `Atidarė realų futures ${side}${channel} pagal boto signalą.`;
+    }
+
+    // ---- chips --------------------------------------------------------------
+    function signalChips(signals) {
+      if (!signals || !signals.length) {
+        return '<span class="bc-chip bc-chip--sig">nėra signalų duomenų</span>';
+      }
+      return signals.map(signal =>
+        `<span class="bc-chip bc-chip--sig">${esc(signal.name)} ${esc(signed(signal.value, 2))}</span>`).join("");
+    }
+
+    function contextChips(source, extras) {
+      const chips = [];
+      const spread = Number(source.spreadPercent);
+      if (Number.isFinite(spread)) chips.push(`spread ${signedPercent(spread, 2)}`);
+      if (source.priceActionDirection) {
+        const trend = Number(source.priceActionTrendPercent);
+        chips.push(`PA ${source.priceActionDirection}${Number.isFinite(trend) ? ` ${signedPercent(trend, 2)}` : ""}`);
+      }
+      const gap = Number(source.emaGapPercent);
+      if (Number.isFinite(gap)) chips.push(`EMA gap ${signedPercent(gap, 2)}`);
+      const side = String(source.side || "").toUpperCase();
+      if (side) chips.push(`pusė ${side}`);
+      const leverage = Number(source.leverage);
+      if (Number.isFinite(leverage) && leverage) chips.push(`svertas ${num(leverage, 0)}x`);
+
+      const html = chips.map(text => `<span class="bc-chip bc-chip--ctx">${esc(text)}</span>`).join("");
+      const warn = (extras || []).map(text => `<span class="bc-chip bc-chip--warn">${esc(text)}</span>`).join("");
+      return html + warn;
+    }
+
+    // ---- cards ---------------------------------------------------------------
+    function kv(label, value, tone) {
+      return `<span class="bc-kv"><span class="bc-kv-l">${esc(label)}</span>` +
+        `<span class="bc-kv-v ${tone || "bc-t-soft"}">${esc(value)}</span></span>`;
+    }
+
+    function positionParams(position, entry) {
+      const liquidation = Number(position.liquidationDistancePercent);
+      return [
+        kv("Įėjimas", price(position.entryPrice)),
+        kv("Dabar", price(position.lastPrice), "bc-t-cream"),
+        kv("Kiekis", quantity(position.quantity)),
+        kv("Nominalas", money(position.entryNotionalEur)),
+        kv("Marža", money(position.initialMarginEur)),
+        kv("Mokestis", entry && Number.isFinite(Number(entry.feeEur)) ? money(entry.feeEur, 3) : "—"),
+        kv("Stop loss", price(position.stopLossPrice), "bc-t-red"),
+        kv("Tikslas (TP)", price(position.takeProfitPrice), "bc-t-green"),
+        kv("Likvidacija", price(position.liquidationPrice), "bc-t-red"),
+        kv("Iki likvidacijos", Number.isFinite(liquidation) ? percent(liquidation, 1) : "—",
+          Number.isFinite(liquidation) && liquidation < 8 ? "bc-t-red" : "bc-t-soft")
+      ].join("");
+    }
+
+    // The track spans the two exit prices and is always oriented so that RIGHT
+    // IS BAD: LONG runs SL -> TP, SHORT runs TP -> SL.
+    function riskBar(position) {
+      const isLong = String(position.side || "").toUpperCase() !== "SHORT";
+      const stop = Number(position.stopLossPrice);
+      const target = Number(position.takeProfitPrice);
+      const now = Number(position.lastPrice);
+      const entry = Number(position.entryPrice);
+      const liquidation = Number(position.liquidationDistancePercent);
+
+      const foot = `<p class="bc-bar-foot">įėjimas ${esc(price(entry))} · iki likvidacijos ` +
+        `<b class="${Number.isFinite(liquidation) && liquidation < 8 ? "bc-t-red" : "bc-t-soft"}">` +
+        `${esc(Number.isFinite(liquidation) ? percent(liquidation, 1) : "—")}</b></p>`;
+
+      if (!Number.isFinite(stop) || !Number.isFinite(target) || stop === target) {
+        return `<div class="bc-bar-box">${foot}</div>`;
+      }
+
+      const lo = isLong ? stop : target;
+      const hi = isLong ? target : stop;
+      const at = (value) => (Number(value) - lo) / (hi - lo) * 100;
+      const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+      const nowAt = clamp(at(now), 0, 100);
+      const entryAt = clamp(at(entry), 0, 100);
+      // The dot keeps the true percentage; only the label is pulled back inside
+      // the card, because it is translateX(-50%) and would escape at the ends.
+      const labelAt = clamp(nowAt, 13, 87);
+
+      return `<div class="bc-bar-box">
+              <div class="bc-bar-ends"><span>${isLong ? "SL" : "TP"} ${esc(price(lo))}</span><span>${isLong ? "TP" : "SL"} ${esc(price(hi))}</span></div>
+              <div class="bc-bar bc-bar--${isLong ? "long" : "short"}"></div>
+              <div class="bc-bar-marks">
+                <span class="bc-tick" style="left:${entryAt.toFixed(1)}%"></span>
+                <span class="bc-now" style="left:${nowAt.toFixed(1)}%"></span>
+                <span class="bc-now-l" style="left:${labelAt.toFixed(1)}%">dabar ${esc(price(now))}</span>
+              </div>
+              ${foot}
+            </div>`;
+    }
+
+    function positionCard(position, entry) {
+      const side = String(position.side || "").toUpperCase();
+      const leverage = Number(position.leverage);
+      const liquidation = Number(position.liquidationDistancePercent);
+      const atRisk = Number.isFinite(liquidation) && liquidation < 8;
+
+      const badges = [
+        `<span class="bc-badge bc-badge--${side === "SHORT" ? "red" : "green"}">${esc(side || "—")}</span>`,
+        Number.isFinite(leverage) && leverage ? `<span class="bc-badge bc-badge--neutral">${esc(num(leverage, 0))}x</span>` : "",
+        Number.isFinite(leverage) && leverage ? '<span class="bc-badge bc-badge--neutral">Futures</span>' : "",
+        atRisk ? '<span class="bc-badge bc-badge--warn">Rizika</span>' : ""
+      ].join("");
+
+      const params = positionParams(position, entry);
+      const why = positionWhy(position, entry);
+      const signals = entry ? signalChips(entry.signals) : signalChips(null);
+      const context = contextChips(entry || {
+        spreadPercent: null, side: position.side, leverage: position.leverage
+      }, atRisk ? ["arti SL"] : []);
+      const log = entry && entry.log ? entry.log : "";
+      const pnl = Number(position.unrealizedPnlEur);
+      const tone = toneClass(pnl);
+
+      return `<details class="bc-card bc-card--pos">
+        <summary class="bc-card-sum">
+          <div class="bc-id">
+            <span class="bc-pair">${esc(position.pair)}</span>
+            <span class="bc-badges">${badges}</span>
+            <span class="bc-when">atidaryta ${esc(ltDateTime(position.openedAtUtc, false))} LT · prieš ${esc(duration(position.openedAtUtc))}</span>
+            <span class="bc-params bc-only-wide">${params}</span>
+          </div>
+          <div class="bc-mid">
+            <p class="bc-why-l bc-only-wide">Kodėl ši pozicija atidaryta</p>
+            <p class="bc-why bc-only-wide">${esc(why)}</p>
+            ${riskBar(position)}
+            ${log ? `<p class="bc-tech bc-only-wide">${esc(log)}</p>` : ""}
+          </div>
+          <div class="bc-num">
+            <p class="bc-num-l">Nerealizuotas P/N</p>
+            <p class="bc-num-v"><span class="${tone}">${esc(signedMoney(pnl))}</span><em class="${tone}">(${esc(signedPercent(position.unrealizedPnlPercent))})</em></p>
+            <div class="bc-only-wide">
+              <p class="bc-chips-l">Signalai</p><div class="bc-chips">${signals}</div>
+              <p class="bc-chips-l">Kontekstas</p><div class="bc-chips">${context}</div>
+            </div>
+          </div>
+          <span class="bc-chev bc-only-narrow">detaliau ▾</span>
+        </summary>
+        <div class="bc-card-body bc-only-narrow">
+          <div class="bc-params">${params}</div>
+          <p class="bc-why-l">Kodėl ši pozicija atidaryta</p>
+          <p class="bc-why">${esc(why)}</p>
+          <div class="bc-chips">${signals}${context}</div>
+          ${log ? `<p class="bc-tech">${esc(log)}</p>` : ""}
+        </div>
+      </details>`;
+    }
+
+    const TRADE_BADGES = {
+      WOULD_OPEN_LONG: ['<span class="bc-badge bc-badge--green">Atidaryta LONG</span>'],
+      WOULD_OPEN_SHORT: ['<span class="bc-badge bc-badge--red">Atidaryta SHORT</span>'],
+      WOULD_BUY: ['<span class="bc-badge bc-badge--green">Atidaryta LONG</span>'],
+      WOULD_SELL: ['<span class="bc-badge bc-badge--red">Uždaryta</span>'],
+      WOULD_CLOSE: ['<span class="bc-badge bc-badge--red">Uždaryta</span>']
+    };
+
+    function tradeCard(trade) {
+      const isExit = trade.action === "WOULD_CLOSE" || trade.action === "WOULD_SELL";
+      const log = String(trade.log || "");
+      const badges = (TRADE_BADGES[trade.action] || []).slice();
+      if (isExit && (/STOP_LOSS/i.test(log) || /STOP/i.test(trade.exitReasonCode || ""))) {
+        badges.push('<span class="bc-badge bc-badge--red">Stop loss</span>');
+      }
+      if (isExit && (/TAKE_PROFIT/i.test(log) || /TAKE_PROFIT/i.test(trade.exitReasonCode || ""))) {
+        badges.push('<span class="bc-badge bc-badge--green">Tikslas</span>');
+      }
+      if (Number.isFinite(Number(trade.leverage)) && Number(trade.leverage)) {
+        badges.push('<span class="bc-badge bc-badge--neutral">Futures</span>');
+      }
+
+      const realized = Number(trade.realizedPnlEur);
+      const realizedPercent = Number(trade.realizedPnlPercent);
+      const outcome = isExit && Number.isFinite(realized)
+        ? kv("Realizuota",
+            `${signedMoney(realized)} ${Number.isFinite(realizedPercent) ? signedPercent(realizedPercent) : ""}`.trim(),
+            toneClass(realized))
+        : kv("Tikslinė suma", money(trade.targetNotionalEur));
+
+      const params = [
+        kv("Įvykdyta kaina", price(trade.fillPrice)),
+        kv("Kiekis", quantity(trade.quantity)),
+        kv("Mokestis", money(trade.feeEur, 3)),
+        kv("Balas", num(trade.score, 2), "bc-t-cream"),
+        outcome
+      ].join("");
+
+      const why = tradeWhy(trade);
+      const signals = signalChips(trade.signals);
+      const context = contextChips(trade, trade.reduceOnly ? ["reduce-only"] : []);
+
+      return `<details class="bc-card bc-card--trade">
+        <summary class="bc-card-sum">
+          <div class="bc-id">
+            <span class="bc-pair">${esc(trade.pair)}</span>
+            <span class="bc-badges">${badges.join("")}</span>
+            <span class="bc-when">${esc(ltDateTime(trade.utc, false))} LT</span>
+            <span class="bc-params bc-only-wide">${params}</span>
+          </div>
+          <div class="bc-mid">
+            <p class="bc-why-l bc-only-wide">Kodėl</p>
+            <p class="bc-why bc-only-wide">${esc(why)}</p>
+            ${log ? `<p class="bc-tech bc-only-wide">${esc(log)}</p>` : ""}
+            <p class="bc-trade-sum bc-only-narrow">kaina ${esc(price(trade.fillPrice))}</p>
+          </div>
+          <div class="bc-num">
+            <p class="bc-num-l bc-only-wide">Signalai</p>
+            <div class="bc-chips bc-only-wide">${signals}</div>
+            <p class="bc-chips-l bc-only-wide">Kontekstas</p>
+            <div class="bc-chips bc-only-wide">${context}</div>
+            <p class="bc-num-v bc-only-narrow"><span class="bc-t-cream">${esc(num(trade.score, 2))} balas</span></p>
+          </div>
+          <span class="bc-chev bc-only-narrow">detaliau ▾</span>
+        </summary>
+        <div class="bc-card-body bc-only-narrow">
+          <div class="bc-params">${params}</div>
+          <p class="bc-why-l">Kodėl</p>
+          <p class="bc-why">${esc(why)}</p>
+          <div class="bc-chips">${signals}${context}</div>
+          ${log ? `<p class="bc-tech">${esc(log)}</p>` : ""}
+        </div>
+      </details>`;
+    }
+
+    // ---- sections -------------------------------------------------------------
+    function renderPositions(data) {
+      const positions = data.positions || [];
+      const contexts = data.entryContexts || {};
+      const updated = data.summary ? `atnaujinta ${ltDateTime(data.summary.updatedAt)} LT` : "laukiama duomenų";
+      els.posMeta.textContent = `${num(positions.length, 0)} ${positionsWord(positions.length)} · ${updated}`;
+      els.posList.innerHTML = positions.length
+        ? positions.map(position => positionCard(position, contexts[position.pair])).join("")
+        : '<p class="bc-empty">Nėra atvirų pozicijų</p>';
+    }
+
+    function renderTrades(data) {
+      const today = data.today || {};
+      const trades = today.trades || [];
+      els.tradeMeta.textContent = today.localDate
+        ? `nuo ${today.localDate} 00:00 ${today.timeZone || "Europe/Vilnius"}`
+        : "";
+
+      const exits = trades.filter(trade => trade.action === "WOULD_CLOSE" || trade.action === "WOULD_SELL");
+      const exitNote = [
+        today.stopLoss ? `${num(today.stopLoss, 0)} stop loss` : "",
+        today.takeProfit ? `${num(today.takeProfit, 0)} tikslas` : ""
+      ].filter(Boolean).join(" · ") || "uždarytos pozicijos";
+
+      els.tradeStats.innerHTML = [
+        metricCell("Sandoriai šiandien", num(trades.length, 0), "bc-t-gold", "nuo 00:00 LT"),
+        metricCell("Atidaryta", num(today.opened || 0, 0), "bc-t-cream", "naujos pozicijos"),
+        metricCell("Uždaryta", num(today.closed || 0, 0), "bc-t-cream", esc(exitNote)),
+        metricCell("Realizuotas P/N", signedMoney(today.realizedPnlEur || 0), toneClass(today.realizedPnlEur || 0),
+          `iš ${esc(num(exits.length, 0))} ${esc(tradesWord(exits.length))}`)
+      ].join("");
+
+      els.tradeList.innerHTML = trades.length
+        ? trades.map(tradeCard).join("")
+        : '<p class="bc-empty">Šiandien sandorių dar nebuvo</p>';
+    }
+
+    // ---- loading + failure ------------------------------------------------------
+    function renderSkeleton() {
+      if (lastGood) return;
+      els.posList.innerHTML = '<div class="bc-skeleton bc-skeleton--pos"></div><div class="bc-skeleton bc-skeleton--pos"></div>';
+      els.tradeList.innerHTML = '<div class="bc-skeleton bc-skeleton--trade"></div>';
+      els.chart.innerHTML = '<div class="bc-skeleton bc-skeleton--chart"></div>';
+    }
+
+    // The API's warnings are English operator text; the page is Lithuanian.
+    const WARNINGS = {
+      "portfolio_state is empty; wait for the worker to persist a cycle":
+        "Botas dar neįrašė nė vieno ciklo — laukiama pirmųjų duomenų.",
+      "portfolio tables/views are not initialized yet; wait for the worker to start with database enabled":
+        "Duomenų bazė dar neparuošta — laukiama, kol botas startuos."
+    };
+
+    function notice(message) {
+      message = message ? (WARNINGS[message] || message) : message;
+      if (!message) {
+        els.notice.hidden = true;
+        els.notice.textContent = "";
+        return;
+      }
+      els.notice.hidden = false;
+      els.notice.textContent = message;
+    }
+
+    let currencyCode = "USD";
+
+    function render(data) {
+      currencyCode = (data.summary && data.summary.cashQuoteCurrency) || "USD";
+      currencySymbol = currencyCode === "EUR" ? "€" : "$";
+
+      notice(data.warning || null);
+      renderStatus(data);
+      renderHeadline(data);
+      renderChart(data);
+      renderMetrics(data);
+      renderPositions(data);
+      renderTrades(data);
+    }
+
+    async function refresh() {
+      const botInstanceId = TENANTS[tenant].botInstanceId;
+      try {
+        const response = await fetch(`/api/dashboard?botInstanceId=${encodeURIComponent(botInstanceId)}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        lastGood = data;
+        render(data);
+      } catch (error) {
+        // Never blank the dashboard: keep the last good numbers, flip the dots
+        // red and say so above the hero.
+        notice(`Nepavyko atnaujinti duomenų (${error.message}). Rodomi paskutiniai gauti skaičiai.`);
+        document.querySelectorAll(".bc-dot").forEach(dot => dot.classList.add("bc-dot--down"));
+      }
+    }
+
+    initTenant();
+    renderSkeleton();
+    refresh();
+    setInterval(refresh, REFRESH_MS);
   </script>
 </body>
-
 </html>

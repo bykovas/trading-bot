@@ -123,6 +123,59 @@ app.MapGet("/api/positions", async (string? botInstanceId, CancellationToken can
     return Results.Ok(await ReadPositions(connection, Clean(botInstanceId), cancellationToken));
 });
 
+// Landing dashboard (public/index.html) reads this single endpoint every 10s.
+// It bundles what the page needs — summary, positions with their entry context,
+// worker health for every instance, the 30 closed-day equity series and today's
+// executed trades — so the page never has to fan out across /api/portfolio,
+// /api/bot-status and the megabyte-sized /api/trade-cycles payload.
+app.MapGet("/api/dashboard", async (string? botInstanceId, CancellationToken cancellationToken) =>
+{
+    var connectionString = GetConnectionString(builder.Configuration);
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return Results.Problem("TRADINGBOT_DATABASE_CONNECTION_STRING is not configured.");
+    }
+
+    var bot = Clean(botInstanceId);
+
+    try
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var summary = await ReadSummary(connection, bot, cancellationToken);
+        var positions = await ReadPositions(connection, bot, cancellationToken);
+        var entries = await ReadEntryContexts(connection, bot, positions, cancellationToken);
+        var workers = await ReadWorkers(connection, cancellationToken);
+        var equity = await ReadEquityDays(connection, bot, DashboardDefaults.EquityWindowDays, cancellationToken);
+        var today = await ReadTodayTrades(connection, bot, cancellationToken);
+
+        return Results.Ok(new DashboardResponse(
+            DateTimeOffset.UtcNow,
+            bot,
+            summary,
+            positions,
+            entries,
+            workers,
+            equity,
+            today,
+            summary is null ? "portfolio_state is empty; wait for the worker to persist a cycle" : null));
+    }
+    catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedObject)
+    {
+        return Results.Ok(new DashboardResponse(
+            DateTimeOffset.UtcNow,
+            bot,
+            null,
+            Array.Empty<PortfolioPositionDto>(),
+            new Dictionary<string, DashboardEntryDto>(),
+            Array.Empty<DashboardWorkerDto>(),
+            DashboardEquityDto.Empty(),
+            DashboardTodayDto.Empty(),
+            "portfolio tables/views are not initialized yet; wait for the worker to start with database enabled"));
+    }
+});
+
 app.MapGet("/api/cycles", async (
     int? limit,
     int? offset,
@@ -1551,6 +1604,553 @@ static EntryBlackoutStatus BotEntryBlackout(string? botInstanceId, DateTimeOffse
         ? SpotEntryBlackout(nowUtc)
         : EntryBlackoutStatus.NotConfigured();
 
+static async Task<IReadOnlyDictionary<string, DashboardEntryDto>> ReadEntryContexts(
+    NpgsqlConnection connection,
+    string? botInstanceId,
+    IReadOnlyList<PortfolioPositionDto> positions,
+    CancellationToken cancellationToken)
+{
+    var result = new Dictionary<string, DashboardEntryDto>(StringComparer.OrdinalIgnoreCase);
+
+    // The opening action sits within a cycle or two of the position's open time, so
+    // the search is a fifteen-minute window per pair rather than a scan over months
+    // of decisions on that pair. On the live database that is the difference between
+    // ~240ms and ~1ms.
+    var wanted = positions
+        .Where(position => position.OpenedAtUtc.HasValue)
+        .GroupBy(position => position.Pair, StringComparer.OrdinalIgnoreCase)
+        .Select(group => group.First())
+        .ToList();
+
+    if (wanted.Count == 0 || string.IsNullOrWhiteSpace(botInstanceId))
+    {
+        return result;
+    }
+
+    await using var command = new NpgsqlCommand(
+        """
+        select
+            target.pair,
+            entry.cycle_id,
+            entry.decision_index,
+            entry.utc,
+            entry.action,
+            entry.side,
+            entry.leverage,
+            entry.score,
+            entry.entry_channel,
+            entry.reason,
+            entry.fee_eur,
+            entry.spread_percent,
+            entry.price_action_direction,
+            entry.price_action_trend_percent,
+            entry.bullish_ema_gap_percent
+        from unnest(@pairs, @opened_at) as target(pair, opened_at)
+        join lateral (
+            select
+                decision.cycle_id,
+                decision.decision_index,
+                decision.utc,
+                action.action,
+                action.side,
+                action.leverage,
+                decision.score,
+                action.entry_channel,
+                action.reason,
+                action.fee_eur,
+                decision.spread_percent,
+                decision.price_action_direction,
+                decision.price_action_trend_percent,
+                decision.bullish_ema_gap_percent
+            from dry_run_decision_facts decision
+            join dry_run_actions action
+                on action.cycle_id = decision.cycle_id and action.decision_index = decision.decision_index
+            where decision.bot_instance_id = @bot_instance_id
+              and decision.pair = target.pair
+              and decision.utc >= target.opened_at - interval '15 minutes'
+              and decision.utc <= target.opened_at + interval '15 minutes'
+              and action.action in ('WOULD_BUY', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT')
+            order by decision.utc desc
+            limit 1
+        ) entry on true
+        """,
+        connection);
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
+    command.Parameters.Add("pairs", NpgsqlDbType.Array | NpgsqlDbType.Text).Value =
+        wanted.Select(position => position.Pair).ToArray();
+    command.Parameters.Add("opened_at", NpgsqlDbType.Array | NpgsqlDbType.TimestampTz).Value =
+        wanted.Select(position => DateTime.SpecifyKind(position.OpenedAtUtc!.Value, DateTimeKind.Utc)).ToArray();
+
+    var keys = new List<DecisionKey>();
+    var drafts = new List<(DecisionKey Key, DashboardEntryDto Entry)>();
+
+    await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+    {
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var key = new DecisionKey(reader.GetString(1), reader.GetInt32(2));
+            keys.Add(key);
+            drafts.Add((key, new DashboardEntryDto(
+                reader.GetString(0),
+                DateTime.SpecifyKind(reader.GetDateTime(3), DateTimeKind.Utc),
+                reader.GetString(4),
+                ReadNullableString(reader, 5),
+                reader.IsDBNull(6) ? null : reader.GetDecimal(6),
+                reader.GetDecimal(7),
+                ReadNullableString(reader, 8),
+                ReadNullableString(reader, 9),
+                reader.IsDBNull(10) ? 0m : reader.GetDecimal(10),
+                Array.Empty<DashboardSignalDto>(),
+                Array.Empty<string>(),
+                reader.IsDBNull(11) ? 0m : reader.GetDecimal(11),
+                ReadNullableString(reader, 12),
+                reader.IsDBNull(13) ? null : reader.GetDecimal(13),
+                reader.IsDBNull(14) ? null : reader.GetDecimal(14))));
+        }
+    }
+
+    var signals = await ReadSignalContributions(connection, keys, cancellationToken);
+    var riskReasons = await ReadRiskReasons(connection, keys, cancellationToken);
+
+    foreach (var (key, entry) in drafts)
+    {
+        result[entry.Pair] = entry with
+        {
+            Signals = signals.TryGetValue(key, out var contributions) ? contributions : Array.Empty<DashboardSignalDto>(),
+            RiskReasons = riskReasons.TryGetValue(key, out var reasons) ? reasons : Array.Empty<string>()
+        };
+    }
+
+    return result;
+}
+
+// Both lookups over-select on the cross product of cycle ids and decision indexes and
+// then filter in memory: the exact tuple filter is awkward to parameterise and the row
+// counts here are tiny (open positions, or today's trades).
+static async Task<Dictionary<DecisionKey, IReadOnlyList<DashboardSignalDto>>> ReadSignalContributions(
+    NpgsqlConnection connection,
+    IReadOnlyList<DecisionKey> keys,
+    CancellationToken cancellationToken)
+{
+    var result = new Dictionary<DecisionKey, IReadOnlyList<DashboardSignalDto>>();
+    if (keys.Count == 0)
+    {
+        return result;
+    }
+
+    var wanted = keys.ToHashSet();
+    await using var command = new NpgsqlCommand(
+        """
+        select cycle_id, decision_index, name, value, reason
+        from dry_run_signal_contributions
+        where cycle_id = any(@cycle_ids) and decision_index = any(@decision_indexes)
+        order by cycle_id, decision_index, contribution_index
+        """,
+        connection);
+    command.Parameters.Add("cycle_ids", NpgsqlDbType.Array | NpgsqlDbType.Text).Value =
+        keys.Select(key => key.CycleId).Distinct().ToArray();
+    command.Parameters.Add("decision_indexes", NpgsqlDbType.Array | NpgsqlDbType.Integer).Value =
+        keys.Select(key => key.DecisionIndex).Distinct().ToArray();
+
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    while (await reader.ReadAsync(cancellationToken))
+    {
+        var key = new DecisionKey(reader.GetString(0), reader.GetInt32(1));
+        if (!wanted.Contains(key))
+        {
+            continue;
+        }
+
+        if (!result.TryGetValue(key, out var list))
+        {
+            list = new List<DashboardSignalDto>();
+            result[key] = list;
+        }
+
+        ((List<DashboardSignalDto>)list).Add(new DashboardSignalDto(
+            reader.GetString(2),
+            reader.GetDecimal(3),
+            reader.GetString(4)));
+    }
+
+    return result;
+}
+
+static async Task<Dictionary<DecisionKey, IReadOnlyList<string>>> ReadRiskReasons(
+    NpgsqlConnection connection,
+    IReadOnlyList<DecisionKey> keys,
+    CancellationToken cancellationToken)
+{
+    var result = new Dictionary<DecisionKey, IReadOnlyList<string>>();
+    if (keys.Count == 0)
+    {
+        return result;
+    }
+
+    var wanted = keys.ToHashSet();
+    await using var command = new NpgsqlCommand(
+        """
+        select cycle_id, decision_index, reason
+        from dry_run_decision_risk_reasons
+        where cycle_id = any(@cycle_ids) and decision_index = any(@decision_indexes)
+        order by cycle_id, decision_index, reason_index
+        """,
+        connection);
+    command.Parameters.Add("cycle_ids", NpgsqlDbType.Array | NpgsqlDbType.Text).Value =
+        keys.Select(key => key.CycleId).Distinct().ToArray();
+    command.Parameters.Add("decision_indexes", NpgsqlDbType.Array | NpgsqlDbType.Integer).Value =
+        keys.Select(key => key.DecisionIndex).Distinct().ToArray();
+
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    while (await reader.ReadAsync(cancellationToken))
+    {
+        var key = new DecisionKey(reader.GetString(0), reader.GetInt32(1));
+        if (!wanted.Contains(key))
+        {
+            continue;
+        }
+
+        if (!result.TryGetValue(key, out var list))
+        {
+            list = new List<string>();
+            result[key] = list;
+        }
+
+        ((List<string>)list).Add(reader.GetString(2));
+    }
+
+    return result;
+}
+
+static async Task<IReadOnlyList<DashboardWorkerDto>> ReadWorkers(
+    NpgsqlConnection connection,
+    CancellationToken cancellationToken)
+{
+    var now = DateTimeOffset.UtcNow;
+    await using var command = new NpgsqlCommand(
+        """
+        select
+            summary.bot_instance_id,
+            latest.bot_instance_name,
+            latest.utc,
+            latest.market_data_mode,
+            latest.active_pairs_count
+        from portfolio_state_summary summary
+        join lateral (
+            select bot_instance_name, utc, market_data_mode, active_pairs_count
+            from dry_run_cycle_facts cycle
+            where cycle.bot_instance_id = summary.bot_instance_id
+            order by cycle.utc desc, cycle.cycle_id desc
+            limit 1
+        ) latest on true
+        order by summary.bot_instance_id
+        """,
+        connection);
+
+    var workers = new List<DashboardWorkerDto>();
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    while (await reader.ReadAsync(cancellationToken))
+    {
+        var cycleUtc = DateTime.SpecifyKind(reader.GetDateTime(2), DateTimeKind.Utc);
+        var age = now - new DateTimeOffset(cycleUtc);
+        var isStale = age > TimeSpan.FromMinutes(10);
+        workers.Add(new DashboardWorkerDto(
+            reader.GetString(0),
+            ReadNullableString(reader, 1),
+            cycleUtc,
+            (int)Math.Max(0, age.TotalSeconds),
+            isStale ? "stale" : "running",
+            isStale,
+            reader.IsDBNull(3) ? "unknown" : reader.GetString(3),
+            reader.IsDBNull(4) ? 0 : reader.GetInt32(4)));
+    }
+
+    return workers;
+}
+
+// Closed days never change, so they are rolled up once into portfolio_daily_equity
+// and read back from there. That keeps the landing page off a 300ms sequential scan
+// of dry_run_cycle_facts every 10 seconds, and — more importantly — preserves the
+// equity curve even if the per-cycle facts are ever pruned.
+static async Task EnsureDailyEquityTable(NpgsqlConnection connection, CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand(
+        """
+        create table if not exists portfolio_daily_equity (
+            bot_instance_id text not null,
+            local_date date not null,
+            time_zone text not null,
+            open_value_eur numeric not null,
+            high_value_eur numeric not null,
+            low_value_eur numeric not null,
+            close_value_eur numeric not null,
+            cycle_count integer not null,
+            recorded_at timestamptz not null default now(),
+            primary key (bot_instance_id, local_date)
+        )
+        """,
+        connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
+static async Task BackfillDailyEquity(
+    NpgsqlConnection connection,
+    string botInstanceId,
+    string timeZoneId,
+    CancellationToken cancellationToken)
+{
+    // Only days after the last stored one are aggregated, so the expensive full
+    // scan happens once and every later call touches a single day.
+    await using var command = new NpgsqlCommand(
+        """
+        insert into portfolio_daily_equity
+            (bot_instance_id, local_date, time_zone, open_value_eur, high_value_eur,
+             low_value_eur, close_value_eur, cycle_count)
+        select
+            @bot_instance_id,
+            (utc at time zone @time_zone)::date,
+            @time_zone,
+            (array_agg(portfolio_value_after_eur order by utc asc, cycle_id asc))[1],
+            max(portfolio_value_after_eur),
+            min(portfolio_value_after_eur),
+            (array_agg(portfolio_value_after_eur order by utc desc, cycle_id desc))[1],
+            count(*)
+        from dry_run_cycle_facts
+        where bot_instance_id = @bot_instance_id
+          and utc >= coalesce(
+                (select max(local_date) at time zone @time_zone
+                 from portfolio_daily_equity
+                 where bot_instance_id = @bot_instance_id),
+                '-infinity'::timestamptz)
+        group by 2
+        having (utc at time zone @time_zone)::date
+             < (now() at time zone @time_zone)::date
+        on conflict (bot_instance_id, local_date) do nothing
+        """,
+        connection);
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
+    command.Parameters.Add("time_zone", NpgsqlDbType.Text).Value = timeZoneId;
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
+static async Task<DashboardEquityDto> ReadEquityDays(
+    NpgsqlConnection connection,
+    string? botInstanceId,
+    int days,
+    CancellationToken cancellationToken)
+{
+    const string timeZoneId = "Europe/Vilnius";
+    var timeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+    var todayLocal = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone)
+        .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    if (string.IsNullOrWhiteSpace(botInstanceId))
+    {
+        // The curve is per account; without one there is nothing meaningful to plot.
+        return new DashboardEquityDto(timeZoneId, todayLocal, Array.Empty<DashboardEquityDayDto>(), 0m, false);
+    }
+
+    await EnsureDailyEquityTable(connection, cancellationToken);
+    await BackfillDailyEquity(connection, botInstanceId, timeZoneId, cancellationToken);
+
+    await using var command = new NpgsqlCommand(
+        """
+        select
+            local_date,
+            open_value_eur,
+            high_value_eur,
+            low_value_eur,
+            close_value_eur,
+            cycle_count
+        from portfolio_daily_equity
+        where bot_instance_id = @bot_instance_id
+        order by local_date desc
+        limit @days
+        """,
+        connection);
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
+    command.Parameters.AddWithValue("days", days);
+
+    var closed = new List<DashboardEquityDayDto>();
+    await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+    {
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            closed.Add(new DashboardEquityDayDto(
+                reader.GetFieldValue<DateTime>(0).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                reader.GetDecimal(1),
+                reader.GetDecimal(2),
+                reader.GetDecimal(3),
+                reader.GetDecimal(4),
+                0m,
+                reader.GetInt32(5)));
+        }
+    }
+
+    closed.Reverse();
+
+    // Manual money movement is NOT derivable from what is stored today: on the live
+    // accounts cash jumps by 15-45 USD between cycles while total portfolio value
+    // stays flat, because the exchange releases and re-commits margin outside the
+    // bot's own action log. Reporting those as deposits would be fiction, so the
+    // series carries no adjustments until the worker records the real events.
+    return new DashboardEquityDto(timeZoneId, todayLocal, closed, 0m, false);
+}
+
+static async Task<DashboardTodayDto> ReadTodayTrades(
+    NpgsqlConnection connection,
+    string? botInstanceId,
+    CancellationToken cancellationToken)
+{
+    const string timeZoneId = "Europe/Vilnius";
+    var timeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+    var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone);
+    var localStart = localNow.Date;
+    var utcStart = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localStart, timeZone), TimeSpan.Zero);
+
+    await using var command = new NpgsqlCommand(
+        """
+        with today_cycles as materialized (
+            select cycle_id, utc
+            from dry_run_cycle_facts
+            where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
+              and utc >= @utc_start
+        ),
+        traded as materialized (
+            select action.*
+            from dry_run_actions action
+            join today_cycles cycle on cycle.cycle_id = action.cycle_id
+            where action.action in ('WOULD_BUY', 'WOULD_SELL', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT', 'WOULD_CLOSE')
+        )
+        select
+            action.cycle_id,
+            action.decision_index,
+            cycle.utc,
+            decision.pair,
+            action.action,
+            action.side,
+            action.leverage,
+            action.fill_price,
+            action.quantity,
+            action.fee_eur,
+            decision.score,
+            action.target_notional_eur,
+            action.portfolio_value_before_eur,
+            action.portfolio_value_after_eur,
+            action.exit_reason_code,
+            action.exit_trigger_source,
+            action.entry_channel,
+            action.exchange_order_id,
+            action.reason,
+            action.reduce_only,
+            decision.spread_percent,
+            decision.price_action_direction,
+            decision.price_action_trend_percent,
+            decision.bullish_ema_gap_percent
+        from traded action
+        join today_cycles cycle on cycle.cycle_id = action.cycle_id
+        join dry_run_decision_facts decision
+            on decision.cycle_id = action.cycle_id and decision.decision_index = action.decision_index
+        order by cycle.utc desc, action.decision_index desc
+        limit 60
+        """,
+        connection);
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
+    command.Parameters.Add("utc_start", NpgsqlDbType.TimestampTz).Value = utcStart;
+
+    var keys = new List<DecisionKey>();
+    var drafts = new List<(DecisionKey Key, DashboardTradeDto Trade)>();
+
+    await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+    {
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var key = new DecisionKey(reader.GetString(0), reader.GetInt32(1));
+            var action = reader.GetString(4);
+            var log = reader.GetString(18);
+            var valueBefore = reader.GetDecimal(12);
+            var valueAfter = reader.GetDecimal(13);
+            var isExit = action is "WOULD_CLOSE" or "WOULD_SELL";
+
+            keys.Add(key);
+            drafts.Add((key, new DashboardTradeDto(
+                DateTime.SpecifyKind(reader.GetDateTime(2), DateTimeKind.Utc),
+                reader.GetString(3),
+                action,
+                ReadNullableString(reader, 5),
+                reader.IsDBNull(6) ? null : reader.GetDecimal(6),
+                reader.GetDecimal(7),
+                reader.GetDecimal(8),
+                reader.GetDecimal(9),
+                reader.GetDecimal(10),
+                reader.GetDecimal(11),
+                isExit ? valueAfter - valueBefore : null,
+                isExit ? ParseRealizedPercent(log) : null,
+                ReadNullableString(reader, 14),
+                ReadNullableString(reader, 15),
+                ReadNullableString(reader, 16),
+                ReadNullableString(reader, 17),
+                log,
+                !reader.IsDBNull(19) && reader.GetBoolean(19),
+                Array.Empty<DashboardSignalDto>(),
+                Array.Empty<string>(),
+                reader.IsDBNull(20) ? 0m : reader.GetDecimal(20),
+                ReadNullableString(reader, 21),
+                reader.IsDBNull(22) ? null : reader.GetDecimal(22),
+                reader.IsDBNull(23) ? null : reader.GetDecimal(23))));
+        }
+    }
+
+    var signals = await ReadSignalContributions(connection, keys, cancellationToken);
+    var riskReasons = await ReadRiskReasons(connection, keys, cancellationToken);
+
+    var trades = drafts
+        .Select(draft => draft.Trade with
+        {
+            Signals = signals.TryGetValue(draft.Key, out var contributions) ? contributions : Array.Empty<DashboardSignalDto>(),
+            RiskReasons = riskReasons.TryGetValue(draft.Key, out var reasons) ? reasons : Array.Empty<string>()
+        })
+        .ToList();
+
+    return new DashboardTodayDto(
+        localStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        timeZoneId,
+        trades,
+        trades.Count(trade => trade.Action is "WOULD_BUY" or "WOULD_OPEN_LONG" or "WOULD_OPEN_SHORT"),
+        trades.Count(trade => trade.Action is "WOULD_CLOSE" or "WOULD_SELL"),
+        trades.Count(trade => IsStopLossExit(trade)),
+        trades.Count(trade => IsTakeProfitExit(trade)),
+        trades.Where(trade => trade.RealizedPnlEur.HasValue).Sum(trade => trade.RealizedPnlEur!.Value));
+}
+
+static bool IsStopLossExit(DashboardTradeDto trade) =>
+    (trade.ExitReasonCode?.Contains("STOP", StringComparison.OrdinalIgnoreCase) ?? false)
+    || (trade.ExitTriggerSource?.Contains("STOP", StringComparison.OrdinalIgnoreCase) ?? false)
+    || trade.Log.Contains("STOP_LOSS", StringComparison.OrdinalIgnoreCase);
+
+static bool IsTakeProfitExit(DashboardTradeDto trade) =>
+    (trade.ExitReasonCode?.Contains("TAKE_PROFIT", StringComparison.OrdinalIgnoreCase) ?? false)
+    || (trade.ExitTriggerSource?.Contains("TAKE_PROFIT", StringComparison.OrdinalIgnoreCase) ?? false)
+    || trade.Log.Contains("TAKE_PROFIT", StringComparison.OrdinalIgnoreCase);
+
+// Exit logs carry the exchange's own realised percentage, e.g.
+// "realized PnL USD -3.0708 (-2.0488 %)". The absolute figure is taken from the
+// portfolio delta instead; only the percentage is read back out of the log.
+static decimal? ParseRealizedPercent(string log)
+{
+    var match = System.Text.RegularExpressions.Regex.Match(
+        log,
+        @"realized\s+PnL[^()]*\(\s*(?<value>[-+−]?\d+(?:[.,]\d+)?)\s*%",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    if (!match.Success)
+    {
+        return null;
+    }
+
+    var raw = match.Groups["value"].Value.Replace('−', '-').Replace(',', '.');
+    return decimal.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : null;
+}
+
 internal sealed record PortfolioResponse(
     DateTimeOffset Utc,
     PortfolioSummaryDto? Summary,
@@ -2363,3 +2963,111 @@ partial class Program
             returnedTrades, pnlByPair, pnlByRegime, null);
     }
 }
+
+internal static class DashboardDefaults
+{
+    public const int EquityWindowDays = 30;
+}
+
+internal readonly record struct DecisionKey(string CycleId, int DecisionIndex);
+
+internal sealed record DashboardResponse(
+    DateTimeOffset Utc,
+    string? BotInstanceId,
+    PortfolioSummaryDto? Summary,
+    IReadOnlyList<PortfolioPositionDto> Positions,
+    IReadOnlyDictionary<string, DashboardEntryDto> EntryContexts,
+    IReadOnlyList<DashboardWorkerDto> Workers,
+    DashboardEquityDto Equity,
+    DashboardTodayDto Today,
+    string? Warning);
+
+internal sealed record DashboardSignalDto(string Name, decimal Value, string Reason);
+
+internal sealed record DashboardEntryDto(
+    string Pair,
+    DateTime Utc,
+    string Action,
+    string? Side,
+    decimal? Leverage,
+    decimal Score,
+    string? EntryChannel,
+    string? Log,
+    decimal FeeEur,
+    IReadOnlyList<DashboardSignalDto> Signals,
+    IReadOnlyList<string> RiskReasons,
+    decimal SpreadPercent,
+    string? PriceActionDirection,
+    decimal? PriceActionTrendPercent,
+    decimal? EmaGapPercent);
+
+internal sealed record DashboardWorkerDto(
+    string BotInstanceId,
+    string? BotInstanceName,
+    DateTime LatestCycleUtc,
+    int LatestCycleAgeSeconds,
+    string RuntimeState,
+    bool IsStale,
+    string MarketDataMode,
+    int ActivePairsCount);
+
+internal sealed record DashboardEquityDayDto(
+    string Date,
+    decimal Open,
+    decimal High,
+    decimal Low,
+    decimal Close,
+    decimal ManualAdjustmentEur,
+    long Cycles);
+
+internal sealed record DashboardEquityDto(
+    string TimeZone,
+    string TodayLocalDate,
+    IReadOnlyList<DashboardEquityDayDto> Days,
+    decimal ManualAdjustmentEur,
+    bool ManualAdjustmentsTracked)
+{
+    public static DashboardEquityDto Empty() =>
+        new("Europe/Vilnius", string.Empty, Array.Empty<DashboardEquityDayDto>(), 0m, false);
+}
+
+internal sealed record DashboardTradeDto(
+    DateTime Utc,
+    string Pair,
+    string Action,
+    string? Side,
+    decimal? Leverage,
+    decimal FillPrice,
+    decimal Quantity,
+    decimal FeeEur,
+    decimal Score,
+    decimal TargetNotionalEur,
+    decimal? RealizedPnlEur,
+    decimal? RealizedPnlPercent,
+    string? ExitReasonCode,
+    string? ExitTriggerSource,
+    string? EntryChannel,
+    string? ExchangeOrderId,
+    string Log,
+    bool ReduceOnly,
+    IReadOnlyList<DashboardSignalDto> Signals,
+    IReadOnlyList<string> RiskReasons,
+    decimal SpreadPercent,
+    string? PriceActionDirection,
+    decimal? PriceActionTrendPercent,
+    decimal? EmaGapPercent);
+
+internal sealed record DashboardTodayDto(
+    string LocalDate,
+    string TimeZone,
+    IReadOnlyList<DashboardTradeDto> Trades,
+    int Opened,
+    int Closed,
+    int StopLoss,
+    int TakeProfit,
+    decimal RealizedPnlEur)
+{
+    public static DashboardTodayDto Empty() =>
+        new(string.Empty, "Europe/Vilnius", Array.Empty<DashboardTradeDto>(), 0, 0, 0, 0, 0m);
+}
+
