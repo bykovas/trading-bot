@@ -6,10 +6,15 @@
 # page's own disclaimer. They differ only in which account the page opens on,
 # which the page decides from the hostname — the routing below is identical, so
 # /api stays same-origin on every host.
+#
+# Traefik 3 removed the v2 multi-value form Host(`a`, `b`): each matcher takes one
+# argument, so the hosts are OR-ed explicitly. The parentheses around the OR group
+# are load-bearing — && binds tighter than ||, so without them the /api and /web
+# routers would only apply the path filter to the last host.
 http:
   routers:
     trading-bot-http:
-      rule: "Host(`fin.bykovas.lt`, `algo.meetluko.eu`, `algo.bykovas.lt`)"
+      rule: "(Host(`fin.bykovas.lt`) || Host(`algo.meetluko.eu`) || Host(`algo.bykovas.lt`))"
       entryPoints:
         - web
       middlewares:
@@ -17,7 +22,7 @@ http:
       service: trading-bot
 
     trading-bot-https:
-      rule: "Host(`fin.bykovas.lt`, `algo.meetluko.eu`, `algo.bykovas.lt`)"
+      rule: "(Host(`fin.bykovas.lt`) || Host(`algo.meetluko.eu`) || Host(`algo.bykovas.lt`))"
       entryPoints:
         - websecure
       tls:
@@ -25,7 +30,7 @@ http:
       service: trading-bot
 
     trading-bot-web-https:
-      rule: "Host(`fin.bykovas.lt`, `algo.meetluko.eu`, `algo.bykovas.lt`) && PathPrefix(`/web`)"
+      rule: "(Host(`fin.bykovas.lt`) || Host(`algo.meetluko.eu`) || Host(`algo.bykovas.lt`)) && PathPrefix(`/web`)"
       entryPoints:
         - websecure
       priority: 1100
@@ -34,7 +39,7 @@ http:
       service: trading-bot-web
 
     trading-bot-api-https:
-      rule: "Host(`fin.bykovas.lt`, `algo.meetluko.eu`, `algo.bykovas.lt`) && PathPrefix(`/api`)"
+      rule: "(Host(`fin.bykovas.lt`) || Host(`algo.meetluko.eu`) || Host(`algo.bykovas.lt`)) && PathPrefix(`/api`)"
       entryPoints:
         - websecure
       priority: 1000
