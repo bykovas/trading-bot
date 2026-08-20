@@ -617,6 +617,15 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
      the way it did when it sat outside the hero. */
   .bc-hero>.bc-mobilebar{order:1;min-width:0;margin:0 -20px;flex-wrap:wrap}
 }
+
+@container (max-width:899px){
+  /* FOLD BUDGET, see spec: on 390x844 the ".bc-next-l" label must end above
+     844px, because it is what tells the reader the page continues. Moving the
+     status bar into the hero cost 72px and pushed the label to 858. The eyebrow
+     lost the exchange name (it is still named in the heuristics paragraph) and
+     the lead is a step smaller; re-measure both if anything is added here. */
+  .bc-hero-main .bc-lead{font-size:14px;line-height:1.45}
+}
   </style>
 </head>
 <body>
@@ -641,7 +650,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
     <section class="bc-hero">
       <div class="bc-hero-main">
-        <p class="bc-eyebrow">Uždaras testavimas · tikri pinigai · Kraken</p>
+        <p class="bc-eyebrow">Uždaras testavimas · tikri pinigai</p>
         <h1 class="bc-h1">Botas prekiauja. Mes uždirbam. Kol kas.</h1>
         <p class="bc-lead">Jis pats suranda ir atidaro pozicijas, pats valdo riziką, pats uždaro sandorius. Be rankų, be emocijų. Kiekvienas sprendimas įrašytas. Mes tik stebime, kaip keičiasi skaičiai.</p>
       </div>
