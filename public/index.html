@@ -473,6 +473,24 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
   .bc-card-body .bc-chips-l{margin-top:16px}
   .bc-card-body .bc-tech{margin-top:14px}
 }
+
+/* ============================================================
+   The raw operator pages, behind one button and a warning.
+   ============================================================ */
+.bc-more{display:flex;justify-content:center;padding:26px 22px 30px}
+.bc-more-btn{display:inline-flex;align-items:center;min-height:44px;padding:0 20px;
+  border:1px solid var(--hairline);border-radius:var(--pill);background:rgba(255,255,255,.03);
+  color:var(--muted);cursor:pointer;font:12.5px var(--font-mono);letter-spacing:.02em}
+.bc-more-btn:hover{color:var(--ink-soft);border-color:rgba(246,218,160,.28)}
+
+.bc-warn-box{margin:0 0 16px;padding:12px 14px;border:1px solid rgba(240,166,58,.3);
+  border-radius:var(--r);background:rgba(240,166,58,.07);color:var(--amber);
+  font:12.5px/1.55 var(--font-body)}
+.bc-warn-box b{color:var(--amber);font-weight:600}
+
+/* Inside the dialog the tab row is a plain stack, not a page-wide strip. */
+.bc-modal--pages .bc-tabs{flex-direction:column;gap:8px;padding:0}
+.bc-modal--pages .bc-tabs a{justify-content:space-between;min-height:44px}
   </style>
 </head>
 <body>
@@ -566,8 +584,6 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       <div class="bc-metrics" id="bcMetrics"></div>
       </section>
 
-    <nav class="bc-tabs"><a href="/trades.html">Sandori&#371; &#382;urnalas</a><a href="/cycles.html">Cikl&#371; lentel&#279;</a><a href="/cycle-decisions.html">Cikl&#371; sprendimai</a><a href="/market-snapshots.html">Rinkos momentin&#279;s nuotraukos</a><a href="/api/export/cycles-and-snapshots.csv">Eksportuoti CSV</a><a href="/sim.html">Modeliavimas &#8222;kas jei&#8220;</a></nav>
-
     <section class="bc-sec">
       <div class="bc-sec-head"><h2>Aktyvios pozicijos</h2><span id="bcPosMeta">kraunama</span></div>
       <div class="bc-list" id="bcPosList"></div>
@@ -578,6 +594,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       <div class="bc-tstats" id="bcTradeStats"></div>
       <div class="bc-list" id="bcTradeList"></div>
     </section>
+
+    <div class="bc-more">
+      <button type="button" class="bc-more-btn" id="bcPagesOpen">Kiti svetainės puslapiai</button>
+    </div>
 
     <footer class="bc-footnote" id="testuotojas">
       <p class="bc-fn-line"><span id="fn-blynai" class="bc-fn-item"><b>1.</b> <b>BlynAI Capital</b> — ne įmonė ir ne finansinė paslauga, o nekomercinis hobio projektas algoritminės prekybos programinei įrangai ir biržų API integracijoms tyrinėti. Projektas nepriima ir nevaldo kitų asmenų lėšų, nevaldo jų biržos sąskaitų ir investavimo paslaugų neteikia. Rodomi rezultatai yra istoriniai ir negarantuoja būsimų. Tai nėra individuali investavimo rekomendacija.</span> <span id="fn-testuotojas" class="bc-fn-item"><b>2.</b> <b>Viešas testuotojas</b> — asmuo, savo infrastruktūroje įsidiegęs boto programinę įrangą ir prekiaujantis tik savo lėšomis per savo biržos API raktą; strategiją ir rizikos parametrus nustato pats.</span> <button type="button" class="bc-fn-more" id="bcDisclaimerOpen">Skaityti plačiau</button></p>
@@ -628,6 +648,17 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <p>Svetainėje pateikiamas turinys, programinis kodas, prekybos statistika, algoritmai, techniniai paaiškinimai ir kitų naudotojų paskelbti rezultatai yra skirti tik informaciniams, edukaciniams ir technologijų demonstravimo tikslams.</p>
         <p>Jokia čia pateikta informacija neturėtų būti suprantama kaip individuali investavimo rekomendacija, finansinė konsultacija, turto valdymo paslauga ar garantija dėl būsimo finansinio rezultato.</p>
         <p>Kiekvienas asmuo pats sprendžia, ar ir kaip naudoti programinę įrangą bei kokią riziką prisiimti.</p>
+      </div>
+    </dialog>
+
+    <dialog class="bc-modal bc-modal--pages" id="bcPages" aria-labelledby="bcPagesTitle">
+      <div class="bc-modal-head">
+        <h2 class="bc-modal-t" id="bcPagesTitle">Kiti svetainės puslapiai</h2>
+        <button type="button" class="bc-modal-x" id="bcPagesClose" aria-label="Uždaryti">&#10005;</button>
+      </div>
+      <div class="bc-modal-body">
+        <p class="bc-warn-box"><b>Įspėjimas.</b> Šie puslapiai nepritaikyti prie šio dizaino ir nėra patikrinti. Juose gali būti klaidų, o skaičiai gali rodyti nesąmones. Jie palikti tokie, kokie yra — kaip neapdorotas techninis žurnalas.</p>
+        <nav class="bc-tabs"><a href="/trades.html">Sandori&#371; &#382;urnalas</a><a href="/cycles.html">Cikl&#371; lentel&#279;</a><a href="/cycle-decisions.html">Cikl&#371; sprendimai</a><a href="/market-snapshots.html">Rinkos momentin&#279;s nuotraukos</a><a href="/api/export/cycles-and-snapshots.csv">Eksportuoti CSV</a><a href="/sim.html">Modeliavimas &#8222;kas jei&#8220;</a></nav>
       </div>
     </dialog>
   </div>
@@ -914,10 +945,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       });
     }
 
-    function initDisclaimer() {
-      const dialog = el("bcDisclaimer");
-      const open = el("bcDisclaimerOpen");
-      const close = el("bcDisclaimerClose");
+    function initModal(dialogId, openId, closeId) {
+      const dialog = el(dialogId);
+      const open = el(openId);
+      const close = el(closeId);
       if (!dialog || !open || !close) return;
 
       open.addEventListener("click", () => dialog.showModal());
@@ -926,6 +957,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       dialog.addEventListener("click", event => {
         if (event.target === dialog) dialog.close();
       });
+    }
+
+    function initDisclaimer() {
+      initModal("bcDisclaimer", "bcDisclaimerOpen", "bcDisclaimerClose");
+      initModal("bcPages", "bcPagesOpen", "bcPagesClose");
     }
 
     // ---- status ---------------------------------------------------------
