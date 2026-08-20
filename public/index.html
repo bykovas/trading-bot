@@ -11,7 +11,8 @@
   <meta property="og:url" content="__OG_URL__">
   <meta property="og:site_name" content="__OG_SITE__">
   <meta property="og:title" content="__OG_TITLE__">
-  <meta property="og:description" content="__OG_DESCRIPTION__">__OG_IMAGE_TAGS__
+  <meta property="og:description" content="__OG_DESCRIPTION__">
+  <!--__OG_IMAGE_TAGS__-->
   <meta name="twitter:card" content="__OG_TWITTER_CARD__">
   <meta name="twitter:title" content="__OG_TITLE__">
   <meta name="twitter:description" content="__OG_DESCRIPTION__">
@@ -118,6 +119,14 @@
    them, so no !important is needed. Hidden on narrow with the other small lines. */
 .bc-coin--luko .bc-coin-algo,.bc-coin--byko .bc-coin-algo{
   margin-top:3px;padding-top:3px;border-top:1px solid rgba(246,218,160,.1);color:var(--muted-3)}
+/* Cross rate, opposite the label on the same baseline. Each figure takes the
+   colour of the coin it is denominated in, so it ties back to the cards below. */
+.bc-coins-hd{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.bc-rate{margin:0;font:11px/1.4 var(--font-mono);font-variant-numeric:tabular-nums;color:var(--muted-3);white-space:nowrap}
+.bc-rate b{font-weight:500}
+.bc-rate .bc-rate-b{color:#bfe2ff}
+.bc-rate .bc-rate-l{color:#e8d5ac}
+.bc-rate-x{color:var(--muted-4)}
 .bc-hero-wide{grid-column:1/-1;min-width:0}
 .bc-heur{grid-column:1/-1;min-width:0}
 .bc-cta-wrap{grid-column:1/-1;min-width:0}
@@ -289,7 +298,7 @@
 
   /* HERO = the whole first screen: centred, sells before any scroll */
   /* FOLD BUDGET: on a 390x844 screen everything up to and including the coin
-     pills must sit above 844px. Measured bottom of .bc-coins = 739px.
+     pills must sit above 844px. Measured bottom of .bc-coins = 784px.
      If you add anything to the hero, re-measure .bc-coins bottom. */
   /* The brand is lifted out of flow so the hero starts at y=0 and its glow
      origin coincides with the top of the screen — otherwise a hard seam forms
@@ -311,6 +320,10 @@
   .bc-coin-ic svg{width:17px;height:17px}
   .bc-coin-txt small{display:none}
   .bc-coin-txt b{font-size:12.5px}
+
+  /* Stacked and centred under the label; the fold budget below assumes one line. */
+  .bc-coins-hd{flex-direction:column;align-items:center;gap:5px}
+  .bc-rate{font-size:10px}
   /* card 1 (yesterday) and card 3 (no promises) stay; the 30-day figure in
      card 2 is dropped because the live section repeats it a screen below */
   .bc-proof{grid-template-columns:1fr;border:0;border-radius:0;background:none;text-align:center}
@@ -501,6 +514,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 /* Inside the dialog the tab row is a plain stack, not a page-wide strip. */
 .bc-modal--pages .bc-tabs{flex-direction:column;gap:8px;padding:0}
 .bc-modal--pages .bc-tabs a{justify-content:space-between;min-height:44px}
+
   </style>
 </head>
 <body>
@@ -530,7 +544,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       </div>
 
       <aside class="bc-coins">
-        <p class="bc-coins-l">Pripažįstame tik dvi valiutas</p>
+        <div class="bc-coins-hd">
+          <p class="bc-coins-l">Pripažįstame tik dvi valiutas</p>
+          <p class="bc-rate">1 LUKO &#8776; <b class="bc-rate-b">12,96</b> BYKO<span class="bc-rate-x"> &#183; </span>1 BYKO &#8776; <b class="bc-rate-l">0,08</b> LUKO</p>
+        </div>
         <div class="bc-coins-row">
           <a class="bc-coin bc-coin--luko" href="https://meetluko.eu"><span class="bc-coin-ic"><svg viewBox="0 0 512 512" aria-hidden="true"><circle cx="256" cy="256" r="256" fill="#0A0A0A"/><circle cx="256" cy="256" r="248" fill="none" stroke="#C9A86A" stroke-opacity=".5" stroke-width="8"/><g transform="translate(-117.1 -89.7) scale(1.4463)"><g opacity=".3"><path d="M144 164L182 122V167Z" fill="#C9A86A"/><g fill="none" stroke="#C9A86A" stroke-width="15"><circle cx="306" cy="186" r="58"/><path d="M364 186V312"/></g></g><path d="M182 122h52V312H346l16 16V358H182Z" fill="#C9A86A"/></g></svg></span><span class="bc-coin-txt"><b>LUKO</b><small>meetluko.eu</small><small class="bc-coin-algo">algo.meetluko.eu</small></span></a>
           <a class="bc-coin bc-coin--byko" href="https://byko.bykovas.lt"><span class="bc-coin-ic"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#7CCBFF"/><g transform="translate(2.1875 1.25) scale(.3125)" fill="none" stroke="#0B0D10" stroke-width="13"><path d="M24 14V82"/><path d="M40 20L70 48 40 76"/></g></svg></span><span class="bc-coin-txt"><b>BYKO</b><small>byko.bykovas.lt</small><small class="bc-coin-algo">algo.bykovas.lt</small></span></a>
