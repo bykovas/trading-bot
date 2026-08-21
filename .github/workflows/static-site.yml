@@ -28,6 +28,34 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve per-component image tags
+        run: |
+          # An image is tagged with the last commit that touched what goes into it,
+          # not with the commit being built. Two pushes that leave a component alone
+          # resolve to the same tag, the registry already has it, the build is skipped
+          # and compose sees an unchanged image reference - so the container is left
+          # running. That is the point: a trading worker should not be restarted
+          # mid-position because a stylesheet changed.
+          #
+          # The workflow itself is in every path list: a change to how images are built
+          # invalidates all of them.
+          CI=".github/workflows/static-site.yml"
+          tag_for() {
+            local sha
+            sha="$(git log -1 --format=%H -- "$@" || true)"
+            printf '%s' "${sha:-${{ github.sha }}}"
+          }
+          {
+            echo "UI_IMAGE_TAG=$(tag_for Dockerfile nginx public "$CI")"
+            echo "API_IMAGE_TAG=$(tag_for src/TradingBot.Api src/TradingBot.Core "$CI")"
+            echo "WEB_IMAGE_TAG=$(tag_for src/TradingBot.Web "$CI")"
+            echo "SPOT_WORKER_IMAGE_TAG=$(tag_for src/TradingBot.SpotWorker src/TradingBot.Core "$CI")"
+            echo "FUTURES_WORKER_IMAGE_TAG=$(tag_for src/TradingBot.FuturesWorker src/TradingBot.Core "$CI")"
+            echo "MARKET_DATA_WORKER_IMAGE_TAG=$(tag_for src/TradingBot.MarketDataWorker src/TradingBot.Core "$CI")"
+          } | tee infra/image-tags.env >> "$GITHUB_ENV"
+          echo "Resolved image tags:"
+          cat infra/image-tags.env
+
       - name: Enforce worker changelog
         run: bash .ai/check-worker-changelog.sh "${{ github.event.before }}" "${{ github.sha }}"
 
@@ -48,83 +76,104 @@ jobs:
 
       - name: Build UI image
         run: |
+          if docker manifest inspect "${UI_IMAGE_NAME}:${UI_IMAGE_TAG}" >/dev/null 2>&1; then
+            echo "UI unchanged since ${UI_IMAGE_TAG}; reusing the published image."
+            exit 0
+          fi
           docker build \
             --tag "${UI_IMAGE_NAME}:latest" \
-            --tag "${UI_IMAGE_NAME}:${{ github.sha }}" \
+            --tag "${UI_IMAGE_NAME}:${UI_IMAGE_TAG}" \
             .
+          docker push "${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
+          docker push "${UI_IMAGE_NAME}:latest"
 
       - name: Build spot worker image
         run: |
+          if docker manifest inspect "${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}" >/dev/null 2>&1; then
+            echo "Spot worker unchanged since ${SPOT_WORKER_IMAGE_TAG}; reusing the published image."
+            exit 0
+          fi
           WORKER_BUILD_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           WORKER_STRATEGY_VERSION="$(git ls-files src/TradingBot.Core src/TradingBot.SpotWorker | sort | xargs sha256sum | sha256sum | cut -d ' ' -f1)"
           WORKER_CHANGE_SET="$(awk '/^## / {print $2; exit}' .ai/worker-changelog.md)"
           docker build \
             --file src/TradingBot.SpotWorker/Dockerfile \
-            --build-arg "TRADINGBOT_WORKER_VERSION=${{ github.sha }}" \
-            --build-arg "TRADINGBOT_WORKER_COMMIT=${{ github.sha }}" \
+            --build-arg "TRADINGBOT_WORKER_VERSION=${SPOT_WORKER_IMAGE_TAG}" \
+            --build-arg "TRADINGBOT_WORKER_COMMIT=${SPOT_WORKER_IMAGE_TAG}" \
             --build-arg "TRADINGBOT_WORKER_BUILD_UTC=${WORKER_BUILD_UTC}" \
-            --build-arg "TRADINGBOT_WORKER_IMAGE_TAG=${{ github.sha }}" \
+            --build-arg "TRADINGBOT_WORKER_IMAGE_TAG=${SPOT_WORKER_IMAGE_TAG}" \
             --build-arg "TRADINGBOT_WORKER_STRATEGY_VERSION=${WORKER_STRATEGY_VERSION}" \
             --build-arg "TRADINGBOT_WORKER_CHANGE_SET=${WORKER_CHANGE_SET}" \
             --tag "${SPOT_WORKER_IMAGE_NAME}:latest" \
-            --tag "${SPOT_WORKER_IMAGE_NAME}:${{ github.sha }}" \
+            --tag "${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}" \
             .
+          docker push "${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}"
+          docker push "${SPOT_WORKER_IMAGE_NAME}:latest"
 
       - name: Build futures worker image
         run: |
+          if docker manifest inspect "${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG}" >/dev/null 2>&1; then
+            echo "Futures worker unchanged since ${FUTURES_WORKER_IMAGE_TAG}; reusing the published image."
+            exit 0
+          fi
           WORKER_BUILD_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           FUTURES_STRATEGY_VERSION="$(git ls-files src/TradingBot.Core src/TradingBot.FuturesWorker | sort | xargs sha256sum | sha256sum | cut -d ' ' -f1)"
           WORKER_CHANGE_SET="$(awk '/^## / {print $2; exit}' .ai/worker-changelog.md)"
           docker build \
             --file src/TradingBot.FuturesWorker/Dockerfile \
-            --build-arg "TRADINGBOT_WORKER_VERSION=${{ github.sha }}" \
-            --build-arg "TRADINGBOT_WORKER_COMMIT=${{ github.sha }}" \
+            --build-arg "TRADINGBOT_WORKER_VERSION=${FUTURES_WORKER_IMAGE_TAG}" \
+            --build-arg "TRADINGBOT_WORKER_COMMIT=${FUTURES_WORKER_IMAGE_TAG}" \
             --build-arg "TRADINGBOT_WORKER_BUILD_UTC=${WORKER_BUILD_UTC}" \
-            --build-arg "TRADINGBOT_WORKER_IMAGE_TAG=${{ github.sha }}" \
+            --build-arg "TRADINGBOT_WORKER_IMAGE_TAG=${FUTURES_WORKER_IMAGE_TAG}" \
             --build-arg "TRADINGBOT_WORKER_STRATEGY_VERSION=${FUTURES_STRATEGY_VERSION}" \
             --build-arg "TRADINGBOT_WORKER_CHANGE_SET=${WORKER_CHANGE_SET}" \
             --tag "${FUTURES_WORKER_IMAGE_NAME}:latest" \
-            --tag "${FUTURES_WORKER_IMAGE_NAME}:${{ github.sha }}" \
+            --tag "${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG}" \
             .
+          docker push "${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG}"
+          docker push "${FUTURES_WORKER_IMAGE_NAME}:latest"
 
       - name: Build market data worker image
         run: |
+          if docker manifest inspect "${MARKET_DATA_WORKER_IMAGE_NAME}:${MARKET_DATA_WORKER_IMAGE_TAG}" >/dev/null 2>&1; then
+            echo "market data worker unchanged since ${MARKET_DATA_WORKER_IMAGE_TAG}; reusing the published image."
+            exit 0
+          fi
           docker build \
             --file src/TradingBot.MarketDataWorker/Dockerfile \
             --tag "${MARKET_DATA_WORKER_IMAGE_NAME}:latest" \
-            --tag "${MARKET_DATA_WORKER_IMAGE_NAME}:${{ github.sha }}" \
+            --tag "${MARKET_DATA_WORKER_IMAGE_NAME}:${MARKET_DATA_WORKER_IMAGE_TAG}" \
             .
+          docker push "${MARKET_DATA_WORKER_IMAGE_NAME}:${MARKET_DATA_WORKER_IMAGE_TAG}"
+          docker push "${MARKET_DATA_WORKER_IMAGE_NAME}:latest"
 
       - name: Build API image
         run: |
+          if docker manifest inspect "${API_IMAGE_NAME}:${API_IMAGE_TAG}" >/dev/null 2>&1; then
+            echo "API unchanged since ${API_IMAGE_TAG}; reusing the published image."
+            exit 0
+          fi
           docker build \
             --file src/TradingBot.Api/Dockerfile \
             --tag "${API_IMAGE_NAME}:latest" \
-            --tag "${API_IMAGE_NAME}:${{ github.sha }}" \
+            --tag "${API_IMAGE_NAME}:${API_IMAGE_TAG}" \
             .
+          docker push "${API_IMAGE_NAME}:${API_IMAGE_TAG}"
+          docker push "${API_IMAGE_NAME}:latest"
 
       - name: Build web image
         run: |
+          if docker manifest inspect "${WEB_IMAGE_NAME}:${WEB_IMAGE_TAG}" >/dev/null 2>&1; then
+            echo "web unchanged since ${WEB_IMAGE_TAG}; reusing the published image."
+            exit 0
+          fi
           docker build \
             --file src/TradingBot.Web/Dockerfile \
             --tag "${WEB_IMAGE_NAME}:latest" \
-            --tag "${WEB_IMAGE_NAME}:${{ github.sha }}" \
+            --tag "${WEB_IMAGE_NAME}:${WEB_IMAGE_TAG}" \
             .
-
-      - name: Push images
-        run: |
-          docker push "${UI_IMAGE_NAME}:latest"
-          docker push "${UI_IMAGE_NAME}:${{ github.sha }}"
-          docker push "${API_IMAGE_NAME}:latest"
-          docker push "${API_IMAGE_NAME}:${{ github.sha }}"
+          docker push "${WEB_IMAGE_NAME}:${WEB_IMAGE_TAG}"
           docker push "${WEB_IMAGE_NAME}:latest"
-          docker push "${WEB_IMAGE_NAME}:${{ github.sha }}"
-          docker push "${SPOT_WORKER_IMAGE_NAME}:latest"
-          docker push "${SPOT_WORKER_IMAGE_NAME}:${{ github.sha }}"
-          docker push "${FUTURES_WORKER_IMAGE_NAME}:latest"
-          docker push "${FUTURES_WORKER_IMAGE_NAME}:${{ github.sha }}"
-          docker push "${MARKET_DATA_WORKER_IMAGE_NAME}:latest"
-          docker push "${MARKET_DATA_WORKER_IMAGE_NAME}:${{ github.sha }}"
 
       - name: Upload deploy bundle
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -134,6 +183,7 @@ jobs:
           retention-days: 1
           path: |
             infra/deploy.sh
+            infra/image-tags.env
             infra/docker-compose.prod.yml
             infra/traefik/trading-bot.yml
             src/TradingBot.SpotWorker/appsettings.json
@@ -150,17 +200,11 @@ jobs:
 
     env:
       UI_IMAGE_NAME: ghcr.io/bykovas/trading-bot-ui
-      UI_IMAGE_TAG: ${{ github.sha }}
       API_IMAGE_NAME: ghcr.io/bykovas/trading-bot-api
-      API_IMAGE_TAG: ${{ github.sha }}
       WEB_IMAGE_NAME: ghcr.io/bykovas/trading-bot-web
-      WEB_IMAGE_TAG: ${{ github.sha }}
       SPOT_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-spot-worker
-      SPOT_WORKER_IMAGE_TAG: ${{ github.sha }}
       FUTURES_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-futures-worker
-      FUTURES_WORKER_IMAGE_TAG: ${{ github.sha }}
       MARKET_DATA_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-market-data-worker
-      MARKET_DATA_WORKER_IMAGE_TAG: ${{ github.sha }}
       GHCR_USERNAME: ${{ github.actor }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TRADINGBOT_DB_PASSWORD: ${{ secrets.TRADINGBOT_DB_PASSWORD }}
@@ -188,4 +232,11 @@ jobs:
           name: deploy-bundle
 
       - name: Deploy
-        run: bash infra/deploy.sh
+        run: |
+          # Each component is pinned to the commit that last changed it, so compose
+          # only recreates what actually moved. Without this every service would carry
+          # this push's sha and every container would be restarted, workers included.
+          set -a
+          . ./infra/image-tags.env
+          set +a
+          bash infra/deploy.sh

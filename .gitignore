@@ -59,3 +59,7 @@ Thumbs.db
 
 # Node tooling for the Open Graph card generator (tools/build-og.mjs).
 node_modules/
+
+# Written by CI at build time so the deploy pins each service to the commit that
+# last changed it; never committed.
+infra/image-tags.env
