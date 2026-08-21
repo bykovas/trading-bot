@@ -1,3 +1,11 @@
+## 2026-08-21-exchange-close-realised-result
+
+- A close performed by the exchange was reported on the page as "realised 0.00". The dashboard builds a trade's result from the difference between `portfolio_value_before_eur` and `portfolio_value_after_eur` on the action row, not from the reason text, and the exchange-closure recorder left both at zero: it deliberately does not route through `FuturesVirtualPortfolio.Apply`/`Close`, so nothing ever set them. On futures-lukas-live the +3.59 trailing-stop close on HBAR/USD at 12:03 on 2026-08-21 made the whole day read 0.00 realised.
+- Both recorders now set the pair so the difference is exactly the realised figure Kraken reported on the fill. The live one bases it on the portfolio before the close, which it already has; the backfill one leaves the absolutes at zero, because the only total available at repair time belongs to today rather than to the day the closure happened, and a plausible wrong number is worse than none.
+- The reason text also gains the realised percentage in the same shape `FuturesVirtualPortfolio` writes it, `realized PnL USD 3.5934 (2.4324%)`, because the page reads that back with a regex. Without it an exchange close showed no percentage while a bot close did.
+- Percentage is the price move signed for the side, identical to the bot's own close, so both kinds of exit read the same way.
+- No change to signal scoring, entry gates, sizing, leverage, exits, execution or the mirror. Journal fields only.
+
 ## 2026-08-21-unsettled-valuations
 
 - A cycle in which a position leaves the account records a total the account never held. Cash and open positions come from two Kraken reads that settle independently: the position is already gone from one while its proceeds have not yet arrived in the other. Lukas read 74.39 at 12:03 on 2026-08-21 and 92.91 two minutes later with no trade in between, and that single reading was being reported on the page as a -22.6% max drawdown.

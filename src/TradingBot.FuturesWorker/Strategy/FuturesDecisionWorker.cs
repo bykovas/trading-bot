@@ -1117,6 +1117,10 @@ internal sealed class FuturesDecisionWorker(
                 Action = "WOULD_CLOSE",
                 Reason = $"EXCHANGE_CLOSE_BACKFILLED: reconstructed from Kraken fills, "
                     + $"fill {fillPrice:0.########}, realized PnL USD {realized:0.####}, {group_.Count} fill(s)",
+                // Only the difference is read, and it has to equal the realised figure.
+                // The absolutes stay at zero rather than being filled with the account
+                // total at repair time: that total belongs to today, not to the day this
+                // closure happened, and a plausible wrong number is worse than none.
                 // A sell closes a long and a buy closes a short.
                 Side = last.Side.Equals("buy", StringComparison.OrdinalIgnoreCase) ? "SHORT" : "LONG",
                 ReduceOnly = true,
@@ -1128,7 +1132,9 @@ internal sealed class FuturesDecisionWorker(
                 ExitReasonCode = "EXCHANGE_CLOSE_BACKFILLED",
                 ExitTriggerSource = "exchange",
                 ExchangeOrderId = last.OrderId,
-                ExchangeFillTimestamp = last.FillTime
+                ExchangeFillTimestamp = last.FillTime,
+                PortfolioValueBeforeEur = 0m,
+                PortfolioValueAfterEur = realized
             };
 
             portfolio.Store.AppendCycle(new DryRunCycleRecord
@@ -1209,6 +1215,16 @@ internal sealed class FuturesDecisionWorker(
     // price is known here and cash was already rebuilt from Kraken a few lines above -
     // reusing them would replace a real number with a modelled one and count the money
     // twice. This writes the journal entry only; the portfolio is already correct.
+    // The price move the close realised, signed for the side. Matches what
+    // FuturesVirtualPortfolio writes for a close the bot performs itself, so both
+    // kinds of exit read the same way on the page.
+    private static decimal RealizedPercent(string side, decimal entryPrice, decimal fillPrice) =>
+        entryPrice <= 0m
+            ? 0m
+            : decimal.Round((side.Equals("SHORT", StringComparison.OrdinalIgnoreCase)
+                ? (entryPrice - fillPrice) / entryPrice
+                : (fillPrice - entryPrice) / entryPrice) * 100m, 4);
+
     private async Task RecordExchangeClosuresAsync(
         IReadOnlyList<PortfolioPosition> vanished,
         IReadOnlyList<InstrumentOptions> universe,
@@ -1270,14 +1286,20 @@ internal sealed class FuturesDecisionWorker(
                 : (decimal?)null;
             var last = closing[^1];
             var reason = ClosureReason(position, closing, fillPrice);
+            var realizedPct = RealizedPercent(position.Side, position.EntryPrice, fillPrice);
 
             var action = new DryRunAction
             {
                 Pair = position.Pair,
                 Action = "WOULD_CLOSE",
+                // The percentage has to be in the text and in this exact shape: the
+                // dashboard reads it back out of the reason with a regex, the way it
+                // does for the closes the bot performs itself.
                 Reason = $"{reason}: closed by the exchange, entry {position.EntryPrice:0.########}, "
                     + $"fill {fillPrice:0.########}"
-                    + (realized.HasValue ? $", realized PnL USD {realized.Value:0.####}" : ", realized PnL unreported")
+                    + (realized.HasValue
+                        ? $", realized PnL USD {realized.Value:0.####} ({realizedPct:0.####}%)"
+                        : ", realized PnL unreported")
                     + $", {closing.Count} fill(s)",
                 Side = position.Side,
                 ReduceOnly = true,
@@ -1292,7 +1314,13 @@ internal sealed class FuturesDecisionWorker(
                 ExitTriggerSource = "exchange",
                 ExchangeOrderId = last.OrderId,
                 ExchangeFillTimestamp = last.FillTime,
-                EntryChannel = position.EntryChannel
+                EntryChannel = position.EntryChannel,
+                // What the day's realised figure is actually built from: the dashboard
+                // takes a trade's result as the difference between these two, not from
+                // the reason text. Leaving them at zero, as this did, reported a +3.59
+                // close on futures-lukas-live as "realised 0.00" for the whole day.
+                PortfolioValueBeforeEur = portfolioBefore.TotalValueEur,
+                PortfolioValueAfterEur = portfolioBefore.TotalValueEur + (realized ?? 0m)
             };
 
             decisions.Add(new DryRunDecisionRecord
