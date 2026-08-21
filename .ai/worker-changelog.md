@@ -1,3 +1,12 @@
+## 2026-08-21-record-exchange-closures
+
+- The reconciliation now notices positions that left the account without the worker closing them and writes a `WOULD_CLOSE` journal entry for each, built from Kraken's own fills: real fill price, real `realized_pnl`, real fill time, and the closing order id.
+- Attribution: a trailing stop is identified exactly, by matching the fill's `order_id` against the stored `trailing_stop_order_id`; `fillType` containing "liquidation" is reported as such; otherwise take profit and stop loss are told apart by which level the fill price landed nearer, their levels being 4% and 2% from entry. Reasons are prefixed `EXCHANGE_` so a close the exchange performed is never confused with one the bot decided.
+- Verified against live data before shipping: on futures-lukas-live the fill `PF_HBARUSD sell 0.07579 pnl=+3.59341 order=a28de0e3` matches the trailing order id the worker logged when it armed the stop, so the identification works on a real closure rather than only in theory.
+- Deliberately does not route through `FuturesVirtualPortfolio.Apply`/`Close`. Those derive a fill price from a slippage model and move `state.CashEur`, but the real price is known here and cash has already been rebuilt from Kraken a few lines above; reusing them would replace a real number with a modelled one and count the money twice. The portfolio is left untouched - only the journal gains the entry.
+- Failure to read fills is logged and the cycle continues; the closure stays unrecorded rather than blocking trading.
+- No change to signal scoring, entry gates, sizing, leverage, exits, execution or the mirror.
+
 ## 2026-08-21-futures-fills-reader
 
 - `IFuturesBroker` gains `GetFillsAsync(sinceUtc)` and `KrakenFuturesBroker` implements it against `/derivatives/api/v3/fills`, walked newest-first in pages of 100 via `lastFillTime` until the window is covered - the same paging shape as the account-log reader, and for the same reason.

@@ -1024,6 +1024,157 @@ internal sealed class FuturesDecisionWorker(
         side.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? "LONG" :
         throw new ArgumentException($"Unsupported futures side '{side}'.", nameof(side));
 
+    // Which protection actually fired. The trailing stop is identified exactly, by its
+    // order id, because that one we placed ourselves and stored. Take profit and stop
+    // loss are told apart by where the fill landed: their levels sit 4% and 2% from
+    // entry, far enough that the nearer one is never in doubt.
+    private static string ClosureReason(
+        PortfolioPosition position,
+        IReadOnlyList<FuturesFill> closing,
+        decimal fillPrice)
+    {
+        if (closing.Any(fill => fill.FillType.Contains("liquidation", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "EXCHANGE_LIQUIDATION";
+        }
+
+        if (!string.IsNullOrWhiteSpace(position.TrailingStopOrderId)
+            && closing.Any(fill => fill.OrderId.Equals(position.TrailingStopOrderId, StringComparison.OrdinalIgnoreCase)))
+        {
+            return "EXCHANGE_TRAILING_STOP";
+        }
+
+        var stop = position.StopLossPrice;
+        var target = position.TakeProfitPrice;
+        if (stop is > 0m && target is > 0m)
+        {
+            return Math.Abs(fillPrice - target.Value) <= Math.Abs(fillPrice - stop.Value)
+                ? "EXCHANGE_TAKE_PROFIT"
+                : "EXCHANGE_STOP_LOSS";
+        }
+
+        return "EXCHANGE_FILL";
+    }
+
+    // Deliberately does NOT route through FuturesVirtualPortfolio.Apply/Close. Those
+    // derive a fill price from a slippage model and move state.CashEur, but the real
+    // price is known here and cash was already rebuilt from Kraken a few lines above -
+    // reusing them would replace a real number with a modelled one and count the money
+    // twice. This writes the journal entry only; the portfolio is already correct.
+    private async Task RecordExchangeClosuresAsync(
+        IReadOnlyList<PortfolioPosition> vanished,
+        IReadOnlyList<InstrumentOptions> universe,
+        PortfolioState portfolioBefore,
+        PortfolioState state,
+        DateTimeOffset utc,
+        CancellationToken cancellationToken)
+    {
+        var since = vanished
+            .Select(position => position.OpenedAtUtc ?? utc.AddDays(-2))
+            .Min()
+            .AddMinutes(-5);
+
+        IReadOnlyList<FuturesFill> fills;
+        try
+        {
+            fills = await broker!.GetFillsAsync(since, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"futures-close-sync: could not read fills ({ex.Message}); {vanished.Count} closure(s) left unrecorded");
+            return;
+        }
+
+        var decisions = new List<DryRunDecisionRecord>();
+        foreach (var position in vanished)
+        {
+            var symbol = universe
+                .FirstOrDefault(instrument => instrument.Pair.Equals(position.Pair, StringComparison.OrdinalIgnoreCase))
+                ?.KrakenPair;
+            if (string.IsNullOrWhiteSpace(symbol))
+            {
+                Console.WriteLine($"futures-close-sync: {position.Pair} left the account but is not in the universe; closure unrecorded");
+                continue;
+            }
+
+            // A long is closed by a sell and a short by a buy.
+            var closingSide = position.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? "buy" : "sell";
+            var openedAt = position.OpenedAtUtc ?? since;
+            var closing = fills
+                .Where(fill => fill.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase)
+                    && fill.Side.Equals(closingSide, StringComparison.OrdinalIgnoreCase)
+                    && fill.FillTime >= openedAt)
+                .OrderBy(fill => fill.FillTime)
+                .ToList();
+
+            if (closing.Count == 0)
+            {
+                Console.WriteLine($"futures-close-sync: {position.Pair} left the account but no closing fill was found since {openedAt:O}");
+                continue;
+            }
+
+            var size = closing.Sum(fill => fill.Size);
+            var fillPrice = size > 0m
+                ? closing.Sum(fill => fill.Price * fill.Size) / size
+                : closing[^1].Price;
+            var realized = closing.Any(fill => fill.RealizedPnl.HasValue)
+                ? closing.Where(fill => fill.RealizedPnl.HasValue).Sum(fill => fill.RealizedPnl!.Value)
+                : (decimal?)null;
+            var last = closing[^1];
+            var reason = ClosureReason(position, closing, fillPrice);
+
+            var action = new DryRunAction
+            {
+                Pair = position.Pair,
+                Action = "WOULD_CLOSE",
+                Reason = $"{reason}: closed by the exchange, entry {position.EntryPrice:0.########}, "
+                    + $"fill {fillPrice:0.########}"
+                    + (realized.HasValue ? $", realized PnL USD {realized.Value:0.####}" : ", realized PnL unreported")
+                    + $", {closing.Count} fill(s)",
+                Side = position.Side,
+                ReduceOnly = true,
+                Leverage = position.Leverage,
+                Quantity = size,
+                EntryPrice = position.EntryPrice,
+                FillPrice = fillPrice,
+                LastPrice = fillPrice,
+                NetNotionalEur = realized ?? 0m,
+                GrossNotionalEur = fillPrice * size,
+                ExitReasonCode = reason,
+                ExitTriggerSource = "exchange",
+                ExchangeOrderId = last.OrderId,
+                ExchangeFillTimestamp = last.FillTime,
+                EntryChannel = position.EntryChannel
+            };
+
+            decisions.Add(new DryRunDecisionRecord
+            {
+                Pair = position.Pair,
+                Price = fillPrice,
+                FastEma = null,
+                SlowEma = null,
+                Rsi = null,
+                DesiredPosition = "FLAT",
+                Score = 0m,
+                RiskApproved = true,
+                RiskReasons = Array.Empty<string>(),
+                Contributions = Array.Empty<SignalContribution>(),
+                DryRunAction = action,
+                Broker = "EXCHANGE_CLOSED"
+            });
+
+            Console.WriteLine(
+                $"futures-close-sync: {position.Pair} closed by {reason} at {fillPrice:0.########} "
+                + $"({(realized.HasValue ? $"USD {realized.Value:0.####}" : "PnL unreported")}) "
+                + $"orderId={last.OrderId} fills={closing.Count}");
+        }
+
+        if (decisions.Count > 0)
+        {
+            AppendFastCycle(utc, portfolioBefore, state, decisions, decisions.Select(decision => decision.Pair));
+        }
+    }
+
     private void AppendFastCycle(
         DateTimeOffset utc,
         PortfolioState portfolioBefore,
@@ -1866,12 +2017,28 @@ internal sealed class FuturesDecisionWorker(
             imported.Add(importedPosition);
         }
 
+        // A position the exchange closed for us simply is not in `imported`. Without this
+        // it would vanish silently: the worker only ever saw remotePositions=0, dropped
+        // it, and the day read "opened 1, closed 0, realised 0.00" while the account had
+        // actually gained. A trailing stop is the designed way out of a winning trade,
+        // so this is the normal path, not an edge case.
+        var vanished = state.Positions
+            .Where(existing => !imported.Any(position =>
+                position.Pair.Equals(existing.Pair, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        var portfolioBeforeClose = state.Clone();
+
         var before = state.Positions.Count;
         state.Positions = imported;
         state.PendingFuturesOrders.RemoveAll(order =>
             imported.Any(position => position.Pair.Equals(order.Pair, StringComparison.OrdinalIgnoreCase)));
         state.UpdatedAt = utc;
         Console.WriteLine($"futures-kraken-sync: accounts={accounts.Count} remotePositions={positions.Count} openOrders={openOrders.Count} trackedPositions={state.Positions.Count} previousTracked={before} availableCollateralUsd={state.CashEur:0.####}");
+
+        if (vanished.Count > 0)
+        {
+            await RecordExchangeClosuresAsync(vanished, universe, portfolioBeforeClose, state, utc, cancellationToken);
+        }
 
         // Kraken returns every wallet on the account, and the collateral sum above
         // spans all of them. That hides an internal move: shifting money from the
