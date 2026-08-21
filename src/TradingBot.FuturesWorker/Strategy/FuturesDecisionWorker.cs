@@ -1071,6 +1071,19 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var known = portfolio.Store.LoadRecordedExchangeOrderIds(config.BotInstance.Id, since);
+
+        // The order id alone is not enough. A close the bot performed itself carries no
+        // exchange order id at all, so a first run of this matched none of them and
+        // recorded every one a second time - 18 duplicates across the two live accounts.
+        // A close already sitting on the same pair within a few minutes of the fill is
+        // the same close, whoever wrote it.
+        var recorded = portfolio.Store.LoadRecordedCloseTimes(config.BotInstance.Id, since);
+        var window = TimeSpan.FromMinutes(15);
+        bool AlreadyJournalled(string pair, DateTimeOffset fillTime) =>
+            recorded.Any(close =>
+                close.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase)
+                && (close.Utc - fillTime).Duration() < window);
+
         var closing = fills
             .Where(fill => fill.RealizedPnl is not null && fill.RealizedPnl != 0m)
             .Where(fill => !known.Contains(fill.OrderId))
@@ -1091,6 +1104,10 @@ internal sealed class FuturesDecisionWorker(
             var realized = group_.Sum(fill => fill.RealizedPnl ?? 0m);
             var last = group_[^1];
             var pair = symbolToPair.TryGetValue(last.Symbol, out var mapped) ? mapped : last.Symbol;
+            if (AlreadyJournalled(pair, last.FillTime))
+            {
+                continue;
+            }
 
             var action = new DryRunAction
             {

@@ -23,6 +23,9 @@ public sealed class FuturesSizingTests
     {
         public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public IReadOnlyList<(string Pair, DateTimeOffset Utc)> LoadRecordedCloseTimes(string botInstanceId, DateTimeOffset sinceUtc) =>
+            Array.Empty<(string, DateTimeOffset)>();
+
 
         public string StateDescription => "null";
         public string EventsDescription => "null";
@@ -36,6 +39,9 @@ public sealed class FuturesSizingTests
 
         public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public IReadOnlyList<(string Pair, DateTimeOffset Utc)> LoadRecordedCloseTimes(string botInstanceId, DateTimeOffset sinceUtc) =>
+            Array.Empty<(string, DateTimeOffset)>();
+
 
     private static (FuturesVirtualPortfolio Portfolio, PortfolioState State, FuturesBotConfiguration Config) Setup(
         decimal targetMarginUsd, decimal leverage, decimal startingCash = 100m)

@@ -1,3 +1,10 @@
+## 2026-08-21-backfill-dedupe-by-pair-and-time
+
+- Fixes a defect in yesterday's repair that I found only after running it on production. It skipped a fill when the fill's `order_id` was already in the journal, which is exactly wrong for the closes the bot performs itself: those are written by `FuturesVirtualPortfolio` and carry no `exchange_order_id` at all, so the guard matched none of them and recorded every one a second time. The first run added 29 entries on futures-live and 15 on futures-lukas-live, of which 18 were duplicates of closes already there - e.g. `HBAR/USD 08-20 21:10` appearing as both `SELL_STOP_LOSS -3.274` and `EXCHANGE_CLOSE_BACKFILLED -3.262`.
+- The guard now also skips a fill when a `WOULD_CLOSE` already sits on the same pair within 15 minutes of the fill time, whoever wrote it, via the new `IDryRunPortfolioStore.LoadRecordedCloseTimes`. Fifteen minutes is the cycle period: two genuine closes on one pair inside a single cycle are not reachable, since a pair holds at most one position and reopening requires the next cycle.
+- The 18 duplicate cycles were deleted from production - `dry_run_cycles` and its dependants - leaving futures-live at 72 closes and futures-lukas-live at 15, of which 13 each are genuine recoveries. No orphan rows remain in `dry_run_actions`, `dry_run_decision_facts` or `dry_run_cycle_facts`.
+- No change to signal scoring, entry gates, sizing, leverage, exits, execution or the mirror. The repair still only appends journal rows.
+
 ## 2026-08-21-backfill-missed-closures
 
 - New one-shot repair, off unless `TRADINGBOT_FUTURES_BACKFILL_CLOSURE_DAYS` is set to a number of days. On startup the worker walks Kraken's fills over that window and writes journal entries for closures it never recorded, then continues normally. Running it twice is harmless: order ids already present in the journal are skipped, via the new `IDryRunPortfolioStore.LoadRecordedExchangeOrderIds`.

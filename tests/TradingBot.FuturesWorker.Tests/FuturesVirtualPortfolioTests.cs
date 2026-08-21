@@ -20,6 +20,9 @@ public sealed class FuturesVirtualPortfolioTests
     {
         public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public IReadOnlyList<(string Pair, DateTimeOffset Utc)> LoadRecordedCloseTimes(string botInstanceId, DateTimeOffset sinceUtc) =>
+            Array.Empty<(string, DateTimeOffset)>();
+
 
         public string StateDescription => "null";
         public string EventsDescription => "null";
@@ -33,6 +36,9 @@ public sealed class FuturesVirtualPortfolioTests
 
         public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public IReadOnlyList<(string Pair, DateTimeOffset Utc)> LoadRecordedCloseTimes(string botInstanceId, DateTimeOffset sinceUtc) =>
+            Array.Empty<(string, DateTimeOffset)>();
+
 
     [Fact]
     public void Entry_plan_uses_only_filled_notional_for_partial_maker_fill()

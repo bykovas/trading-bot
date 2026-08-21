@@ -16,6 +16,11 @@ public interface IDryRunPortfolioStore
     // closures it has yet to record without inserting the same one twice.
     IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc);
 
+    // Closes already in the journal, by pair and time. The order id alone is not enough
+    // to deduplicate: a close the bot performed itself carries no exchange order id, so
+    // matching only on that id recorded every one of them a second time.
+    IReadOnlyList<(string Pair, DateTimeOffset Utc)> LoadRecordedCloseTimes(string botInstanceId, DateTimeOffset sinceUtc);
+
     // Persist the per-cycle light market snapshot (one row per universe pair) in a
     // single batch. Callers wrap this so a failure never blocks the trading cycle.
     void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots);
@@ -89,6 +94,9 @@ public sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunPor
 
     public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
         new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    public IReadOnlyList<(string Pair, DateTimeOffset Utc)> LoadRecordedCloseTimes(string botInstanceId, DateTimeOffset sinceUtc) =>
+        Array.Empty<(string, DateTimeOffset)>();
 
     public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots)
     {
@@ -457,6 +465,31 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
         }
 
         return ids;
+    }
+
+    public IReadOnlyList<(string Pair, DateTimeOffset Utc)> LoadRecordedCloseTimes(string botInstanceId, DateTimeOffset sinceUtc)
+    {
+        var closes = new List<(string, DateTimeOffset)>();
+        using var connection = OpenConnection();
+        using var command = new NpgsqlCommand(
+            """
+            select action.pair, cycle.utc
+            from dry_run_actions action
+            join dry_run_cycle_facts cycle on cycle.cycle_id = action.cycle_id
+            where cycle.bot_instance_id = @bot_instance_id
+              and cycle.utc >= @since
+              and action.action = 'WOULD_CLOSE'
+            """,
+            connection);
+        command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
+        command.Parameters.Add("since", NpgsqlDbType.TimestampTz).Value = sinceUtc.UtcDateTime;
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            closes.Add((reader.GetString(0), reader.GetFieldValue<DateTimeOffset>(1)));
+        }
+
+        return closes;
     }
 
     public void AppendMarketSnapshots(IReadOnlyList<MarketSnapshotRecord> snapshots)

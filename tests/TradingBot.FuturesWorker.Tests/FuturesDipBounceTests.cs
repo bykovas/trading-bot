@@ -12,6 +12,9 @@ public sealed class FuturesDipBounceTests
     {
         public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public IReadOnlyList<(string Pair, DateTimeOffset Utc)> LoadRecordedCloseTimes(string botInstanceId, DateTimeOffset sinceUtc) =>
+            Array.Empty<(string, DateTimeOffset)>();
+
 
         public string StateDescription => "null";
         public string EventsDescription => "null";
@@ -25,6 +28,9 @@ public sealed class FuturesDipBounceTests
 
         public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public IReadOnlyList<(string Pair, DateTimeOffset Utc)> LoadRecordedCloseTimes(string botInstanceId, DateTimeOffset sinceUtc) =>
+            Array.Empty<(string, DateTimeOffset)>();
+
 
     [Fact]
     public void Dip_bounce_options_normalize_to_sane_defaults()

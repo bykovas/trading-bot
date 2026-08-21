@@ -114,6 +114,9 @@ public class MarketSnapshotPersistenceTests
     {
         public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public IReadOnlyList<(string Pair, DateTimeOffset Utc)> LoadRecordedCloseTimes(string botInstanceId, DateTimeOffset sinceUtc) =>
+            Array.Empty<(string, DateTimeOffset)>();
+
 
         public List<IReadOnlyList<MarketSnapshotRecord>> SnapshotBatches { get; } = new();
         public int AppendCycleCalls { get; private set; }
