@@ -20,9 +20,18 @@ public interface IMarketDataSource
 public sealed class KrakenMarketDataSource(HttpClient httpClient, KrakenOptions options) : IMarketDataSource
 {
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
-    // Kraken public endpoints are ~1 req/s per IP; OHLC is per-pair. 500ms between
-    // OHLC calls keeps a 22-pair active set around ~11s, comfortably inside the loop.
-    private static readonly TimeSpan OhlcDelay = TimeSpan.FromMilliseconds(500);
+    // Kraken documents public endpoints as ~1 req/s per IP, and OHLC as limited per IP
+    // *and* per pair. The old 500ms was derived from the documented figure and sized for
+    // a 22-pair active set; the set is now 75 spot and 94 futures, and the pause had
+    // become the dominant cost of a sweep - 169 pairs x 2 calls x 500ms is 169s of pure
+    // sleeping before a single byte is fetched.
+    //
+    // Measured against the live API from a clean address: 150 calls (OHLC + Depth over
+    // 75 pairs) back to back with no pause completed in 15s with zero rate-limit
+    // responses, and 40 consecutive calls for one pair - about 21/s - were also clean.
+    // 20ms keeps a deliberate floor rather than hammering flat out, and RateLimitBackoffs
+    // below still absorbs a 429 if Kraken tightens.
+    private static readonly TimeSpan OhlcDelay = TimeSpan.FromMilliseconds(20);
     // Escalating backoffs for repeated 429s: first retry after 2s, second after 5s.
     private static readonly TimeSpan[] RateLimitBackoffs =
     {

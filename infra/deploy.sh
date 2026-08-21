@@ -384,6 +384,16 @@ echo "Starting application services after database readiness."
 if [ "${FUTURES_LUKAS_LIVE_TRADING_FLAG}" != "true" ]; then
   docker rm -f trading-bot-lukas-futures-worker-live >/dev/null 2>&1 || true
 fi
+
+# Compose leaves containers of disabled profiles alone, so the paper workers are
+# removed explicitly - the same way the Lukas worker is when his flag is off.
+# Without this they would keep running on the previous image forever.
+for PAPER_WORKER in \
+  trading-bot-spot-worker-live \
+  trading-bot-spot-worker-virtual \
+  trading-bot-futures-worker-virtual; do
+  docker rm -f "${PAPER_WORKER}" >/dev/null 2>&1 || true
+done
 docker compose \
   -p "${PROJECT_NAME}" \
   -f "${COMPOSE_FILE}" \
@@ -410,11 +420,11 @@ run_healthcheck_with_retries "trading-bot-api container" 30 2 \
     wget -q -O /dev/null http://trading-bot-api:8080/api/health
 
 # Worker health: workers have no HTTP endpoint, so verify every enabled container.
+# Only the workers that handle real money. The three paper ones moved behind the
+# `paper` compose profile: they never placed an order, and health-checking a container
+# that is deliberately not started would fail every deploy.
 WORKER_CONTAINERS=(
-  trading-bot-spot-worker-live
-  trading-bot-spot-worker-virtual
   trading-bot-futures-worker-live
-  trading-bot-futures-worker-virtual
 )
 if [ "${FUTURES_LUKAS_LIVE_TRADING_FLAG}" = "true" ]; then
   WORKER_CONTAINERS+=(trading-bot-lukas-futures-worker-live)

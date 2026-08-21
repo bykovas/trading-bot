@@ -1,3 +1,10 @@
+## 2026-08-21-market-data-throughput-and-paper-workers
+
+- `OhlcDelay` in `KrakenMarketDataSource` drops from 500ms to 20ms. The old value was derived from Kraken's documented ~1 req/s and sized in its own comment for "a 22-pair active set"; the live sets are now 75 spot and 94 futures pairs, so the pause alone accounted for ~169s of every sweep. Measured against the live API from an unrelated address: 150 back-to-back calls (OHLC + Depth across 75 pairs) finished in 15s with zero rate-limit responses, and 40 consecutive calls on a single pair (~21/s) were clean too. `RateLimitBackoffs` is unchanged and still absorbs a 429.
+- Consequence for the stack: the spot candle sweep was taking 144-420s against a 120s schedule, so it ran continuously and starved the light-quote step. `market_quotes` therefore sat minutes stale, every decision worker tripped its staleness gate and fell back to fetching Kraken directly, and six processes competed for one IP's budget - which kept the sweep slow. This breaks that loop.
+- `spot-worker-live`, `spot-worker-virtual` and `futures-worker-virtual` move behind a `paper` compose profile that nothing enables, and `deploy.sh` removes their containers and no longer health-checks them. None has ever placed a real order - `exchange_order_id` is null across all 53,535 / 52,581 / 1,158,911 recorded actions and live trading is off for each - while each still polled Kraken and wrote its own duplicate copy of every market snapshot.
+- No change to signal scoring, entry gates, sizing, leverage, TP/SL/trailing, execution or the mirror. The two workers that handle money, `futures-worker-live` and `futures-worker-lukas-live`, are untouched and still deployed and health-checked.
+
 ## 2026-08-20-futures-wallet-diagnostics
 
 - Kraken returns every wallet on the futures account (11 on the live accounts) and `SumFuturesAvailableCollateralUsd` adds up `availableMargin` across all of them, so the portfolio value is an all-wallet total.
