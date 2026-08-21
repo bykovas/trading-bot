@@ -306,6 +306,22 @@ def main():
                                  {item["symbol"] for item in instruments})
         if delisted:
             log(f"{len(delisted)} delisted symbol(s) recovered from the registry")
+            # They need their own row too. Without it the candles are there but
+            # nothing says which symbols are no longer listed, and a query that
+            # joins instruments silently drops them - which is the survivorship
+            # bias this whole path exists to avoid.
+            values = ",".join(
+                "({},{},null,null,{},false,null,null,null,'delisted')".format(
+                    quote(item["symbol"]), quote(item["symbol"]), quote(item["type"]))
+                for item in delisted)
+            database.run(f"""
+                insert into kraken_instruments
+                    (symbol, pair, base, quote, type, tradeable, opening_date,
+                     contract_size, tick_size, tags)
+                values {values}
+                on conflict (symbol) do update set
+                    tradeable = false, tags = 'delisted', fetched_at = now();
+            """)
             instruments += delisted
     wanted = None
     if args.symbols:
