@@ -1,3 +1,11 @@
+## 2026-08-21-backfill-missed-closures
+
+- New one-shot repair, off unless `TRADINGBOT_FUTURES_BACKFILL_CLOSURE_DAYS` is set to a number of days. On startup the worker walks Kraken's fills over that window and writes journal entries for closures it never recorded, then continues normally. Running it twice is harmless: order ids already present in the journal are skipped, via the new `IDryRunPortfolioStore.LoadRecordedExchangeOrderIds`.
+- Backfilled entries are stamped with the fill's own time, not the moment of the repair, so they land on the day they happened and the daily figures they exist to fix actually change.
+- They deliberately do not claim which protection fired. The live path identifies a trailing stop exactly by matching the fill's order id against the one stored on the position, but for history the position is long gone and that id no longer exists anywhere. These carry the real price, time and realized PnL under a plain `EXCHANGE_CLOSE_BACKFILLED` reason rather than a guess.
+- Known gap on futures-lukas-live before the repair: a +3.59 close on 2026-08-21 and a +4.88 close on 2026-08-20, neither in the journal.
+- No change to signal scoring, entry gates, sizing, leverage, exits, execution or the mirror. The repair only appends journal rows; it never touches portfolio state.
+
 ## 2026-08-21-record-exchange-closures
 
 - The reconciliation now notices positions that left the account without the worker closing them and writes a `WOULD_CLOSE` journal entry for each, built from Kraken's own fills: real fill price, real `realized_pnl`, real fill time, and the closing order id.

@@ -88,6 +88,7 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_UNIVERSE_BLACKLIST", value => config.UniverseDiscovery.Blacklist = ParseCsv(value));
         SetIfPresent("TRADINGBOT_FUTURES_MAX_LEVERAGE", value => config.Futures.MaxLeverage = ParseDecimal(value, config.Futures.MaxLeverage));
         SetIfPresent("TRADINGBOT_FUTURES_DEFAULT_LEVERAGE", value => config.Futures.DefaultLeverage = ParseDecimal(value, config.Futures.DefaultLeverage));
+        SetIfPresent("TRADINGBOT_FUTURES_BACKFILL_CLOSURE_DAYS", value => config.Futures.BackfillClosureDays = ParseInt(value, config.Futures.BackfillClosureDays));
         SetIfPresent("TRADINGBOT_FUTURES_MAX_POSITIONS", value => config.Futures.MaxPositions = ParseInt(value, config.Futures.MaxPositions));
         SetIfPresent("TRADINGBOT_FUTURES_ALLOW_SHORTS", value => config.Futures.AllowShorts = ParseBool(value, config.Futures.AllowShorts));
         SetIfPresent("TRADINGBOT_FUTURES_FLIP_LONG_ENTRIES", value => config.Futures.FlipLongEntries = ParseBool(value, config.Futures.FlipLongEntries));
@@ -534,6 +535,13 @@ internal sealed class FuturesOptions
 {
     public decimal MaxLeverage { get; set; } = 10m;
     public decimal DefaultLeverage { get; set; } = 10m;
+    // One-shot repair, off by default. Set to a number of days to have the worker walk
+    // Kraken's fills on startup and write journal entries for closures it never saw -
+    // every position the exchange closed while this was missing has an opening with no
+    // exit. Set it back to 0 once the gap is filled; a second run is harmless anyway,
+    // since already-recorded order ids are skipped.
+    public int BackfillClosureDays { get; set; }
+
     public int MaxPositions { get; set; } = 3;
     public bool AllowShorts { get; set; } = true;
 

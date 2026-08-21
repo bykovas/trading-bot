@@ -21,6 +21,9 @@ public sealed class FuturesSizingTests
 
     private sealed class NullStore : IDryRunPortfolioStore
     {
+        public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         public string StateDescription => "null";
         public string EventsDescription => "null";
         public PortfolioState? Load() => null;
@@ -30,6 +33,9 @@ public sealed class FuturesSizingTests
         public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc) => Array.Empty<MarketSnapshotRecord>();
         public void SaveCashEvents(IReadOnlyList<PortfolioCashEvent> events) { }
     }
+
+        public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     private static (FuturesVirtualPortfolio Portfolio, PortfolioState State, FuturesBotConfiguration Config) Setup(
         decimal targetMarginUsd, decimal leverage, decimal startingCash = 100m)

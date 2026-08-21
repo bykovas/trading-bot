@@ -64,6 +64,13 @@ internal sealed class FuturesDecisionWorker(
         Console.WriteLine($"futures exit checks: fastExit={config.Futures.FastExitCheckSeconds}s fullCycle={config.Worker.LoopIntervalSeconds}s");
         HydratePriceHistory();
 
+        // One-shot repair when the operator asks for it, before the first cycle so the
+        // journal is whole by the time anything reads it.
+        if (config.Futures.BackfillClosureDays > 0)
+        {
+            await BackfillExchangeClosuresAsync(config.Futures.BackfillClosureDays, cancellationToken);
+        }
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -1023,6 +1030,128 @@ internal sealed class FuturesDecisionWorker(
         side.Equals("LONG", StringComparison.OrdinalIgnoreCase) ? "SHORT" :
         side.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? "LONG" :
         throw new ArgumentException($"Unsupported futures side '{side}'.", nameof(side));
+
+    // Walks Kraken's fills and writes journal entries for closures that were never
+    // recorded. Unlike the live path this cannot say WHICH protection fired: the
+    // position is long gone, so the trailing order id it was matched against no longer
+    // exists anywhere. Rather than guess, these entries carry the real price, time and
+    // realized PnL under a plain EXCHANGE_CLOSE_BACKFILLED reason - the money and the
+    // count become right, and nothing is invented.
+    private async Task BackfillExchangeClosuresAsync(int days, CancellationToken cancellationToken)
+    {
+        if (broker?.IsConfigured != true || days <= 0)
+        {
+            return;
+        }
+
+        var since = _clock.UtcNow.AddDays(-days);
+        IReadOnlyList<FuturesFill> fills;
+        try
+        {
+            fills = await broker.GetFillsAsync(since, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"futures-closure-backfill: could not read fills ({ex.Message})");
+            return;
+        }
+
+        // Fills speak Kraken symbols (PF_HBARUSD); the journal speaks pairs (HBAR/USD).
+        var symbolToPair = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var instrument in (await ResolveUniverseAsync(cancellationToken)).Instruments)
+            {
+                symbolToPair[instrument.KrakenPair] = instrument.Pair;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"futures-closure-backfill: universe unavailable ({ex.Message}); symbols will be journalled as-is");
+        }
+
+        var known = portfolio.Store.LoadRecordedExchangeOrderIds(config.BotInstance.Id, since);
+        var closing = fills
+            .Where(fill => fill.RealizedPnl is not null && fill.RealizedPnl != 0m)
+            .Where(fill => !known.Contains(fill.OrderId))
+            .GroupBy(fill => fill.OrderId, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Min(fill => fill.FillTime))
+            .ToList();
+
+        Console.WriteLine(
+            $"futures-closure-backfill: {fills.Count} fill(s) since {since:yyyy-MM-dd}, "
+            + $"{known.Count} order id(s) already journalled, {closing.Count} closure(s) to add");
+
+        var state = portfolio.Load();
+        foreach (var group in closing)
+        {
+            var group_ = group.OrderBy(fill => fill.FillTime).ToList();
+            var size = group_.Sum(fill => fill.Size);
+            var fillPrice = size > 0m ? group_.Sum(fill => fill.Price * fill.Size) / size : group_[^1].Price;
+            var realized = group_.Sum(fill => fill.RealizedPnl ?? 0m);
+            var last = group_[^1];
+            var pair = symbolToPair.TryGetValue(last.Symbol, out var mapped) ? mapped : last.Symbol;
+
+            var action = new DryRunAction
+            {
+                Pair = pair,
+                Action = "WOULD_CLOSE",
+                Reason = $"EXCHANGE_CLOSE_BACKFILLED: reconstructed from Kraken fills, "
+                    + $"fill {fillPrice:0.########}, realized PnL USD {realized:0.####}, {group_.Count} fill(s)",
+                // A sell closes a long and a buy closes a short.
+                Side = last.Side.Equals("buy", StringComparison.OrdinalIgnoreCase) ? "SHORT" : "LONG",
+                ReduceOnly = true,
+                Quantity = size,
+                FillPrice = fillPrice,
+                LastPrice = fillPrice,
+                NetNotionalEur = realized,
+                GrossNotionalEur = fillPrice * size,
+                ExitReasonCode = "EXCHANGE_CLOSE_BACKFILLED",
+                ExitTriggerSource = "exchange",
+                ExchangeOrderId = last.OrderId,
+                ExchangeFillTimestamp = last.FillTime
+            };
+
+            portfolio.Store.AppendCycle(new DryRunCycleRecord
+            {
+                CycleId = $"{config.BotInstance.Id}-{last.FillTime:yyyyMMddHHmmss}-backfill",
+                BotInstanceId = config.BotInstance.Id,
+                BotInstanceName = config.BotInstance.Name,
+                // The fill's own time, not now: this closure belongs to the day it
+                // happened, or the daily figures it is meant to repair stay wrong.
+                Utc = last.FillTime,
+                MarketDataMode = config.Kraken.MarketDataMode,
+                AiProvider = "none",
+                Worker = _buildInfo,
+                ActivePairs = new[] { pair },
+                Decisions = new[]
+                {
+                    new DryRunDecisionRecord
+                    {
+                        Pair = pair,
+                        Price = fillPrice,
+                        FastEma = null,
+                        SlowEma = null,
+                        Rsi = null,
+                        DesiredPosition = "FLAT",
+                        Score = 0m,
+                        RiskApproved = true,
+                        RiskReasons = Array.Empty<string>(),
+                        Contributions = Array.Empty<SignalContribution>(),
+                        DryRunAction = action,
+                        Broker = "EXCHANGE_CLOSED"
+                    }
+                },
+                PortfolioBefore = state.Clone(),
+                PortfolioAfter = state.Clone(),
+                EntryDiagnostics = null
+            });
+
+            Console.WriteLine(
+                $"futures-closure-backfill: added {pair} {last.FillTime:O} fill {fillPrice:0.########} "
+                + $"USD {realized:0.####} orderId={last.OrderId}");
+        }
+    }
 
     // Which protection actually fired. The trailing stop is identified exactly, by its
     // order id, because that one we placed ourselves and stored. Take profit and stop

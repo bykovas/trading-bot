@@ -159,6 +159,9 @@ public sealed class FuturesPositionSizerAndCostModelTests
 
     private sealed class NullStore : IDryRunPortfolioStore
     {
+        public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         public string StateDescription => "null";
         public string EventsDescription => "null";
         public PortfolioState? Load() => null;
@@ -168,6 +171,9 @@ public sealed class FuturesPositionSizerAndCostModelTests
         public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc) => Array.Empty<MarketSnapshotRecord>();
         public void SaveCashEvents(IReadOnlyList<PortfolioCashEvent> events) { }
     }
+
+        public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     private static void InvokeNormalize(FuturesBotConfiguration config)
     {

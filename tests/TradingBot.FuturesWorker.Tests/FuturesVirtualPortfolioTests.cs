@@ -18,6 +18,9 @@ public sealed class FuturesVirtualPortfolioTests
 
     private sealed class NullStore : IDryRunPortfolioStore
     {
+        public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         public string StateDescription => "null";
         public string EventsDescription => "null";
         public PortfolioState? Load() => null;
@@ -27,6 +30,9 @@ public sealed class FuturesVirtualPortfolioTests
         public IReadOnlyList<MarketSnapshotRecord> LoadRecentMarketSnapshots(DateTimeOffset sinceUtc) => Array.Empty<MarketSnapshotRecord>();
         public void SaveCashEvents(IReadOnlyList<PortfolioCashEvent> events) { }
     }
+
+        public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     [Fact]
     public void Entry_plan_uses_only_filled_notional_for_partial_maker_fill()

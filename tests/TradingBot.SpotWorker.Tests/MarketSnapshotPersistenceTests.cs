@@ -112,6 +112,9 @@ public class MarketSnapshotPersistenceTests
 
     private sealed class FakeStore : IDryRunPortfolioStore
     {
+        public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc) =>
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         public List<IReadOnlyList<MarketSnapshotRecord>> SnapshotBatches { get; } = new();
         public int AppendCycleCalls { get; private set; }
         public bool ThrowOnSnapshots { get; init; }
