@@ -1,3 +1,10 @@
+## 2026-08-21-freeze-spot-collection
+
+- The market data collector gains per-venue switches, `TRADINGBOT_MARKET_DATA_SPOT_ENABLED` and `TRADINGBOT_MARKET_DATA_FUTURES_ENABLED` (both default true), and `deploy.sh` sets spot to false. Spot light quotes and candles are no longer fetched; the rows already in `market_quotes`, `market_candles` and `market_snapshots` stay untouched and simply stop being refreshed.
+- Reason: nothing trades spot. `spot-worker-live` never placed a real order in 53,535 recorded actions and both spot workers are now retired, yet the spot candle sweep was the single slowest thing on the box - 71 pairs at two calls each, 204s after the `OhlcDelay` fix and 419s before it, against a 120s schedule. It never finished before the next one started, so it ran continuously and starved the light-quote step that the futures workers depend on.
+- Effect on the venue that matters: futures keeps its full sweep, and the per-IP Kraken budget it shares stops being spent on a frozen venue. Quote freshness had already recovered from 444s to 7s after the delay change; this removes the remaining competitor.
+- No change to signal scoring, entry gates, sizing, leverage, exits, execution or the mirror. Re-enabling spot is one environment variable.
+
 ## 2026-08-21-market-data-throughput-and-paper-workers
 
 - `OhlcDelay` in `KrakenMarketDataSource` drops from 500ms to 20ms. The old value was derived from Kraken's documented ~1 req/s and sized in its own comment for "a 22-pair active set"; the live sets are now 75 spot and 94 futures pairs, so the pause alone accounted for ~169s of every sweep. Measured against the live API from an unrelated address: 150 back-to-back calls (OHLC + Depth across 75 pairs) finished in 15s with zero rate-limit responses, and 40 consecutive calls on a single pair (~21/s) were clean too. `RateLimitBackoffs` is unchanged and still absorbs a 429.

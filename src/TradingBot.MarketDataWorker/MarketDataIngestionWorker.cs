@@ -23,20 +23,35 @@ internal sealed class MarketDataIngestionWorker(
 
         store.EnsureSchema();
         Console.WriteLine(
-            $"market-data-worker start light={config.Ingestion.LightIntervalSeconds}s candles={config.Ingestion.CandleIntervalSeconds}s timeframe={config.Ingestion.TimeframeMinutes}m maxPairs={config.Ingestion.MaxCandlePairs}");
+            $"market-data-worker start light={config.Ingestion.LightIntervalSeconds}s candles={config.Ingestion.CandleIntervalSeconds}s timeframe={config.Ingestion.TimeframeMinutes}m maxPairs={config.Ingestion.MaxCandlePairs} spot={config.Ingestion.SpotEnabled} futures={config.Ingestion.FuturesEnabled}");
 
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
                 var utc = _clock.UtcNow;
-                await RefreshLightAsync(MarketDataVenue.Spot, spotUniverseProvider, spotMarketDataSource, utc, cancellationToken);
-                await RefreshLightAsync(MarketDataVenue.Futures, futuresUniverseProvider, futuresMarketDataSource, utc, cancellationToken);
+                if (config.Ingestion.SpotEnabled)
+                {
+                    await RefreshLightAsync(MarketDataVenue.Spot, spotUniverseProvider, spotMarketDataSource, utc, cancellationToken);
+                }
+
+                if (config.Ingestion.FuturesEnabled)
+                {
+                    await RefreshLightAsync(MarketDataVenue.Futures, futuresUniverseProvider, futuresMarketDataSource, utc, cancellationToken);
+                }
 
                 if (utc >= _nextCandleRefreshUtc)
                 {
-                    await RefreshCandlesAsync(MarketDataVenue.Spot, spotUniverseProvider, spotMarketDataSource, utc, cancellationToken);
-                    await RefreshCandlesAsync(MarketDataVenue.Futures, futuresUniverseProvider, futuresMarketDataSource, utc, cancellationToken);
+                    if (config.Ingestion.SpotEnabled)
+                    {
+                        await RefreshCandlesAsync(MarketDataVenue.Spot, spotUniverseProvider, spotMarketDataSource, utc, cancellationToken);
+                    }
+
+                    if (config.Ingestion.FuturesEnabled)
+                    {
+                        await RefreshCandlesAsync(MarketDataVenue.Futures, futuresUniverseProvider, futuresMarketDataSource, utc, cancellationToken);
+                    }
+
                     _nextCandleRefreshUtc = utc.AddSeconds(config.Ingestion.CandleIntervalSeconds);
                 }
             }

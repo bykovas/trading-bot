@@ -290,6 +290,12 @@ echo "Writing market data worker environment to ${MARKET_DATA_ENV_FILE}"
 {
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  # Spot is frozen: nothing trades it since the paper workers were retired, and its
+  # sweep was the slowest thing the collector did - 71 pairs of candles against a
+  # shared per-IP rate budget that the futures workers need. Existing spot rows stay
+  # in the database, they just stop being refreshed.
+  printf 'TRADINGBOT_MARKET_DATA_SPOT_ENABLED=false\n'
+  printf 'TRADINGBOT_MARKET_DATA_FUTURES_ENABLED=true\n'
   printf 'TRADINGBOT_MARKET_DATA_LIGHT_INTERVAL_SECONDS=30\n'
   printf 'TRADINGBOT_MARKET_DATA_CANDLE_INTERVAL_SECONDS=120\n'
   printf 'TRADINGBOT_TIMEFRAME_MINUTES=15\n'

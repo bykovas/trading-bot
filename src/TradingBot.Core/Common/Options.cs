@@ -283,6 +283,13 @@ public sealed class MarketDataIngestionOptions
     public decimal StrongMoverPercent { get; set; } = 3m;
     public List<string> ForceInclude { get; set; } = new();
     public List<string> Blacklist { get; set; } = new();
+
+    // Which venues the collector sweeps. Both default to on, but a venue nobody
+    // trades is pure cost: its sweep competes for the same per-IP rate budget as the
+    // venue that does carry money, and on Kraken spot the candle pass alone was
+    // taking longer than the interval it was scheduled on.
+    public bool SpotEnabled { get; set; } = true;
+    public bool FuturesEnabled { get; set; } = true;
 }
 
 public sealed class CorrelationRiskOptions

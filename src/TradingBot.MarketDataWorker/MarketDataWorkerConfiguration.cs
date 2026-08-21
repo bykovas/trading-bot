@@ -44,6 +44,8 @@ internal sealed class MarketDataWorkerConfiguration
         SetIfPresent("TRADINGBOT_DATABASE_CONNECTION_STRING", value => config.Database.ConnectionString = value);
         SetIfPresent("TRADINGBOT_KRAKEN_BASE_URL", value => config.SpotKraken.BaseUrl = value);
         SetIfPresent("TRADINGBOT_KRAKEN_FUTURES_BASE_URL", value => config.FuturesKraken.BaseUrl = value);
+        SetIfPresent("TRADINGBOT_MARKET_DATA_SPOT_ENABLED", value => config.Ingestion.SpotEnabled = ParseBool(value, config.Ingestion.SpotEnabled));
+        SetIfPresent("TRADINGBOT_MARKET_DATA_FUTURES_ENABLED", value => config.Ingestion.FuturesEnabled = ParseBool(value, config.Ingestion.FuturesEnabled));
         SetIfPresent("TRADINGBOT_MARKET_DATA_LIGHT_INTERVAL_SECONDS", value => config.Ingestion.LightIntervalSeconds = ParseInt(value, config.Ingestion.LightIntervalSeconds));
         SetIfPresent("TRADINGBOT_MARKET_DATA_CANDLE_INTERVAL_SECONDS", value => config.Ingestion.CandleIntervalSeconds = ParseInt(value, config.Ingestion.CandleIntervalSeconds));
         SetIfPresent("TRADINGBOT_TIMEFRAME_MINUTES", value => config.Ingestion.TimeframeMinutes = ParseInt(value, config.Ingestion.TimeframeMinutes));
