@@ -2099,7 +2099,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const signals = entry ? signalChips(entry.signals) : signalChips(null);
       const context = contextChips(entry || {
         spreadPercent: null, side: position.side, leverage: position.leverage
-      }, atRisk ? ["arti SL"] : []);
+      // "arti LIQ", not "arti SL": the flag counts the distance to liquidation, which
+      // is a different price from the stop-loss and often much further away. Labelled
+      // as SL it contradicted the position's own text - "stop-loss saugiai toli" - and
+      // would have read as an outright lie on a wide stop at high leverage.
+      }, atRisk ? ["arti LIQ"] : []);
       const log = entry && entry.log ? entry.log : "";
       const bar = riskBar(position);
       const pnl = Number(position.unrealizedPnlEur);
