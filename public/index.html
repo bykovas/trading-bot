@@ -667,6 +667,29 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
      thought, so the block keeps only the gap. */
   .bc-hero>.bc-coins{margin-top:0}
 }
+
+/* The trailing bar is not a stop-to-target scale: it runs from the entry price to
+   +15% of it, which is further than these positions realistically travel. A stop
+   that only exists once the trade is winning has no losing half to draw, so the
+   gradient starts at the amber/green blend rather than at red. */
+.bc-bar--trail{background:linear-gradient(90deg,rgba(240,166,58,.4),rgba(65,237,160,.55) 55%,rgba(65,237,160,.85))}
+.bc-ts{position:absolute;top:-2px;width:2px;height:12px;margin-left:-1px;background:var(--gold);opacity:.9}
+.bc-ts-l{position:absolute;top:15px;transform:translateX(-50%);white-space:nowrap;font:11px var(--font-mono);color:var(--gold)}
+
+/* Two labels stacked under the trailing bar need more room than the single label the
+   stop-to-target bar carries, otherwise the lower one lands on the foot line. */
+/* The trailing stop sits above the bar and the current price below it, so the two
+   never share a line and the eye reads floor-then-price without decoding. */
+.bc-bar-top{position:relative;height:17px;margin-top:7px}
+.bc-bar-top .bc-ts-l{position:absolute;top:0}
+.bc-bar-marks--trail{height:34px}
+.bc-bar-marks--trail .bc-now-l{top:15px}
+/* A label centred on its mark hangs half its width outside the box whenever the mark
+   sits near an end. Its width depends on the font and on how wide the card is, so
+   rather than estimate that in percent the label is pinned to the container edge
+   once the mark gets close to one - still beside its mark, never past the border. */
+.bc-lab--start{transform:none}
+.bc-lab--end{transform:none}
   </style>
 </head>
 <body>
@@ -1965,6 +1988,23 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         ? ` ${distances.join(", ").replace(/^i/, "I")}.`
         : "";
 
+      // Same reason as the bar: with a trailing stop armed there is no target left to
+      // measure a distance to, and the stop-loss price quoted here was cancelled.
+      const trailingArmed = String(position.trailingStopState || "").toUpperCase() === "EXCHANGE_OPEN";
+      const trailingPct = Number(position.trailingStopPercent);
+      if (trailingArmed) {
+        const floor = Number.isFinite(now) && Number.isFinite(trailingPct)
+          ? (String(position.side || "").toUpperCase() === "SHORT"
+              ? now * (1 + trailingPct / 100)
+              : now * (1 - trailingPct / 100))
+          : null;
+        return opening
+          + " Pozicija nuėjo pakankamai toli, todėl tikslą ir stop-loss pakeičiau slenkančiu stopu"
+          + (Number.isFinite(trailingPct) ? ` ${percent(trailingPct, 2)} atstumu` : "")
+          + (floor ? ` — šiuo metu ties ${price(floor)}` : "")
+          + ". Viršutinės ribos nebeliko: kol kaina kyla, kyla ir stopas.";
+      }
+
       let state;
       if (pnl > 0) {
         state = " Kaina nuėjo tikslo pusėn, todėl pozicija pelne." + spread;
@@ -2048,6 +2088,25 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     }
 
     // ---- cards ---------------------------------------------------------------
+    // What the position is worth at a given price, in money. A price on its own tells
+    // you nothing about the size of the bet: 0,0725 is meaningless until it reads
+    // "-3,00 $". Direction is folded in, so a short reads the same way as a long.
+    function moneyAt(position, priceValue) {
+      const entry = Number(position.entryPrice);
+      const qty = Number(position.quantity);
+      const value = Number(priceValue);
+      if (!Number.isFinite(entry) || !Number.isFinite(qty) || !Number.isFinite(value)) return null;
+      const direction = String(position.side || "").toUpperCase() === "SHORT" ? -1 : 1;
+      return (value - entry) * qty * direction;
+    }
+
+    function priceWithMoney(position, priceValue) {
+      const amount = moneyAt(position, priceValue);
+      return amount === null
+        ? price(priceValue)
+        : `${price(priceValue)} (${signedMoney(amount)})`;
+    }
+
     function kv(label, value, tone) {
       return `<span class="bc-kv"><span class="bc-kv-l">${esc(label)}</span>` +
         `<span class="bc-kv-v ${tone || "bc-t-soft"}">${esc(value)}</span></span>`;
@@ -2063,22 +2122,30 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const trailing = String(position.trailingStopState || "").toUpperCase() === "EXCHANGE_OPEN";
       const trailingPct = Number(position.trailingStopPercent);
 
+      const nowPrice = Number(position.lastPrice);
+      const trailStop = trailing && Number.isFinite(nowPrice) && Number.isFinite(trailingPct)
+        ? (String(position.side || "").toUpperCase() === "SHORT"
+            ? nowPrice * (1 + trailingPct / 100)
+            : nowPrice * (1 - trailingPct / 100))
+        : null;
+
       const protection = trailing
         ? [
             kv("Apsauga", "Slenkantis stop", "bc-t-gold"),
+            kv("Slenkantis stop", trailStop === null ? "—" : priceWithMoney(position, trailStop), "bc-t-gold"),
             kv("Atstumas", Number.isFinite(trailingPct) ? percent(trailingPct, 2) : "—", "bc-t-gold"),
             kv("Stop loss", "atšauktas", "bc-t-soft"),
             kv("Tikslas (TP)", "atšauktas", "bc-t-soft")
           ]
         : [
             kv("Apsauga", "Stop loss / TP", "bc-t-soft"),
-            kv("Stop loss", price(position.stopLossPrice), "bc-t-red"),
-            kv("Tikslas (TP)", price(position.takeProfitPrice), "bc-t-soft")
+            kv("Stop loss", priceWithMoney(position, position.stopLossPrice), "bc-t-red"),
+            kv("Tikslas (TP)", priceWithMoney(position, position.takeProfitPrice), "bc-t-soft")
           ];
 
       return [
         kv("Įėjimas", price(position.entryPrice)),
-        kv("Dabar", price(position.lastPrice), "bc-t-cream"),
+        kv("Dabar", priceWithMoney(position, position.lastPrice), "bc-t-cream"),
         kv("Kiekis", quantity(position.quantity)),
         kv("Nominalas", money(position.entryNotionalEur)),
         kv("Marža", money(position.initialMarginEur)),
@@ -2092,6 +2159,9 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
     // The track spans the two exit prices and is always oriented so that RIGHT
     // IS BAD: LONG runs SL -> TP, SHORT runs TP -> SL.
+    const clampPercent = (value) => Math.min(87, Math.max(13, value));
+    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
     function riskBar(position) {
       const isLong = String(position.side || "").toUpperCase() !== "SHORT";
       const stop = Number(position.stopLossPrice);
@@ -2104,6 +2174,56 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         `<b class="${Number.isFinite(liquidation) && liquidation < 8 ? "bc-t-red" : "bc-t-soft"}">` +
         `${esc(Number.isFinite(liquidation) ? percent(liquidation, 1) : "—")}</b></p>`;
 
+      // Once the trailing stop is armed the take profit and stop loss are cancelled, so
+      // a stop-to-target bar would plot two prices that no longer exist and imply a
+      // ceiling the position no longer has. The scale becomes profit instead: the entry
+      // price on the left, +15% of it on the right - further than these trades actually
+      // run - with the current price and the stop that follows it marked along the way.
+      const trailingPct = Number(position.trailingStopPercent);
+      if (String(position.trailingStopState || "").toUpperCase() === "EXCHANGE_OPEN"
+          && Number.isFinite(now) && Number.isFinite(entry) && entry > 0
+          && Number.isFinite(trailingPct) && trailingPct > 0) {
+        const SCALE = 15;
+        // Profit reads the same on both sides once the direction is folded in.
+        const gain = (value) => (isLong ? (value - entry) : (entry - value)) / entry * 100;
+        const stopPrice = isLong ? now * (1 - trailingPct / 100) : now * (1 + trailingPct / 100);
+        const at = (value) => clamp(gain(value) / SCALE * 100, 0, 100);
+        const nowAt = at(now);
+        const tsAt = at(stopPrice);
+        const ceiling = isLong ? entry * (1 + SCALE / 100) : entry * (1 - SCALE / 100);
+
+        // Position for a label: centred on its mark in the middle of the bar, pinned to
+        // the container edge near either end. Pinning uses the edge rather than the mark
+        // because the label's width is unknown here - it depends on the font and on the
+        // card width, which is half as wide on a phone.
+        // 25/75, not 18/82: a centred label needs half its width clear on either side,
+        // so the threshold has to cover the widest the label ever gets relative to the
+        // bar. The same text is ~16% of an 805px desktop bar but ~45% of a 330px phone
+        // one, and 25% is what keeps the phone case inside.
+        const EDGE = 25;
+        const label = (at) => at < EDGE
+          ? { cls: " bc-lab--start", style: "left:0" }
+          : at > 100 - EDGE
+            ? { cls: " bc-lab--end", style: "right:0" }
+            : { cls: "", style: `left:${at.toFixed(1)}%` };
+        const ts = label(tsAt);
+        const nw = label(nowAt);
+
+        return `<div class="bc-bar-box">
+              <div class="bc-bar-ends"><span>Įėjimas ${esc(price(entry))}</span><span>${esc(priceWithMoney(position, ceiling))}</span></div>
+              <div class="bc-bar-top">
+                <span class="bc-ts-l${ts.cls}" style="${ts.style}">TS ${esc(priceWithMoney(position, stopPrice))}</span>
+              </div>
+              <div class="bc-bar bc-bar--trail"></div>
+              <div class="bc-bar-marks bc-bar-marks--trail">
+                <span class="bc-ts" style="left:${tsAt.toFixed(1)}%"></span>
+                <span class="bc-now" style="left:${nowAt.toFixed(1)}%"></span>
+                <span class="bc-now-l${nw.cls}" style="${nw.style}">dabar ${esc(priceWithMoney(position, now))}</span>
+              </div>
+              ${foot}
+            </div>`;
+      }
+
       if (!Number.isFinite(stop) || !Number.isFinite(target) || stop === target) {
         return `<div class="bc-bar-box">${foot}</div>`;
       }
@@ -2111,7 +2231,6 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const lo = isLong ? stop : target;
       const hi = isLong ? target : stop;
       const at = (value) => (Number(value) - lo) / (hi - lo) * 100;
-      const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
       const nowAt = clamp(at(now), 0, 100);
       const entryAt = clamp(at(entry), 0, 100);
@@ -2120,12 +2239,12 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const labelAt = clamp(nowAt, 13, 87);
 
       return `<div class="bc-bar-box">
-              <div class="bc-bar-ends"><span>${isLong ? "SL" : "TP"} ${esc(price(lo))}</span><span>${isLong ? "TP" : "SL"} ${esc(price(hi))}</span></div>
+              <div class="bc-bar-ends"><span>${isLong ? "SL" : "TP"} ${esc(priceWithMoney(position, lo))}</span><span>${isLong ? "TP" : "SL"} ${esc(priceWithMoney(position, hi))}</span></div>
               <div class="bc-bar bc-bar--${isLong ? "long" : "short"}"></div>
               <div class="bc-bar-marks">
                 <span class="bc-tick" style="left:${entryAt.toFixed(1)}%"></span>
                 <span class="bc-now" style="left:${nowAt.toFixed(1)}%"></span>
-                <span class="bc-now-l" style="left:${labelAt.toFixed(1)}%">dabar ${esc(price(now))}</span>
+                <span class="bc-now-l" style="left:${labelAt.toFixed(1)}%">dabar ${esc(priceWithMoney(position, now))}</span>
               </div>
               ${foot}
             </div>`;
