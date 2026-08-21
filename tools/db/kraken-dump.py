@@ -179,6 +179,10 @@ def dump_series(database, symbol, opening_date, feed, resolution, args, state):
     if start == 0:
         # openingDate is when the contract listed; there is nothing before it.
         start = int(datetime.fromisoformat(opening_date.replace("Z", "+00:00")).timestamp()) if opening_date else 1640995200
+        # A floor only ever moves the start forward. A symbol listed after it keeps
+        # its own listing date, so no request is spent on years that never existed.
+        if args.since:
+            start = max(start, args.since)
 
     added = 0
     while True:
@@ -268,6 +272,9 @@ def main():
     parser.add_argument("--feed", default="trade", choices=["trade", "mark"])
     parser.add_argument("--resolution", default="15m", choices=sorted(RESOLUTION_SECONDS))
     parser.add_argument("--symbols", help="comma separated, default every tradeable perp")
+    parser.add_argument("--from", dest="since_date", metavar="YYYY-MM-DD",
+                        help="do not fetch candles before this date; a symbol listed later "
+                             "still starts at its own listing date")
     parser.add_argument("--registry-database", default="tradingbot",
                         help="database holding instrument_registry, read to recover delisted symbols")
     parser.add_argument("--skip-delisted", action="store_true",
@@ -283,6 +290,8 @@ def main():
     parser.add_argument("--refresh", action="store_true", help="re-walk series already marked complete")
     parser.add_argument("--plan", action="store_true", help="print what would be fetched and exit")
     args = parser.parse_args()
+    args.since = (int(datetime.fromisoformat(args.since_date + "T00:00:00+00:00").timestamp())
+                  if args.since_date else None)
 
     database = Database(args.container, args.user, args.database)
 
@@ -310,7 +319,8 @@ def main():
         total = 0
         for item in instruments:
             opened = item.get("openingDate") or "2022-01-01T00:00:00Z"
-            seconds = time.time() - datetime.fromisoformat(opened.replace("Z", "+00:00")).timestamp()
+            listed = datetime.fromisoformat(opened.replace("Z", "+00:00")).timestamp()
+            seconds = time.time() - max(listed, args.since or 0)
             total += max(1, int(seconds / step / PAGE) + 1)
         log(f"{len(instruments)} symbols, {args.feed}/{args.resolution}: "
             f"~{total} requests, ~{total * PAGE / 1e6:.1f}M candles, "
