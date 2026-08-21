@@ -1929,20 +1929,50 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         : `Atidariau ${String(position.side || "").toUpperCase()} pagal savo signalą.`;
 
       const pnl = Number(position.unrealizedPnlEur) || 0;
-      const liquidation = Number(position.liquidationDistancePercent);
+      const now = Number(position.lastPrice);
       const stop = Number(position.stopLossPrice);
       const target = Number(position.takeProfitPrice);
-      const nearStop = Number.isFinite(liquidation) && liquidation < 8;
+
+      // How far the price still has to travel, in both money and percent, instead of
+      // a word for it. The old text said "stop-loss saugiai toli" whenever the
+      // position was in profit - it never looked at the stop at all, and a position
+      // can be a cent in profit with the stop right underneath. And the flag it used
+      // for "netoli stop-loss" was the distance to liquidation, a different price
+      // that is usually further away.
+      const gap = (to) => {
+        const diff = Math.abs(Number(to) - now);
+        return Number.isFinite(diff) && Number.isFinite(now) && now !== 0
+          ? { diff, pct: diff / Math.abs(now) * 100 }
+          : null;
+      };
+      const toTarget = Number.isFinite(target) ? gap(target) : null;
+      const toStop = Number.isFinite(stop) ? gap(stop) : null;
+      const nearStop = !!toStop && toStop.pct < 2;
+
+      // A gap of 0,001945 next to a price of 0,0770 reads as noise. price() picks its
+      // decimals from the magnitude of what it is given, and a difference is always
+      // smaller than the price it came from, so it would always be printed finer than
+      // the number it is compared against. Match the price's own scale instead.
+      const sameScale = (formatted, value) => num(value, (formatted.split(",")[1] || "").length);
+      const distances = [];
+      if (toTarget) {
+        distances.push(`iki tikslo ${price(target)} — ${percent(toTarget.pct, 1)} (${sameScale(price(target), toTarget.diff)})`);
+      }
+      if (toStop) {
+        distances.push(`iki stop-loss ${price(stop)} — ${percent(toStop.pct, 1)} (${sameScale(price(stop), toStop.diff)})`);
+      }
+      const spread = distances.length
+        ? ` ${distances.join(", ").replace(/^i/, "I")}.`
+        : "";
 
       let state;
       if (pnl > 0) {
-        state = Number.isFinite(target)
-          ? ` Kaina nuėjo tikslo pusėn, todėl pozicija pelne — tikslas ${price(target)}, o stop-loss saugiai toli.`
-          : " Pozicija pelne.";
-      } else if (nearStop && Number.isFinite(stop)) {
-        state = ` Nuo tada kaina pasisuko prieš poziciją, todėl ji minuse ir jau visai netoli stop-loss — uždarysiu ją automatiškai, jei bus pasiekta ${price(stop)}.`;
-      } else if (Number.isFinite(stop)) {
-        state = ` Kol kas pozicija minuse; uždarysiu ją automatiškai, jei bus pasiekta ${price(stop)}.`;
+        state = " Kaina nuėjo tikslo pusėn, todėl pozicija pelne." + spread;
+      } else if (nearStop) {
+        state = " Nuo tada kaina pasisuko prieš poziciją ir stop-loss jau visai netoli —"
+          + " uždarysiu ją automatiškai, jei bus pasiektas." + spread;
+      } else if (toStop) {
+        state = " Kol kas pozicija minuse; uždarysiu ją automatiškai, jei bus pasiektas stop-loss." + spread;
       } else {
         state = "";
       }
@@ -2103,7 +2133,9 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // would have read as an outright lie on a wide stop at high leverage.
       const context = contextChips(entry || {
         spreadPercent: null, side: position.side, leverage: position.leverage
-      }, atRisk ? ["arti LIQ"] : []);
+      }, atRisk && Number.isFinite(Number(position.liquidationPrice))
+        ? [`LIQ ${price(position.liquidationPrice)}`]
+        : atRisk ? ["arti LIQ"] : []);
       const log = entry && entry.log ? entry.log : "";
       const bar = riskBar(position);
       const pnl = Number(position.unrealizedPnlEur);
