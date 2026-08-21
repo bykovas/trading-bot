@@ -4,6 +4,7 @@
 - The guard now also skips a fill when a `WOULD_CLOSE` already sits on the same pair within 15 minutes of the fill time, whoever wrote it, via the new `IDryRunPortfolioStore.LoadRecordedCloseTimes`. Fifteen minutes is the cycle period: two genuine closes on one pair inside a single cycle are not reachable, since a pair holds at most one position and reopening requires the next cycle.
 - The 18 duplicate cycles were deleted from production - `dry_run_cycles` and its dependants - leaving futures-live at 72 closes and futures-lukas-live at 15, of which 13 each are genuine recoveries. No orphan rows remain in `dry_run_actions`, `dry_run_decision_facts` or `dry_run_cycle_facts`.
 - No change to signal scoring, entry gates, sizing, leverage, exits, execution or the mirror. The repair still only appends journal rows.
+- Follow-up found on production: the repair's cycle rows are not observations of the account. Each is stamped with the fill's own time but carries the portfolio as it stood when the repair ran, so 13 rows on futures-live all read 49.49 and 13 on futures-lukas-live all read 94.70, back-dated across three days. Two of them sat below futures-live's real 08-20 low. The equity rollup and the drawdown scan now skip `-backfill` cycles; every already-stored day rebuilds byte-identical, checked against 08-17 through 08-20 on both accounts.
 
 ## 2026-08-21-backfill-missed-closures
 

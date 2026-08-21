@@ -2036,6 +2036,12 @@ static async Task BackfillDailyEquity(
             from dry_run_cycle_facts
             where bot_instance_id = @bot_instance_id
               and portfolio_value_after_eur > 0
+              -- Rows the closure repair wrote are not observations. It stamps the
+              -- fill's own time on a cycle carrying the portfolio as it stood when
+              -- the repair ran, so 13 rows landed across three past days all reading
+              -- 49.49 on futures-live and 94.70 on lukas. Back-dated into the series
+              -- they draw values the account never held.
+              and cycle_id not like '%-backfill'
               and utc >= coalesce(
                     (select max(local_date) at time zone @time_zone
                      from portfolio_daily_equity
@@ -2140,6 +2146,8 @@ static async Task<decimal> ReadMaxDrawdownPercent(
                 from dry_run_cycle_facts
                 where bot_instance_id = @bot_instance_id
                   and portfolio_value_after_eur > 0
+                  -- Same reason as the rollup: repair rows are not observations.
+                  and cycle_id not like '%-backfill'
                   and utc >= @utc_start
             ),
             day_median as (
@@ -3312,7 +3320,7 @@ internal static class DashboardDefaults
 
     // Bump when the daily rollup's computation changes: stored days from an older
     // revision are dropped and rebuilt on the next read.
-    public const int RollupRevision = 3;
+    public const int RollupRevision = 4;
 }
 
 internal readonly record struct DecisionKey(string CycleId, int DecisionIndex);
