@@ -148,7 +148,11 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
         }
 
         EnsureSchema();
+        // One transaction for the whole batch. Each statement outside one is its own
+        // implicit transaction and pays a WAL flush; at ~3.5ms a row that is what made
+        // these sweeps slow.
         using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
         foreach (var instrument in instruments)
         {
             using var command = new NpgsqlCommand(
@@ -162,7 +166,8 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
                     price_decimals = excluded.price_decimals,
                     updated_at = excluded.updated_at
                 """,
-                connection);
+                connection,
+                transaction);
             command.Parameters.AddWithValue("venue", instrument.Venue);
             command.Parameters.AddWithValue("pair", instrument.Pair);
             command.Parameters.AddWithValue("kraken_symbol", instrument.KrakenSymbol);
@@ -172,6 +177,8 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
             command.Parameters.AddWithValue("updated_at", instrument.UpdatedAt.UtcDateTime);
             command.ExecuteNonQuery();
         }
+
+        transaction.Commit();
     }
 
     public void UpsertQuotes(IReadOnlyList<SharedMarketQuoteRecord> quotes)
@@ -182,7 +189,11 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
         }
 
         EnsureSchema();
+        // One transaction for the whole batch. Each statement outside one is its own
+        // implicit transaction and pays a WAL flush; at ~3.5ms a row that is what made
+        // these sweeps slow.
         using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
         foreach (var quote in quotes)
         {
             using var command = new NpgsqlCommand(
@@ -204,12 +215,23 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
                     mark_price = excluded.mark_price,
                     index_price = excluded.index_price
                 """,
-                connection);
+                connection,
+                transaction);
             BindQuote(command, quote);
             command.ExecuteNonQuery();
         }
+
+        transaction.Commit();
     }
 
+    // A sweep brings back ~11k futures candles (and used to bring 51k for spot). Writing
+    // them one statement at a time meant that many SQL parses, round trips and - because
+    // each ran outside a transaction - that many WAL flushes: measured at roughly 3.5ms
+    // per row, which was ~39 of the 55 seconds a futures sweep took. The HTTP calls it
+    // was blamed on account for 14: 93 pairs x 2 requests at ~75ms each.
+    //
+    // Binary COPY into a temp table, then one upsert out of it. The same idiom the
+    // snapshot writer has used all along.
     public void UpsertCandles(IReadOnlyList<SharedMarketCandleRecord> candles, int timeframeMinutes)
     {
         if (candles.Count == 0)
@@ -219,33 +241,75 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
 
         EnsureSchema();
         using var connection = OpenConnection();
-        foreach (var candle in candles)
+        using var transaction = connection.BeginTransaction();
+
+        using (var create = new NpgsqlCommand(
+            """
+            create temp table tmp_market_candles (
+                venue text, pair text, timeframe_minutes int, open_time timestamptz,
+                open numeric, high numeric, low numeric, close numeric, volume numeric
+            ) on commit drop
+            """,
+            connection,
+            transaction))
         {
-            using var command = new NpgsqlCommand(
-                """
-                insert into market_candles (
-                    venue, pair, timeframe_minutes, open_time, open, high, low, close, volume)
-                values (
-                    @venue, @pair, @timeframe_minutes, @open_time, @open, @high, @low, @close, @volume)
-                on conflict (venue, pair, timeframe_minutes, open_time) do update set
-                    open = excluded.open,
-                    high = excluded.high,
-                    low = excluded.low,
-                    close = excluded.close,
-                    volume = excluded.volume
-                """,
-                connection);
-            command.Parameters.AddWithValue("venue", candle.Venue);
-            command.Parameters.AddWithValue("pair", candle.Pair);
-            command.Parameters.AddWithValue("timeframe_minutes", timeframeMinutes);
-            command.Parameters.AddWithValue("open_time", candle.OpenTime.UtcDateTime);
-            command.Parameters.AddWithValue("open", candle.Open);
-            command.Parameters.AddWithValue("high", candle.High);
-            command.Parameters.AddWithValue("low", candle.Low);
-            command.Parameters.AddWithValue("close", candle.Close);
-            command.Parameters.AddWithValue("volume", candle.Volume);
-            command.ExecuteNonQuery();
+            create.ExecuteNonQuery();
         }
+
+        using (var writer = connection.BeginBinaryImport(
+            """
+            copy tmp_market_candles (
+                venue, pair, timeframe_minutes, open_time, open, high, low, close, volume)
+            from stdin (format binary)
+            """))
+        {
+            foreach (var candle in candles)
+            {
+                writer.StartRow();
+                writer.Write(candle.Venue, NpgsqlDbType.Text);
+                writer.Write(candle.Pair, NpgsqlDbType.Text);
+                writer.Write(timeframeMinutes, NpgsqlDbType.Integer);
+                writer.Write(candle.OpenTime.UtcDateTime, NpgsqlDbType.TimestampTz);
+                writer.Write(candle.Open, NpgsqlDbType.Numeric);
+                writer.Write(candle.High, NpgsqlDbType.Numeric);
+                writer.Write(candle.Low, NpgsqlDbType.Numeric);
+                writer.Write(candle.Close, NpgsqlDbType.Numeric);
+                writer.Write(candle.Volume, NpgsqlDbType.Numeric);
+            }
+
+            writer.Complete();
+        }
+
+        // `is distinct from` so a re-fetched candle that has not moved is left alone:
+        // rewriting it with identical values still costs a new row version and a dead
+        // tuple, and a closed candle never changes.
+        using (var merge = new NpgsqlCommand(
+            """
+            insert into market_candles (
+                venue, pair, timeframe_minutes, open_time, open, high, low, close, volume)
+            select distinct on (venue, pair, timeframe_minutes, open_time)
+                venue, pair, timeframe_minutes, open_time, open, high, low, close, volume
+            from tmp_market_candles
+            order by venue, pair, timeframe_minutes, open_time
+            on conflict (venue, pair, timeframe_minutes, open_time) do update set
+                open = excluded.open,
+                high = excluded.high,
+                low = excluded.low,
+                close = excluded.close,
+                volume = excluded.volume
+            where market_candles.open is distinct from excluded.open
+               or market_candles.high is distinct from excluded.high
+               or market_candles.low is distinct from excluded.low
+               or market_candles.close is distinct from excluded.close
+               or market_candles.volume is distinct from excluded.volume
+            """,
+            connection,
+            transaction))
+        {
+            merge.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
     }
 
     public void UpsertOrderBooks(IReadOnlyList<SharedMarketOrderBookRecord> orderBooks)
@@ -256,7 +320,11 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
         }
 
         EnsureSchema();
+        // One transaction for the whole batch. Each statement outside one is its own
+        // implicit transaction and pays a WAL flush; at ~3.5ms a row that is what made
+        // these sweeps slow.
         using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
         foreach (var orderBook in orderBooks)
         {
             using var command = new NpgsqlCommand(
@@ -268,7 +336,8 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
                     bids_json = excluded.bids_json,
                     asks_json = excluded.asks_json
                 """,
-                connection);
+                connection,
+                transaction);
             command.Parameters.AddWithValue("venue", orderBook.Venue);
             command.Parameters.AddWithValue("pair", orderBook.Pair);
             command.Parameters.AddWithValue("utc", orderBook.Utc.UtcDateTime);
@@ -276,6 +345,8 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
             command.Parameters.Add("asks_json", NpgsqlDbType.Jsonb).Value = JsonSerializer.Serialize(orderBook.Asks, JsonOptions);
             command.ExecuteNonQuery();
         }
+
+        transaction.Commit();
     }
 
     public void AppendCycle(MarketDataCycleRecord cycle)

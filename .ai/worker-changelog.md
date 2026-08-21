@@ -1,3 +1,11 @@
+## 2026-08-21-batch-market-data-writes
+
+- `UpsertCandles` in `PostgresMarketDataStore` now streams the batch into a temp table with binary COPY and merges it with one upsert, inside a single transaction. It previously issued one insert per candle: ~11k statements per futures sweep, each parsed separately and each its own implicit transaction with its own WAL flush. Measured at roughly 3.5ms a row, that was ~39 of the 55 seconds a sweep took.
+- The HTTP calls the sweep was blamed for account for about 14 seconds: probed from the production host itself, Kraken Futures answers candles in 74ms and the order book in 77ms, and the sweep makes 93 x 2 of them. The bottleneck was never the exchange.
+- The merge also skips rows whose values have not moved (`where ... is distinct from ...`). A closed candle never changes, but the sweep refetches the full window every run, so the old unconditional `do update` rewrote every row it touched - a new row version and a dead tuple each time, for data identical to what was already stored.
+- `UpsertQuotes`, `UpsertOrderBooks` and `UpsertInstruments` keep their per-row statements but now run inside one transaction each, which removes the per-statement flush from those paths too.
+- No change to signal scoring, entry gates, sizing, leverage, exits, execution or the mirror. Consumers read the same tables with the same shape; only the write path changed.
+
 ## 2026-08-21-freeze-spot-collection
 
 - The market data collector gains per-venue switches, `TRADINGBOT_MARKET_DATA_SPOT_ENABLED` and `TRADINGBOT_MARKET_DATA_FUTURES_ENABLED` (both default true), and `deploy.sh` sets spot to false. Spot light quotes and candles are no longer fetched; the rows already in `market_quotes`, `market_candles` and `market_snapshots` stay untouched and simply stop being refreshed.
