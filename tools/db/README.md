@@ -42,10 +42,21 @@ extrapolated from a measured 349 bytes per candle including both indexes.
 
 ## What is dumped
 
-Every tradeable perpetual, not just the pairs the live universe currently scans -
-the point is to test widening, and a dump limited to what we already look at cannot
-answer that. The 14 dated futures are excluded by default: they carry expiry and
-basis behaviour that does not belong in a perpetual backtest.
+Every perpetual Kraken has, not just the pairs the live universe scans - though in
+practice those are the same thing: the worker reports `discovered=308 included=308
+blacklisted=0`, so the universe is already everything its registry has seen. The
+narrowing happens further down the funnel, at the active set, not here.
+
+Delisted symbols are included, and they are the reason the registry is read at all.
+Kraken's instruments endpoint returns only what trades today - 285 symbols - while
+the registry remembers 316, and Kraken still serves full history for the missing 31
+(PF_LUNA2USD-style casualties: PF_CATUSD, PF_VINEUSD, PF_ETHWUSD and so on). A dump
+built from the live list alone is survivorship-biased, and the perps that vanished
+are disproportionately the ones that collapsed - exactly the behaviour a strategy
+has to survive. `--skip-delisted` opts out.
+
+The 14 dated futures are excluded by default: they carry expiry and basis behaviour
+that does not belong in a perpetual backtest.
 
 `trade` is the feed that actually printed. `mark` is a separate series for the same
 symbol, priced for liquidations; pass `--feed mark` if that is ever needed, and it

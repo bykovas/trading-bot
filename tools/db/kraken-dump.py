@@ -87,6 +87,29 @@ def quote(value):
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def load_delisted(container, user, registry_database, live_symbols):
+    """Symbols the bot's own registry remembers but Kraken no longer lists.
+
+    Kraken's instruments endpoint returns only what trades today, so a dump built
+    from it alone is a survivorship-biased dataset: the perps that were delisted are
+    disproportionately the ones that collapsed, which is exactly what a strategy has
+    to survive. The registry has seen 308 futures symbols against the 285 live now,
+    and Kraken still serves full history for every one of the missing 31."""
+    registry = Database(container, user, registry_database)
+    try:
+        rows = registry.query(
+            "select kraken_symbol from instrument_registry "
+            "where kraken_symbol like 'PF\\_%' order by kraken_symbol;")
+    except RuntimeError as error:
+        log(f"registry unavailable, dumping live symbols only ({error})")
+        return []
+    return [
+        {"symbol": symbol, "pair": symbol, "type": "flexible_futures",
+         "tradeable": False, "openingDate": None, "delisted": True}
+        for symbol in rows if symbol not in live_symbols
+    ]
+
+
 def load_instruments(database, plan_only, contract_type):
     payload = fetch(INSTRUMENTS)
     rows = []
@@ -108,7 +131,7 @@ def load_instruments(database, plan_only, contract_type):
                 quote(item.get("base")),
                 quote(item.get("quote")),
                 quote(item.get("type")),
-                "true",
+                "false" if item.get("delisted") else "true",
                 quote(item.get("openingDate")),
                 item.get("contractSize") if item.get("contractSize") is not None else "null",
                 item.get("tickSize") if item.get("tickSize") is not None else "null",
@@ -245,6 +268,10 @@ def main():
     parser.add_argument("--feed", default="trade", choices=["trade", "mark"])
     parser.add_argument("--resolution", default="15m", choices=sorted(RESOLUTION_SECONDS))
     parser.add_argument("--symbols", help="comma separated, default every tradeable perp")
+    parser.add_argument("--registry-database", default="tradingbot",
+                        help="database holding instrument_registry, read to recover delisted symbols")
+    parser.add_argument("--skip-delisted", action="store_true",
+                        help="live symbols only; leaves a survivorship-biased dataset")
     parser.add_argument("--type", default="flexible_futures",
                         choices=["flexible_futures", "futures_inverse", "all"],
                         help="contract type; the default is the perpetuals the bot trades")
@@ -265,6 +292,12 @@ def main():
         log(f"schema ready in {args.database}")
 
     instruments = load_instruments(database, args.plan, args.type)
+    if not args.skip_delisted and args.type in ("flexible_futures", "all"):
+        delisted = load_delisted(args.container, args.user, args.registry_database,
+                                 {item["symbol"] for item in instruments})
+        if delisted:
+            log(f"{len(delisted)} delisted symbol(s) recovered from the registry")
+            instruments += delisted
     wanted = None
     if args.symbols:
         wanted = {s.strip().upper() for s in args.symbols.split(",")}
@@ -276,9 +309,7 @@ def main():
         step = RESOLUTION_SECONDS[args.resolution]
         total = 0
         for item in instruments:
-            opened = item.get("openingDate")
-            if not opened:
-                continue
+            opened = item.get("openingDate") or "2022-01-01T00:00:00Z"
             seconds = time.time() - datetime.fromisoformat(opened.replace("Z", "+00:00")).timestamp()
             total += max(1, int(seconds / step / PAGE) + 1)
         log(f"{len(instruments)} symbols, {args.feed}/{args.resolution}: "
