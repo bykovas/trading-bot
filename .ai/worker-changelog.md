@@ -1,3 +1,12 @@
+## 2026-08-21-unsettled-valuations
+
+- A cycle in which a position leaves the account records a total the account never held. Cash and open positions come from two Kraken reads that settle independently: the position is already gone from one while its proceeds have not yet arrived in the other. Lukas read 74.39 at 12:03 on 2026-08-21 and 92.91 two minutes later with no trade in between, and that single reading was being reported on the page as a -22.6% max drawdown.
+- `ReconcileWithKrakenAsync` now returns whether a position vanished this cycle, and the cycle is journalled with `valuation_unsettled`. The cycle is still written in full - decisions, actions, everything - it is only kept out of the equity series and the drawdown scan. The flag also covers the other shape of the same fault: on 2026-08-19 at 18:28 a freshly opened position dropped out of Kraken's position read for exactly one cycle, showing 69.07 between two readings of ~80 with cash unchanged at 14.77.
+- Cost is one equity sample per close, out of roughly 490 a day. Trading is untouched: the worker still sizes and decides on the same reconciled state it always did, which stays conservative while the credit is in flight.
+- Max drawdown was also being measured over 30 days while the rest of the page starts at 2026-08-19, so futures-live reported -65.1% off a peak the chart never draws. It now starts at the same date. With both fixes the figures become -20.7% for futures-live and -7.5% for futures-lukas-live, computed against production data before shipping.
+- Five readings already in the database predate the flag (futures-live 07-29 03:17, 08-17 21:39, 08-17 22:37; futures-lukas-live 08-19 18:28, 08-21 12:03). They need a one-off update to be marked; until then they remain in the series.
+- No change to signal scoring, entry gates, sizing, leverage, exits, execution or the mirror.
+
 ## 2026-08-21-backfill-dedupe-by-pair-and-time
 
 - Fixes a defect in yesterday's repair that I found only after running it on production. It skipped a fill when the fill's `order_id` was already in the journal, which is exactly wrong for the closes the bot performs itself: those are written by `FuturesVirtualPortfolio` and carry no `exchange_order_id` at all, so the guard matched none of them and recorded every one a second time. The first run added 29 entries on futures-live and 15 on futures-lukas-live, of which 18 were duplicates of closes already there - e.g. `HBAR/USD 08-20 21:10` appearing as both `SELL_STOP_LOSS -3.274` and `EXCHANGE_CLOSE_BACKFILLED -3.262`.

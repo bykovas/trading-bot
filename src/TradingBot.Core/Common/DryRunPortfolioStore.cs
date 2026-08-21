@@ -807,6 +807,9 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 validated_order_count integer not null
             );
 
+            alter table dry_run_cycle_facts
+                add column if not exists valuation_unsettled boolean not null default false;
+
             create index if not exists ix_dry_run_cycle_facts_bot_utc on dry_run_cycle_facts (bot_instance_id, utc desc, cycle_id desc);
             create index if not exists ix_dry_run_cycle_facts_change_set on dry_run_cycle_facts (change_set, utc desc);
             create index if not exists ix_dry_run_cycle_facts_strategy_utc on dry_run_cycle_facts (strategy_version, utc desc, cycle_id desc);
@@ -1628,7 +1631,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 portfolio_value_after_eur,
                 would_buy_count,
                 would_sell_count,
-                validated_order_count)
+                validated_order_count,
+                valuation_unsettled)
             values (
                 @cycle_id,
                 @bot_instance_id,
@@ -1652,7 +1656,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 @portfolio_value_after_eur,
                 @would_buy_count,
                 @would_sell_count,
-                @validated_order_count)
+                @validated_order_count,
+                @valuation_unsettled)
             """,
             connection,
             transaction))
@@ -1680,6 +1685,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             Add(command, "would_buy_count", NpgsqlDbType.Integer, wouldBuyCount);
             Add(command, "would_sell_count", NpgsqlDbType.Integer, wouldSellCount);
             Add(command, "validated_order_count", NpgsqlDbType.Integer, validatedOrderCount);
+            Add(command, "valuation_unsettled", NpgsqlDbType.Boolean, record.ValuationUnsettled);
             command.ExecuteNonQuery();
         }
 

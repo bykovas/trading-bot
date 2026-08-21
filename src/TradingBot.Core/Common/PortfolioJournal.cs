@@ -489,6 +489,16 @@ public sealed class DryRunCycleRecord
     public required PortfolioState PortfolioBefore { get; init; }
     public required PortfolioState PortfolioAfter { get; init; }
 
+    // The account total recorded here is not a value the account held. Cash and open
+    // positions come from two endpoints that settle independently: for the cycle in
+    // which a position leaves, the position is already gone from one while its
+    // proceeds have not yet arrived in the other, and the sum reads far below the
+    // truth. Lukas showed 74.39 at 12:03 on 2026-08-21 and 92.91 two minutes later
+    // without a trade in between; that single reading set the day's low and a -22.6%
+    // max drawdown. Such cycles are journalled in full but kept out of the equity
+    // series - the number was never real, so it is not shown.
+    public bool ValuationUnsettled { get; init; }
+
     // Per-cycle entry funnel (candidate counts, top candidates, rejection reasons,
     // excluded pairs and the explicit no-trade reason). Null only in legacy records.
     public CycleEntryDiagnostics? EntryDiagnostics { get; init; }

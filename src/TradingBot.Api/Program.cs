@@ -1919,6 +1919,21 @@ static async Task EnsureDailyEquityTable(NpgsqlConnection connection, Cancellati
         """,
         connection);
     await revision.ExecuteNonQueryAsync(cancellationToken);
+
+    // Owned by the workers, declared here too because either side can deploy first
+    // and the equity queries below read it.
+    await using var unsettled = new NpgsqlCommand(
+        """
+        do $$
+        begin
+            if to_regclass('public.dry_run_cycle_facts') is not null then
+                alter table dry_run_cycle_facts
+                    add column if not exists valuation_unsettled boolean not null default false;
+            end if;
+        end $$;
+        """,
+        connection);
+    await unsettled.ExecuteNonQueryAsync(cancellationToken);
 }
 
 // Written by the workers from the exchange ledger; declared here too so the
@@ -2036,6 +2051,12 @@ static async Task BackfillDailyEquity(
             from dry_run_cycle_facts
             where bot_instance_id = @bot_instance_id
               and portfolio_value_after_eur > 0
+              -- A cycle in which a position left the account: it is already gone from
+              -- the position read while its proceeds have not yet landed in the wallet
+              -- read, so the total is understated by roughly the whole position. Lukas
+              -- read 74.39 at 12:03 on 2026-08-21 and 92.91 two minutes later with no
+              -- trade in between. The account never held 74.39, so it is not drawn.
+              and not valuation_unsettled
               -- Rows the closure repair wrote are not observations. It stamps the
               -- fill's own time on a cycle carrying the portfolio as it stood when
               -- the repair ran, so 13 rows landed across three past days all reading
@@ -2146,9 +2167,13 @@ static async Task<decimal> ReadMaxDrawdownPercent(
                 from dry_run_cycle_facts
                 where bot_instance_id = @bot_instance_id
                   and portfolio_value_after_eur > 0
-                  -- Same reason as the rollup: repair rows are not observations.
+                  -- Same reasons as the rollup. This one mattered most here: the
+                  -- single unsettled reading was reported as a -22.6% max drawdown.
+                  and not valuation_unsettled
+                  -- Repair rows are not observations either.
                   and cycle_id not like '%-backfill'
                   and utc >= @utc_start
+                  and (utc at time zone @time_zone)::date >= @launch_date::date
             ),
             day_median as (
                 select local_date, percentile_cont(0.5) within group (order by value) as median
@@ -2180,6 +2205,7 @@ static async Task<decimal> ReadMaxDrawdownPercent(
         command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
         command.Parameters.Add("time_zone", NpgsqlDbType.Text).Value = "Europe/Vilnius";
         command.Parameters.Add("utc_start", NpgsqlDbType.TimestampTz).Value = now.AddDays(-days);
+        command.Parameters.Add("launch_date", NpgsqlDbType.Text).Value = DashboardDefaults.LaunchLocalDate;
 
         var result = await command.ExecuteScalarAsync(cancellationToken);
         var percent = result is decimal value ? value : 0m;
@@ -3318,9 +3344,16 @@ internal static class DashboardDefaults
 {
     public const int EquityWindowDays = 30;
 
+    // Nothing on the page reads earlier than this. The chart is trimmed to it in the
+    // browser, but max drawdown arrives as one finished number, so it was still being
+    // measured from peaks that predate the launch: futures-live reported -65.1% off a
+    // peak the page never draws. Measured from the same start, the figure means what
+    // the reader thinks it means.
+    public const string LaunchLocalDate = "2026-08-19";
+
     // Bump when the daily rollup's computation changes: stored days from an older
     // revision are dropped and rebuilt on the next read.
-    public const int RollupRevision = 4;
+    public const int RollupRevision = 5;
 }
 
 internal readonly record struct DecisionKey(string CycleId, int DecisionIndex);

@@ -141,9 +141,10 @@ internal sealed class FuturesDecisionWorker(
         var lightStates = await marketDataSource.GetLightMarketStatesAsync(universe, cancellationToken);
         PersistMarketSnapshots(cycleId, utc, lightStates);
         _priceHistory.Record(utc, lightStates);
+        var valuationUnsettled = false;
         if (config.Futures.LiveTradingEnabled)
         {
-            await ReconcileWithKrakenAsync(state, universe, lightStates, utc, cancellationToken);
+            valuationUnsettled = await ReconcileWithKrakenAsync(state, universe, lightStates, utc, cancellationToken);
             await RefreshDeadManSwitchAsync(cancellationToken);
         }
 
@@ -613,6 +614,7 @@ internal sealed class FuturesDecisionWorker(
             Decisions = decisions,
             PortfolioBefore = portfolioBefore,
             PortfolioAfter = state.Clone(),
+            ValuationUnsettled = valuationUnsettled,
             EntryDiagnostics = BuildEntryDiagnostics(lightStates, active, fullStates, decisions, btcRegime)
         });
         Console.WriteLine($"futures cycle done: decisions={decisions.Count} cash={state.CashEur:0.####} total={state.TotalValueEur:0.####} positions={state.Positions.Count}");
@@ -2052,7 +2054,11 @@ internal sealed class FuturesDecisionWorker(
             ? Task.FromResult<IReadOnlyList<PortfolioCashEvent>>(Array.Empty<PortfolioCashEvent>())
             : broker.GetCashEventsAsync(since, cancellationToken);
 
-    private async Task ReconcileWithKrakenAsync(
+    // Returns true when a position left the account this cycle. The caller marks the
+    // cycle's valuation unsettled: the closed position is already out of the position
+    // read while its proceeds have not yet landed in the wallet read, so the total is
+    // understated by roughly the whole position.
+    private async Task<bool> ReconcileWithKrakenAsync(
         PortfolioState state,
         IReadOnlyList<InstrumentOptions> universe,
         IReadOnlyList<InstrumentMarketState> lightStates,
@@ -2198,6 +2204,8 @@ internal sealed class FuturesDecisionWorker(
                 $"futures-kraken-wallet: name={account.Name} currency={account.Currency} " +
                 $"marginBalance={account.MarginBalance:0.####} availableMargin={account.AvailableMargin:0.####}");
         }
+
+        return vanished.Count > 0;
     }
 
     internal static decimal SumFuturesAvailableCollateralUsd(IReadOnlyList<FuturesAccountBalance> accounts)
