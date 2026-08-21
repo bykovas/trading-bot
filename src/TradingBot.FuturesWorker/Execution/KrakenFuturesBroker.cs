@@ -85,6 +85,89 @@ internal sealed class KrakenFuturesBroker(HttpClient httpClient, KrakenOptions o
         return positions;
     }
 
+    // Newest first, 100 per page, walked back with lastFillTime until the window is
+    // covered. The same shape as the account-log reader below, and for the same reason:
+    // one page is not the history, it is whatever fitted in one page.
+    public async Task<IReadOnlyList<FuturesFill>> GetFillsAsync(DateTimeOffset sinceUtc, CancellationToken cancellationToken)
+    {
+        var fills = new List<FuturesFill>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string? before = null;
+
+        for (var page = 0; page < 40; page++)
+        {
+            var parameters = before is null
+                ? Array.Empty<KeyValuePair<string, string>>()
+                : new[] { new KeyValuePair<string, string>("lastFillTime", before) };
+
+            using var doc = await SendPrivateAsync(
+                HttpMethod.Get, "/derivatives/api/v3/fills", parameters, cancellationToken);
+            var root = doc.RootElement;
+            EnsureSuccess(root, "fills");
+
+            if (!root.TryGetProperty("fills", out var items) || items.ValueKind != JsonValueKind.Array)
+            {
+                break;
+            }
+
+            var rows = 0;
+            var reachedWindowStart = false;
+            string? oldest = null;
+
+            foreach (var item in items.EnumerateArray())
+            {
+                rows++;
+                var fillTimeRaw = GetString(item, "fillTime");
+                var fillTime = ParseTimestamp(fillTimeRaw);
+                if (fillTimeRaw is not null && (oldest is null || string.CompareOrdinal(fillTimeRaw, oldest) < 0))
+                {
+                    oldest = fillTimeRaw;
+                }
+
+                if (fillTime is not null && fillTime < sinceUtc)
+                {
+                    reachedWindowStart = true;
+                    continue;
+                }
+
+                var fillId = GetString(item, "fill_id") ?? GetString(item, "fillId");
+                var symbol = GetString(item, "symbol");
+                var side = GetString(item, "side");
+                var size = GetDecimal(item, "size") ?? GetDecimal(item, "quantity");
+                var price = GetDecimal(item, "price");
+                if (fillId is null || symbol is null || side is null || size is null || price is null)
+                {
+                    continue;
+                }
+
+                if (!seen.Add(fillId))
+                {
+                    continue;
+                }
+
+                fills.Add(new FuturesFill(
+                    GetString(item, "order_id") ?? GetString(item, "orderId") ?? string.Empty,
+                    fillId,
+                    symbol,
+                    side.Equals("sell", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy",
+                    size.Value,
+                    price.Value,
+                    fillTime ?? DateTimeOffset.UtcNow,
+                    GetString(item, "fillType") ?? string.Empty,
+                    GetDecimal(item, "realized_pnl") ?? GetDecimal(item, "realizedPnl")));
+            }
+
+            if (rows == 0 || reachedWindowStart || oldest is null || oldest == before)
+            {
+                break;
+            }
+
+            before = oldest;
+        }
+
+        return fills;
+    }
+
     public async Task<IReadOnlyList<FuturesOpenOrder>> GetOpenOrdersAsync(CancellationToken cancellationToken)
     {
         using var doc = await SendPrivateAsync(HttpMethod.Get, "/derivatives/api/v3/openorders", Array.Empty<KeyValuePair<string, string>>(), cancellationToken);

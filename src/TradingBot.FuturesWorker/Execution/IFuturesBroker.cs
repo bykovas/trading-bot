@@ -17,6 +17,11 @@ internal interface IFuturesBroker
 
     // Deposits, withdrawals and transfers since the given instant, from the futures
     // account log. Best-effort: an outage returns an empty list.
+    // Fills are how the exchange reports what it did without being asked. A position
+    // closed by a protection order never passes through this worker, so without them a
+    // trailing stop that took profit leaves an entry with no exit in the journal.
+    Task<IReadOnlyList<FuturesFill>> GetFillsAsync(DateTimeOffset sinceUtc, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(
         DateTimeOffset since,
         CancellationToken cancellationToken);
@@ -73,6 +78,19 @@ internal interface IFuturesBroker
 // Name is the key Kraken uses for the wallet ("cash", "flex", "fi_xbtusd", ...).
 // It is optional so existing call sites and tests keep compiling; only the live
 // broker fills it, and only the diagnostics read it.
+// One execution as Kraken reports it. RealizedPnl is populated on the fills that close
+// a position, which is exactly the number the journal was missing.
+internal sealed record FuturesFill(
+    string OrderId,
+    string FillId,
+    string Symbol,
+    string Side,
+    decimal Size,
+    decimal Price,
+    DateTimeOffset FillTime,
+    string FillType,
+    decimal? RealizedPnl);
+
 internal sealed record FuturesAccountBalance(string Currency, decimal MarginBalance, decimal AvailableMargin, string Name = "");
 
 internal sealed record FuturesOpenPosition(string Symbol, string Side, decimal Size, decimal EntryPrice, decimal MarkPrice, decimal Leverage);

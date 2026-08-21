@@ -673,6 +673,9 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
    that only exists once the trade is winning has no losing half to draw, so the
    gradient starts at the amber/green blend rather than at red. */
 .bc-bar--trail{background:linear-gradient(90deg,rgba(240,166,58,.4),rgba(65,237,160,.55) 55%,rgba(65,237,160,.85))}
+/* Mirrored for a short, the same way .bc-bar--short mirrors .bc-bar--long: the axis
+   is price, so profit lies to the left when the position is short. */
+.bc-bar--trail-rev{background:linear-gradient(90deg,rgba(65,237,160,.85),rgba(65,237,160,.55) 45%,rgba(240,166,58,.4))}
 .bc-ts{position:absolute;top:-2px;width:2px;height:12px;margin-left:-1px;background:var(--gold);opacity:.9}
 .bc-ts-l{position:absolute;top:15px;transform:translateX(-50%);white-space:nowrap;font:11px var(--font-mono);color:var(--gold)}
 
@@ -2184,13 +2187,17 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           && Number.isFinite(now) && Number.isFinite(entry) && entry > 0
           && Number.isFinite(trailingPct) && trailingPct > 0) {
         const SCALE = 15;
-        // Profit reads the same on both sides once the direction is folded in.
-        const gain = (value) => (isLong ? (value - entry) : (entry - value)) / entry * 100;
+        // The axis is price and rises left to right, which mirrors the whole bar for a
+        // short exactly as .bc-bar--short already mirrors the stop-to-target one. So a
+        // short reads the way a price chart reads: the profitable end is the low end,
+        // on the left, and the entry sits on the right.
         const stopPrice = isLong ? now * (1 - trailingPct / 100) : now * (1 + trailingPct / 100);
-        const at = (value) => clamp(gain(value) / SCALE * 100, 0, 100);
+        const ceiling = isLong ? entry * (1 + SCALE / 100) : entry * (1 - SCALE / 100);
+        const lo = isLong ? entry : ceiling;
+        const hi = isLong ? ceiling : entry;
+        const at = (value) => clamp((value - lo) / (hi - lo) * 100, 0, 100);
         const nowAt = at(now);
         const tsAt = at(stopPrice);
-        const ceiling = isLong ? entry * (1 + SCALE / 100) : entry * (1 - SCALE / 100);
 
         // Position for a label: centred on its mark in the middle of the bar, pinned to
         // the container edge near either end. Pinning uses the edge rather than the mark
@@ -2210,11 +2217,13 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         const nw = label(nowAt);
 
         return `<div class="bc-bar-box">
-              <div class="bc-bar-ends"><span>Įėjimas ${esc(price(entry))}</span><span>${esc(priceWithMoney(position, ceiling))}</span></div>
+              <div class="bc-bar-ends">${isLong
+                ? `<span>Įėjimas ${esc(price(entry))}</span><span>${esc(priceWithMoney(position, ceiling))}</span>`
+                : `<span>${esc(priceWithMoney(position, ceiling))}</span><span>Įėjimas ${esc(price(entry))}</span>`}</div>
               <div class="bc-bar-top">
                 <span class="bc-ts-l${ts.cls}" style="${ts.style}">TS ${esc(priceWithMoney(position, stopPrice))}</span>
               </div>
-              <div class="bc-bar bc-bar--trail"></div>
+              <div class="bc-bar bc-bar--trail${isLong ? "" : "-rev"}"></div>
               <div class="bc-bar-marks bc-bar-marks--trail">
                 <span class="bc-ts" style="left:${tsAt.toFixed(1)}%"></span>
                 <span class="bc-now" style="left:${nowAt.toFixed(1)}%"></span>

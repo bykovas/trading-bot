@@ -178,6 +178,9 @@ public sealed class FuturesExecutionControlTests
         public Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(DateTimeOffset since, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<PortfolioCashEvent>>(Array.Empty<PortfolioCashEvent>());
 
+        public Task<IReadOnlyList<FuturesFill>> GetFillsAsync(DateTimeOffset sinceUtc, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<FuturesFill>>(Array.Empty<FuturesFill>());
+
         public bool IsConfigured => true;
         public FuturesTickerQuote? Ticker { get; init; }
         public FuturesOrderResult FokResult { get; init; } = FuturesOrderResult.Rejected("not configured");

@@ -1,3 +1,11 @@
+## 2026-08-21-futures-fills-reader
+
+- `IFuturesBroker` gains `GetFillsAsync(sinceUtc)` and `KrakenFuturesBroker` implements it against `/derivatives/api/v3/fills`, walked newest-first in pages of 100 via `lastFillTime` until the window is covered - the same paging shape as the account-log reader, and for the same reason.
+- Why: a position closed by a protection order never passes through this worker. On futures-lukas-live the trailing stop armed at 11:54 on 2026-08-21 and closed PF_HBARUSD around 12:02 for roughly +3.5 USD; the bot only saw `remotePositions=0`, dropped the position from its state and recorded nothing, so the day read `opened 1, closed 0, realised 0.00` while the account had actually gained. Fills carry `order_id`, `price`, `fillTime` and `realized_pnl` on position-closing fills, which is everything the journal was missing.
+- Nothing calls the new method yet: this commit is additive only and cannot change trading behaviour. The consumer is the next step, and it must build the close record without routing through `FuturesVirtualPortfolio.Apply`/`Close` - those derive a fill price from a slippage model and move `state.CashEur`, but the reconciliation has already rebuilt cash from Kraken, so reusing them would replace a real fill price with a modelled one and count the money twice.
+- Which protection fired is identified by matching the fill's `order_id` against the stored `trailing_stop_order_id`; take profit and stop loss are told apart by fill price, since their levels sit 4% and 2% from entry and the order ids are not persisted.
+- No change to signal scoring, entry gates, sizing, leverage, exits, execution or the mirror.
+
 ## 2026-08-21-batch-market-data-writes
 
 - `UpsertCandles` in `PostgresMarketDataStore` now streams the batch into a temp table with binary COPY and merges it with one upsert, inside a single transaction. It previously issued one insert per candle: ~11k statements per futures sweep, each parsed separately and each its own implicit transaction with its own WAL flush. Measured at roughly 3.5ms a row, that was ~39 of the 55 seconds a sweep took.

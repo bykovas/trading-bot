@@ -241,6 +241,9 @@ public sealed class FuturesEntryMirrorTests
         public Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(DateTimeOffset since, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<PortfolioCashEvent>>(Array.Empty<PortfolioCashEvent>());
 
+        public Task<IReadOnlyList<FuturesFill>> GetFillsAsync(DateTimeOffset sinceUtc, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<FuturesFill>>(Array.Empty<FuturesFill>());
+
         public bool IsConfigured => true;
         public int EntryCalls { get; private set; }
         public string? EntrySide { get; private set; }
