@@ -2055,6 +2055,27 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
     function positionParams(position, entry) {
       const liquidation = Number(position.liquidationDistancePercent);
+
+      // Once the position is far enough toward its target the worker arms a trailing
+      // stop on the exchange and CANCELS the take profit and the stop loss. Showing
+      // those two prices afterwards describes orders that no longer exist - which is
+      // exactly what the page did while a trailing stop closed a position on 2026-08-21.
+      const trailing = String(position.trailingStopState || "").toUpperCase() === "EXCHANGE_OPEN";
+      const trailingPct = Number(position.trailingStopPercent);
+
+      const protection = trailing
+        ? [
+            kv("Apsauga", "Slenkantis stop", "bc-t-gold"),
+            kv("Atstumas", Number.isFinite(trailingPct) ? percent(trailingPct, 2) : "—", "bc-t-gold"),
+            kv("Stop loss", "atšauktas", "bc-t-soft"),
+            kv("Tikslas (TP)", "atšauktas", "bc-t-soft")
+          ]
+        : [
+            kv("Apsauga", "Stop loss / TP", "bc-t-soft"),
+            kv("Stop loss", price(position.stopLossPrice), "bc-t-red"),
+            kv("Tikslas (TP)", price(position.takeProfitPrice), "bc-t-soft")
+          ];
+
       return [
         kv("Įėjimas", price(position.entryPrice)),
         kv("Dabar", price(position.lastPrice), "bc-t-cream"),
@@ -2062,8 +2083,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         kv("Nominalas", money(position.entryNotionalEur)),
         kv("Marža", money(position.initialMarginEur)),
         kv("Mokestis", entry && Number.isFinite(Number(entry.feeEur)) ? money(entry.feeEur, 3) : "—"),
-        kv("Stop loss", price(position.stopLossPrice), "bc-t-red"),
-        kv("Tikslas (TP)", price(position.takeProfitPrice), "bc-t-soft"),
+        ...protection,
         kv("Likvidacija", price(position.liquidationPrice), "bc-t-red"),
         kv("Iki likvidacijos", Number.isFinite(liquidation) ? percent(liquidation, 1) : "—",
           Number.isFinite(liquidation) && liquidation < 8 ? "bc-t-red" : "bc-t-soft")

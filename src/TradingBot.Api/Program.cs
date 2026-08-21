@@ -531,7 +531,9 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             liquidation_distance_percent,
             funding_paid_eur,
             tp_order_state,
-            sl_order_state
+            sl_order_state,
+            trailing_stop_state,
+            trailing_stop_percent
         from portfolio_position_state position
         where (@bot_instance_id is null or position.bot_instance_id = @bot_instance_id)
         order by market_value_eur desc, pair
@@ -584,6 +586,8 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             GetNullableDecimal(reader, 20),
             reader.IsDBNull(21) ? null : reader.GetString(21),
             reader.IsDBNull(22) ? null : reader.GetString(22),
+            reader.IsDBNull(23) ? null : reader.GetString(23),
+            GetNullableDecimal(reader, 24),
             // Stored values are the worker's net-of-fees liquidation figures (spot).
             storedPnlEur,
             storedPnlPercent));
@@ -2552,6 +2556,12 @@ internal sealed record PortfolioPositionDto(
     decimal? FundingPaidEur,
     string? TpOrderState,
     string? SlOrderState,
+    // Which protection is actually live on the exchange. Once the position is far
+    // enough toward its target the worker arms a trailing stop and CANCELS the take
+    // profit and stop loss, so a page still showing "SL / TP" at that moment is
+    // describing orders that no longer exist.
+    string? TrailingStopState,
+    decimal? TrailingStopPercent,
     // Net-of-fees unrealized PnL (worker's conservative liquidation basis). The
     // MarketValueEur/UnrealizedPnl* fields above are gross, at last price, for Kraken
     // parity; these show what the position would net after round-trip costs.
