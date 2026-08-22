@@ -192,6 +192,12 @@
 .bc-sq{width:14px;height:14px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center}
 .bc-sq svg{width:7px;height:6px;display:block}
 .bc-sq--up{background:var(--green)} .bc-sq--dn{background:var(--red)}
+/* Today: filled when the day is up, hollow when it is down, and carrying the same
+   plus and minus the transfers use - the gold adds a subject, not a second
+   convention to learn. */
+.bc-sq--today{background:#f5b84f}
+.bc-sq--today-dn{background:#12100b;box-shadow:inset 0 0 0 1.5px #f5b84f}
+.bc-sq--today svg,.bc-sq--today-dn svg{width:7px;height:7px}
 .bc-sq--dep{background:var(--blue)} .bc-sq--wdr{background:var(--blue-deep);box-shadow:inset 0 0 0 1.5px var(--blue)}
 .bc-chart{margin-top:16px}
 .bc-chart-svg{display:block;overflow:visible}
@@ -390,7 +396,13 @@
   .bc-live{padding:20px 16px 0}
   .bc-legend{align-items:flex-start;order:2;margin-top:10px}
   .bc-legend-l{text-align:left}
-  .bc-legend-row{justify-content:flex-start}
+  /* Three entries need 379px and a 375px phone offers 343, so they wrapped to a
+     second row. Trimmed rather than shortened: the words are the labels, and
+     "Pervedimai" cannot be abbreviated without inventing jargon. */
+  .bc-legend-row{justify-content:flex-start;gap:5px}
+  .bc-legend-row .bc-lg{padding:0 8px;gap:5px;font-size:11px}
+  .bc-legend-row .bc-sq{width:12px;height:12px}
+  .bc-legend-row .bc-sq-pair{gap:2px}
   .bc-live-head{flex-direction:column;gap:0}
   .bc-metrics{grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid rgba(246,218,160,.12);border-radius:10px;overflow:hidden}
   .bc-metric{padding:12px 13px}
@@ -718,7 +730,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     <section class="bc-hero">
       <div class="bc-hero-main">
         <p class="bc-eyebrow">Uždaras testavimas · tikri pinigai</p>
-        <h1 class="bc-h1"><span class="bc-h1-a">Botas prekiauja.</span> <span class="bc-h1-b">Mes uždirbam. Kol kas.</span></h1>
+        <h1 class="bc-h1"><span class="bc-h1-a">L&amp;D botas Algo dirba.</span> <span class="bc-h1-b">Mes uždirbam. Kol kas.</span></h1>
         <p class="bc-lead">Jis pats suranda ir atidaro pozicijas, pats valdo riziką, pats uždaro sandorius. Be rankų, be emocijų. Kiekvienas sprendimas įrašytas. Mes tik stebime, kaip keičiasi skaičiai.</p>
       </div>
 
@@ -796,9 +808,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <div class="bc-legend">
           <p class="bc-legend-l" id="bcChartCaption">Grafikas — 30 uždarytų dienų<br>(šiandiena dar neįskaityta)</p>
           <div class="bc-legend-row">
-            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span></span>Boto prekyba</span>
+            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span></span>Algo Bot</span>
             <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--dep"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#0e2a48"/></svg></span><span class="bc-sq bc-sq--wdr"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#6faeff"/></svg></span></span>Pervedimai</span>
-            <span class="bc-lg" id="bcLegendGap" hidden><span class="bc-sq bc-sq--gap"></span>Trūksta duomenų</span>
+            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--today"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#12100b"/></svg></span><span class="bc-sq bc-sq--today-dn"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#f5b84f"/></svg></span></span>Šiandien</span>
+              <span class="bc-lg" id="bcLegendGap" hidden><span class="bc-sq bc-sq--gap"></span>Trūksta duomenų</span>
           </div>
         </div>
       </div>
@@ -1308,30 +1321,44 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     const CHART_WIDE = {
       className: "bc-chart-svg bc-only-wide", width: 1180, height: 310,
       plotWidth: 1112, top: 24, bottom: 278, flowHeight: 54, flowGap: 16,
-      labelX: 1124, labelSize: 10.5, gridLines: 7, dateTicks: 5, dateY: 296,
+      labelX: 1124, labelSize: 10.5, gridLines: 7, dateTicks: 5, dateStepDays: 2, dateY: 296,
       candleWidth: 26, wickWidth: 1.7, flowWidth: 14,
       pillWidth: 62, pillHeight: 23, pillSize: 12.5, annotationSize: 10.5
     };
     const CHART_NARROW = {
       className: "bc-chart-svg bc-only-narrow", width: 390, height: 168,
       plotWidth: 364, top: 8, bottom: 138, flowHeight: 26, flowGap: 10,
-      labelX: 369, labelSize: 8.5, gridLines: 3, dateTicks: 3, dateY: 162,
+      labelX: 369, labelSize: 8.5, gridLines: 3, dateTicks: 3, dateStepDays: 7, dateY: 162,
       candleWidth: 10, wickWidth: 1.2, flowWidth: 5,
       pillWidth: 40, pillHeight: 17, pillSize: 9.5, annotationSize: 8
     };
 
+    // Picks the round step whose line count lands closest to , rather than the
+    // first one wide enough. Taking the first left holes in the ladder: a ceiling of
+    // 552 jumped straight from a step of 100 to 200 and drew three lines where five
+    // belong. Ties go to the denser grid, which is the one that helps reading.
     function niceTicks(min, max, count) {
       const span = max - min;
       if (!(span > 0)) return [min];
-      const rough = span / Math.max(1, count - 1);
-      const magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
-      const step = [1, 2, 2.5, 5, 10].map(factor => factor * magnitude)
-        .find(candidate => candidate >= rough) || 10 * magnitude;
-      const ticks = [];
-      for (let value = Math.ceil(min / step) * step; value <= max + step * 0.001; value += step) {
-        ticks.push(Number(value.toFixed(10)));
-      }
-      return ticks;
+      const magnitude = Math.pow(10, Math.floor(Math.log10(span / Math.max(1, count - 1))));
+      const ladder = [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10, 15, 20];
+      const build = (step) => {
+        const ticks = [];
+        for (let value = Math.ceil(min / step) * step; value <= max + step * 0.001; value += step) {
+          ticks.push(Number(value.toFixed(10)));
+        }
+        return ticks;
+      };
+      let best = null;
+      ladder.map(factor => factor * magnitude).forEach(step => {
+        const ticks = build(step);
+        if (ticks.length < 2 || ticks.length > 9) return;
+        const score = Math.abs(ticks.length - count);
+        if (!best || score < best.score || (score === best.score && ticks.length > best.ticks.length)) {
+          best = { score, ticks };
+        }
+      });
+      return best ? best.ticks : build(magnitude);
     }
 
     // The launch. Nothing on this page reaches back before it - not the chart, not the
@@ -1406,12 +1433,15 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       return columns;
     }
 
-    function chartSvg(spec, columns, liveValue) {
-      const slots = Math.max(columns.length, CHART_SLOTS);
+    function chartSvg(spec, columns, today) {
+      // Today occupies the slot after the last closed day, so the divider has
+      // something to divide rather than sitting at the edge of the plot.
+      const total = columns.length + (today ? 1 : 0);
+      const slots = Math.max(total, CHART_SLOTS);
       const slot = spec.plotWidth / slots;
       // Anchored right, against the ŠIANDIEN divider, so a young account gets
       // normal-width candles by the divider rather than a few stretched across.
-      const centre = (index) => spec.plotWidth - (columns.length - index - 0.5) * slot;
+      const centre = (index) => spec.plotWidth - (total - index - 0.5) * slot;
 
       const values = [];
       columns.forEach(column => {
@@ -1419,7 +1449,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         if (column.manual) values.push(column.manual.from, column.manual.to);
         if (column.gap) values.push(column.gap.from, column.gap.to);
       });
-      if (Number.isFinite(Number(liveValue))) values.push(Number(liveValue));
+      if (today) values.push(today.from, today.to);
       const finite = values.filter(Number.isFinite);
       if (!finite.length) return "";
 
@@ -1427,17 +1457,29 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // every chart and between the two accounts: a column half the plot tall is half
       // the money, not half of some floating window. Only the top is padded - padding
       // the bottom would push the baseline below zero, which has no meaning here.
-      let min = Math.min(0, ...finite);
-      let max = Math.max(...finite);
-      max += (max - min) * 0.08 || Math.max(Math.abs(max) * 0.02, 0.5);
+      //
+      // The ceiling is today's balance plus a fifth. That keeps the newest candle at
+      // roughly five sixths of the height whatever the account is worth, so the chart
+      // looks the same on 40 dollars and on 400, and leaves room above for the next
+      // few days before the scale has to move. It never clips: a past day taller than
+      // that raises the ceiling instead.
+      const min = Math.min(0, ...finite);
+      const headroom = today && Number.isFinite(today.to) ? Math.abs(today.to) * 1.2 : 0;
+      let max = Math.max(headroom, ...finite);
+      if (max <= min) max = min + 1;
       const y = (value) => spec.top + (max - Number(value)) / (max - min) * (spec.bottom - spec.top);
 
+      // Five levels: the zero baseline and four above it. Grey rather than the old
+      // near-invisible gold at .07 opacity - a grid you cannot see is decoration, and
+      // reading a candle against nothing was guesswork. Zero is drawn stronger than
+      // the rest because it is the one line that means something on its own.
       const out = [];
-      niceTicks(min, max, spec.gridLines).forEach(tick => {
+      niceTicks(min, max, 6).forEach(tick => {
         const ty = y(tick);
         if (ty < spec.top - 1 || ty > spec.bottom + 1) return;
-        out.push(`<line x1="0" x2="${spec.plotWidth}" y1="${ty.toFixed(2)}" y2="${ty.toFixed(2)}" stroke="rgba(246,218,160,.07)" stroke-width="1"/>`);
-        out.push(`<text x="${spec.labelX}" y="${(ty + 4).toFixed(2)}" fill="#5f584e" font-family="IBM Plex Mono, monospace" font-size="${spec.labelSize}">${esc(num(tick, tick % 1 === 0 ? 0 : 1))}</text>`);
+        const zero = Math.abs(tick) < 1e-9;
+        out.push(`<line x1="0" x2="${spec.plotWidth}" y1="${ty.toFixed(2)}" y2="${ty.toFixed(2)}" stroke="${zero ? "rgba(255,255,255,.20)" : "rgba(255,255,255,.09)"}" stroke-width="1"/>`);
+        out.push(`<text x="${spec.labelX}" y="${(ty + 4).toFixed(2)}" fill="${zero ? "#8b8378" : "#6b6459"}" font-family="IBM Plex Mono, monospace" font-size="${spec.labelSize}">${esc(num(tick, tick % 1 === 0 ? 0 : 1))}</text>`);
       });
 
       // Bodies only, no wicks: the stored high and low belong to the day as a whole,
@@ -1469,16 +1511,22 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         }
       });
 
-      // Today, deliberately outside the series.
-      out.push(`<line x1="${spec.plotWidth}" x2="${spec.plotWidth}" y1="${spec.top}" y2="${spec.bottom}" stroke="#f5b84f" stroke-width="1" stroke-dasharray="3 4" opacity=".55"/>`);
-      if (spec.gridLines > 3) {
-        out.push(`<text x="${spec.plotWidth}" y="18" fill="#f5b84f" font-family="IBM Plex Mono, monospace" font-size="10" font-weight="600" letter-spacing="1.4" text-anchor="end">ŠIANDIEN →</text>`);
-      }
-      if (Number.isFinite(Number(liveValue))) {
-        const ly = y(liveValue);
-        out.push(`<line x1="0" x2="${spec.plotWidth}" y1="${ly.toFixed(2)}" y2="${ly.toFixed(2)}" stroke="#f5b84f" stroke-width="1" stroke-dasharray="2 5" opacity=".5"/>`);
-        out.push(`<rect x="${spec.plotWidth + 4}" y="${(ly - spec.pillHeight / 2).toFixed(2)}" width="${spec.pillWidth}" height="${spec.pillHeight}" rx="6" fill="#f5b84f"/>`);
-        out.push(`<text x="${spec.plotWidth + 4 + spec.pillWidth / 2}" y="${(ly + spec.pillSize / 2 - 1).toFixed(2)}" fill="#12100b" font-family="IBM Plex Mono, monospace" font-weight="700" font-size="${spec.pillSize}" text-anchor="middle">${esc(num(liveValue, 2))}</text>`);
+      // Today, still set apart from the closed series but now drawn rather than
+      // announced. The dashed price line and its pill were removed with it: the
+      // number they carried is the headline directly above the chart, and saying
+      // it twice cost a horizontal rule across every candle.
+      if (today) {
+        const dividerX = centre(columns.length) - slot / 2;
+        out.push(`<line x1="${dividerX.toFixed(2)}" x2="${dividerX.toFixed(2)}" y1="${spec.top}" y2="${spec.bottom}" stroke="#f5b84f" stroke-width="1" stroke-dasharray="3 4" opacity=".55"/>`);
+        if (spec.gridLines > 3) {
+          out.push(`<text x="${(dividerX - 6).toFixed(2)}" y="18" fill="#f5b84f" font-family="IBM Plex Mono, monospace" font-size="10" font-weight="600" letter-spacing="1.4" text-anchor="end">ŠIANDIEN →</text>`);
+        }
+        // Filled up, hollow down - the same notation the transfers already use, so
+        // the third colour adds a subject and not a second thing to learn.
+        const up = today.to >= today.from;
+        out.push(bar(centre(columns.length), spec.candleWidth, today.from, today.to,
+          up ? "#f5b84f" : "#12100b",
+          up ? "" : ' stroke="#f5b84f" stroke-width="1.6"'));
       }
 
       // One date label per day, centred over that day's columns.
@@ -1488,23 +1536,47 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         if (last && last.date === column.date) last.to = index;
         else spans.push({ date: column.date, from: index, to: index });
       });
-      // Sampling by count alone printed "08-19" and "08-20" on top of each other while
-      // the series was short and its columns sat side by side at the divider. A label
-      // is skipped unless there is room for it.
-      // Right to left, because the series is anchored to the divider and the newest day
-      // is the one worth naming. Sampling by count alone printed "08-19" and "08-20" on
-      // top of each other while the columns still sat side by side, and dropping the
-      // later one would have left the chart labelled with the older date.
-      const step = Math.ceil(spans.length / spec.dateTicks);
+      // Dates on a fixed rhythm, each with its own dashed rule, rather than wherever
+      // the sampling happened to land. The phone gets one a week because that is what
+      // fits between 390 pixels and an 8.5pt label; the desktop has room for one every
+      // couple of days.
+      //
+      // The rhythm runs across the whole plot, not just the part holding data. A young
+      // account fills four of thirty slots, and ruling only those left five sixths of
+      // the chart blank - the grid looked broken rather than empty. Dates before the
+      // series are extrapolated one slot per day, so the spacing is continuous through
+      // the point where the account starts.
+      const DAY_MS = 86400000;
+      const stepDays = spec.dateStepDays || 7;
+      const dayOf = (date) => Math.round(Date.parse(date + "T00:00:00Z") / DAY_MS);
       const minGap = spec.labelSize * 3.6;
-      let lastLabelX = Infinity;
-      for (let index = spans.length - 1; index >= 0; index -= 1) {
-        if ((spans.length - 1 - index) % step) continue;
-        const span = spans[index];
-        const x = (centre(span.from) + centre(span.to)) / 2;
-        if (lastLabelX - x < minGap) continue;
-        lastLabelX = x;
-        out.push(`<text x="${x.toFixed(2)}" y="${spec.dateY}" fill="#5f584e" font-family="IBM Plex Mono, monospace" font-size="${spec.labelSize}" text-anchor="middle">${esc(span.date.slice(5))}</text>`);
+
+      if (spans.length) {
+        const firstDay = dayOf(spans[0].date);
+        const newest = dayOf(spans[spans.length - 1].date);
+        const byDate = new Map(spans.map(span => [span.date, span]));
+        const xOf = (day) => {
+          const span = byDate.get(new Date(day * DAY_MS).toISOString().slice(0, 10));
+          return span ? (centre(span.from) + centre(span.to)) / 2 : centre(0) - (firstDay - day) * slot;
+        };
+
+        let lastLabelX = Infinity;
+        // Right to left, because the series is anchored to the divider and the newest
+        // day is the one worth naming.
+        // One step throughout. The old fallback to daily inside the data region was
+        // there because a three-day chart would otherwise carry a single date; now
+        // that the rhythm covers the empty part too there are always plenty, and a
+        // constant step is what makes the spacing read as a rhythm at all.
+        for (let day = newest; ; day -= stepDays) {
+          const x = xOf(day);
+          if (x < -slot) break;
+          if (x < 0 || x > spec.plotWidth) continue;
+          if (lastLabelX - x < minGap) continue;
+          lastLabelX = x;
+          const label = new Date(day * DAY_MS).toISOString().slice(5, 10);
+          out.push(`<line x1="${x.toFixed(2)}" x2="${x.toFixed(2)}" y1="${spec.top}" y2="${spec.bottom}" stroke="rgba(255,255,255,.09)" stroke-width="1" stroke-dasharray="3 5"/>`);
+          out.push(`<text x="${x.toFixed(2)}" y="${spec.dateY}" fill="#6b6459" font-family="IBM Plex Mono, monospace" font-size="${spec.labelSize}" text-anchor="middle">${esc(label)}</text>`);
+        }
       }
 
       // One invisible hit area per column, full height, so the tooltip has something
@@ -1604,6 +1676,14 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const days = (data.equity && data.equity.days) || [];
       const liveValue = data.summary ? Number(data.summary.totalValueEur) : null;
       const columns = buildColumns(days);
+      // Today opens where the last closed day ended, by the same chaining rule the
+      // closed series uses, so no money falls into the gap between them. It is one
+      // body and not two: today's transfers are not split out anywhere yet, so the
+      // candle is labelled "šiandien" rather than claimed for the bot.
+      const lastClose = days.length ? Number(days[days.length - 1].close) : null;
+      const today = Number.isFinite(lastClose) && Number.isFinite(liveValue)
+        ? { from: lastClose, to: liveValue }
+        : null;
       chartSegments = columns;
       hideChartTip();
 
@@ -1620,7 +1700,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         paint(els.chartCanvas, '<p class="bc-empty">Istorijos duomenų dar nėra</p>');
         return;
       }
-      paint(els.chartCanvas, chartSvg(CHART_WIDE, columns, liveValue) + chartSvg(CHART_NARROW, columns, liveValue));
+      paint(els.chartCanvas, chartSvg(CHART_WIDE, columns, today) + chartSvg(CHART_NARROW, columns, today));
     }
 
     // The coin cross rate. Read from the chain by the API and cached there, so the
