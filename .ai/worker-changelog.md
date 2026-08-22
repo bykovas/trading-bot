@@ -1,3 +1,11 @@
+## 2026-08-22-end-the-flip-experiment
+
+- futures-live stops inverting. Two independent settings did it and both are now off: `Futures.FlipLongEntries`, which turned its own approved LONG signals into SHORTs, and `EntryMirror.InvertSide`, which flipped the entries mirrored from futures-lukas-live. Turning off only the first would have left the mirror inverted, which is most of what that account trades - 8 of its 9 mirrored entries were SHORT.
+- `InvertSide` had to change on both accounts, not just the follower. The publisher uses it to decide the side it writes into the command and the follower uses it to decide the side it expects; had they disagreed, every command would have been rejected with `MIRROR_SIDE_MISMATCH` and the mirror would have gone quiet rather than loud.
+- Checked what else had drifted while the two accounts were run differently: of 175 configuration keys they differed in five, and four of those are identity and mirror role. Take profit, stop loss, trailing distance, leverage, position count, margin per position, entry gates, cooldowns and the blackout window were already identical, on both the repository files and the deployed copies, with environment overrides carrying nothing but the instance id.
+- Positions already open keep the behaviour they were opened with. futures-live is holding an XBT/USD LONG opened through the mirror against lukas's SHORT on the same pair four seconds earlier; it stays flagged as a flipped entry and exits on the flipped levels, 1.5% take profit and 0.75% trailing. New entries follow lukas directly.
+- No change to signal scoring, sizing, risk caps or exits.
+
 ## 2026-08-22-trailing-stop-075
 
 - `TpSl.TrailingStopPercent` goes from 2% to 0.75% on both live futures accounts. `FlippedTrailingStopPercent` was already 0.75, so on futures-live this only brings the non-flipped entries into line with what its flipped ones have been doing since the flip experiment started; on futures-lukas-live, where `FlipLongEntries` is false, it changes every entry.

@@ -7,24 +7,33 @@ namespace TradingBot.FuturesWorker.Tests;
 public sealed class FuturesInstanceConfigurationTests
 {
     [Fact]
-    public void Lukas_profile_matches_primary_profile_except_identity_flip_and_mirror_role()
+    public void Lukas_profile_matches_primary_profile_except_identity_and_mirror_role()
     {
         var root = FindRepositoryRoot();
         var primary = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.json"));
         var lukas = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.lukas.json"));
 
-        Assert.True(primary["Futures"]?["FlipLongEntries"]?.GetValue<bool>());
+        // The flip experiment ended on 2026-08-22: futures-live trades what
+        // futures-lukas-live trades, in the same direction.
+        Assert.False(primary["Futures"]?["FlipLongEntries"]?.GetValue<bool>());
         Assert.False(lukas["Futures"]?["FlipLongEntries"]?.GetValue<bool>());
+
         Assert.Equal("futures-lukas-live", primary["EntryMirror"]?["FollowSourceBotInstanceId"]?.GetValue<string>());
         Assert.Equal("futures-live", lukas["EntryMirror"]?["PublishToBotInstanceId"]?.GetValue<string>());
-        Assert.True(primary["EntryMirror"]?["InvertSide"]?.GetValue<bool>());
-        Assert.True(lukas["EntryMirror"]?["InvertSide"]?.GetValue<bool>());
         Assert.Equal("futures-lukas-live", lukas["BotInstance"]?["Id"]?.GetValue<string>());
         Assert.Equal("Lukas live futures worker", lukas["BotInstance"]?["Name"]?.GetValue<string>());
 
+        // InvertSide is read on both sides of the mirror - the publisher decides the
+        // side it writes into the command, the follower decides the side it expects.
+        // Disagreeing does not half-work: every command is rejected as
+        // MIRROR_SIDE_MISMATCH and the mirror goes quiet instead of loud.
+        var publisherInverts = lukas["EntryMirror"]?["InvertSide"]?.GetValue<bool>();
+        var followerInverts = primary["EntryMirror"]?["InvertSide"]?.GetValue<bool>();
+        Assert.Equal(publisherInverts, followerInverts);
+        Assert.False(followerInverts);
+
         var normalizedLukas = lukas.DeepClone().AsObject();
         normalizedLukas["BotInstance"] = primary["BotInstance"]?.DeepClone();
-        normalizedLukas["Futures"]!["FlipLongEntries"] = true;
         normalizedLukas["EntryMirror"] = primary["EntryMirror"]?.DeepClone();
 
         Assert.True(JsonNode.DeepEquals(primary, normalizedLukas));
