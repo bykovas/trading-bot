@@ -43,20 +43,27 @@ public sealed class FuturesInstanceConfigurationTests
         // match, because a difference there is drift rather than a decision.
         var mayDiffer = new[]
         {
-            "OwnSignalEntriesEnabled",
-            "TargetMarginUsd", "MaxMarginPerPositionUsd",
-            "MaxNotionalUsd", "MaxTotalNotionalUsd",
-            "MaxPositions", "MaxConcurrentOpenRiskUsd",
+            ("Futures", "OwnSignalEntriesEnabled"),
+            ("Futures", "TargetMarginUsd"),
+            ("Futures", "MaxMarginPerPositionUsd"),
+            ("Futures", "MaxNotionalUsd"),
+            ("Futures", "MaxTotalNotionalUsd"),
+            ("Futures", "MaxPositions"),
+            // Staking lives in two sections: the notional caps under Futures and the
+            // money-at-risk that sizes into them under Risk. Allowing one without the
+            // other fails the moment an account is actually resized.
+            ("Risk", "TargetRiskUsd"),
+            ("Risk", "MaxConcurrentOpenRiskUsd"),
         };
 
         var normalizedLukas = lukas.DeepClone().AsObject();
         normalizedLukas["BotInstance"] = primary["BotInstance"]?.DeepClone();
         normalizedLukas["EntryMirror"] = primary["EntryMirror"]?.DeepClone();
-        foreach (var key in mayDiffer)
+        foreach (var (section, key) in mayDiffer)
         {
-            if (primary["Futures"]?[key] is not null)
+            if (primary[section]?[key] is not null)
             {
-                normalizedLukas["Futures"]![key] = primary["Futures"]![key]!.DeepClone();
+                normalizedLukas[section]![key] = primary[section]![key]!.DeepClone();
             }
         }
 

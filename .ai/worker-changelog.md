@@ -1,3 +1,11 @@
+## 2026-08-22-futures-live-stakes-ten-times
+
+- futures-live trades 150 USD of margin per position instead of 15. Leverage stays 10x and the position count stays 3, so a full book is 450 USD of margin against 1500 USD of notional per position. futures-lukas-live is unchanged at 15.
+- Every money knob moved together, in both sections that hold them: `TargetMarginUsd` and `MaxMarginPerPositionUsd` 15 to 150, `MaxNotionalUsd` 150 to 1500, `MaxTotalNotionalUsd` 450 to 4500, `Risk.TargetRiskUsd` 4.5 to 45 and `Risk.MaxConcurrentOpenRiskUsd` 13.5 to 135. Raising the margin caps alone would have left the risk-based sizer working to the old budget and quietly ignoring the new limit.
+- Which binds is unchanged: at a 2% stop the risk budget wants 2250 USD of notional and the notional cap holds it to 1500, exactly as 45 was held to 150 before. The account behaves the same, ten times larger.
+- The guard test's allow-list now spans both sections. It listed only the `Futures` keys, so the first real resize failed the build on `Risk.TargetRiskUsd` - the two are one setting split across two places.
+- No change to signal scoring, entry gates, exits, leverage or the mirror.
+
 ## 2026-08-22-immediate-ledger-read-on-cash-jump
 
 - Transfers were read from the futures account log every thirty minutes. That is fine for the daily figures but not for the live chart: a 560 USD deposit into futures-live landed at 19:16 and the page drew it as bot profit - "+1179% today" - because the split between the bot's work and a transfer can only be made once the ledger names the movement. The money itself was never missing; the balance had it immediately. What was missing was the record saying whose it was.
