@@ -32,9 +32,33 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.Equal(publisherInverts, followerInverts);
         Assert.False(followerInverts);
 
+        // futures-live is mirror-only: it opens nothing from its own signals and takes
+        // every entry from lukas. lukas trades his own and publishes them.
+        Assert.False(primary["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
+        Assert.True(lukas["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
+
+        // What the two accounts are allowed to disagree about: who they are, their
+        // role in the mirror, whether they act on their own signals, and how much
+        // they stake. Everything else - exits, gates, leverage, cooldowns - must
+        // match, because a difference there is drift rather than a decision.
+        var mayDiffer = new[]
+        {
+            "OwnSignalEntriesEnabled",
+            "TargetMarginUsd", "MaxMarginPerPositionUsd",
+            "MaxNotionalUsd", "MaxTotalNotionalUsd",
+            "MaxPositions", "MaxConcurrentOpenRiskUsd",
+        };
+
         var normalizedLukas = lukas.DeepClone().AsObject();
         normalizedLukas["BotInstance"] = primary["BotInstance"]?.DeepClone();
         normalizedLukas["EntryMirror"] = primary["EntryMirror"]?.DeepClone();
+        foreach (var key in mayDiffer)
+        {
+            if (primary["Futures"]?[key] is not null)
+            {
+                normalizedLukas["Futures"]![key] = primary["Futures"]![key]!.DeepClone();
+            }
+        }
 
         Assert.True(JsonNode.DeepEquals(primary, normalizedLukas));
     }

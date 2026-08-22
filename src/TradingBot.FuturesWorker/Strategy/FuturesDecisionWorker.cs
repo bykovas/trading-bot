@@ -60,7 +60,7 @@ internal sealed class FuturesDecisionWorker(
         {
             Console.WriteLine("!!! FUTURES LIVE TRADING ENABLED: approved decisions will place REAL Kraken Futures market orders !!!");
         }
-        Console.WriteLine($"futures limits: leverage<= {config.Futures.MaxLeverage:0.#}x, positions<= {config.Futures.MaxPositions}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flipLongEntries={config.Futures.FlipLongEntries}, mirrorRole={MirrorRole}");
+        Console.WriteLine($"futures limits: leverage<= {config.Futures.MaxLeverage:0.#}x, positions<= {config.Futures.MaxPositions}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flipLongEntries={config.Futures.FlipLongEntries}, ownSignalEntries={(config.Futures.OwnSignalEntriesEnabled ? "on" : "off (mirror only)")}, mirrorRole={MirrorRole}");
         Console.WriteLine($"futures exit checks: fastExit={config.Futures.FastExitCheckSeconds}s fullCycle={config.Worker.LoopIntervalSeconds}s");
         HydratePriceHistory();
 
@@ -175,6 +175,16 @@ internal sealed class FuturesDecisionWorker(
         foreach (var marketState in fullStates.Where(candidate => candidate.IsUsable))
         {
             var pair = marketState.Instrument.Pair;
+
+            // A mirror-only account considers nothing it does not already hold, so
+            // its entries can come from one place and one place only. Held pairs
+            // still fall through to the exit logic below: this gates entries, and
+            // an account that could not close what it opened would be a trap.
+            if (!config.Futures.OwnSignalEntriesEnabled && !heldPairs.Contains(pair))
+            {
+                continue;
+            }
+
             var markPrice = marketState.LastPrice;
             var indicators = indicatorEngine.Calculate(marketState.Candles, config.Strategy);
             var priceAction = _priceHistory.Assess(

@@ -1,3 +1,11 @@
+## 2026-08-22-futures-live-mirror-only
+
+- New `Futures.OwnSignalEntriesEnabled`, off on futures-live. That account now opens nothing from its own signals and takes every entry from the mirror. It was the other way round before: of its 82 entries only 9 came from the mirror and 73 from its own scoring.
+- The gate skips a pair the account does not already hold, before any indicator or risk work is done on it. Held pairs still fall all the way through to the exit logic - trailing, stop loss, max hold, score decay all keep working. An account that could not close what it opened would be a trap, and gating entries at the candidate stage rather than at the order stage keeps that impossible by construction.
+- Visible in two places: the startup line now reads `ownSignalEntries=off (mirror only)`, and the per-cycle decision count drops from about seventy to however many pairs are held, because the account genuinely stops considering the rest.
+- The staking knobs are now allowed to differ between the two accounts - `TargetMarginUsd`, `MaxMarginPerPositionUsd`, `MaxNotionalUsd`, `MaxTotalNotionalUsd`, `MaxPositions`, `MaxConcurrentOpenRiskUsd` - since the point of a mirror on a separate account is to size the same trade differently. Everything else must still match: exits, entry gates, leverage, cooldowns, blackout. The guard test enforces exactly that split, so a real drift still fails the build while a deliberate sizing change does not.
+- No change to signal scoring, exits, risk caps or the mirror protocol itself.
+
 ## 2026-08-22-end-the-flip-experiment
 
 - futures-live stops inverting. Two independent settings did it and both are now off: `Futures.FlipLongEntries`, which turned its own approved LONG signals into SHORTs, and `EntryMirror.InvertSide`, which flipped the entries mirrored from futures-lukas-live. Turning off only the first would have left the mirror inverted, which is most of what that account trades - 8 of its 9 mirrored entries were SHORT.

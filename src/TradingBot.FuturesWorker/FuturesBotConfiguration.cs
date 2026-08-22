@@ -89,6 +89,7 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_MAX_LEVERAGE", value => config.Futures.MaxLeverage = ParseDecimal(value, config.Futures.MaxLeverage));
         SetIfPresent("TRADINGBOT_FUTURES_DEFAULT_LEVERAGE", value => config.Futures.DefaultLeverage = ParseDecimal(value, config.Futures.DefaultLeverage));
         SetIfPresent("TRADINGBOT_FUTURES_BACKFILL_CLOSURE_DAYS", value => config.Futures.BackfillClosureDays = ParseInt(value, config.Futures.BackfillClosureDays));
+        SetIfPresent("TRADINGBOT_FUTURES_OWN_SIGNAL_ENTRIES_ENABLED", value => config.Futures.OwnSignalEntriesEnabled = ParseBool(value, config.Futures.OwnSignalEntriesEnabled));
         SetIfPresent("TRADINGBOT_FUTURES_MAX_POSITIONS", value => config.Futures.MaxPositions = ParseInt(value, config.Futures.MaxPositions));
         SetIfPresent("TRADINGBOT_FUTURES_ALLOW_SHORTS", value => config.Futures.AllowShorts = ParseBool(value, config.Futures.AllowShorts));
         SetIfPresent("TRADINGBOT_FUTURES_FLIP_LONG_ENTRIES", value => config.Futures.FlipLongEntries = ParseBool(value, config.Futures.FlipLongEntries));
@@ -554,6 +555,12 @@ internal sealed class FuturesOptions
     // Outside that regime the original LONG is preserved, so the gate changes side
     // selection rather than suppressing an otherwise approved trade.
     public bool FlipLongEntries { get; set; }
+
+    // Off makes the account mirror-only: it opens nothing from its own signals and
+    // trades exactly what the mirror source sends. Positions it already holds are
+    // still managed and closed as normal - this gates new entries, never exits,
+    // and an account that could not close what it opened would be a trap.
+    public bool OwnSignalEntriesEnabled { get; set; } = true;
     public decimal FlipMaxPair24hRisePercent { get; set; } = 3m;
     public decimal FlipMaxBtc24hRisePercent { get; set; } = 0m;
 
