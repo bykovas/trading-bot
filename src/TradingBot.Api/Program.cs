@@ -1953,19 +1953,41 @@ static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>>
     string timeZoneId,
     CancellationToken cancellationToken)
 {
+    // The journal alone cannot carry this. Positions the exchange closed before the
+    // worker learned to record such closures were never journalled, so their margin
+    // is never released and the running sum climbs without bound: it put
+    // futures-live at a peak of 79.93 on an account of about 50, with a cap of three
+    // positions at 15. Two corrections, both from observed state rather than guesses:
+    // a second open on a pair replaces the first, because an unobserved close must
+    // have happened in between; and a cycle that reports no open position value at
+    // all resets the held set, because the exchange saying the account is flat is
+    // proof that nothing is held.
     await using var command = new NpgsqlCommand(
         """
-        select
-            (cycle.utc at time zone @time_zone)::date as local_date,
-            action.pair,
-            action.action,
-            coalesce(action.actual_initial_margin_eur, action.requested_margin_eur, 0) as margin
-        from dry_run_actions action
-        join dry_run_cycle_facts cycle on cycle.cycle_id = action.cycle_id
-        where (@bot_instance_id is null or cycle.bot_instance_id = @bot_instance_id)
-          and action.action in ('WOULD_BUY', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT',
-                                'WOULD_SELL', 'WOULD_CLOSE')
-        order by cycle.utc, action.decision_index
+        select kind, local_date, pair, action, margin from (
+            select
+                'ACTION' as kind,
+                cycle.utc as utc,
+                cycle.bot_instance_id as bot_instance_id,
+                (cycle.utc at time zone @time_zone)::date as local_date,
+                action.pair as pair,
+                action.action as action,
+                coalesce(action.actual_initial_margin_eur, action.requested_margin_eur, 0) as margin,
+                action.decision_index as decision_index
+            from dry_run_actions action
+            join dry_run_cycle_facts cycle on cycle.cycle_id = action.cycle_id
+            where action.action in ('WOULD_BUY', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT',
+                                    'WOULD_SELL', 'WOULD_CLOSE')
+            union all
+            select 'FLAT', utc, bot_instance_id,
+                   (utc at time zone @time_zone)::date, '', '', 0, 0
+            from dry_run_cycle_facts
+            where positions_value_after_eur = 0
+              and not valuation_unsettled
+              and cycle_id not like '%-backfill'
+        ) event
+        where (@bot_instance_id is null or event.bot_instance_id = @bot_instance_id)
+        order by event.utc, event.decision_index
         """,
         connection);
     command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
@@ -1979,10 +2001,11 @@ static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>>
     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
     while (await reader.ReadAsync(cancellationToken))
     {
-        var date = reader.GetFieldValue<DateTime>(0).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var pair = reader.GetString(1);
-        var action = reader.GetString(2);
-        var margin = reader.GetDecimal(3);
+        var kind = reader.GetString(0);
+        var date = reader.GetFieldValue<DateTime>(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var pair = reader.GetString(2);
+        var action = reader.GetString(3);
+        var margin = reader.GetDecimal(4);
 
         if (date != currentDate)
         {
@@ -1994,22 +2017,20 @@ static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>>
             }
         }
 
-        if (action is "WOULD_BUY" or "WOULD_OPEN_LONG" or "WOULD_OPEN_SHORT")
+        if (kind == "FLAT")
         {
-            openMargin.TryGetValue(pair, out var existing);
-            openMargin[pair] = existing + margin;
-            held += margin;
+            openMargin.Clear();
+            held = 0m;
+        }
+        else if (action is "WOULD_BUY" or "WOULD_OPEN_LONG" or "WOULD_OPEN_SHORT")
+        {
+            openMargin[pair] = margin;
+            held = openMargin.Values.Sum();
         }
         else
         {
-            if (openMargin.Remove(pair, out var released))
-            {
-                held -= released;
-                if (held < 0m)
-                {
-                    held = 0m;
-                }
-            }
+            openMargin.Remove(pair);
+            held = openMargin.Values.Sum();
 
             var counted = byDate[date];
             byDate[date] = (counted.Peak, counted.Closed + 1);
