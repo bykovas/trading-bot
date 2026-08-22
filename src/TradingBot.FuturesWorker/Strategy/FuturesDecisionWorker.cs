@@ -2053,6 +2053,10 @@ internal sealed class FuturesDecisionWorker(
     // private calls, and the trading cycle must never wait on it.
     private static readonly TimeSpan CashEventSyncInterval = TimeSpan.FromMinutes(30);
 
+    // Bigger than any fee, funding payment or rounding the reconciliation produces on
+    // its own, small enough that a real transfer never slips under it.
+    private const decimal UnexplainedCashJumpUsd = 5m;
+
     // Re-read a generous window every time. The store dedupes on the exchange's own
     // entry id, so an overlap costs nothing and a missed sync heals itself.
     private static readonly TimeSpan CashEventSyncWindow = TimeSpan.FromDays(45);
@@ -2122,6 +2126,21 @@ internal sealed class FuturesDecisionWorker(
         var markByPair = lightStates.ToDictionary(state => state.Instrument.Pair, state => state.LastPrice, StringComparer.OrdinalIgnoreCase);
 
         var availableUsd = SumFuturesAvailableCollateralUsd(accounts);
+
+        // Cash that moved without a trade to explain it is a transfer, and the page
+        // cannot tell one from bot profit until the ledger says so. Waiting for the
+        // half-hourly sync meant a 560 dollar deposit was drawn as though the bot had
+        // earned it, "+1179% today", for up to thirty minutes. A jump this size is
+        // rare enough that fetching the ledger on the spot costs nothing.
+        var cashJump = Math.Abs(availableUsd - state.CashEur);
+        if (state.CashEur > 0m && cashJump >= UnexplainedCashJumpUsd)
+        {
+            Console.WriteLine(
+                $"futures-cash-jump: available collateral moved {availableUsd - state.CashEur:0.##} USD without a close; re-reading the account log");
+            _lastCashEventSync = DateTimeOffset.MinValue;
+            await SyncCashEventsAsync(utc, cancellationToken);
+        }
+
         state.CashEur = availableUsd;
         state.CashQuoteValue = availableUsd;
         state.CashQuoteCurrency = "USD";

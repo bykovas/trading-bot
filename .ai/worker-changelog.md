@@ -1,3 +1,10 @@
+## 2026-08-22-immediate-ledger-read-on-cash-jump
+
+- Transfers were read from the futures account log every thirty minutes. That is fine for the daily figures but not for the live chart: a 560 USD deposit into futures-live landed at 19:16 and the page drew it as bot profit - "+1179% today" - because the split between the bot's work and a transfer can only be made once the ledger names the movement. The money itself was never missing; the balance had it immediately. What was missing was the record saying whose it was.
+- The reconciliation now re-reads the ledger on the spot when available collateral moves by 5 USD or more without a position closing in the same cycle. Cash that moves without a trade to explain it is a transfer by definition, and a jump that size is rare enough that the extra history call costs nothing. The routine half-hourly sync is unchanged.
+- Threshold picked to sit above any fee, funding payment or reconciliation rounding the worker produces on its own, and well below any transfer a person would actually make.
+- No change to signal scoring, entry gates, sizing, leverage, exits or the mirror.
+
 ## 2026-08-22-futures-live-mirror-only
 
 - New `Futures.OwnSignalEntriesEnabled`, off on futures-live. That account now opens nothing from its own signals and takes every entry from the mirror. It was the other way round before: of its 82 entries only 9 came from the mirror and 73 from its own scoring.
