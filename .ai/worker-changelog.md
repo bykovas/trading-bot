@@ -1,3 +1,11 @@
+## 2026-08-22-hypothetical-scales-from-capital-used
+
+- The "if only we had known" card multiplied the whole portfolio by ten: 60 dollars became 600 and the best day's 18.54 became 185. That credited the result to money that was never in a position. On that day the bot held at most 44.98 of margin, and the 18.54 belongs to those 44.98.
+- It now answers a question that has an answer: the same day traded with 500 dollars of capital. Straight ratio, because position size is proportional to margin and the result is proportional to position size - 18.54 / 44.98 x 500 = 206. futures-lukas-live reads `500 $ → 706 $`, futures-live `500 $ → 582 $` off its own best day.
+- 500 is fixed rather than tied to the live balance, so the card says the same thing tomorrow as today and is not quietly restated every time money moves.
+- Losing best day keeps its own wording: a bigger stake on a day that lost is not a missed opportunity.
+- Page only. No worker behaviour touched.
+
 ## 2026-08-22-chart-legend-and-starting-capital
 
 - The chart's first blue bar was the starting capital and the first day's transfers in one body, while the headline counted only the transfers - the page showed 62.44 drawn and 2.44 written for futures-lukas-live, both correct answers to different questions. The capital now has its own darker blue and its own legend entry, and the headline names it: `rankiniai koregavimai +2,44 $ (+ 60,00 $ pradinio kapitalo)`.

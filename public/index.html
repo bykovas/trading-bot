@@ -1771,7 +1771,13 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     // day the bot earned it. The served copy stays as the fallback until a day
     // closes. Card 3 is the same best day at ten times the size — a hypothetical,
     // so it never takes a colour (§9b).
-    const HYPO_MULTIPLIER = 10;
+    // The hypothetical is scaled from the money that was actually at work, not from
+    // the portfolio. Ten times a 60 dollar account said nothing useful: the bot never
+    // had 60 in a position, it had 44.98, and the result belongs to that. Answering
+    // "what if the same day had been traded with 500" is a straight ratio, because
+    // position size is proportional to margin and the result is proportional to
+    // position size.
+    const HYPO_CAPITAL = 500;
 
     function fillDay(fromEl, toEl, sumEl, day, tail) {
       if (!fromEl || !day || !Number.isFinite(Number(day.open))) return;
@@ -1810,20 +1816,21 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
       fillDay(els.bestFrom, els.bestTo, els.bestS, best, " · geriausias rezultatas iki šiol");
 
-      if (best && els.hypoFrom) {
+      const used = best ? Number(best.peakMarginEur) : null;
+      if (best && els.hypoFrom && Number.isFinite(used) && used > 0) {
         // Muted throughout: this never happened, and §9b forbids dressing a
         // hypothetical like a realised figure.
-        // Whole dollars: cents on a sum that never existed are false precision, and
-        // the mock this replaces was whole-dollar too ("600 $ -> 900 $").
-        els.hypoFrom.textContent = money(Number(best.open) * HYPO_MULTIPLIER, 0);
-        els.hypoTo.textContent = money(Number(best.close) * HYPO_MULTIPLIER, 0);
+        // Whole dollars: cents on a sum that never existed are false precision.
+        const scaled = Number(best.botEur) * (HYPO_CAPITAL / used);
+        els.hypoFrom.textContent = money(HYPO_CAPITAL, 0);
+        els.hypoTo.textContent = money(HYPO_CAPITAL + scaled, 0);
         els.hypoS.textContent = lost
-          // Ten times a losing day is not a missed opportunity, and pretending to
-          // regret it would be the one dishonest line on the page.
-          ? `${signedMoney(Number(best.botEur) * HYPO_MULTIPLIER, 0)} · ta pati logika, tik nuliai. ` +
+          // A bigger stake on a losing day is not a missed opportunity, and
+          // pretending to regret it would be the one dishonest line on the page.
+          ? `${signedMoney(scaled, 0)} · ta pati logika, tik daugiau pinigų darbe. ` +
             "Šįkart gerai, kad nepasinaudojom…"
-          : `${signedMoney(Number(best.botEur) * HYPO_MULTIPLIER, 0)} · ta pati logika, tik nuliai, ` +
-            "botui nerūpi, su kokia suma dirba, o mes nepasinaudojom…";
+          : `${signedMoney(scaled, 0)} · ta pati logika, tik daugiau pinigų darbe. ` +
+            `Tądien dirbo ${money(used)}, botui nerūpi, kiek jų — o mes nepasinaudojom…`;
       }
 
       // One sentence for every case - it already says results vary, which is what a
