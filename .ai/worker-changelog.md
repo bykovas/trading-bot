@@ -1,3 +1,10 @@
+## 2026-08-22-chart-legend-and-starting-capital
+
+- The chart's first blue bar was the starting capital and the first day's transfers in one body, while the headline counted only the transfers - the page showed 62.44 drawn and 2.44 written for futures-lukas-live, both correct answers to different questions. The capital now has its own darker blue and its own legend entry, and the headline names it: `rankiniai koregavimai +2,44 $ (+ 60,00 $ pradinio kapitalo)`.
+- `Per N dienas botas` is measured against the live total, which already holds anything moved today, so subtracting only the closed days' adjustments credited the bot with a deposit the moment it landed: futures-live read `+534,36 botas (+1 036,2 %)` an hour after 560 dollars went in. Today's transfers are subtracted now too.
+- Legend entries renamed and cut to fit four on one row of a 375px phone: `Algo`, `Įnašai`, `Šiandien`, `Startas`. Spelled out the four need 358px against 343 available, so the third keeps its long form `Algo šiandien` where there is room and shortens on a phone - on a desktop the entry says which candle it names, on a phone the gold already says it.
+- Page only. No worker behaviour touched.
+
 ## 2026-08-22-futures-live-stakes-ten-times
 
 - futures-live trades 150 USD of margin per position instead of 15. Leverage stays 10x and the position count stays 3, so a full book is 450 USD of margin against 1500 USD of notional per position. futures-lukas-live is unchanged at 15.

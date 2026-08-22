@@ -198,6 +198,10 @@
 .bc-sq--today{background:#f5b84f}
 .bc-sq--today-dn{background:#12100b;box-shadow:inset 0 0 0 1.5px #f5b84f}
 .bc-sq--today svg,.bc-sq--today-dn svg{width:7px;height:7px}
+/* The capital the account began with. One square, not a pair: unlike a transfer it
+   has no direction - it is where the counting starts, and it happens once. */
+.bc-sq--start{background:var(--blue-deep)}
+.bc-lg-w{display:inline} .bc-lg-n{display:none}
 .bc-sq--dep{background:var(--blue)} .bc-sq--wdr{background:var(--blue-deep);box-shadow:inset 0 0 0 1.5px var(--blue)}
 .bc-chart{margin-top:16px}
 .bc-chart-svg{display:block;overflow:visible}
@@ -399,10 +403,15 @@
   /* Three entries need 379px and a 375px phone offers 343, so they wrapped to a
      second row. Trimmed rather than shortened: the words are the labels, and
      "Pervedimai" cannot be abbreviated without inventing jargon. */
-  .bc-legend-row{justify-content:flex-start;gap:5px}
-  .bc-legend-row .bc-lg{padding:0 8px;gap:5px;font-size:11px}
-  .bc-legend-row .bc-sq{width:12px;height:12px}
+  .bc-legend-row{justify-content:flex-start;gap:4px}
+  .bc-legend-row .bc-lg{padding:0 6px;gap:4px;font-size:11px}
+  .bc-legend-row .bc-sq{width:10px;height:10px}
   .bc-legend-row .bc-sq-pair{gap:2px}
+  /* Four entries need 350px spelled out and a 375px phone offers 343. The long form
+     is kept where there is room rather than shortened everywhere: on a desktop the
+     entry says which candle it names, on a phone the gold already says it. */
+  .bc-lg-w{display:none}
+  .bc-lg-n{display:inline}
   .bc-live-head{flex-direction:column;gap:0}
   .bc-metrics{grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid rgba(246,218,160,.12);border-radius:10px;overflow:hidden}
   .bc-metric{padding:12px 13px}
@@ -808,9 +817,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <div class="bc-legend">
           <p class="bc-legend-l" id="bcChartCaption">Grafikas — 30 uždarytų dienų<br>(šiandiena dar neįskaityta)</p>
           <div class="bc-legend-row">
-            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span></span>Algo Bot</span>
-            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--dep"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#0e2a48"/></svg></span><span class="bc-sq bc-sq--wdr"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#6faeff"/></svg></span></span>Pervedimai</span>
-            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--today"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#12100b"/></svg></span><span class="bc-sq bc-sq--today-dn"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#f5b84f"/></svg></span></span>Šiandien</span>
+            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span></span>Algo</span>
+            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--dep"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#0e2a48"/></svg></span><span class="bc-sq bc-sq--wdr"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#6faeff"/></svg></span></span>Įnašai</span>
+            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--today"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#12100b"/></svg></span><span class="bc-sq bc-sq--today-dn"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#f5b84f"/></svg></span></span><span class="bc-lg-w">Algo šiandien</span><span class="bc-lg-n">Šiandien</span></span>
+              <span class="bc-lg"><span class="bc-sq bc-sq--start"></span>Startas</span>
               <span class="bc-lg" id="bcLegendGap" hidden><span class="bc-sq bc-sq--gap"></span>Trūksta duomenų</span>
           </div>
         </div>
@@ -1398,12 +1408,18 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           // The rest of the opening value is a balance carried over from before the
           // series starts - painting that blue would credit the hands with money the
           // bot had already been trading, and it pins the axis to zero for no reason.
-          const carried = open - (Number(day.preWindowEur) || 0);
-          const handsIn = (Number(day.preWindowEur) || 0) + moved;
+          const started = Number(day.preWindowEur) || 0;
+          const carried = open - started;
+          // Two different things were one blue bar. The capital the account began with
+          // is not a transfer into a running account - the bot's result is measured
+          // from it, and the headline says so - so it gets its own darker blue and the
+          // day's actual transfers keep theirs, stacked above it.
+          const afterOpening = carried + started;
           columns.push({
-            date: day.date, opening: true, open: carried, close, moved: handsIn,
-            manual: handsIn ? { from: carried, to: carried + handsIn, amount: handsIn } : null,
-            bot: { from: carried + handsIn, to: close }
+            date: day.date, opening: true, open: carried, close, moved: started + moved,
+            capital: started ? { from: carried, to: afterOpening, amount: started } : null,
+            manual: moved ? { from: afterOpening, to: afterOpening + moved, amount: moved } : null,
+            bot: { from: afterOpening + moved, to: close }
           });
           return;
         }
@@ -1446,6 +1462,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const values = [];
       columns.forEach(column => {
         if (column.bot) values.push(column.bot.from, column.bot.to);
+        if (column.capital) values.push(column.capital.from, column.capital.to);
         if (column.manual) values.push(column.manual.from, column.manual.to);
         if (column.gap) values.push(column.gap.from, column.gap.to);
       });
@@ -1502,6 +1519,9 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         if (column.bot) {
           out.push(bar(x, spec.candleWidth, column.bot.from, column.bot.to,
             column.bot.to >= column.bot.from ? "#41eda0" : "#ff5367", ""));
+        }
+        if (column.capital) {
+          out.push(bar(x, spec.flowWidth, column.capital.from, column.capital.to, "#2f5d8a", ""));
         }
         if (column.manual) {
           // Filled for money in, hollow for money out - the legend's own convention.
@@ -1893,7 +1913,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         // the page shows 62,44 on the chart and 2,44 in the text.
         const opening = days.reduce((sum, day) => sum + (Number(day.preWindowEur) || 0), 0);
         const openingText = opening
-          ? ` <span class="bc-t-soft">(be ${esc(money(opening))} pradinio kapitalo)</span>`
+          ? ` <span class="bc-t-soft">(+ ${esc(money(opening))} pradinio kapitalo)</span>`
           : "";
         const manualText = manual || opening
           ? ` · rankiniai koregavimai <i>${esc(signedMoney(manual))}</i>${openingText}`
