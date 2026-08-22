@@ -282,6 +282,9 @@
 .bc-proof-fine{margin-top:8px;font:11.5px/1.5 var(--font-mono);color:var(--muted-3);text-wrap:pretty}
 /* Card 2 is a hypothetical, so its figures must not borrow the profit colour. */
 .bc-proof-n--hypo .bc-from,.bc-proof-n--hypo .bc-arrow{color:var(--muted-3)}
+/* The money that was at work keeps the amber it had when it read "Iš 44,98 $" on the
+   line below. It moved to the headline, not to a different meaning. */
+.bc-from--used{color:var(--amber)}
 .bc-proof-n--hypo .bc-to{color:var(--muted)}
 .bc-proof-l--hypo{color:var(--muted-4)}
 .bc-fn-mark{color:var(--gold);text-decoration:none}
@@ -1800,6 +1803,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const trades = Number(day.closedTrades) || 0;
       const tradesText = trades > 0 ? ` (${esc(num(trades, 0))} ${esc(tradesWord(trades))})` : tail;
 
+      fromEl.classList.toggle("bc-from--used", !!onCapital);
       if (onCapital) {
         fromEl.textContent = money(used);
         toEl.textContent = money(used + bot);
