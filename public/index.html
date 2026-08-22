@@ -1806,7 +1806,14 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         sumEl.innerHTML =
           `<b class="${bot < 0 ? "bc-t-red" : ""}">${esc(signedMoney(bot))}</b> · ` +
           `${esc(signedPercent(day.marginPercent, 1))}${tradesText}`;
-        return `Portfelis ${money(day.open)} → ${money(day.close)}`;
+        // day.close here is the opening plus the bot's result - the transfers are
+        // deliberately left out of it, the way every figure on this card is. Calling
+        // that "portfelis" was a lie the moment a deposit landed: the account really
+        // went 46,93 to 600,53 that day, and the card said 38,55.
+        const moved = Number(day.manualAdjustmentEur) || 0;
+        return moved
+          ? `Portfelis be įnašų ${money(day.open)} → ${money(day.close)}`
+          : `Portfelis ${money(day.open)} → ${money(day.close)}`;
       }
 
       fromEl.textContent = money(day.open);
