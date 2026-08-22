@@ -1201,9 +1201,14 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     // ---- status ---------------------------------------------------------
     // Green under two minutes, amber while data goes stale, red once the
     // worker is effectively down (or has never reported).
+    // The worker loops every 120s and a cycle itself takes another 8-10s, so cycles
+    // land 128-130s apart. A 120s threshold was therefore below the normal period:
+    // the page flipped to "pasenę" for the last seconds of every single cycle while
+    // nothing was wrong. 200s clears the real cadence with room for jitter and still
+    // catches a genuinely missed cycle, which lands at ~260s.
     function health(ageSeconds) {
       if (!Number.isFinite(Number(ageSeconds))) return "down";
-      if (ageSeconds <= 120) return "ok";
+      if (ageSeconds <= 200) return "ok";
       if (ageSeconds <= 600) return "stale";
       return "down";
     }
