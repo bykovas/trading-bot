@@ -1661,8 +1661,18 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // Green is for a realised gain only; a losing day says so in red.
       toEl.classList.toggle("is-realised", bot > 0);
       toEl.classList.toggle("is-loss", bot < 0);
-      sumEl.innerHTML = `<b class="${bot < 0 ? "bc-t-red" : ""}">${esc(signedMoney(bot))}</b> · ` +
-        `${esc(signedPercent(day.botPercent, 1))}${tail}`;
+      // Against the money actually at work, not the portfolio. An account holding
+      // 60 that only ever committed 15 did not make 31% on its capital; it made
+      // 124% on the part it used, and the smaller number is the flattering one.
+      // Falls back to the portfolio figure on a day with nothing open.
+      const used = Number(day.peakMarginEur);
+      const onCapital = used > 0 && Number.isFinite(Number(day.marginPercent));
+      const lead = onCapital ? `Iš <span class="bc-t-amber">${esc(money(used))}</span> → ` : "";
+      const trades = Number(day.closedTrades) || 0;
+      const suffix = trades > 0 ? ` (${esc(num(trades, 0))} ${esc(tradesWord(trades))})` : tail;
+      sumEl.innerHTML = lead +
+        `<b class="${bot < 0 ? "bc-t-red" : ""}">${esc(signedMoney(bot))}</b> · ` +
+        `${esc(signedPercent(onCapital ? day.marginPercent : day.botPercent, 1))}${suffix}`;
     }
 
     function renderProof(equity) {

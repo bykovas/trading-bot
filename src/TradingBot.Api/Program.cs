@@ -1936,6 +1936,95 @@ static async Task EnsureDailyEquityTable(NpgsqlConnection connection, Cancellati
     await unsettled.ExecuteNonQueryAsync(cancellationToken);
 }
 
+// How much money the bot actually had at work on each local day, and how many
+// trades it closed there.
+//
+// The percentage a day earned is meaningless against the portfolio: an account
+// holding 60 USD that only ever committed 15 to a position did not make 30% on its
+// capital, it made 124% on the part it used. The figure that belongs under the day
+// is the peak of the margin held at once - three positions of 15 alive together are
+// 45, the same three one after another are 15.
+//
+// Positions outlive days, so this walks the whole action history in order and
+// carries the open set across midnight rather than resetting it.
+static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>> ReadDailyTradingLoad(
+    NpgsqlConnection connection,
+    string? botInstanceId,
+    string timeZoneId,
+    CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand(
+        """
+        select
+            (cycle.utc at time zone @time_zone)::date as local_date,
+            action.pair,
+            action.action,
+            coalesce(action.actual_initial_margin_eur, action.requested_margin_eur, 0) as margin
+        from dry_run_actions action
+        join dry_run_cycle_facts cycle on cycle.cycle_id = action.cycle_id
+        where (@bot_instance_id is null or cycle.bot_instance_id = @bot_instance_id)
+          and action.action in ('WOULD_BUY', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT',
+                                'WOULD_SELL', 'WOULD_CLOSE')
+        order by cycle.utc, action.decision_index
+        """,
+        connection);
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
+    command.Parameters.Add("time_zone", NpgsqlDbType.Text).Value = timeZoneId;
+
+    var byDate = new Dictionary<string, (decimal Peak, int Closed)>();
+    var openMargin = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+    var held = 0m;
+    string? currentDate = null;
+
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    while (await reader.ReadAsync(cancellationToken))
+    {
+        var date = reader.GetFieldValue<DateTime>(0).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var pair = reader.GetString(1);
+        var action = reader.GetString(2);
+        var margin = reader.GetDecimal(3);
+
+        if (date != currentDate)
+        {
+            currentDate = date;
+            // A day starts owing whatever was still open at midnight.
+            if (!byDate.ContainsKey(date))
+            {
+                byDate[date] = (held, 0);
+            }
+        }
+
+        if (action is "WOULD_BUY" or "WOULD_OPEN_LONG" or "WOULD_OPEN_SHORT")
+        {
+            openMargin.TryGetValue(pair, out var existing);
+            openMargin[pair] = existing + margin;
+            held += margin;
+        }
+        else
+        {
+            if (openMargin.Remove(pair, out var released))
+            {
+                held -= released;
+                if (held < 0m)
+                {
+                    held = 0m;
+                }
+            }
+
+            var counted = byDate[date];
+            byDate[date] = (counted.Peak, counted.Closed + 1);
+        }
+
+        var current = byDate[date];
+        if (held > current.Peak)
+        {
+            byDate[date] = (held, current.Closed);
+        }
+    }
+
+    return byDate.ToDictionary(entry => entry.Key, entry => (entry.Value.Peak, entry.Value.Closed));
+}
+
 // Written by the workers from the exchange ledger; declared here too so the
 // dashboard keeps working on a database where no worker has synced yet.
 static async Task EnsureCashEventsTable(NpgsqlConnection connection, CancellationToken cancellationToken)
@@ -2312,14 +2401,19 @@ static async Task<DashboardEquityDto> ReadEquityDays(
 
     closed.Reverse();
 
+    var load = await ReadDailyTradingLoad(connection, botInstanceId, timeZoneId, cancellationToken);
+
     // What the bot did, with money you moved taken out: a day that received a
     // deposit is not a day the bot earned it.
-    static DashboardDayResultDto? Result(DashboardEquityDayDto? day)
+    DashboardDayResultDto? Result(DashboardEquityDayDto? day)
     {
         if (day is null || day.Open <= 0m) return null;
         var bot = day.Close - day.Open - day.ManualAdjustmentEur;
+        load.TryGetValue(day.Date, out var used);
+        var peak = used.PeakMarginEur > 0m ? used.PeakMarginEur : (decimal?)null;
         return new DashboardDayResultDto(
-            day.Date, day.Open, day.Open + bot, day.ManualAdjustmentEur, bot, bot / day.Open * 100m);
+            day.Date, day.Open, day.Open + bot, day.ManualAdjustmentEur, bot, bot / day.Open * 100m,
+            peak, peak is null ? null : bot / peak.Value * 100m, used.ClosedTrades);
     }
 
     var drawdown = await ReadMaxDrawdownPercent(connection, botInstanceId, days, cancellationToken);
@@ -3440,7 +3534,15 @@ internal sealed record DashboardDayResultDto(
     decimal Close,
     decimal ManualAdjustmentEur,
     decimal BotEur,
-    decimal BotPercent);
+    decimal BotPercent,
+    // The most margin the bot held at once that day, and what the day's result is
+    // against it. Percent of the portfolio flatters a day the bot barely traded:
+    // the same +18.54 is 31% of a 60 USD account and 124% of the 15 it actually
+    // committed. Null when nothing was open, which leaves the page on the portfolio
+    // figure rather than dividing by zero.
+    decimal? PeakMarginEur,
+    decimal? MarginPercent,
+    int ClosedTrades);
 
 internal sealed record DashboardTradeDto(
     DateTime Utc,
