@@ -2348,7 +2348,7 @@ static async Task<DashboardEquityDto> ReadEquityDays(
     {
         // The curve is per account; without one there is nothing meaningful to plot.
         return new DashboardEquityDto(
-            timeZoneId, todayLocal, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null, 0m);
+            timeZoneId, todayLocal, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null, 0m, 0m);
     }
 
     // "create table if not exists" is cheap but not free: it is a DDL round trip on
@@ -2465,7 +2465,31 @@ static async Task<DashboardEquityDto> ReadEquityDays(
         true,
         yesterday,
         best,
-        drawdown);
+        drawdown,
+        await ReadTodayCashMovement(connection, botInstanceId, timeZoneId, cancellationToken));
+}
+
+// Everything moved on the current local day. Unlike the closed days there is no
+// window to sit inside: the day opens where yesterday closed, so anything that
+// arrives today is a transfer against that opening, whenever it landed.
+static async Task<decimal> ReadTodayCashMovement(
+    NpgsqlConnection connection,
+    string? botInstanceId,
+    string timeZoneId,
+    CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand(
+        """
+        select coalesce(sum(amount), 0)
+        from portfolio_cash_events
+        where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
+          and (occurred_at at time zone @time_zone)::date = (now() at time zone @time_zone)::date
+        """,
+        connection);
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
+    command.Parameters.Add("time_zone", NpgsqlDbType.Text).Value = timeZoneId;
+    var value = await command.ExecuteScalarAsync(cancellationToken);
+    return value is decimal amount ? decimal.Round(amount, 8) : 0m;
 }
 
 static async Task<DashboardTodayDto> ReadTodayTrades(
@@ -3556,10 +3580,15 @@ internal sealed record DashboardEquityDto(
     bool ManualAdjustmentsTracked,
     DashboardDayResultDto? Yesterday,
     DashboardDayResultDto? BestDay,
-    decimal MaxDrawdownPercent)
+    decimal MaxDrawdownPercent,
+    // Money moved today, while the day is still open. The closed days carry their own
+    // figure and the chart splits them into a bot part and a transfer part; without
+    // this the day in progress could not be split the same way, and a deposit landing
+    // now would be drawn as though the bot had earned it.
+    decimal TodayManualEur)
 {
     public static DashboardEquityDto Empty() =>
-        new("Europe/Vilnius", string.Empty, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null, 0m);
+        new("Europe/Vilnius", string.Empty, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null, 0m, 0m);
 }
 
 // One day's result with money movement stripped out: Close is where the day would

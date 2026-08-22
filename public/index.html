@@ -1449,7 +1449,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         if (column.manual) values.push(column.manual.from, column.manual.to);
         if (column.gap) values.push(column.gap.from, column.gap.to);
       });
-      if (today) values.push(today.from, today.to);
+      if (today) {
+        values.push(today.bot.from, today.bot.to);
+        if (today.manual) values.push(today.manual.from, today.manual.to);
+      }
       const finite = values.filter(Number.isFinite);
       if (!finite.length) return "";
 
@@ -1464,7 +1467,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // few days before the scale has to move. It never clips: a past day taller than
       // that raises the ceiling instead.
       const min = Math.min(0, ...finite);
-      const headroom = today && Number.isFinite(today.to) ? Math.abs(today.to) * 1.2 : 0;
+      const liveTotal = today ? (today.manual ? today.manual.to : today.bot.to) : null;
+      const headroom = Number.isFinite(liveTotal) ? Math.abs(liveTotal) * 1.2 : 0;
       let max = Math.max(headroom, ...finite);
       if (max <= min) max = min + 1;
       const y = (value) => spec.top + (max - Number(value)) / (max - min) * (spec.bottom - spec.top);
@@ -1522,11 +1526,20 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           out.push(`<text x="${(dividerX - 6).toFixed(2)}" y="18" fill="#f5b84f" font-family="IBM Plex Mono, monospace" font-size="10" font-weight="600" letter-spacing="1.4" text-anchor="end">ŠIANDIEN →</text>`);
         }
         // Filled up, hollow down - the same notation the transfers already use, so
-        // the third colour adds a subject and not a second thing to learn.
-        const up = today.to >= today.from;
-        out.push(bar(centre(columns.length), spec.candleWidth, today.from, today.to,
+        // the third colour adds a subject and not a second thing to learn. The
+        // transfer part keeps the blue it has everywhere else: what changed today is
+        // whose day it is, not what a deposit is.
+        const x = centre(columns.length);
+        const up = today.bot.to >= today.bot.from;
+        out.push(bar(x, spec.candleWidth, today.bot.from, today.bot.to,
           up ? "#f5b84f" : "#12100b",
           up ? "" : ' stroke="#f5b84f" stroke-width="1.6"'));
+        if (today.manual) {
+          const paidIn = today.manual.amount >= 0;
+          out.push(bar(x, spec.flowWidth, today.manual.from, today.manual.to,
+            paidIn ? "#6faeff" : "#12100b",
+            paidIn ? "" : ' stroke="#6faeff" stroke-width="1.6"'));
+        }
       }
 
       // One date label per day, centred over that day's columns.
@@ -1677,12 +1690,19 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const liveValue = data.summary ? Number(data.summary.totalValueEur) : null;
       const columns = buildColumns(days);
       // Today opens where the last closed day ended, by the same chaining rule the
-      // closed series uses, so no money falls into the gap between them. It is one
-      // body and not two: today's transfers are not split out anywhere yet, so the
-      // candle is labelled "šiandien" rather than claimed for the bot.
+      // closed series uses, so no money falls into the gap between them - and it is
+      // split the same way too: what the bot did, then what a hand moved, stacked on
+      // top. Without the split a deposit landing today would be drawn as though the
+      // bot had earned it, which is the one thing this chart exists not to do.
       const lastClose = days.length ? Number(days[days.length - 1].close) : null;
+      const movedToday = Number(data.equity && data.equity.todayManualEur) || 0;
       const today = Number.isFinite(lastClose) && Number.isFinite(liveValue)
-        ? { from: lastClose, to: liveValue }
+        ? {
+            bot: { from: lastClose, to: liveValue - movedToday },
+            manual: movedToday
+              ? { from: liveValue - movedToday, to: liveValue, amount: movedToday }
+              : null
+          }
         : null;
       chartSegments = columns;
       hideChartTip();
