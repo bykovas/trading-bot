@@ -1509,9 +1509,17 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
       // Bodies only, no wicks: the stored high and low belong to the day as a whole,
       // transfer included, so hanging them off one part would be inventing a range.
-      const bar = (x, width, from, to, fill, stroke) => {
+      const bar = (x, width, from, to, fill, strokeColour) => {
         const top = y(Math.max(from, to));
-        const height = Math.max(1.5, Math.abs(y(from) - y(to)));
+        // An outlined body needs room for its own outline. A 0,27 loss on a 600
+        // account is 1.5px tall, the stroke is 1.6px, and the two edges met in the
+        // middle: the hollow candle that means "down" was painted solid gold and read
+        // as a gain. Outlined bodies get enough height to show a dark centre; filled
+        // ones keep the smaller floor, since nothing about them is ambiguous.
+        const height = Math.max(strokeColour ? 4.5 : 1.5, Math.abs(y(from) - y(to)));
+        const stroke = strokeColour
+          ? ` stroke="${strokeColour}" stroke-width="${Math.min(1.6, height / 3).toFixed(2)}"`
+          : "";
         // Square corners. The handoff rounded the bodies by 2px, but a flat day is
         // only 1.5px tall and the radius swallowed it whole, turning half of August
         // into a row of pills.
@@ -1522,20 +1530,20 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         const x = centre(index);
         if (column.bot) {
           out.push(bar(x, spec.candleWidth, column.bot.from, column.bot.to,
-            column.bot.to >= column.bot.from ? "#41eda0" : "#ff5367", ""));
+            column.bot.to >= column.bot.from ? "#41eda0" : "#ff5367", null));
         }
         if (column.capital) {
-          out.push(bar(x, spec.flowWidth, column.capital.from, column.capital.to, "#2f5d8a", ""));
+          out.push(bar(x, spec.flowWidth, column.capital.from, column.capital.to, "#2f5d8a", null));
         }
         if (column.manual) {
           // Filled for money in, hollow for money out - the legend's own convention.
           const paidIn = column.manual.amount >= 0;
           out.push(bar(x, spec.flowWidth, column.manual.from, column.manual.to,
             paidIn ? "#6faeff" : "#12100b",
-            paidIn ? "" : ' stroke="#6faeff" stroke-width="1.6"'));
+            paidIn ? null : "#6faeff"));
         }
         if (column.gap) {
-          out.push(bar(x, spec.flowWidth, column.gap.from, column.gap.to, "#7a7367", ""));
+          out.push(bar(x, spec.flowWidth, column.gap.from, column.gap.to, "#7a7367", null));
         }
       });
 
@@ -1557,12 +1565,12 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         const up = today.bot.to >= today.bot.from;
         out.push(bar(x, spec.candleWidth, today.bot.from, today.bot.to,
           up ? "#f5b84f" : "#12100b",
-          up ? "" : ' stroke="#f5b84f" stroke-width="1.6"'));
+          up ? null : "#f5b84f"));
         if (today.manual) {
           const paidIn = today.manual.amount >= 0;
           out.push(bar(x, spec.flowWidth, today.manual.from, today.manual.to,
             paidIn ? "#6faeff" : "#12100b",
-            paidIn ? "" : ' stroke="#6faeff" stroke-width="1.6"'));
+            paidIn ? null : "#6faeff"));
         }
       }
 
