@@ -7,21 +7,41 @@ live accounts have produced so far.
 
 ## Where it lives
 
-Its own database, `tradingbot_research`, on the same Postgres instance as the
-trading database. The reasoning is in the header of `kraken-research-schema.sql`:
-`tradingbot` is 18 GB of live journal driving real money, this is bulk import with
-different retention and a need to be droppable. Same instance means nothing extra
-to run or back up, and `postgres_fdw` can still bridge the two if a query ever
-needs both.
+A local Postgres in Docker, `bykovas-pg`, with its files on the external disk:
 
-On the VPS the scripts sit in `/opt/research/kraken-dump/`.
+    /Volumes/FileDepot/bykovas-pg-data     the cluster
+    localhost:55432                        user bykovas, database bykovas-pg
+    schema kraken                          candles, instruments, dump_progress
+
+The database name is deliberately generic: the next dataset gets a schema beside
+this one rather than a database of its own. `drop schema kraken cascade` removes
+everything here.
+
+It runs locally rather than on the VPS because the full set is 75 GB and the VPS
+had 95 GB free with a live trading database sharing the disk. The external volume
+has 646 GB free after the load.
+
+An earlier 15m-only copy still sits in `tradingbot_research` on the VPS with the
+tables unqualified (`kraken_candles` rather than `kraken.candles`); the analysis
+scripts still point there.
 
 ## Usage
 
-    ./kraken-dump.py --plan --resolution 15m         # what it would fetch, no writes
-    ./kraken-dump.py --resolution 15m                # every tradeable perpetual
-    ./kraken-dump.py --resolution 1h --symbols PF_XBTUSD,PF_ETHUSD
-    ./kraken-dump.py --resolution 5m --limit-symbols 5
+    tools/db/dump-all-resolutions.sh                 # 4h, 1h, 15m, 5m, 1m in order
+
+    tools/db/kraken-dump.py --plan --resolution 15m  # what it would fetch, no writes
+    tools/db/kraken-dump.py \
+      --container bykovas-pg --user bykovas --database bykovas-pg \
+      --resolution 15m --from 2025-01-01 --workers 6 \
+      --disk-path /Volumes/FileDepot \
+      --symbols-file tools/db/kraken-futures-registry-symbols.txt
+
+`--symbols-file` replaces the registry read for a machine with no trading database
+next to it; the snapshot in this directory ages, so refresh it from
+`instrument_registry` when a run should pick up perps delisted since.
+
+`--workers` overlaps different symbols. Paging within one symbol stays sequential
+because each request's cursor comes from the previous page.
 
 Resumable: every page advances a cursor in `kraken_dump_progress`, so a run that is
 killed continues where it stopped. Re-running a finished series costs zero requests.
@@ -31,14 +51,23 @@ trading database shares, and `--max-requests` caps a single run.
 
 ## Scale, measured
 
-| resolution | requests | candles | wall clock | database |
-|---|---|---|---|---|
-| 1h | ~3 000 | ~6.0M | ~14 min | ~2 GB |
-| 15m | ~11 600 | ~23.2M | ~52 min | ~8 GB |
-| 5m | ~34 500 | ~69.0M | ~155 min | ~24 GB |
+The full local load, 308 perpetuals from 2025-01-01, six workers:
 
-285 tradeable perpetuals, history back to 2022-03-23 for the oldest. Sizes are
-extrapolated from a measured 349 bytes per candle including both indexes.
+| resolution | candles | wall clock |
+|---|---|---|
+| 4h | 981 256 | 55 s |
+| 1h | 3 916 561 | 3 min |
+| 15m | 15 630 938 | 22 min |
+| 5m | 46 655 099 | 1 h 43 |
+| 1m | 232 754 490 | 8 h |
+
+75 GB on disk for all five. Kraken serves every resolution back to 2022-03-23, so
+a deeper window is available at proportional cost.
+
+Two things made this feasible. Writes are batched per 200 000 rows instead of one
+`psql` process per page — that process cost about 0.65 s against 0.12-0.8 s of
+actual network, so the writer, not Kraken, was most of the wall clock. And symbols
+are fetched in parallel, which took the rate from 1 page/s to 15.6.
 
 ## What is dumped
 
@@ -55,8 +84,12 @@ built from the live list alone is survivorship-biased, and the perps that vanish
 are disproportionately the ones that collapsed - exactly the behaviour a strategy
 has to survive. `--skip-delisted` opts out.
 
-The 14 dated futures are excluded by default: they carry expiry and basis behaviour
-that does not belong in a perpetual backtest.
+Dated futures are excluded, but type alone does not identify them: Kraken labels
+eight `FF_` contracts `flexible_futures` exactly as it labels the perpetuals, so
+they came through the type filter and sat in the dataset looking like perps until
+the pair counts were reconciled. The `PF_` prefix is what actually marks one. The
+eight already loaded are kept but relabelled `fixed_futures`, so a query joining
+`kraken.instruments` filters them out.
 
 `trade` is the feed that actually printed. `mark` is a separate series for the same
 symbol, priced for liquidations; pass `--feed mark` if that is ever needed, and it

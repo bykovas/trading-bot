@@ -1,19 +1,19 @@
 -- Historical Kraken Futures data for research: funnel width experiments, backtests,
 -- and anything that needs more past than the live bot keeps.
 --
--- This belongs in its own database, not in `tradingbot`. The trading database is
--- 18 GB of live journal that drives real money; this is a few gigabytes of bulk
--- import with completely different retention, vacuum and backup needs, and it must
--- be droppable and rebuildable without anyone thinking twice. Same Postgres
--- instance, so there is nothing extra to run, monitor or back up:
+-- It lives in a plain `research` database under its own `kraken` schema, so the
+-- database stays generic and the next dataset gets a schema beside this one rather
+-- than a database of its own. Everything here can be dropped with one statement:
 --
---   docker exec trading-bot-db psql -U tradingbot -d postgres \
---     -c "create database tradingbot_research"
+--   drop schema kraken cascade;
 --
--- Reaching across to the live journal later is still possible with postgres_fdw or
--- a dump; the separation costs nothing and buys a clean blast radius.
+-- It is deliberately not in the trading database. That one is 18 GB of live journal
+-- driving real money; this is bulk import with completely different retention and
+-- vacuum needs that has to be rebuildable without anyone thinking twice.
 
-create table if not exists kraken_instruments (
+create schema if not exists kraken;
+
+create table if not exists kraken.instruments (
     symbol text primary key,
     pair text not null,
     base text,
@@ -29,7 +29,7 @@ create table if not exists kraken_instruments (
     fetched_at timestamptz not null default now()
 );
 
-create table if not exists kraken_candles (
+create table if not exists kraken.candles (
     symbol text not null,
     -- Kraken serves three separate series per symbol. `trade` is what actually
     -- printed, `mark` is what liquidations are priced off. They differ, and a
@@ -47,12 +47,12 @@ create table if not exists kraken_candles (
 
 -- Cross-symbol scans by time are the whole point of this table: "what did all 285
 -- perps do in this window". The primary key leads with symbol and cannot serve that.
-create index if not exists ix_kraken_candles_slice
-    on kraken_candles (feed, resolution, open_time, symbol);
+create index if not exists ix_candles_slice
+    on kraken.candles (feed, resolution, open_time, symbol);
 
 -- One row per series being dumped, so a run that dies halfway resumes instead of
 -- starting over. 285 symbols x ~77 pages is not something to repeat by accident.
-create table if not exists kraken_dump_progress (
+create table if not exists kraken.dump_progress (
     symbol text not null,
     feed text not null,
     resolution text not null,
@@ -69,7 +69,7 @@ create table if not exists kraken_dump_progress (
 );
 
 -- Coverage at a glance: what is loaded, how deep, and what is still missing.
-create or replace view kraken_dump_coverage as
+create or replace view kraken.dump_coverage as
 select
     progress.resolution,
     progress.feed,
@@ -78,5 +78,5 @@ select
     sum(progress.candle_count) as candles,
     min(progress.earliest_open_time) as earliest,
     max(progress.latest_open_time) as latest
-from kraken_dump_progress progress
+from kraken.dump_progress progress
 group by progress.resolution, progress.feed;
