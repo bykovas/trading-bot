@@ -1871,7 +1871,12 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       }
 
       const first = days.length ? Number(days[0].open) : null;
-      const manual = Number(data.equity && data.equity.manualAdjustmentEur) || 0;
+      // Closed days and today both. The figure below is measured against the live
+      // total, which already holds anything moved today, so leaving today out
+      // credited the bot with it: futures-live read "+534,36 botas" an hour after a
+      // 560 dollar deposit.
+      const manual = (Number(data.equity && data.equity.manualAdjustmentEur) || 0)
+        + (Number(data.equity && data.equity.todayManualEur) || 0);
       if (Number.isFinite(first) && first !== 0) {
         // The bold figure is the bot's, like every other headline number on the page.
         // It used to be the whole change with "iš jų ..." naming the manual part as a
@@ -1880,8 +1885,18 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         // beside the result rather than inside it.
         const botChange = total - first - manual;
         const botPercent = botChange / Math.abs(first) * 100;
-        const manualText = manual
-          ? ` · rankiniai koregavimai <i>${esc(signedMoney(manual))}</i>`
+        // The chart's first blue bar is the starting capital plus whatever moved that
+        // same day, because a bar rising from zero has to contain the money the
+        // account began with. This figure deliberately excludes it - the bot's result
+        // is measured from that capital, so subtracting it here would take it twice.
+        // Two honest answers to two different questions, and without naming the gap
+        // the page shows 62,44 on the chart and 2,44 in the text.
+        const opening = days.reduce((sum, day) => sum + (Number(day.preWindowEur) || 0), 0);
+        const openingText = opening
+          ? ` <span class="bc-t-soft">(be ${esc(money(opening))} pradinio kapitalo)</span>`
+          : "";
+        const manualText = manual || opening
+          ? ` · rankiniai koregavimai <i>${esc(signedMoney(manual))}</i>${openingText}`
           : "";
         els.liveSince.innerHTML = `Per ${esc(overDaysPhrase(days.length))} botas <b>${esc(signedMoney(botChange))} (${esc(signedPercent(botPercent, 1))})</b>${manualText}`;
       } else {
