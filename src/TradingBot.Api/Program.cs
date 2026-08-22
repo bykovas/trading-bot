@@ -2398,6 +2398,8 @@ static async Task<DashboardEquityDto> ReadEquityDays(
     command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = botInstanceId;
     command.Parameters.AddWithValue("days", days);
 
+    var dayLoad = await ReadDailyTradingLoad(connection, botInstanceId, timeZoneId, cancellationToken);
+
     var closed = new List<DashboardEquityDayDto>();
     await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
     {
@@ -2416,13 +2418,19 @@ static async Task<DashboardEquityDto> ReadEquityDays(
                 beforeWindow.TryGetValue(
                     reader.GetFieldValue<DateTime>(0).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     out var opening) ? opening : 0m,
-                await reader.IsDBNullAsync(6, cancellationToken) ? null : reader.GetDouble(6)));
+                await reader.IsDBNullAsync(6, cancellationToken) ? null : reader.GetDouble(6),
+                dayLoad.TryGetValue(
+                    reader.GetFieldValue<DateTime>(0).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    out var used) && used.PeakMarginEur > 0m ? used.PeakMarginEur : null,
+                dayLoad.TryGetValue(
+                    reader.GetFieldValue<DateTime>(0).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    out var traded) ? traded.ClosedTrades : 0));
         }
     }
 
     closed.Reverse();
 
-    var load = await ReadDailyTradingLoad(connection, botInstanceId, timeZoneId, cancellationToken);
+    var load = dayLoad;
 
     // What the bot did, with money you moved taken out: a day that received a
     // deposit is not a day the bot earned it.
@@ -3531,7 +3539,14 @@ internal sealed record DashboardEquityDayDto(
     decimal PreWindowEur,
     // How long the account went unobserved before this day's first cycle. Null on the
     // first day of the series, which has nothing before it.
-    double? GapMinutes);
+    double? GapMinutes,
+    // The most margin held at once that day, and the trades closed in it. These
+    // belong on the row and not only on the computed day result: the browser trims
+    // the series to the launch date and rebuilds "yesterday" and "best day" from
+    // these rows, so anything living only on the server's result objects is thrown
+    // away before it can be drawn.
+    decimal? PeakMarginEur,
+    int ClosedTrades);
 
 internal sealed record DashboardEquityDto(
     string TimeZone,

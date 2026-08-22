@@ -2491,9 +2491,17 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       if (!Number.isFinite(open) || open <= 0) return null;
       const moved = Number(day.manualAdjustmentEur) || 0;
       const bot = Number(day.close) - open - moved;
+      // The margin percentage is recomputed here rather than taken from the server:
+      // the bot figure above is measured from the chained open, so a percentage
+      // carried over from the server's own arithmetic would not match the money
+      // printed beside it.
+      const peak = Number(day.peakMarginEur);
       return {
         date: day.date, open, close: open + bot,
-        manualAdjustmentEur: moved, botEur: bot, botPercent: bot / open * 100
+        manualAdjustmentEur: moved, botEur: bot, botPercent: bot / open * 100,
+        peakMarginEur: peak > 0 ? peak : null,
+        marginPercent: peak > 0 ? bot / peak * 100 : null,
+        closedTrades: Number(day.closedTrades) || 0
       };
     }
 
