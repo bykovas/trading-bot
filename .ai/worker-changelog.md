@@ -1,3 +1,11 @@
+## 2026-08-23-outlier-band-deleted-a-real-deposit
+
+- The daily rollup keeps only values within a third and triple of the day's median, to stop one nonsense cycle setting a high or a low. It cannot tell a nonsense cycle from a real jump: 562 USD arrived on futures-live at 22:16 local on 2026-08-22, the day's median was about 40, and every cycle after the deposit sat above median x 3 and was thrown away. The day closed at 38.35 as though the money had never come, and its observed window ended at 22:14 - two minutes before the transfer.
+- That second effect is what reached the page. Movements are attributed to a day only when they land inside its observed window, so the transfer fell outside the truncated window, was never counted as manual, and the next day opened from 38.35 against a live 600: the bot was credited with +561.71, "+1 464,61 % šiandien".
+- The band is now widened by the money that actually moved that day, from `portfolio_cash_events`. Noise is still caught - a 704 USD reading on an account around 52 with no transfers is as far outside as it ever was - while a deposit no longer deletes the balance it created. Rollup revision bumped so stored days rebuild; 08-19 through 08-21 were checked to come back byte-identical before shipping.
+- The same band guards the drawdown scan and inherits the fix.
+- Page and API only; no worker behaviour touched.
+
 ## 2026-08-22-hypothetical-scales-from-capital-used
 
 - The "if only we had known" card multiplied the whole portfolio by ten: 60 dollars became 600 and the best day's 18.54 became 185. That credited the result to money that was never in a position. On that day the bot held at most 44.98 of margin, and the 18.54 belongs to those 44.98.

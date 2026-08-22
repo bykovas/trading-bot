@@ -2184,6 +2184,19 @@ static async Task BackfillDailyEquity(
             from day_values
             group by local_date
         ),
+        -- What a deposit or withdrawal did to the account that day. The band below
+        -- exists to throw away single nonsense cycles, but it cannot tell one from a
+        -- real jump: 562 USD arriving on an account whose median was 40 put every
+        -- later cycle above median*3, so the day closed at 38.35 as though the money
+        -- had never come. Widening by the movement keeps the guard for noise and
+        -- stops it deleting the account's actual balance.
+        day_cash as (
+            select (occurred_at at time zone @time_zone)::date as local_date,
+                   sum(abs(amount)) as moved
+            from portfolio_cash_events
+            where (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
+            group by 1
+        ),
         -- The typical day, used to throw away whole days that are not a funded
         -- account: futures-live's first day sits at 3e-6 USD across 329 cycles,
         -- before the worker had reconciled with Kraken. Left in, it made the
@@ -2196,11 +2209,14 @@ static async Task BackfillDailyEquity(
             select value.local_date, value.utc, value.cycle_id, value.value
             from day_values value
             join day_median median on median.local_date = value.local_date
+            left join day_cash cash on cash.local_date = value.local_date
             cross join series
             where median.median > 0
               and series.median > 0
               and median.median >= series.median / 10.0
-              and value.value between median.median / 3.0 and median.median * 3.0
+              and value.value
+                  between median.median / 3.0
+                  and (median.median + coalesce(cash.moved, 0)) * 3.0
         )
         insert into portfolio_daily_equity
             (bot_instance_id, local_date, time_zone, open_value_eur, high_value_eur,
@@ -2447,10 +2463,17 @@ static async Task<DashboardEquityDto> ReadEquityDays(
 
     var drawdown = await ReadMaxDrawdownPercent(connection, botInstanceId, days, cancellationToken);
     var yesterday = Result(closed.Count > 0 ? closed[^1] : null);
+    // Best by what the card actually shows: the return on the money that was at
+    // work. Ranking by portfolio percent disagreed with the figure printed beside it
+    // - 2026-08-19 made 41.2% on its capital and won the title, while 2026-08-22 made
+    // 55.6% on its own and did not, because the account had grown in between and the
+    // same profit was a smaller slice of it. A day with no position open has no
+    // return on capital, so it falls back to the portfolio figure rather than
+    // dropping out of the running.
     var best = closed
         .Select(Result)
         .Where(result => result is not null)
-        .OrderByDescending(result => result!.BotPercent)
+        .OrderByDescending(result => result!.MarginPercent ?? result.BotPercent)
         .FirstOrDefault();
 
     // Deposits and withdrawals come from the exchange ledger, which the workers sync
@@ -3500,7 +3523,7 @@ internal static class DashboardDefaults
 
     // Bump when the daily rollup's computation changes: stored days from an older
     // revision are dropped and rebuilt on the next read.
-    public const int RollupRevision = 5;
+    public const int RollupRevision = 6;
 }
 
 internal readonly record struct DecisionKey(string CycleId, int DecisionIndex);

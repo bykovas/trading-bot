@@ -770,7 +770,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
             <p class="bc-proof-l">Vakar · realūs sandoriai</p>
             <p class="bc-proof-n"><span class="bc-from" id="bcYestFrom">60 $</span><span class="bc-arrow">&#8594;</span><span class="bc-to" id="bcYestTo">89 $</span></p>
             <p class="bc-proof-s" id="bcYestS"><b>+29 $</b> &#183; +48 % per parą</p>
-            <p class="bc-proof-fine">Uždaryti sandoriai, ne popierinis pelnas.</p>
+            <p class="bc-proof-fine" id="bcYestFine">Uždaryti sandoriai, ne popierinis pelnas.</p>
           </div>
           <div class="bc-proof-cell">
             <p class="bc-proof-l">Geriausia para &#183; realūs sandoriai</p>
@@ -1125,6 +1125,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       rate: el("bcRate"),
       rateB: el("bcRateB"),
       rateL: el("bcRateL"),
+      yestFine: el("bcYestFine"),
       legendGap: el("bcLegendGap"),
       metrics: el("bcMetrics"),
       posMeta: el("bcPosMeta"),
@@ -1782,8 +1783,6 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     function fillDay(fromEl, toEl, sumEl, day, tail) {
       if (!fromEl || !day || !Number.isFinite(Number(day.open))) return;
       const bot = Number(day.botEur);
-      fromEl.textContent = money(day.open);
-      toEl.textContent = money(day.close);
       // Green is for a realised gain only; a losing day says so in red.
       toEl.classList.toggle("is-realised", bot > 0);
       toEl.classList.toggle("is-loss", bot < 0);
@@ -1791,20 +1790,44 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // 60 that only ever committed 15 did not make 31% on its capital; it made
       // 124% on the part it used, and the smaller number is the flattering one.
       // Falls back to the portfolio figure on a day with nothing open.
+      // The headline pair is the money that was at work and what it became. The
+      // portfolio moves to the line below: it is context, not the result. Printing
+      // the portfolio big said the account grew from 60 to 78 while the sentence
+      // underneath said the bot had 44.98 in play, and the eye took the first pair
+      // for the trade.
       const used = Number(day.peakMarginEur);
       const onCapital = used > 0 && Number.isFinite(Number(day.marginPercent));
-      const lead = onCapital ? `Iš <span class="bc-t-amber">${esc(money(used))}</span> → ` : "";
       const trades = Number(day.closedTrades) || 0;
-      const suffix = trades > 0 ? ` (${esc(num(trades, 0))} ${esc(tradesWord(trades))})` : tail;
-      sumEl.innerHTML = lead +
+      const tradesText = trades > 0 ? ` (${esc(num(trades, 0))} ${esc(tradesWord(trades))})` : tail;
+
+      if (onCapital) {
+        fromEl.textContent = money(used);
+        toEl.textContent = money(used + bot);
+        sumEl.innerHTML =
+          `<b class="${bot < 0 ? "bc-t-red" : ""}">${esc(signedMoney(bot))}</b> · ` +
+          `${esc(signedPercent(day.marginPercent, 1))}${tradesText}`;
+        return `Portfelis ${money(day.open)} → ${money(day.close)}`;
+      }
+
+      fromEl.textContent = money(day.open);
+      toEl.textContent = money(day.close);
+      sumEl.innerHTML =
         `<b class="${bot < 0 ? "bc-t-red" : ""}">${esc(signedMoney(bot))}</b> · ` +
-        `${esc(signedPercent(onCapital ? day.marginPercent : day.botPercent, 1))}${suffix}`;
+        `${esc(signedPercent(day.botPercent, 1))}${tradesText}`;
     }
 
     function renderProof(equity) {
       if (!equity) return;
 
-      fillDay(els.yestFrom, els.yestTo, els.yestS, equity.yesterday, " per parą");
+      // The portfolio goes in the fine print. It is context - the account it happened
+      // in - not the result, and on one line with the profit and the trade count it
+      // wrapped to four rows on a phone.
+      const yestPortfolio = fillDay(els.yestFrom, els.yestTo, els.yestS, equity.yesterday, " per parą");
+      if (els.yestFine) {
+        els.yestFine.textContent = yestPortfolio
+          ? `${yestPortfolio} · Uždaryti sandoriai, ne popierinis pelnas.`
+          : "Uždaryti sandoriai, ne popierinis pelnas.";
+      }
 
       // The copy under the best day was written for an account with a long history
       // behind it. Once the series starts at the launch, that stops being the case:
@@ -1814,7 +1837,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const best = equity.bestDay;
       const lost = !!best && Number(best.botEur) <= 0;
 
-      fillDay(els.bestFrom, els.bestTo, els.bestS, best, " · geriausias rezultatas iki šiol");
+      const bestPortfolio = fillDay(els.bestFrom, els.bestTo, els.bestS, best, " · geriausias rezultatas iki šiol");
 
       const used = best ? Number(best.peakMarginEur) : null;
       if (best && els.hypoFrom && Number.isFinite(used) && used > 0) {
@@ -1838,7 +1861,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // it was is a fact, and facts on this page are dated.
       if (best && els.bestFine) {
         els.bestFine.textContent =
-          `Geriausia para iki šiol (${best.date}) — bet ne vienintelė, `
+          (bestPortfolio ? `${bestPortfolio} · ` : "")
+          + `Geriausia para iki šiol (${best.date}) — bet ne vienintelė, `
           + "sekasi įvairiai, nes eksperimentuojam.";
       }
     }
@@ -2673,8 +2697,15 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         days,
         manualAdjustmentEur: days.reduce((sum, day) => sum + (Number(day.manualAdjustmentEur) || 0), 0),
         yesterday: results.length ? results[results.length - 1] : null,
+        // Best by what the card prints: the return on the money that was at work.
+        // Ranking by portfolio percent disagreed with the figure beside it - a day
+        // that made 41.2% on its capital held the title while a later one made 55.6%
+        // on its own and did not, because the account had grown and the same profit
+        // was a smaller slice of it.
         bestDay: results.length
-          ? results.reduce((best, result) => result.botPercent > best.botPercent ? result : best)
+          ? results.reduce((best, result) =>
+              (result.marginPercent ?? result.botPercent) > (best.marginPercent ?? best.botPercent)
+                ? result : best)
           : null
       });
     }
