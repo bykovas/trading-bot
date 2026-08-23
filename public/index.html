@@ -88,6 +88,13 @@
 .bc-topbar-right{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
 /* Page chrome, not a data control — deliberately quieter than the tenant switch
    next to it, so two pill pairs never read as one four-state toggle. */
+/* The document link and the language switch share one line and one type size:
+   both are meta, neither is the page. */
+.bc-meta{display:flex;align-items:baseline}
+.bc-aktas{font:10px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted-3);text-decoration:none}
+.bc-aktas:hover{color:var(--cream)}
+.bc-aktas::after{content:" · ";color:var(--muted-4)}
 .bc-lang{margin:0;display:flex;font:10px var(--font-mono);letter-spacing:.14em;text-transform:uppercase}
 .bc-lang b{font-weight:500;color:var(--gold-soft)}
 .bc-lang a{color:var(--muted-3);text-decoration:none}
@@ -372,6 +379,12 @@
   .bc-topbar-right>.bc-tenant,.bc-topbar-right>.bc-status-chips,
   .bc-topbar-right>.bc-status-line{display:none}
   /* Pinned into the empty corner beside the centred brand — costs no fold budget. */
+  /* The two of them take the corners the centred wordmark leaves empty, on the
+     line under it: the document on the left, the language on the right. The
+     wrapper dissolves so each can be placed on its own. */
+  .bc-meta{display:contents}
+  .bc-aktas{position:absolute;top:21px;left:4px;padding:10px 12px;z-index:3}
+  .bc-aktas::after{content:none}
   .bc-lang{position:absolute;top:31px;right:16px;z-index:3}
   .bc-seg button{min-height:24px;padding:0 10px;font-size:10.5px}
   .bc-mobilebar{display:flex}
@@ -785,7 +798,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <span class="bc-brand-txt"><b>Blyn<i>AI</i> Capital</b><small>L&amp;D Finance Lab<sup class="bc-fn-mark">1</sup></small></span>
       </a>
       <div class="bc-topbar-right">
-          <p class="bc-lang"><b class="is-active" aria-current="true">LT</b><span class="bc-lang-x"> &#183; </span><a href="/en/" hreflang="en">EN</a></p>
+          <div class="bc-meta">
+            <a class="bc-aktas" href="/aktas/">Aktas</a>
+            <p class="bc-lang"><b class="is-active" aria-current="true">LT</b><span class="bc-lang-x"> &#183; </span><a href="/en/" hreflang="en">EN</a></p>
+          </div>
         <div class="bc-tenant">
           <span class="bc-tenant-l">Viešas testuotojas<a class="bc-fn-mark" href="#fn-testuotojas" aria-label="Viešo testuotojo apibrėžimas">2</a></span>
           <span class="bc-seg"><button type="button" data-tenant="LUKAS">LUKAS</button><button type="button" data-tenant="DENISAS">DENISAS</button></span>

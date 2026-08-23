@@ -1,3 +1,11 @@
+## 2026-08-23-aktas-page-and-its-link
+
+- `/aktas/` publishes the MB „BlynAI“ founding-agreement draft, exactly as it was handed over - a self-unpacking bundle with its fonts and assets inside, so it reads the same offline as on the site. A "Atsisiųsti PDF" button floats over it and disappears when the page is printed; the PDF sits beside it at `/aktas/blynai-aktas.pdf`.
+- The link is added to the bundle's own template rather than to the wrapper around it: the wrapper replaces the whole document element as it unpacks, so anything left outside would be thrown away a second after it appeared.
+- The page carries `noindex`. The document calls itself an internal document and is stamped PROJEKTAS · NEPASIRAŠYTA, so it is reachable by the link but not collected by search engines. One line to remove if that is not wanted.
+- In the topbar the link takes the corner the centred wordmark leaves empty: on a phone `AKTAS` on the left against `LT · EN` on the right, on a desktop the two share one line as `AKTAS · LT · EN`. Same type, same size - both are meta, neither is the page.
+- Page only. No worker behaviour touched.
+
 ## 2026-08-23-share-card-goes-live-and-the-site-moves-to-blynai
 
 - The og:image was a PNG built by hand and committed, so its figures were frozen at the second the build ran. A card is most often shared on the day something happened, which is exactly when a stale number is worst. `tools/og-server.mjs` now renders it per request off `/api/dashboard`, caches it for five minutes, and keeps the last good picture on disk.
