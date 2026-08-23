@@ -1,3 +1,12 @@
+## 2026-08-23-aktas-becomes-an-intent-act-not-a-founding-contract
+
+- The document called itself `MAŽOSIOS BENDRIJOS STEIGIMO SUTARTIS` and its 7.1 said it becomes one the moment both founders sign - while 3.2 and the signature page said the contribution and the personal data would be settled later. Signed as written it would have been a real founding contract that is missing what the law requires one to contain, which is the worst of both.
+- Retitled to `BlynAI steigėjų ketinimų aktas`, and the status box now carries the sentence that says what it is not: it confirms the founders' intent, is not a founding contract, and by itself creates neither the company, nor membership in it, nor authority to act in its name.
+- 7.1 rewritten in the same terms and 7.2 now says the company is founded by a separate contract. The signature note drops "until then this stays a draft" and says the personal codes belong to that contract instead. The stamp says NEPASIRAŠYTA rather than PROJEKTAS - the act is meant to be signed, it just has not been yet. Running heads and footers follow.
+- Nothing about the substance moved: 50/50, Lukas as vadovas with sole authority in day-to-day matters, the joint-decision list, the profit split, and the LUKO/BYKO clause all read as before. The appendix already said it binds nobody; it now refers to this act rather than to a contract that no longer exists.
+- PDF re-made from the corrected page. Not legal advice - these are the changes named in the review, applied as written.
+- Page only. No worker behaviour touched.
+
 ## 2026-08-23-aktas-page-and-its-link
 
 - `/aktas/` publishes the MB „BlynAI“ founding-agreement draft, exactly as it was handed over - a self-unpacking bundle with its fonts and assets inside, so it reads the same offline as on the site. A "Atsisiųsti PDF" button floats over it and disappears when the page is printed; the PDF sits beside it at `/aktas/blynai-aktas.pdf`.
