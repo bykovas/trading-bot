@@ -203,6 +203,9 @@
 /* The divider is a border on each group, not a separate element, so a group that
    hides takes its own rule with it. A separate span would leave a doubled hairline
    wherever "startas" is absent, which is any account funded before it was listed. */
+/* Squares first, then what they mean - every group, and the dialog rows too. The
+   BlynAI name is part of its group's label, not a heading in front of the squares:
+   one group reading the other way was the only thing to notice about the line. */
 .bc-legend-bar>*{display:inline-flex;align-items:center;gap:5px;padding:0 9px;
   border-left:1px solid var(--hairline)}
 .bc-legend-bar>*:first-child{border-left:0;padding-left:12px}
@@ -873,7 +876,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <div class="bc-legend">
           <p class="bc-legend-l" id="bcChartCaption">Grafikas — 30 uždarytų dienų<br>(šiandiena dar neįskaityta)</p>
           <div class="bc-legend-bar">
-            <span><span class="bc-blynai">Blyn<i>AI</i></span><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span><span class="bc-sq bc-sq--gap" id="bcLegendGap" hidden></span></span><span class="bc-lg-w">istorija</span></span>
+            <span><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span><span class="bc-sq bc-sq--gap" id="bcLegendGap" hidden></span></span><span class="bc-lg-lbl"><span class="bc-blynai">Blyn<i>AI</i></span><span class="bc-lg-w"> istorija</span></span></span>
             <span><span class="bc-sq-pair"><span class="bc-sq bc-sq--today"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#12100b"/></svg></span><span class="bc-sq bc-sq--today-dn"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#f5b84f"/></svg></span></span>šiandien</span>
             <span><span class="bc-sq-pair"><span class="bc-sq bc-sq--dep"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#0e2a48"/></svg></span><span class="bc-sq bc-sq--wdr"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#6faeff"/></svg></span></span><span class="bc-lg-w">pervedimai</span><span class="bc-lg-n">pinigai</span></span>
             <span id="bcLegendStart"><span class="bc-sq bc-sq--start"></span>startas</span>
