@@ -63,3 +63,4 @@ node_modules/
 # Written by CI at build time so the deploy pins each service to the commit that
 # last changed it; never committed.
 infra/image-tags.env
+public/og-preview/
