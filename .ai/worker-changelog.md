@@ -2,6 +2,7 @@
 
 - `/aktas/` publishes the MB „BlynAI“ founding-agreement draft, exactly as it was handed over - a self-unpacking bundle with its fonts and assets inside, so it reads the same offline as on the site. A "Atsisiųsti PDF" button floats over it and disappears when the page is printed; the PDF sits beside it at `/aktas/blynai-aktas.pdf`.
 - The link is added to the bundle's own template rather than to the wrapper around it: the wrapper replaces the whole document element as it unpacks, so anything left outside would be thrown away a second after it appeared.
+- The reference to the ownership deed reads `meetluko.eu/deed`, not the dashboard host it named before. The PDF beside it was exported before that change, so it was re-made by printing the corrected page - four pages, same layout, and the download button drops out of the print by itself. Hand over a fresh export any time and it replaces this one.
 - The page carries `noindex`. The document calls itself an internal document and is stamped PROJEKTAS · NEPASIRAŠYTA, so it is reachable by the link but not collected by search engines. One line to remove if that is not wanted.
 - In the topbar the link takes the corner the centred wordmark leaves empty: on a phone `AKTAS` on the left against `LT · EN` on the right, on a desktop the two share one line as `AKTAS · LT · EN`. Same type, same size - both are meta, neither is the page.
 - Page only. No worker behaviour touched.
