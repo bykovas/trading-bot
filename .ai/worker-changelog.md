@@ -1,3 +1,13 @@
+## 2026-08-23-share-card-goes-live-and-the-site-moves-to-blynai
+
+- The og:image was a PNG built by hand and committed, so its figures were frozen at the second the build ran. A card is most often shared on the day something happened, which is exactly when a stale number is worst. `tools/og-server.mjs` now renders it per request off `/api/dashboard`, caches it for five minutes, and keeps the last good picture on disk. Cold render 0.99 s, cached under a millisecond.
+- The figures come from `public/equity-day.js`, the same file the page inlines. "Geriausia para" is arithmetic, not an API field - two copies of it would be two answers disagreeing in public about the same account. Checked against both bots: the card prints what the page's own card prints, character for character.
+- One template for both cards. `og-algo.html` and `og-algo-byko.html` were standalone files photographed by two build scripts; once the figures were live, the markup that prints a figure had to exist once. `build-og.mjs` writes the two committed PNGs from the same template - the floor the renderer serves when it has never drawn a card and the API will not answer. They carry no figures, so they cannot be wrong about the money.
+- A losing best day renders red and keeps the title; an account with no closed day renders with no number block at all, not a row of dashes. The renderer never returns 5xx to a crawler and never renders blank fields.
+- `og:image` carries a revision of the figures, so a platform that caches it for days refetches when the number moves and only then. nginx cannot compute that, so the tags arrive through an SSI include from the renderer, cached the same five minutes. `fin.bykovas.lt` still gets no card: both are instance-branded and neither may stand in for the shared entry point.
+- The dashboards moved to `blynai.meetluko.eu` and `blynai.bykovas.lt`. `algo.*` redirects permanently, and the page still opens on the right account for a link that predates the move - cards carrying the old host are already in chats and in Facebook's cache.
+- No worker behaviour touched.
+
 ## 2026-08-23-legend-on-one-line-and-a-key-behind-a-question-mark
 
 - The legend is one pill with four groups and hairlines between them, not two framed rows. Two frames were the right grouping and the wrong object: stacked above the chart they read as two boxes arguing with the thing they describe. One object with internal divisions reads as a caption.

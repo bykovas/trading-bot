@@ -56,6 +56,9 @@ let browser = null;
 let browserPromise = null;
 // bot+theme → { etag, png, builtAt }
 const memory = new Map();
+// bot+theme → { rev, at }. The tags are pulled in by nginx on every page load,
+// so this must not call the API once per visitor.
+const revisions = new Map();
 
 async function getBrowser() {
   if (browser && browser.isConnected()) return browser;
@@ -170,8 +173,15 @@ function themeOf(url) {
   return THEMES.includes(asked) ? asked : "luko";
 }
 
+// Only the two accounts that have a card. The endpoint is public and the bot id
+// travels in the query string, so without this anything could be asked for -
+// which would put an unbounded set of keys in the caches and render a card under
+// a brand for an account that brand does not own.
+const KNOWN_BOTS = new Set(Object.values(THEME_BOTS));
+
 function botOf(url, theme) {
-  return url.searchParams.get("bot") || THEME_BOTS[theme];
+  const asked = url.searchParams.get("bot");
+  return asked && KNOWN_BOTS.has(asked) ? asked : THEME_BOTS[theme];
 }
 
 async function card(url) {
@@ -207,6 +217,22 @@ async function card(url) {
   return { ...built, theme, bot };
 }
 
+async function revisionFor(theme, bot) {
+  const key = `${theme}|${bot}`;
+  const held = revisions.get(key);
+  if (held && Date.now() - held.at < FRESH_SECONDS * 1000) return held.rev;
+  try {
+    const rev = revisionOf(bot, cardValues(await fetchDashboard(bot), theme));
+    revisions.set(key, { rev, at: Date.now() });
+    return rev;
+  } catch (error) {
+    console.warn(`og: revision for ${bot} unavailable (${error.message})`);
+    if (held) return held.rev;
+    const drawn = memory.get(key);
+    return drawn ? drawn.etag.replace(/"/g, "") : "0";
+  }
+}
+
 // The og:image tags, for nginx to pull in with SSI. They cannot be static: the
 // URL has to carry the revision so a platform refetches when the number moves,
 // and nginx cannot compute that on its own.
@@ -215,15 +241,10 @@ async function tags(url) {
   const bot = botOf(url, theme);
   const origin = url.searchParams.get("origin") || `https://${THEME_DOMAINS[theme]}`;
   const alt = theme === "byko" ? "BYKO — botas, kuris prekiauja pats" : "LUKO — botas, kuris prekiauja pats";
-
-  let rev = "0";
-  try {
-    rev = revisionOf(bot, cardValues(await fetchDashboard(bot), theme));
-  } catch {
-    const held = memory.get(`${theme}|${bot}`);
-    if (held) rev = held.etag.replace(/"/g, "");
-  }
-  const image = `${origin}/og/card.png?bot=${encodeURIComponent(bot)}&theme=${theme}&v=${rev}`;
+  const rev = await revisionFor(theme, bot);
+  // &amp; in an attribute: the tags land inside the page's <head>, and a bare
+  // ampersand there is the parser's business, not ours.
+  const image = `${origin}/og/card.png?bot=${encodeURIComponent(bot)}&amp;theme=${theme}&amp;v=${rev}`;
   return `<meta property="og:image" content="${image}">` +
     `<meta property="og:image:type" content="image/png">` +
     `<meta property="og:image:width" content="1200">` +

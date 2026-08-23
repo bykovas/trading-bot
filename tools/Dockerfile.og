@@ -1,0 +1,34 @@
+# The og:image renderer: a Node service with a headless Chromium behind it.
+#
+# Built on Microsoft's Playwright image rather than installing the browser into
+# node:slim, because the version of Chromium and the version of the Playwright
+# client have to match exactly — pinning one and letting the other float is how
+# a card starts failing to render on a Tuesday. Keep the tag in step with the
+# playwright version in package.json.
+FROM mcr.microsoft.com/playwright:v1.62.1-noble
+
+ENV NODE_ENV=production \
+    OG_PORT=8090 \
+    OG_CACHE_DIR=/var/cache/og
+
+WORKDIR /app
+
+# The client library only. --ignore-scripts skips its postinstall browser
+# download: the base image already carries a matching Chromium and points
+# PLAYWRIGHT_BROWSERS_PATH at it.
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+
+# equity-day.js is imported from public/ on purpose: it is the same file the
+# page inlines, and copying it to a second path here would recreate the split
+# it exists to close.
+COPY tools/og-server.mjs tools/og-card.mjs tools/og-fonts.mjs ./tools/
+COPY tools/fonts/ ./tools/fonts/
+COPY public/equity-day.js ./public/equity-day.js
+COPY public/assets/og-algo-1200x630.png public/assets/og-algo-byko-1200x630.png ./public/assets/
+
+RUN mkdir -p /var/cache/og && chown -R pwuser:pwuser /var/cache/og /app
+USER pwuser
+
+EXPOSE 8090
+CMD ["node", "tools/og-server.mjs"]

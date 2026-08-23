@@ -1,11 +1,15 @@
 # Deployed by infra/deploy.sh to /opt/traefik/dynamic/trading-bot.yml on every
 # release: edit this file, never the copy on the server.
 #
-# Three hosts serve the same stack. fin.bykovas.lt is the original entry point;
-# algo.meetluko.eu and algo.bykovas.lt are the per-tester dashboards named in the
-# page's own disclaimer. They differ only in which account the page opens on,
-# which the page decides from the hostname — the routing below is identical, so
-# /api stays same-origin on every host.
+# The dashboards live on blynai.meetluko.eu and blynai.bykovas.lt; fin.bykovas.lt
+# is the original shared entry point. The two per-tester hosts differ only in
+# which account the page opens on, which the page decides from the hostname —
+# the routing is identical, so /api stays same-origin on every host.
+#
+# algo.meetluko.eu and algo.bykovas.lt were those dashboards until 2026-08-23 and
+# now redirect here. They are kept because the share cards that carried them are
+# already in chats and in Facebook's cache: a moved page owes its old links a
+# destination, not a 404.
 #
 # Traefik 3 removed the v2 multi-value form Host(`a`, `b`): each matcher takes one
 # argument, so the hosts are OR-ed explicitly. The parentheses around the OR group
@@ -14,7 +18,7 @@
 http:
   routers:
     trading-bot-http:
-      rule: "(Host(`fin.bykovas.lt`) || Host(`algo.meetluko.eu`) || Host(`algo.bykovas.lt`))"
+      rule: "(Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`))"
       entryPoints:
         - web
       middlewares:
@@ -22,7 +26,7 @@ http:
       service: trading-bot
 
     trading-bot-https:
-      rule: "(Host(`fin.bykovas.lt`) || Host(`algo.meetluko.eu`) || Host(`algo.bykovas.lt`))"
+      rule: "(Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`))"
       entryPoints:
         - websecure
       tls:
@@ -30,7 +34,7 @@ http:
       service: trading-bot
 
     trading-bot-web-https:
-      rule: "(Host(`fin.bykovas.lt`) || Host(`algo.meetluko.eu`) || Host(`algo.bykovas.lt`)) && PathPrefix(`/web`)"
+      rule: "(Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`)) && PathPrefix(`/web`)"
       entryPoints:
         - websecure
       priority: 1100
@@ -39,7 +43,7 @@ http:
       service: trading-bot-web
 
     trading-bot-api-https:
-      rule: "(Host(`fin.bykovas.lt`) || Host(`algo.meetluko.eu`) || Host(`algo.bykovas.lt`)) && PathPrefix(`/api`)"
+      rule: "(Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`)) && PathPrefix(`/api`)"
       entryPoints:
         - websecure
       priority: 1000
@@ -49,7 +53,35 @@ http:
         certResolver: letsencrypt
       service: trading-bot-api
 
+    # The old dashboard hosts. Both schemes, because a card shared before the move
+    # carries an http link as readily as an https one.
+    trading-bot-legacy-http:
+      rule: "(Host(`algo.meetluko.eu`) || Host(`algo.bykovas.lt`))"
+      entryPoints:
+        - web
+      middlewares:
+        - trading-bot-algo-to-blynai
+      service: trading-bot
+
+    trading-bot-legacy-https:
+      rule: "(Host(`algo.meetluko.eu`) || Host(`algo.bykovas.lt`))"
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - trading-bot-algo-to-blynai
+      service: trading-bot
+
   middlewares:
+    # algo.<rest> becomes blynai.<rest>, path and query kept. Permanent: the page
+    # is not coming back to that name, and search engines should stop asking.
+    trading-bot-algo-to-blynai:
+      redirectRegex:
+        regex: "^https?://algo\\.([^/]+)(.*)$"
+        replacement: "https://blynai.${1}${2}"
+        permanent: true
+
     # Every /api route is a GET with no authentication and no write endpoint, so
     # the data behind it is already fetchable with curl from anywhere. CORS only
     # decides whether a browser on another origin may read the same bytes, which

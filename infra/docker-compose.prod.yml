@@ -3,8 +3,29 @@ services:
     container_name: trading-bot-ui
     image: ${UI_IMAGE_NAME}:${UI_IMAGE_TAG:-latest}
     restart: unless-stopped
+    # On the default network too: nginx pulls the og:image tags from the renderer
+    # as the page goes out, and proxies /og/ to it.
     networks:
+      - default
       - traefik
+
+  og:
+    container_name: trading-bot-og
+    image: ${OG_IMAGE_NAME}:${OG_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # Renders the share card on demand off /api/dashboard. It is reached only
+    # through nginx, so it stays off the traefik network.
+    environment:
+      OG_API_BASE: http://trading-bot-api:8080
+    depends_on:
+      db-ready:
+        condition: service_completed_successfully
+    # The last card it managed to draw, kept across restarts: a crawler arriving
+    # while the API is down gets yesterday's picture rather than nothing.
+    volumes:
+      - /opt/trading-bot/og-cache:/var/cache/og
+    networks:
+      - default
 
 
   web:

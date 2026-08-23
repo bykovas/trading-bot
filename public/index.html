@@ -12,7 +12,7 @@
   <meta property="og:site_name" content="__OG_SITE__">
   <meta property="og:title" content="__OG_TITLE__">
   <meta property="og:description" content="__OG_DESCRIPTION__">
-  <!--__OG_IMAGE_TAGS__-->
+  <!--#include virtual="/og/tags" -->
   <meta name="twitter:card" content="__OG_TWITTER_CARD__">
   <meta name="twitter:title" content="__OG_TITLE__">
   <meta name="twitter:description" content="__OG_DESCRIPTION__">
@@ -808,8 +808,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           <p class="bc-rate" id="bcRate">1 LUKO &#8776; <b class="bc-rate-b" id="bcRateB">9,28</b> BYKO<span class="bc-rate-x"> &#183; </span>1 BYKO &#8776; <b class="bc-rate-l" id="bcRateL">0,11</b> LUKO</p>
         </div>
         <div class="bc-coins-row">
-          <a class="bc-coin bc-coin--luko" href="https://meetluko.eu"><span class="bc-coin-ic"><svg viewBox="0 0 512 512" aria-hidden="true"><circle cx="256" cy="256" r="256" fill="#0A0A0A"/><circle cx="256" cy="256" r="248" fill="none" stroke="#C9A86A" stroke-opacity=".5" stroke-width="8"/><g transform="translate(-117.1 -89.7) scale(1.4463)"><g opacity=".3"><path d="M144 164L182 122V167Z" fill="#C9A86A"/><g fill="none" stroke="#C9A86A" stroke-width="15"><circle cx="306" cy="186" r="58"/><path d="M364 186V312"/></g></g><path d="M182 122h52V312H346l16 16V358H182Z" fill="#C9A86A"/></g></svg></span><span class="bc-coin-txt"><b>LUKO</b><small>meetluko.eu</small><small class="bc-coin-algo">algo.meetluko.eu</small></span></a>
-          <a class="bc-coin bc-coin--byko" href="https://byko.bykovas.lt"><span class="bc-coin-ic"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#7CCBFF"/><g transform="translate(2.1875 1.25) scale(.3125)" fill="none" stroke="#0B0D10" stroke-width="13"><path d="M24 14V82"/><path d="M40 20L70 48 40 76"/></g></svg></span><span class="bc-coin-txt"><b>BYKO</b><small>byko.bykovas.lt</small><small class="bc-coin-algo">algo.bykovas.lt</small></span></a>
+          <a class="bc-coin bc-coin--luko" href="https://meetluko.eu"><span class="bc-coin-ic"><svg viewBox="0 0 512 512" aria-hidden="true"><circle cx="256" cy="256" r="256" fill="#0A0A0A"/><circle cx="256" cy="256" r="248" fill="none" stroke="#C9A86A" stroke-opacity=".5" stroke-width="8"/><g transform="translate(-117.1 -89.7) scale(1.4463)"><g opacity=".3"><path d="M144 164L182 122V167Z" fill="#C9A86A"/><g fill="none" stroke="#C9A86A" stroke-width="15"><circle cx="306" cy="186" r="58"/><path d="M364 186V312"/></g></g><path d="M182 122h52V312H346l16 16V358H182Z" fill="#C9A86A"/></g></svg></span><span class="bc-coin-txt"><b>LUKO</b><small>meetluko.eu</small><small class="bc-coin-algo">blynai.meetluko.eu</small></span></a>
+          <a class="bc-coin bc-coin--byko" href="https://byko.bykovas.lt"><span class="bc-coin-ic"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#7CCBFF"/><g transform="translate(2.1875 1.25) scale(.3125)" fill="none" stroke="#0B0D10" stroke-width="13"><path d="M24 14V82"/><path d="M40 20L70 48 40 76"/></g></svg></span><span class="bc-coin-txt"><b>BYKO</b><small>byko.bykovas.lt</small><small class="bc-coin-algo">blynai.bykovas.lt</small></span></a>
         </div>
       </aside>
 
@@ -934,7 +934,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       </div>
       <div class="bc-modal-body">
         <p>„BlynAI Capital“ nėra juridinis asmuo, įmonė, finansų įstaiga, investicijų valdytojas ar finansinių paslaugų teikėjas. „BlynAI Capital“ yra tik nekomercinio asmeninio hobio projekto ir interneto svetainės pavadinimas.</p>
-        <p>Svetainės <b>algo.bykovas.lt</b> ir <b>algo.meetluko.eu</b> skirtos programinės įrangos kūrimo, algoritminės prekybos, automatizavimo, biržų API integracijų, duomenų analizės ir susijusių technologijų tyrinėjimui, mokymuisi bei rezultatų demonstravimui.</p>
+        <p>Svetainės <b>blynai.bykovas.lt</b> ir <b>blynai.meetluko.eu</b> skirtos programinės įrangos kūrimo, algoritminės prekybos, automatizavimo, biržų API integracijų, duomenų analizės ir susijusių technologijų tyrinėjimui, mokymuisi bei rezultatų demonstravimui.</p>
 
         <h3>Savarankiškas naudojimas</h3>
         <p>Programinė įranga yra techninis įrankis. Kiekvienas ją naudojantis asmuo:</p>
@@ -1325,6 +1325,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     // Each tester's own dashboard opens on their own account. An explicit choice
     // still wins: the query string, or a switch made earlier on this host.
     const HOST_TENANTS = {
+      "blynai.meetluko.eu": "LUKAS",
+      "blynai.bykovas.lt": "DENISAS",
+      // The dashboards moved off algo.*, which now redirects. A link that has
+      // been sitting in a chat since before the move still has to open on the
+      // account it named.
       "algo.meetluko.eu": "LUKAS",
       "algo.bykovas.lt": "DENISAS"
     };
@@ -2873,7 +2878,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     // is no /api next to it, so it falls back to the deployed host: the endpoint
     // is public, read-only and sends CORS headers, which lets a local copy show
     // the very same live numbers without a proxy.
-    const REMOTE_API = "https://algo.meetluko.eu";
+    const REMOTE_API = "https://blynai.meetluko.eu";
     const SERVED_OVER_HTTP = /^https?:$/.test(location.protocol) && !!location.hostname;
     // Same origin first, because that is how the page is served in production. A copy
     // opened from a file, or from a dev server with no /api behind it, falls back to

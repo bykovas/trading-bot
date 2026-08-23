@@ -17,6 +17,7 @@ env:
   SPOT_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-spot-worker
   FUTURES_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-futures-worker
   MARKET_DATA_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-market-data-worker
+  OG_IMAGE_NAME: ghcr.io/bykovas/trading-bot-og
 
 jobs:
   build:
@@ -52,6 +53,9 @@ jobs:
             echo "SPOT_WORKER_IMAGE_TAG=$(tag_for src/TradingBot.SpotWorker src/TradingBot.Core "$CI")"
             echo "FUTURES_WORKER_IMAGE_TAG=$(tag_for src/TradingBot.FuturesWorker src/TradingBot.Core "$CI")"
             echo "MARKET_DATA_WORKER_IMAGE_TAG=$(tag_for src/TradingBot.MarketDataWorker src/TradingBot.Core "$CI")"
+            # equity-day.js is in both lists on purpose: it is one file shared by the
+            # page and the card renderer, and a change to it moves both.
+            echo "OG_IMAGE_TAG=$(tag_for tools/og-server.mjs tools/og-card.mjs tools/og-fonts.mjs tools/fonts tools/Dockerfile.og package.json package-lock.json public/equity-day.js public/assets "$CI")"
           } | tee infra/image-tags.env >> "$GITHUB_ENV"
           echo "Resolved image tags:"
           cat infra/image-tags.env
@@ -175,6 +179,20 @@ jobs:
           docker push "${WEB_IMAGE_NAME}:${WEB_IMAGE_TAG}"
           docker push "${WEB_IMAGE_NAME}:latest"
 
+      - name: Build og image
+        run: |
+          if docker manifest inspect "${OG_IMAGE_NAME}:${OG_IMAGE_TAG}" >/dev/null 2>&1; then
+            echo "og renderer unchanged since ${OG_IMAGE_TAG}; reusing the published image."
+            exit 0
+          fi
+          docker build \
+            --file tools/Dockerfile.og \
+            --tag "${OG_IMAGE_NAME}:latest" \
+            --tag "${OG_IMAGE_NAME}:${OG_IMAGE_TAG}" \
+            .
+          docker push "${OG_IMAGE_NAME}:${OG_IMAGE_TAG}"
+          docker push "${OG_IMAGE_NAME}:latest"
+
       - name: Upload deploy bundle
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
@@ -205,6 +223,7 @@ jobs:
       SPOT_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-spot-worker
       FUTURES_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-futures-worker
       MARKET_DATA_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-market-data-worker
+      OG_IMAGE_NAME: ghcr.io/bykovas/trading-bot-og
       GHCR_USERNAME: ${{ github.actor }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TRADINGBOT_DB_PASSWORD: ${{ secrets.TRADINGBOT_DB_PASSWORD }}

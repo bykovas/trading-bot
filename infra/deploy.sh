@@ -37,6 +37,8 @@ MARKET_DATA_APPSETTINGS_SOURCE="src/TradingBot.MarketDataWorker/appsettings.json
 MARKET_DATA_DIR="${DEPLOY_DIR}/market-data"
 MARKET_DATA_APPSETTINGS="${MARKET_DATA_DIR}/appsettings.json"
 MARKET_DATA_ENV_FILE="${MARKET_DATA_DIR}/.env"
+# The last share card the renderer managed to draw, kept across restarts.
+OG_CACHE_DIR="${DEPLOY_DIR}/og-cache"
 
 : "${UI_IMAGE_NAME:?UI_IMAGE_NAME is required}"
 : "${API_IMAGE_NAME:?API_IMAGE_NAME is required}"
@@ -44,6 +46,7 @@ MARKET_DATA_ENV_FILE="${MARKET_DATA_DIR}/.env"
 : "${SPOT_WORKER_IMAGE_NAME:?SPOT_WORKER_IMAGE_NAME is required}"
 : "${FUTURES_WORKER_IMAGE_NAME:?FUTURES_WORKER_IMAGE_NAME is required}"
 : "${MARKET_DATA_WORKER_IMAGE_NAME:?MARKET_DATA_WORKER_IMAGE_NAME is required}"
+: "${OG_IMAGE_NAME:?OG_IMAGE_NAME is required}"
 : "${GHCR_USERNAME:?GHCR_USERNAME is required}"
 : "${GHCR_TOKEN:?GHCR_TOKEN is required}"
 : "${TRADINGBOT_DB_PASSWORD:?TRADINGBOT_DB_PASSWORD is required}"
@@ -57,6 +60,7 @@ WEB_IMAGE_TAG="${WEB_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 SPOT_WORKER_IMAGE_TAG="${SPOT_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 FUTURES_WORKER_IMAGE_TAG="${FUTURES_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 MARKET_DATA_WORKER_IMAGE_TAG="${MARKET_DATA_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
+OG_IMAGE_TAG="${OG_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 TRAEFIK_NETWORK="${TRAEFIK_NETWORK:-traefik}"
 POSTGRES_BIND_HOST="${POSTGRES_BIND_HOST:-127.0.0.1}"
 
@@ -70,6 +74,7 @@ echo "  virtual= trading-bot-spot-worker-virtual"
 echo "  futures= ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG}"
 echo "  lukas  = trading-bot-lukas-futures-worker-live"
 echo "  market-data= ${MARKET_DATA_WORKER_IMAGE_NAME}:${MARKET_DATA_WORKER_IMAGE_TAG}"
+echo "  og     = ${OG_IMAGE_NAME}:${OG_IMAGE_TAG}"
 
 mkdir -p \
   "${DEPLOY_DIR}" \
@@ -87,8 +92,13 @@ mkdir -p \
   "${FUTURES_VIRTUAL_DIR}/data" \
   "${FUTURES_VIRTUAL_DIR}/logs" \
   "${MARKET_DATA_DIR}/logs" \
+  "${OG_CACHE_DIR}" \
   "${DATABASE_DIR}" \
   "${DATABASE_ENV_DIR}"
+
+# The renderer runs as pwuser (uid 1000) in its image and has to be able to write
+# its cache; the directory is created here by root and handed over.
+chown 1000:1000 "${OG_CACHE_DIR}" 2>/dev/null || true
 cp infra/docker-compose.prod.yml "${COMPOSE_FILE}"
 cp infra/traefik/trading-bot.yml "${TRAEFIK_DYNAMIC_FILE}"
 
