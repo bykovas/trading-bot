@@ -1,3 +1,11 @@
+## 2026-08-23-card-numbers-survive-a-chat-bubble
+
+- A messenger shows the 1200px card at about half size. The figures were one 30px row, so on a phone they arrived at 15px and the trade count at 9px - the one thing the card exists to say was the only thing a reader could not read, while the logo and the coin came through fine.
+- The pair now has its own line at 62px (LUKO) and 56px (BYKO), with the gain, the percent and the count under it at half that. Checked by rendering and shrinking to the width Viber actually uses: at 630px the pair is plainly legible, and it still holds at a 340px thumbnail, where nothing numeric survived before.
+- The percent was the same muted tone as the dots between the figures, and it is the number people repeat. It now carries the same weight as the gain; only the separators and the trade count stay quiet.
+- `CARD_REVISION` added to the seed the og:image URL is built from. That URL is what makes a platform refetch, and it was derived only from the figures - so a redesign would never have reached anyone who had already shared a link. Bump it whenever the card's design changes.
+- Page only. No worker behaviour touched.
+
 ## 2026-08-23-aktas-replaced-by-the-web-export
 
 - The document is now the author's own web export, published as handed over. It reflows for the screen instead of being a fixed A4 sheet, which is the right answer to the phone problem the earlier `zoom` attempt only papered over - and it carries the wording changes, the download button and the links already, so nothing is added to it here.

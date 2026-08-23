@@ -46,18 +46,25 @@ function esc(value) {
     .replace(/"/g, "&quot;");
 }
 
-// The one row of numbers, written once for both themes. Only the colours
-// differ, and those arrive as CSS classes the theme defines.
+// The numbers, written once for both themes; only the colours differ, and those
+// arrive as CSS classes the theme defines.
+//
+// Three lines, not one. A messenger shows a 1200px card at about half size, so
+// the single 30px row this used to be arrived at 15px on a phone and the trade
+// count at 9px - the one thing on the card a reader is meant to take away was
+// the only thing they could not read. The pair that carries the story gets its
+// own line and its own size; what follows it is support and can be smaller.
 function statBlock(stat) {
   if (!stat) return "";
   const trades = stat.trades
-    ? ` <i class="trades">(${esc(stat.trades)})</i>`
+    ? ` <i class="x">&#183;</i> <i class="trades">${esc(stat.trades)}</i>`
     : "";
   return `<div class="stat">` +
     `<span class="stat-l">${esc(stat.label)}</span>` +
     `<span class="stat-n"><i class="from">Iš ${esc(stat.from)}</i> <i class="x">&#8594;</i> ` +
-    `<i class="to">${esc(stat.to)}</i> <i class="x">&#183;</i> <i class="gain">${esc(stat.gain)}</i> ` +
-    `<i class="x">&#183;</i> <i class="pct">${esc(stat.pct)}</i>${trades}</span>` +
+    `<i class="to">${esc(stat.to)}</i></span>` +
+    `<span class="stat-t"><i class="gain">${esc(stat.gain)}</i> <i class="x">&#183;</i> ` +
+    `<i class="pct">${esc(stat.pct)}</i>${trades}</span>` +
     `</div>`;
 }
 
@@ -91,19 +98,26 @@ function lukoCss(hasStat) {
   .badge-name em{font-style:normal;color:#E8B84B}
   .badge-sub{font-family:'DM Mono',ui-monospace,Menlo,monospace;font-weight:500;font-size:23px;
     line-height:1;letter-spacing:.22em;color:#7CCBFF;white-space:nowrap}
-  .stat{display:flex;flex-direction:column;gap:12px;min-width:0}
-  .stat-l{font-family:'DM Mono',ui-monospace,Menlo,monospace;font-weight:500;font-size:22px;
+  .stat{display:flex;flex-direction:column;gap:10px;min-width:0}
+  .stat-l{font-family:'DM Mono',ui-monospace,Menlo,monospace;font-weight:500;font-size:24px;
     line-height:1;letter-spacing:.2em;color:#8A7454;white-space:nowrap}
-  /* One line. Two lines would push the plate up and the coin would be cropped;
-     if the figures ever outgrow the width, the type comes down, not the coin. */
+  /* The pair is the card. Sized so it survives being shown at half scale in a
+     chat bubble; if the figures ever outgrow the width, the type comes down,
+     not the coin. */
   .stat-n{font-family:'Space Grotesk',Archivo,Helvetica,Arial,sans-serif;font-weight:700;
-    font-size:30px;line-height:1.1;white-space:nowrap}
-  .stat-n i{font-style:normal}
+    font-size:62px;line-height:1;white-space:nowrap}
+  .stat-n i,.stat-t i{font-style:normal}
+  .stat-t{font-family:'Space Grotesk',Archivo,Helvetica,Arial,sans-serif;font-weight:700;
+    font-size:31px;line-height:1;white-space:nowrap}
   .from{color:#A97213}
   .to{color:#0C7A45}
-  .gain{color:#493721}
-  .x,.pct{color:#8A7454}
-  .trades{font-family:'DM Mono',ui-monospace,Menlo,monospace;font-weight:500;font-size:18px;color:#8A7454}
+  /* The gain and the percent carry the same weight as each other: at half scale
+     in a chat bubble, the percent used to be as faint as the dots between the
+     figures, and it is the one number people repeat. Only the separators and
+     the trade count stay quiet. */
+  .gain,.pct{color:#493721}
+  .x{color:#8A7454}
+  .trades{font-family:'DM Mono',ui-monospace,Menlo,monospace;font-weight:500;font-size:26px;color:#8A7454}
   /* A losing best day is still the best day. It says so in red rather than
      being swapped for a friendlier one. */
   .is-down .to,.is-down .gain{color:#A4162A}
@@ -184,19 +198,21 @@ function bykoCss(hasStat) {
   .lockup-name em{font-style:normal;color:#E8B84B}
   .lockup-sub{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-weight:500;font-size:39px;
     line-height:1;letter-spacing:.22em;color:#9B8FD8;white-space:nowrap}
-  .stat{display:flex;flex-direction:column;gap:10px;min-width:0}
-  .stat-l{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-weight:500;font-size:19px;
+  .stat{display:flex;flex-direction:column;gap:9px;min-width:0}
+  .stat-l{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-weight:500;font-size:21px;
     line-height:1;letter-spacing:.2em;color:#7C8794;white-space:nowrap}
-  .stat-n{font-family:'Space Grotesk',Inter,sans-serif;font-weight:700;font-size:28px;line-height:1.15;
+  .stat-n{font-family:'Space Grotesk',Inter,sans-serif;font-weight:700;font-size:56px;line-height:1;
     white-space:nowrap}
-  .stat-n i{font-style:normal}
+  .stat-n i,.stat-t i{font-style:normal}
+  .stat-t{font-family:'Space Grotesk',Inter,sans-serif;font-weight:700;font-size:28px;line-height:1;
+    white-space:nowrap}
   /* Inverted against the apricot card, not copied from it: on #0B0D10 the
      LUKO hexes are unreadable. */
   .from{color:#E8B84B}
   .to{color:#41EDA0}
-  .gain{color:#C6CDD6}
-  .x,.pct{color:#7C8794}
-  .trades{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-weight:500;font-size:17px;color:#7C8794}
+  .gain,.pct{color:#C6CDD6}
+  .x{color:#7C8794}
+  .trades{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-weight:500;font-size:23px;color:#7C8794}
   .is-down .to,.is-down .gain{color:#FF6B7A}
   .band{position:relative;border-top:2px solid rgba(255,255,255,.1);padding-top:26px}
   .claim{font-size:40px;line-height:1.15;font-weight:500;color:#AEB6BF;text-wrap:pretty}

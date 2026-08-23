@@ -106,12 +106,22 @@ function cardValues(data, theme) {
   };
 }
 
+// Bump when the card's design changes. The revision is what makes a platform
+// refetch, and it is otherwise derived only from the figures - so a redesign
+// would never reach anyone who had already shared the link, and the only card
+// they could show is the one from before it.
+//   2 - the number pair moved onto its own line and grew, so it survives being
+//       shown at half size in a chat bubble.
+const CARD_REVISION = "2";
+
 // The revision a platform can see. Facebook and LinkedIn fetch og:image once
 // and hold it for days, so the URL has to change when the figure does — and
 // must NOT change when it does not, or their cache is thrown away every hit.
 function revisionOf(bot, values) {
   const stat = values.stat;
-  const seed = stat ? `${bot}|${stat.label}|${stat.gain}|${stat.pct}|${stat.trades}` : `${bot}|empty`;
+  const seed = stat
+    ? `${CARD_REVISION}|${bot}|${stat.label}|${stat.gain}|${stat.pct}|${stat.trades}`
+    : `${CARD_REVISION}|${bot}|empty`;
   return createHash("sha1").update(seed).digest("hex").slice(0, 10);
 }
 
