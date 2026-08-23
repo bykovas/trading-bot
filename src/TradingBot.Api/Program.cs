@@ -536,7 +536,10 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             trailing_stop_percent
         from portfolio_position_state position
         where (@bot_instance_id is null or position.bot_instance_id = @bot_instance_id)
-        order by market_value_eur desc, pair
+        -- Newest first. Ordering by market value put the biggest position on top,
+        -- which since the stake was raised means the newest is as likely to be last
+        -- as first; what a reader is looking for is what just happened.
+        order by opened_at_utc desc nulls last, pair
         """,
         connection);
     command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;

@@ -1,3 +1,8 @@
+## 2026-08-23-positions-listed-newest-first
+
+- Open positions were ordered by market value, so the biggest sat on top. Since futures-live went to ten times the stake that ordering says nothing about time: a fresh 150 USD entry lands under an older 1500 USD one. They are ordered by opening time now, newest first - what a reader opens the list for is what just happened.
+- API only. No worker behaviour touched.
+
 ## 2026-08-23-aktas-luko-mark-and-the-dead-address
 
 - The LUKO mark in the closing strip had lost its decorative group somewhere in the export - only the bare L remained, without the corner and the ring. It carries the same paths as the one on page one now; the two marks are the same markup at different sizes.
