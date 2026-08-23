@@ -76,6 +76,11 @@
 .bc-brand-txt{display:flex;flex-direction:column;gap:2px}
 .bc-brand-txt b{font:600 17px/1.05 var(--font-display);letter-spacing:.01em;color:var(--cream);white-space:nowrap}
 .bc-brand-txt b i{font-style:normal;color:var(--gold)}
+/* The name wherever it appears in running text or a legend, split the same way as in
+   the header. It inherits the size and weight of whatever it sits in - a headline is
+   not a topbar - and carries only the two colours, which is what makes it the name. */
+.bc-blynai{font-family:var(--font-display);color:var(--cream)}
+.bc-blynai i{font-style:normal;color:var(--gold)}
 .bc-brand-txt small{font:10px var(--font-mono);text-transform:uppercase;letter-spacing:.14em;color:var(--purple);white-space:nowrap}
 .bc-topbar-right{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
 /* Page chrome, not a data control — deliberately quieter than the tenant switch
@@ -742,7 +747,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     <section class="bc-hero">
       <div class="bc-hero-main">
         <p class="bc-eyebrow">Uždaras testavimas · tikri pinigai</p>
-        <h1 class="bc-h1"><span class="bc-h1-a">L&amp;D botas Algo dirba.</span> <span class="bc-h1-b">Mes uždirbam. Kol kas.</span></h1>
+        <h1 class="bc-h1"><span class="bc-h1-a">L&amp;D botas <span class="bc-blynai">Blyn<i>AI</i></span> dirba.</span> <span class="bc-h1-b">Mes uždirbam. Kol kas.</span></h1>
         <p class="bc-lead">Jis pats suranda ir atidaro pozicijas, pats valdo riziką, pats uždaro sandorius. Be rankų, be emocijų. Kiekvienas sprendimas įrašytas. Mes tik stebime, kaip keičiasi skaičiai.</p>
       </div>
 
@@ -820,9 +825,9 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <div class="bc-legend">
           <p class="bc-legend-l" id="bcChartCaption">Grafikas — 30 uždarytų dienų<br>(šiandiena dar neįskaityta)</p>
           <div class="bc-legend-row">
-            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span></span>Algo</span>
+            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span></span><span class="bc-blynai">Blyn<i>AI</i></span></span>
             <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--dep"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#0e2a48"/></svg></span><span class="bc-sq bc-sq--wdr"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#6faeff"/></svg></span></span>Įnašai</span>
-            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--today"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#12100b"/></svg></span><span class="bc-sq bc-sq--today-dn"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#f5b84f"/></svg></span></span><span class="bc-lg-w">Algo šiandien</span><span class="bc-lg-n">Šiandien</span></span>
+            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--today"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#12100b"/></svg></span><span class="bc-sq bc-sq--today-dn"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#f5b84f"/></svg></span></span><span class="bc-lg-w"><span class="bc-blynai">Blyn<i>AI</i></span> šiandien</span><span class="bc-lg-n">Šiandien</span></span>
               <span class="bc-lg"><span class="bc-sq bc-sq--start"></span>Startas</span>
               <span class="bc-lg" id="bcLegendGap" hidden><span class="bc-sq bc-sq--gap"></span>Trūksta duomenų</span>
           </div>
