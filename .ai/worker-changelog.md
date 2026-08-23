@@ -1,3 +1,11 @@
+## 2026-08-23-aktas-seal
+
+- The signature card's seal was a round bordered span with three stacked lines. It is the drawn seal now: three outer rings, `MAŽOJI BENDRIJA · BLYNAI` on the upper arc and `L&D FINANCE LAB · 2026` on the lower one - both in the same band, both read left to right - stars at the ends of the text, and only the BlynAI mark in the middle, with no shield and no `MB` letters.
+- Checked rather than assumed: the bundle carries `IBM Plex Mono` at 600, which the arc text needs. Without it `textPath` re-measures against a fallback and the words either spill past the arc or bunch to one side.
+- Printed to A4 to confirm the acceptance criterion: the seal stays inside the signature card with both signature lines and does not push onto another page.
+- Only the seal changed. Diffed the unpacked document against the previous version: one hunk.
+- Page only. No worker behaviour touched.
+
 ## 2026-08-23-positions-listed-newest-first
 
 - Open positions were ordered by market value, so the biggest sat on top. Since futures-live went to ten times the stake that ordering says nothing about time: a fresh 150 USD entry lands under an older 1500 USD one. They are ordered by opening time now, newest first - what a reader opens the list for is what just happened.
