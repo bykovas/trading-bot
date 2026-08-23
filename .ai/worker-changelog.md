@@ -1,3 +1,10 @@
+## 2026-08-23-aktas-replaced-by-the-web-export
+
+- The document is now the author's own web export, published as handed over. It reflows for the screen instead of being a fixed A4 sheet, which is the right answer to the phone problem the earlier `zoom` attempt only papered over - and it carries the wording changes, the download button and the links already, so nothing is added to it here.
+- `tools/build-aktas.py` is gone with it: there is no longer anything of ours to re-apply to an export.
+- Two things worth knowing. The `noindex` sits in the packed template, so a crawler that renders JavaScript sees it and a simpler one does not. And the appendix still links `algo.meetluko.eu`, the host the dashboard moved off - it redirects, so it works, but it names the old address.
+- Page only. No worker behaviour touched.
+
 ## 2026-08-23-aktas-becomes-an-intent-act-not-a-founding-contract
 
 - The document called itself `MAŽOSIOS BENDRIJOS STEIGIMO SUTARTIS` and its 7.1 said it becomes one the moment both founders sign - while 3.2 and the signature page said the contribution and the personal data would be settled later. Signed as written it would have been a real founding contract that is missing what the law requires one to contain, which is the worst of both.
