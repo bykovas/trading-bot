@@ -6,7 +6,7 @@
 - The divider is a border on each group rather than a span between them. A separate span would leave a doubled hairline wherever `startas` is absent - which is any account funded before it was listed.
 - "No data" moved inside the BlynAI group, next to the up and down squares. It is an outcome of a day, not a category of its own, and as a sixth segment it was the difference between fitting a 375px phone and not.
 - On a phone three of the seven words go rather than shorten into stubs: `istorija` is what the name and a pair of arrows already say, and the grey square is the one entry nobody reads in a hurry. Measured 324 of 343 available, 337 in the rare state where a missing day is also on the chart.
-- The headline block now gives up width before the legend does. One line is wider than the two rows it replaced, and left to their content widths the two of them wrapped the legend under the number on a 1280px screen; a 360px basis lets the sentence under the number take a second line instead.
+- The headline block now gives up width before the legend does. One line is wider than the two rows it replaced, and left to their content widths the two of them wrapped the legend under the number on a 1280px screen; a 360px basis lets the sentence under the number take a second line instead. Scoped to the wide layout: the narrow one runs the same flex in a column, where that basis is 360px of empty height under the number - which is exactly what it drew before the rule was moved.
 - Page only. No worker behaviour touched.
 
 ## 2026-08-23-legend-frames-and-the-base-under-the-first-candle

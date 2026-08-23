@@ -181,13 +181,7 @@
 
 /* --- live / chart / metrics --- */
 .bc-live{padding:26px 22px 0}
-/* The headline block gives up width before the legend does. One line of legend is
-   wider than the two stacked frames it replaced, and left to their content widths
-   the two of them wrapped it under the number on a 1280px screen. A 360px basis
-   lets the sentence under the number take a second line instead; below ~900px the
-   wrap is still there, and by then the narrow layout has stacked them anyway. */
 .bc-live-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap}
-.bc-live-head>:first-child{flex:1 1 360px;min-width:0}
 .bc-live-l{display:flex;align-items:center;gap:9px;font:600 11px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--green)}
 .bc-live-l b{font-weight:700;color:var(--gold)}
 .bc-live-n{display:flex;align-items:baseline;gap:14px;padding-top:16px;flex-wrap:wrap}
@@ -197,7 +191,7 @@
   color:var(--green);font:13.5px var(--font-mono)}
 .bc-live-s{margin-top:10px;font:12.5px var(--font-mono);color:var(--muted-2)}
 .bc-live-s b{color:var(--ink-soft);font-weight:400} .bc-live-s i{font-style:normal;color:var(--blue)}
-.bc-legend{display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex:0 0 auto}
+.bc-legend{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
 .bc-legend-l{font:10.5px var(--font-mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted-3);text-align:right}
 /* One pill, four groups, hairlines between them. Two framed rows read as two boxes
    arguing with the chart under them; one object with internal divisions reads as a
@@ -348,6 +342,14 @@
   .bc-card>.bc-card-sum{cursor:default}
   .bc-only-narrow{display:none!important}
   .bc-status-line{display:none}
+  /* The headline block gives up width before the legend does. One line of legend is
+     wider than the two stacked frames it replaced, and left to their content widths
+     the two of them wrapped it under the number on a 1280px screen; a 360px basis
+     lets the sentence under the number take a second line instead. Scoped to this
+     block on purpose - the narrow layout runs the same flex in a column, where a
+     360px basis is 360px of empty height under the number. */
+  .bc-live-head>:first-child{flex:1 1 360px;min-width:0}
+  .bc-legend{flex:0 0 auto}
 }
 
 /* =========================== NARROW (mobile) ========================== */
