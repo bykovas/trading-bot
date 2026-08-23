@@ -342,7 +342,19 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(PORT, () => console.log(`og: listening on ${PORT}, api ${API_BASE}, cache ${CACHE_DIR}`));
+server.listen(PORT, () => {
+  console.log(`og: listening on ${PORT}, api ${API_BASE}, cache ${CACHE_DIR}`);
+  // Launch the browser and lay out both themes now rather than making whichever
+  // crawler arrives first wait through it. That first request measured 2.8s on
+  // the server against 0.05s once a theme's page exists; nothing about it is the
+  // visitor's business. Failures are logged and left alone - the first request
+  // will try again, and the committed card covers it until then.
+  for (const theme of THEMES) {
+    pageFor(theme)
+      .then(() => console.log(`og: ${theme} page ready`))
+      .catch(error => console.warn(`og: could not warm ${theme} (${error.message})`));
+  }
+});
 
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.on(signal, async () => {
