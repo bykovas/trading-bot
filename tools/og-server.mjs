@@ -25,7 +25,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
-import { cardHtml, THEMES } from "./og-card.mjs";
+import { cardHtml, cardCss, cardBody, THEMES } from "./og-card.mjs";
 import { fontsFor } from "./og-fonts.mjs";
 import {
   trimToLaunch, num, signedPercent, formatMoney, formatSignedMoney, tradesWord
@@ -115,24 +115,55 @@ function revisionOf(bot, values) {
   return createHash("sha1").update(seed).digest("hex").slice(0, 10);
 }
 
-async function renderPng(theme, values) {
+// One page per theme, kept alive with its fonts already parsed. Rebuilding the
+// document for every request meant re-reading a megabyte of embedded TrueType
+// each time, which on the server was most of the time a card took - and none of
+// it was drawing. Recycled every so often so a page held open for weeks cannot
+// quietly grow.
+const RENDERS_PER_PAGE = 200;
+const pages = new Map();
+// Requests for the same theme share one page, so they have to queue behind each
+// other rather than overwrite each other's markup mid-screenshot.
+const queues = new Map();
+
+async function pageFor(theme) {
+  const held = pages.get(theme);
+  if (held && !held.page.isClosed() && held.uses < RENDERS_PER_PAGE) return held;
+
+  if (held && !held.page.isClosed()) await held.page.close().catch(() => {});
   const instance = await getBrowser();
   const page = await instance.newPage({ viewport: { width: 1200, height: 630 }, deviceScaleFactor: 1 });
-  try {
-    const fontsCss = await fontsFor(theme);
-    await page.setContent(cardHtml({ theme, fontsCss, values }), { waitUntil: "load" });
-    // The claim is painted with background-clip:text. An unloaded face there
-    // renders nothing at all rather than something in the wrong font, so the
-    // card would ship with its own headline missing.
-    await page.evaluate(() => document.fonts.ready);
-    const box = await page.locator("#card").boundingBox();
-    if (!box || Math.round(box.width) !== 1200 || Math.round(box.height) !== 630) {
-      throw new Error(`card is ${box && box.width}x${box && box.height}, expected 1200x630`);
-    }
-    return await page.locator("#card").screenshot({ type: "png" });
-  } finally {
-    await page.close();
+  const fontsCss = await fontsFor(theme);
+  await page.setContent(cardHtml({ theme, fontsCss, values: { domain: "", stat: null } }), { waitUntil: "load" });
+  // The claim is painted with background-clip:text. An unloaded face there
+  // renders nothing at all rather than something in the wrong font, so the card
+  // would ship with its own headline missing. Waited for once, here.
+  await page.evaluate(() => document.fonts.ready);
+  const fresh = { page, uses: 0 };
+  pages.set(theme, fresh);
+  return fresh;
+}
+
+async function drawOn(theme, values) {
+  const held = await pageFor(theme);
+  held.uses += 1;
+  await held.page.evaluate(([css, body]) => {
+    document.getElementById("bc-theme").textContent = css;
+    document.getElementById("bc-root").innerHTML = body;
+  }, [cardCss(theme, !!values.stat), cardBody(theme, values)]);
+  const box = await held.page.locator("#card").boundingBox();
+  if (!box || Math.round(box.width) !== 1200 || Math.round(box.height) !== 630) {
+    throw new Error(`card is ${box && box.width}x${box && box.height}, expected 1200x630`);
   }
+  return await held.page.locator("#card").screenshot({ type: "png" });
+}
+
+function renderPng(theme, values) {
+  const queued = (queues.get(theme) || Promise.resolve())
+    .catch(() => {})
+    .then(() => drawOn(theme, values));
+  queues.set(theme, queued.catch(() => {}));
+  return queued;
 }
 
 function cachePath(bot, theme) {

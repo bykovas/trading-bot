@@ -237,23 +237,30 @@ function bykoBody(values) {
 
 export const THEMES = ["luko", "byko"];
 
+// Split from the body on purpose. The renderer keeps one page alive per theme
+// with the fonts already parsed and swaps only these two on each request: a
+// megabyte of embedded TrueType re-read for every crawler is most of the time a
+// card takes to draw, and none of it is drawing.
+export function cardCss(theme, hasStat) {
+  return theme === "byko" ? bykoCss(hasStat) : lukoCss(hasStat);
+}
+
+export function cardBody(theme, values) {
+  return theme === "byko" ? bykoBody(values) : lukoBody(values);
+}
+
 // fontsCss is the @font-face block with the faces embedded as data URIs. It is
-// passed in rather than read here so the files are read once per process: a
-// renderer that re-read four TrueType files on every crawler hit would spend
-// more time on disk than on the picture.
+// passed in rather than read here so the files are read once per process.
 export function cardHtml({ theme = "luko", fontsCss = "", values = {} }) {
-  const byko = theme === "byko";
   const hasStat = !!values.stat;
   return `<!doctype html>
 <html lang="lt">
 <head>
 <meta charset="utf-8">
-<title>${byko ? "BYKO" : "LUKO"} — og:image 1200&#215;630</title>
+<title>${theme === "byko" ? "BYKO" : "LUKO"} — og:image 1200&#215;630</title>
 <style>${fontsCss}</style>
-<style>${byko ? bykoCss(hasStat) : lukoCss(hasStat)}</style>
+<style id="bc-theme">${cardCss(theme, hasStat)}</style>
 </head>
-<body>
-${byko ? bykoBody(values) : lukoBody(values)}
-</body>
+<body><div id="bc-root">${cardBody(theme, values)}</div></body>
 </html>`;
 }
