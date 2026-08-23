@@ -87,6 +87,74 @@ public sealed class FuturesEntryMirrorTests
         Assert.Single(decisions);
     }
 
+    // The mirror carries what to trade and which way, never how much. Copying the
+    // publisher's notional as well made the follower's own stake dead config: with
+    // its own signals off, every entry it has arrives through this path, so a
+    // 600 USD account kept taking the 150 USD position sized for a 93 USD one.
+    [Fact]
+    public async Task Follower_sizes_the_mirrored_entry_from_its_own_stake_not_the_publishers()
+    {
+        var command = new FuturesEntryMirrorCommand(
+            Id: 7,
+            SourceBotInstanceId: "futures-lukas-live",
+            SourceCycleId: "futures-lukas-live-20260823120000",
+            TargetBotInstanceId: "futures-live",
+            Pair: "BOME/USD",
+            KrakenSymbol: "PF_BOMEUSD",
+            SourceSide: "LONG",
+            TargetSide: "LONG",
+            TargetNotionalUsd: 150m,
+            Leverage: 10m,
+            SourceFillPrice: 2.02m,
+            QuantityDecimals: 8,
+            PriceDecimals: 4,
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            AttemptCount: 1);
+
+        var followerConfig = CreateConfig("futures-live");
+        followerConfig.EntryMirror.FollowSourceBotInstanceId = "futures-lukas-live";
+        followerConfig.EntryMirror.InvertSide = false;
+        // Ten times the publisher's stake, the way the live instance is configured.
+        followerConfig.Futures.TargetMarginUsd = 150m;
+        followerConfig.Futures.MaxNotionalUsd = 1500m;
+        followerConfig.Futures.MaxMarginPerPositionUsd = 150m;
+        followerConfig.Futures.MaxTotalNotionalUsd = 4500m;
+        followerConfig.Risk.TargetRiskUsd = 45m;
+        followerConfig.Risk.MaxConcurrentOpenRiskUsd = 135m;
+
+        var followerBroker = new StubBroker();
+        var followerWorker = CreateWorker(
+            followerConfig,
+            followerBroker,
+            new StubMirrorStore { Next = command });
+        var state = new PortfolioState
+        {
+            CashEur = 600m,
+            CashQuoteValue = 600m,
+            CashQuoteCurrency = "USD"
+        };
+        var instrument = new InstrumentOptions
+        {
+            Pair = "BOME/USD",
+            KrakenPair = "PF_BOMEUSD",
+            QuantityDecimals = 8,
+            PriceDecimals = 4
+        };
+
+        var mirrorDecisions = new List<DryRunDecisionRecord>();
+        await InvokeProcessAsync(followerWorker, state, [instrument], mirrorDecisions);
+        Assert.True(
+            state.Positions.Count == 1,
+            "no position opened; decisions: " + string.Join(" | ", mirrorDecisions.Select(d => d.DryRunAction.HoldReasonCode + ": " + d.DryRunAction.Reason)));
+
+        var opened = Assert.Single(state.Positions);
+        Assert.Equal("LONG", opened.Side);
+        Assert.Equal("Mirror", opened.EntryChannel);
+        // Its own stake, not the 150 the command carried.
+        Assert.InRange(opened.EntryNotionalEur, 1499.99m, 1500m);
+        Assert.Equal(10m, opened.Leverage);
+    }
+
     [Theory]
     [InlineData("LONG", "SHORT", "LONG")]
     [InlineData("SHORT", "LONG", "SHORT")]
@@ -136,6 +204,9 @@ public sealed class FuturesEntryMirrorTests
             MaxTotalNotionalUsd = 450m,
             MaxMarginPerPositionUsd = 15m
         },
+        // The live publisher's risk budget. Left unset the sizer falls back to the
+        // 1 USD class default, which is neither instance and sizes nothing like them.
+        Risk = new FuturesRiskOptions { TargetRiskUsd = 4.5m, MaxConcurrentOpenRiskUsd = 13.5m },
         Entry = new FuturesEntryOptions { MaxEntryPriceDeviationPct = 0.35m },
         Fees = new FuturesFeesOptions { MakerPct = 0.02m, TakerPct = 0.05m },
         Margin = new MarginOptions { MaxAccountMarginUtilizationPercent = 80m },

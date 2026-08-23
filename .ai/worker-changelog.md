@@ -1,3 +1,13 @@
+## 2026-08-23-mirror-carries-the-signal-not-the-size
+
+- The entry mirror copied the publisher's position, not its signal: `PublishMirrorEntryAsync` sent its own filled notional and the follower handed `command.TargetNotionalUsd` straight to the executor. The follower's `TargetMarginUsd` was never read on that path.
+- Which made futures-live's stake dead config. On 2026-08-22 it went to 150 USD of margin per position and to `OwnSignalEntriesEnabled: false` in the same change - so every entry it has comes through the mirror, and every one of them was sized for futures-lukas-live. Seen live on 2026-08-23: Lukas opened DOT/USD LONG at 12:22:22, futures-live the same at 12:22:26 with 14.99 USD of margin against 584.93 USD free. Nothing was capping it; the size simply was not its own.
+- The follower now sizes the entry itself, through the same `FuturesPositionSizer` its own entries use: its risk budget, its per-position caps, its available collateral. The command supplies the pair and the side and nothing else.
+- Sized without ATR on purpose. The fast-exit cycle claims mirror commands with no candles loaded, so a size that depended on ATR would make one signal two different trades depending on which cycle picked it up. The sizer falls back to the configured stop floor, as it does for any instrument whose ATR is not known yet.
+- Leverage is the follower's own too. Both instances run 10x so nothing changes today, but copying it meant a publisher moving to 5x would push the follower's margin past its own per-position cap.
+- Tests: a command carrying 150 USD of notional now opens 1500 on a follower staked at 150 USD of margin. The mirror tests were also running on the 1 USD class default for `TargetRiskUsd`, which is neither instance - they now carry the live budgets, 4.5 and 45.
+- Effect on live orders: futures-live entries go from ~150 USD of notional to its configured 1500, which is what its appsettings has said since 2026-08-22. futures-lukas-live is unaffected - it publishes and sizes for itself.
+
 ## 2026-08-23-card-numbers-survive-a-chat-bubble
 
 - A messenger shows the 1200px card at about half size. The figures were one 30px row, so on a phone they arrived at 15px and the trade count at 9px - the one thing the card exists to say was the only thing a reader could not read, while the logo and the coin came through fine.

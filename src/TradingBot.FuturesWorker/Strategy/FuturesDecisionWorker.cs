@@ -884,7 +884,40 @@ internal sealed class FuturesDecisionWorker(
                 continue;
             }
 
-            var capacityReason = MirrorCapacityBlockReason(state, command.TargetNotionalUsd, command.Leverage);
+            // The size is this account's decision, not the publisher's. The command
+            // says what to trade and which way; copying its notional as well meant a
+            // 600 USD account taking the same 150 USD position as a 93 USD one - and
+            // it made this instance's own TargetMarginUsd dead config, because with
+            // OwnSignalEntriesEnabled off every entry it has comes through here.
+            var desired = command.TargetSide.Equals("SHORT", StringComparison.OrdinalIgnoreCase)
+                ? FuturesDesiredExposure.Short
+                : FuturesDesiredExposure.Long;
+            var mirrorLeverage = Math.Clamp(
+                config.Futures.DefaultLeverage <= 0m ? 1m : config.Futures.DefaultLeverage,
+                1m,
+                config.Futures.MaxLeverage);
+            var mirrorCosts = FuturesExecutionCostModel.Estimate(config, desired, null);
+            // Sized without ATR on purpose. The fast-exit path claims commands with no
+            // candles loaded, and a size that depended on which path picked a command
+            // up would make one signal two different trades depending on the second it
+            // arrived. The sizer falls back to the configured stop floor, exactly as it
+            // does for any instrument whose ATR is not known yet.
+            var mirrorSize = FuturesPositionSizer.FitToAvailableCollateral(
+                FuturesPositionSizer.Size(config, 0m, mirrorCosts, mirrorLeverage),
+                config,
+                state,
+                portfolio.UsedMarginEur(state),
+                mirrorCosts);
+            var mirrorNotional = mirrorSize.SizedNotionalEur;
+            if (mirrorNotional <= 0m)
+            {
+                var sizeReason = $"mirror command not sized: {mirrorSize.NotionalCapReason ?? "no collateral available"}";
+                await _entryMirrorStore.MarkFailedAsync(command.Id, sizeReason, cancellationToken);
+                decisions.Add(BuildMirrorDecisionRecord(command, MirrorNoOrder(state, command, sizeReason, "MIRROR_NOT_SIZED"), false));
+                continue;
+            }
+
+            var capacityReason = MirrorCapacityBlockReason(state, mirrorNotional, mirrorLeverage);
             if (capacityReason is not null)
             {
                 await _entryMirrorStore.MarkFailedAsync(command.Id, capacityReason, cancellationToken);
@@ -912,16 +945,13 @@ internal sealed class FuturesDecisionWorker(
                 QuantityDecimals = command.QuantityDecimals ?? configuredInstrument.QuantityDecimals,
                 PriceDecimals = command.PriceDecimals ?? configuredInstrument.PriceDecimals
             };
-            var desired = command.TargetSide.Equals("SHORT", StringComparison.OrdinalIgnoreCase)
-                ? FuturesDesiredExposure.Short
-                : FuturesDesiredExposure.Long;
             var fill = await ApplyOrExecuteLiveAsync(
                 state,
                 instrument.Pair,
                 desired,
                 command.SourceFillPrice,
-                command.TargetNotionalUsd,
-                command.Leverage,
+                mirrorNotional,
+                mirrorLeverage,
                 reduceOnly: false,
                 reason: $"mirror entry from {command.SourceBotInstanceId} cycle {command.SourceCycleId}: {command.SourceSide} -> {command.TargetSide}",
                 exitTriggerSource: null,
@@ -943,7 +973,7 @@ internal sealed class FuturesDecisionWorker(
                     $"opened {command.TargetSide} notional USD {fill.Action.FilledNotionalEur:0.####}",
                     cancellationToken);
                 Console.WriteLine(
-                    $"MIRROR_EXECUTED id={command.Id} pair={command.Pair} source={command.SourceSide} target={command.TargetSide} notionalUsd={fill.Action.FilledNotionalEur:0.####} fill={fill.Action.AverageFillPrice:0.########}");
+                    $"MIRROR_EXECUTED id={command.Id} pair={command.Pair} source={command.SourceSide} target={command.TargetSide} notionalUsd={fill.Action.FilledNotionalEur:0.####} sizedHere={mirrorNotional:0.####} sourceNotionalUsd={command.TargetNotionalUsd:0.####} fill={fill.Action.AverageFillPrice:0.########}");
             }
             else
             {
