@@ -1,3 +1,9 @@
+## 2026-08-23-aktas-luko-mark-and-the-dead-address
+
+- The LUKO mark in the closing strip had lost its decorative group somewhere in the export - only the bare L remained, without the corner and the ring. It carries the same paths as the one on page one now; the two marks are the same markup at different sizes.
+- The appendix linked `algo.meetluko.eu`, which is not where the dashboards live any more. It names both of them instead: `blynai.meetluko.eu` and `blynai.bykovas.lt`.
+- Page only. No worker behaviour touched.
+
 ## 2026-08-23-mirror-carries-the-signal-not-the-size
 
 - The entry mirror copied the publisher's position, not its signal: `PublishMirrorEntryAsync` sent its own filled notional and the follower handed `command.TargetNotionalUsd` straight to the executor. The follower's `TargetMarginUsd` was never read on that path.
