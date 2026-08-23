@@ -79,6 +79,10 @@
 /* The name wherever it appears in running text or a legend, split the same way as in
    the header. It inherits the size and weight of whatever it sits in - a headline is
    not a topbar - and carries only the two colours, which is what makes it the name. */
+/* The colon after each owner's name, and the "Aš:" that answers it. They carry the
+   grouping the frames already draw, so a reader who scans one legend entry still
+   knows whose it is. */
+.bc-lg-lbl{color:var(--ink-soft);margin-left:-4px}
 .bc-blynai{font-family:var(--font-display);color:var(--cream)}
 .bc-blynai i{font-style:normal;color:var(--gold)}
 .bc-brand-txt small{font:10px var(--font-mono);text-transform:uppercase;letter-spacing:.14em;color:var(--purple);white-space:nowrap}
@@ -190,7 +194,11 @@
 .bc-live-s b{color:var(--ink-soft);font-weight:400} .bc-live-s i{font-style:normal;color:var(--blue)}
 .bc-legend{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
 .bc-legend-l{font:10.5px var(--font-mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted-3);text-align:right}
-.bc-legend-row{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+/* One frame per row. Squeezed onto a single line the two of them left no margin at
+   all - 337 of 337 on a 375px phone - and the words had to be cut to fit. Stacked,
+   they keep the words that say what they mean. */
+.bc-legend-row{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.bc-lg-part{display:inline-flex;align-items:center;gap:inherit}
 .bc-lg{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 11px;border:1px solid var(--hairline);
   border-radius:var(--r);background:rgba(17,18,15,.7);font:11.5px var(--font-mono);color:var(--ink-soft)}
 .bc-sq-pair{display:inline-flex;gap:3px}
@@ -411,9 +419,15 @@
   /* Three entries need 379px and a 375px phone offers 343, so they wrapped to a
      second row. Trimmed rather than shortened: the words are the labels, and
      "Pervedimai" cannot be abbreviated without inventing jargon. */
-  .bc-legend-row{justify-content:flex-start;gap:4px}
-  .bc-legend-row .bc-lg{padding:0 6px;gap:4px;font-size:11px}
-  .bc-legend-row .bc-sq{width:10px;height:10px}
+  /* Two grouped frames instead of four chips: the entries that belong to the bot sit
+     together under its name, the money you moved sits apart. Spelled out they need
+     360px against 343, so on a phone the frames are trimmed rather than the words -
+     "istorija" and "startas" have no shorter honest form. */
+  /* Room again now that the frames stack, so the swatches and type go back to the
+     sizes they have everywhere else. */
+  .bc-legend-row{align-items:flex-start;gap:6px}
+  .bc-legend-row .bc-lg{padding:0 8px;gap:5px;font-size:11px}
+  .bc-legend-row .bc-sq{width:12px;height:12px}
   .bc-legend-row .bc-sq-pair{gap:2px}
   /* Four entries need 350px spelled out and a 375px phone offers 343. The long form
      is kept where there is room rather than shortened everywhere: on a desktop the
@@ -825,12 +839,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <div class="bc-legend">
           <p class="bc-legend-l" id="bcChartCaption">Grafikas — 30 uždarytų dienų<br>(šiandiena dar neįskaityta)</p>
           <div class="bc-legend-row">
-            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span></span><span class="bc-blynai">Blyn<i>AI</i></span></span>
-            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--dep"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#0e2a48"/></svg></span><span class="bc-sq bc-sq--wdr"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#6faeff"/></svg></span></span>Įnašai</span>
-            <span class="bc-lg"><span class="bc-sq-pair"><span class="bc-sq bc-sq--today"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#12100b"/></svg></span><span class="bc-sq bc-sq--today-dn"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#f5b84f"/></svg></span></span><span class="bc-lg-w"><span class="bc-blynai">Blyn<i>AI</i></span> šiandien</span><span class="bc-lg-n">Šiandien</span></span>
-              <span class="bc-lg"><span class="bc-sq bc-sq--start"></span>Startas</span>
+              <span class="bc-lg"><span class="bc-blynai">Blyn<i>AI</i></span><span class="bc-lg-lbl">:</span><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span></span>istorija<span class="bc-sq-pair"><span class="bc-sq bc-sq--today"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#12100b"/></svg></span><span class="bc-sq bc-sq--today-dn"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#f5b84f"/></svg></span></span>šiandien</span>
+              <span class="bc-lg"><span class="bc-lg-lbl">Rankiniai:</span><span class="bc-sq-pair"><span class="bc-sq bc-sq--dep"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#0e2a48"/></svg></span><span class="bc-sq bc-sq--wdr"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#6faeff"/></svg></span></span>įnešimai<span class="bc-lg-part" id="bcLegendStart"><span class="bc-sq bc-sq--start"></span>startas</span></span>
               <span class="bc-lg" id="bcLegendGap" hidden><span class="bc-sq bc-sq--gap"></span>Trūksta duomenų</span>
-          </div>
+            </div>
         </div>
       </div>
       <div class="bc-chart" id="bcChart"><div id="bcChartCanvas"></div><div class="bc-tip" id="bcChartTip" hidden></div></div>
@@ -1135,6 +1147,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       rateL: el("bcRateL"),
       yestFine: el("bcYestFine"),
       legendGap: el("bcLegendGap"),
+      legendStart: el("bcLegendStart"),
       metrics: el("bcMetrics"),
       posMeta: el("bcPosMeta"),
       posList: el("bcPosList"),
@@ -1417,18 +1430,17 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           // The rest of the opening value is a balance carried over from before the
           // series starts - painting that blue would credit the hands with money the
           // bot had already been trading, and it pins the axis to zero for no reason.
-          const started = Number(day.preWindowEur) || 0;
-          const carried = open - started;
-          // Two different things were one blue bar. The capital the account began with
-          // is not a transfer into a running account - the bot's result is measured
-          // from it, and the headline says so - so it gets its own darker blue and the
-          // day's actual transfers keep theirs, stacked above it.
-          const afterOpening = carried + started;
+          // Everything the account held when the series starts, drawn from zero as the
+          // base the first candle stands on. It is not a deposit and never claims to
+          // be - it has its own colour and its own name - but leaving it out left the
+          // first candle floating with nothing underneath, which said less than it
+          // hid. Whether that money arrived minutes before the first cycle or months
+          // earlier makes no difference to the reader: it is what there was.
           columns.push({
-            date: day.date, opening: true, open: carried, close, moved: started + moved,
-            capital: started ? { from: carried, to: afterOpening, amount: started } : null,
-            manual: moved ? { from: afterOpening, to: afterOpening + moved, amount: moved } : null,
-            bot: { from: afterOpening + moved, to: close }
+            date: day.date, opening: true, open: 0, close, moved: open + moved,
+            capital: open ? { from: 0, to: open, amount: open } : null,
+            manual: moved ? { from: open, to: open + moved, amount: moved } : null,
+            bot: { from: open + moved, to: close }
           });
           return;
         }
@@ -1752,6 +1764,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // not the contents of a particular day, so it never hides. Grey is different:
       // it means something went wrong, and it is announced only when it happened.
       if (els.legendGap) els.legendGap.hidden = !columns.some(column => column.gap);
+      // An account funded before the series starts has no starting capital in it -
+      // futures-live opened its first drawn day at 51,57 that was already there - so
+      // there is no dark blue bar and the entry explains nothing.
+      if (els.legendStart) els.legendStart.hidden = !columns.some(column => column.capital);
 
       if (!columns.length) {
         paint(els.chartCanvas, '<p class="bc-empty">Istorijos duomenų dar nėra</p>');
@@ -1966,7 +1982,9 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         // is measured from that capital, so subtracting it here would take it twice.
         // Two honest answers to two different questions, and without naming the gap
         // the page shows 62,44 on the chart and 2,44 in the text.
-        const opening = days.reduce((sum, day) => sum + (Number(day.preWindowEur) || 0), 0);
+        // The same number the chart draws as the base: everything the account held when
+        // the series starts, however long it had been there.
+        const opening = days.length ? Number(days[0].open) || 0 : 0;
         const openingText = opening
           ? ` <span class="bc-t-soft">(+ ${esc(money(opening))} pradinio kapitalo)</span>`
           : "";

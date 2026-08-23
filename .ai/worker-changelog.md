@@ -1,3 +1,12 @@
+## 2026-08-23-legend-frames-and-the-base-under-the-first-candle
+
+- Legend regrouped into two named frames, one per row: `BlynAI: istorija · šiandien` and `Rankiniai: įnešimai · startas`. What the bot does now sits under the bot's name and what a hand does sits apart, so the grouping reads before the labels do. Squeezed onto one line the two frames left no margin at all - 337 of 337 on a 375px phone - and the words had to be cut to fit; stacked, they keep the words that say what they mean.
+- The name carries the topbar's split wherever it appears in text, "Blyn" in cream and "AI" in gold, at whatever size it sits in.
+- `startas` now means everything the account held when the series starts, drawn from zero as the base the first candle stands on - not just transfers that landed shortly before the first cycle. futures-live was funded long before the launch date, so it had no such transfers and its first candle floated at 51.57 with nothing underneath while the legend still offered to explain a bar that was not there. Whether the money arrived minutes or months before makes no difference to a reader: it is what there was.
+- It keeps its own darker blue and its own name, so it never reads as a deposit; the headline names the same figure, `(+ 51,57 $ pradinio kapitalo)`.
+- The entry hides itself on an account that genuinely has no base to draw, the way the missing-data entry already does.
+- Page only. No worker behaviour touched.
+
 ## 2026-08-23-outlier-band-deleted-a-real-deposit
 
 - The daily rollup keeps only values within a third and triple of the day's median, to stop one nonsense cycle setting a high or a low. It cannot tell a nonsense cycle from a real jump: 562 USD arrived on futures-live at 22:16 local on 2026-08-22, the day's median was about 40, and every cycle after the deposit sat above median x 3 and was thrown away. The day closed at 38.35 as though the money had never come, and its observed window ended at 22:14 - two minutes before the transfer.
