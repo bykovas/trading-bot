@@ -82,7 +82,6 @@
 /* The colon after each owner's name, and the "Aš:" that answers it. They carry the
    grouping the frames already draw, so a reader who scans one legend entry still
    knows whose it is. */
-.bc-lg-lbl{color:var(--ink-soft);margin-left:-4px}
 .bc-blynai{font-family:var(--font-display);color:var(--cream)}
 .bc-blynai i{font-style:normal;color:var(--gold)}
 .bc-brand-txt small{font:10px var(--font-mono);text-transform:uppercase;letter-spacing:.14em;color:var(--purple);white-space:nowrap}
@@ -182,7 +181,13 @@
 
 /* --- live / chart / metrics --- */
 .bc-live{padding:26px 22px 0}
+/* The headline block gives up width before the legend does. One line of legend is
+   wider than the two stacked frames it replaced, and left to their content widths
+   the two of them wrapped it under the number on a 1280px screen. A 360px basis
+   lets the sentence under the number take a second line instead; below ~900px the
+   wrap is still there, and by then the narrow layout has stacked them anyway. */
 .bc-live-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.bc-live-head>:first-child{flex:1 1 360px;min-width:0}
 .bc-live-l{display:flex;align-items:center;gap:9px;font:600 11px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--green)}
 .bc-live-l b{font-weight:700;color:var(--gold)}
 .bc-live-n{display:flex;align-items:baseline;gap:14px;padding-top:16px;flex-wrap:wrap}
@@ -192,15 +197,33 @@
   color:var(--green);font:13.5px var(--font-mono)}
 .bc-live-s{margin-top:10px;font:12.5px var(--font-mono);color:var(--muted-2)}
 .bc-live-s b{color:var(--ink-soft);font-weight:400} .bc-live-s i{font-style:normal;color:var(--blue)}
-.bc-legend{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.bc-legend{display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex:0 0 auto}
 .bc-legend-l{font:10.5px var(--font-mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted-3);text-align:right}
-/* One frame per row. Squeezed onto a single line the two of them left no margin at
-   all - 337 of 337 on a 375px phone - and the words had to be cut to fit. Stacked,
-   they keep the words that say what they mean. */
-.bc-legend-row{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
-.bc-lg-part{display:inline-flex;align-items:center;gap:inherit}
-.bc-lg{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 11px;border:1px solid var(--hairline);
-  border-radius:var(--r);background:rgba(17,18,15,.7);font:11.5px var(--font-mono);color:var(--ink-soft)}
+/* One pill, four groups, hairlines between them. Two framed rows read as two boxes
+   arguing with the chart under them; one object with internal divisions reads as a
+   caption. The owner names that used to head the rows ("BlynAI:", "Rankiniai:") moved
+   into the "?" dialog - the blue already says a person moved that money. */
+.bc-legend-bar{display:inline-flex;align-items:stretch;height:30px;
+  border:1px solid var(--hairline);border-radius:var(--pill);background:rgba(17,18,15,.7);
+  font:11px var(--font-mono);color:var(--ink-soft);white-space:nowrap}
+/* The divider is a border on each group, not a separate element, so a group that
+   hides takes its own rule with it. A separate span would leave a doubled hairline
+   wherever "startas" is absent, which is any account funded before it was listed. */
+.bc-legend-bar>*{display:inline-flex;align-items:center;gap:5px;padding:0 9px;
+  border-left:1px solid var(--hairline)}
+.bc-legend-bar>*:first-child{border-left:0;padding-left:12px}
+.bc-legend-bar>*:last-child{padding-right:12px}
+.bc-legend-bar .bc-blynai{font-size:11.5px}
+/* The question mark is the last segment, not a button beside the pill: set outside
+   it reads as a second object competing with the legend it is there to explain. */
+.bc-lg-help{position:relative;border:0;border-left:1px solid var(--hairline);background:none;
+  color:var(--muted-2);font:600 11px var(--font-mono);cursor:pointer;padding:0 10px}
+.bc-lg-help:hover{color:var(--gold-soft)}
+/* The one control in the legend, and a 26px pill cannot give a thumb 44px. The hit
+   area grows past the pill instead of the glyph doing it - hence no overflow:hidden
+   above, which would clip this back to nothing. It reaches over "startas" on the
+   left, which is text and takes no clicks of its own. */
+.bc-lg-help::after{content:"";position:absolute;inset:-9px -6px}
 .bc-sq-pair{display:inline-flex;gap:3px}
 .bc-sq{width:14px;height:14px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center}
 .bc-sq svg{width:7px;height:6px;display:block}
@@ -416,22 +439,22 @@
   .bc-live{padding:20px 16px 0}
   .bc-legend{align-items:flex-start;order:2;margin-top:10px}
   .bc-legend-l{text-align:left}
-  /* Three entries need 379px and a 375px phone offers 343, so they wrapped to a
-     second row. Trimmed rather than shortened: the words are the labels, and
-     "Pervedimai" cannot be abbreviated without inventing jargon. */
-  /* Two grouped frames instead of four chips: the entries that belong to the bot sit
-     together under its name, the money you moved sits apart. Spelled out they need
-     360px against 343, so on a phone the frames are trimmed rather than the words -
-     "istorija" and "startas" have no shorter honest form. */
-  /* Room again now that the frames stack, so the swatches and type go back to the
-     sizes they have everywhere else. */
-  .bc-legend-row{align-items:flex-start;gap:6px}
-  .bc-legend-row .bc-lg{padding:0 8px;gap:5px;font-size:11px}
-  .bc-legend-row .bc-sq{width:12px;height:12px}
-  .bc-legend-row .bc-sq-pair{gap:2px}
-  /* Four entries need 350px spelled out and a 375px phone offers 343. The long form
-     is kept where there is room rather than shortened everywhere: on a desktop the
-     entry says which candle it names, on a phone the gold already says it. */
+  /* One line has to hold 343px on a 375px phone, so the pill gives up 4px of height,
+     1px of type and 6px of padding per group, and the words drop to the short forms
+     below. Measure with getBoundingClientRect() before adding a group: the type does
+     not go under 10px, the words go first. */
+  .bc-legend-bar{height:26px;font-size:10px}
+  .bc-legend-bar>*{padding:0 4px;gap:4px}
+  .bc-legend-bar>*:first-child{padding-left:7px}
+  .bc-legend-bar>*:last-child{padding-right:7px}
+  .bc-legend-bar .bc-blynai{font-size:10.5px}
+  .bc-legend-bar .bc-sq{width:11px;height:11px}
+  .bc-legend-bar .bc-sq-pair{gap:2px}
+  .bc-lg-help{padding:0 7px;font-size:10px}
+  /* Three of the seven words go, not shortened into stubs: "istorija" is what the
+     BlynAI name and a pair of arrows already say, and the grey square is the one
+     entry nobody has to read in a hurry. The three that stay are the ones a stranger
+     cannot guess. Spelled out the line wants 349px and a 375px phone offers 343. */
   .bc-lg-w{display:none}
   .bc-lg-n{display:inline}
   .bc-live-head{flex-direction:column;gap:0}
@@ -505,8 +528,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
   .bc-skeleton--chart{height:168px}
 }
 
-/* The spec gives .bc-lg an explicit display:inline-flex, which outranks the user
-   agent's [hidden] rule — so a hidden legend chip still took up space. State it
+/* The spec gives the legend groups an explicit display:inline-flex, which outranks
+   the user agent's [hidden] rule — so a hidden group still took up space. State it
    once for the whole shell. */
 .bc-shell [hidden]{display:none!important}
 
@@ -550,6 +573,15 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 .bc-modal-body ul{margin:0 0 11px;padding-left:20px}
 .bc-modal-body li{margin-bottom:5px}
 .bc-modal-body b{color:var(--cream);font-weight:600}
+
+/* Legend key. The swatch column is fixed so the sentences line up in one edge, and
+   the squares sit at cap height of the first line rather than centred on a
+   paragraph that may run three lines deep. */
+.bc-help-row{display:grid;grid-template-columns:37px 1fr;gap:12px;margin-bottom:14px}
+.bc-help-keys{display:inline-flex;gap:3px;padding-top:2px}
+.bc-help-row p{margin:0}
+.bc-help-end{margin-top:16px;padding-top:14px;border-top:1px solid var(--hairline);
+  color:var(--muted-2);font-size:12.5px}
 
 @container (max-width:899px){
   .bc-fn-item{display:block}
@@ -838,11 +870,13 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         </div>
         <div class="bc-legend">
           <p class="bc-legend-l" id="bcChartCaption">Grafikas — 30 uždarytų dienų<br>(šiandiena dar neįskaityta)</p>
-          <div class="bc-legend-row">
-              <span class="bc-lg"><span class="bc-blynai">Blyn<i>AI</i></span><span class="bc-lg-lbl">:</span><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span></span>istorija<span class="bc-sq-pair"><span class="bc-sq bc-sq--today"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#12100b"/></svg></span><span class="bc-sq bc-sq--today-dn"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#f5b84f"/></svg></span></span>šiandien</span>
-              <span class="bc-lg"><span class="bc-lg-lbl">Rankiniai:</span><span class="bc-sq-pair"><span class="bc-sq bc-sq--dep"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#0e2a48"/></svg></span><span class="bc-sq bc-sq--wdr"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#6faeff"/></svg></span></span>įnešimai<span class="bc-lg-part" id="bcLegendStart"><span class="bc-sq bc-sq--start"></span>startas</span></span>
-              <span class="bc-lg" id="bcLegendGap" hidden><span class="bc-sq bc-sq--gap"></span>Trūksta duomenų</span>
-            </div>
+          <div class="bc-legend-bar">
+            <span><span class="bc-blynai">Blyn<i>AI</i></span><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span><span class="bc-sq bc-sq--gap" id="bcLegendGap" hidden></span></span><span class="bc-lg-w">istorija</span></span>
+            <span><span class="bc-sq-pair"><span class="bc-sq bc-sq--today"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#12100b"/></svg></span><span class="bc-sq bc-sq--today-dn"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#f5b84f"/></svg></span></span>šiandien</span>
+            <span><span class="bc-sq-pair"><span class="bc-sq bc-sq--dep"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#0e2a48"/></svg></span><span class="bc-sq bc-sq--wdr"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#6faeff"/></svg></span></span><span class="bc-lg-w">pervedimai</span><span class="bc-lg-n">pinigai</span></span>
+            <span id="bcLegendStart"><span class="bc-sq bc-sq--start"></span>startas</span>
+            <button type="button" class="bc-lg-help" id="bcLegendHelpOpen" aria-label="Ką reiškia grafiko ženklai">?</button>
+          </div>
         </div>
       </div>
       <div class="bc-chart" id="bcChart"><div id="bcChartCanvas"></div><div class="bc-tip" id="bcChartTip" hidden></div></div>
@@ -867,6 +901,26 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     <footer class="bc-footnote" id="testuotojas">
       <p class="bc-fn-line"><span id="fn-blynai" class="bc-fn-item"><b>1.</b> <b>BlynAI Capital</b> — ne įmonė ir ne finansinė paslauga, o nekomercinis hobio projektas algoritminės prekybos programinei įrangai ir biržų API integracijoms tyrinėti. Projektas nepriima ir nevaldo kitų asmenų lėšų, nevaldo jų biržos sąskaitų ir investavimo paslaugų neteikia. Rodomi rezultatai yra istoriniai ir negarantuoja būsimų. Tai nėra individuali investavimo rekomendacija.</span> <span id="fn-testuotojas" class="bc-fn-item"><b>2.</b> <b>Viešas testuotojas</b> — asmuo, savo infrastruktūroje įsidiegęs boto programinę įrangą ir prekiaujantis tik savo lėšomis per savo biržos API raktą; strategiją ir rizikos parametrus nustato pats.</span> <button type="button" class="bc-fn-more" id="bcDisclaimerOpen">Skaityti plačiau</button></p>
     </footer>
+
+    <dialog class="bc-modal" id="bcLegendHelp" aria-labelledby="bcLegendHelpTitle">
+      <div class="bc-modal-head">
+        <h2 class="bc-modal-t" id="bcLegendHelpTitle">Ką rodo kiekvienas kvadratas</h2>
+        <button type="button" class="bc-modal-x" id="bcLegendHelpClose" aria-label="Uždaryti">&#10005;</button>
+      </div>
+      <div class="bc-modal-body">
+        <div class="bc-help-row"><span class="bc-help-keys"><span class="bc-sq-pair"><span class="bc-sq bc-sq--up"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M3.5 0 L7 6 H0 Z" fill="#06301d"/></svg></span><span class="bc-sq bc-sq--dn"><svg viewBox="0 0 7 6" aria-hidden="true"><path d="M0 0 H7 L3.5 6 Z" fill="#3d0710"/></svg></span></span></span>
+          <p><b>Žalias su rodykle į viršų, raudonas — į apačią.</b> Viena uždaryta para. Žalia — tą dieną sąskaita paaugo, raudona — sumažėjo. Rodyklė sako tą patį, ką spalva, kad būtų aišku ir tam, kas spalvų neatskiria.</p></div>
+        <div class="bc-help-row"><span class="bc-help-keys"><span class="bc-sq-pair"><span class="bc-sq bc-sq--today"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#12100b"/></svg></span><span class="bc-sq bc-sq--today-dn"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#f5b84f"/></svg></span></span></span>
+          <p><b>Auksinis su pliusu arba minusu.</b> Šiandiena — diena, kuri dar nesibaigė. Pilnas kvadratas: kol kas pliusas. Tuščias su auksiniu apvadu: kol kas minusas. Skaičius dar pasikeis iki nakties, todėl stovi atskirai nuo uždarytų dienų.</p></div>
+        <div class="bc-help-row"><span class="bc-help-keys"><span class="bc-sq-pair"><span class="bc-sq bc-sq--dep"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M3.1 0.6h1.8v2.5h2.5v1.8H4.9v2.5H3.1V4.9H0.6V3.1h2.5z" fill="#0e2a48"/></svg></span><span class="bc-sq bc-sq--wdr"><svg viewBox="0 0 8 8" aria-hidden="true"><path d="M0.6 3.1h6.8v1.8H0.6z" fill="#6faeff"/></svg></span></span></span>
+          <p><b>Mėlynas su pliusu arba minusu.</b> Rankinis pervedimas: pliusas — pinigai įnešti, minusas — išimti. Tai ne uždarbis ir ne nuostolis, todėl į rezultatą neįskaičiuojama — kitaip įnašas atrodytų kaip pelnas.</p></div>
+        <div class="bc-help-row"><span class="bc-help-keys"><span class="bc-sq bc-sq--start"></span></span>
+          <p><b>Tamsiai mėlynas be ženklo.</b> Startas — suma, su kuria sąskaita pradėjo. Krypties neturi, nes tai ne judėjimas, o vieta, nuo kurios skaičiuojama. Būna vienas.</p></div>
+        <div class="bc-help-row"><span class="bc-help-keys"><span class="bc-sq bc-sq--gap"></span></span>
+          <p><b>Pilkas.</b> Tos dienos duomenų nėra — botas stovėjo arba ryšys nutrūko. Pasirodo tik tada, kai grafike tokia diena iš tikrųjų yra.</p></div>
+        <p class="bc-help-end">Šiandiena grafike stovi atskirai, dešinėje nuo skirtuko, ir į uždarytų dienų sumą neįeina — kiek jų rodoma, parašyta virš grafiko.</p>
+      </div>
+    </dialog>
 
     <dialog class="bc-modal" id="bcDisclaimer" aria-labelledby="bcDisclaimerTitle">
       <div class="bc-modal-head">
@@ -1241,6 +1295,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     function initDisclaimer() {
       initModal("bcDisclaimer", "bcDisclaimerOpen", "bcDisclaimerClose");
       initModal("bcPages", "bcPagesOpen", "bcPagesClose");
+      initModal("bcLegendHelp", "bcLegendHelpOpen", "bcLegendHelpClose");
     }
 
     // ---- status ---------------------------------------------------------

@@ -1,3 +1,14 @@
+## 2026-08-23-legend-on-one-line-and-a-key-behind-a-question-mark
+
+- The legend is one pill with four groups and hairlines between them, not two framed rows. Two frames were the right grouping and the wrong object: stacked above the chart they read as two boxes arguing with the thing they describe. One object with internal divisions reads as a caption.
+- The owner names that headed the rows, `BlynAI:` and `Rankiniai:`, are gone from the line. `BlynAI` stays on the first group; the blue already says a person moved that money, and the full account of who owns what is now a sentence away.
+- A `?` at the end of the pill opens a dialog naming every square in plain Lithuanian - what it is, why it has a direction or does not, and why a transfer is kept out of the result. Same native `<dialog>` and `initModal` as the disclaimer, so Esc, the backdrop and focus return come for free. Its hit area reaches past the pill, because a 26px bar cannot give a thumb 44px and the glyph should not have to grow to 44 either.
+- The divider is a border on each group rather than a span between them. A separate span would leave a doubled hairline wherever `startas` is absent - which is any account funded before it was listed.
+- "No data" moved inside the BlynAI group, next to the up and down squares. It is an outcome of a day, not a category of its own, and as a sixth segment it was the difference between fitting a 375px phone and not.
+- On a phone three of the seven words go rather than shorten into stubs: `istorija` is what the name and a pair of arrows already say, and the grey square is the one entry nobody reads in a hurry. Measured 324 of 343 available, 337 in the rare state where a missing day is also on the chart.
+- The headline block now gives up width before the legend does. One line is wider than the two rows it replaced, and left to their content widths the two of them wrapped the legend under the number on a 1280px screen; a 360px basis lets the sentence under the number take a second line instead.
+- Page only. No worker behaviour touched.
+
 ## 2026-08-23-legend-frames-and-the-base-under-the-first-candle
 
 - Legend regrouped into two named frames, one per row: `BlynAI: istorija · šiandien` and `Rankiniai: įnešimai · startas`. What the bot does now sits under the bot's name and what a hand does sits apart, so the grouping reads before the labels do. Squeezed onto one line the two frames left no margin at all - 337 of 337 on a 375px phone - and the words had to be cut to fit; stacked, they keep the words that say what they mean.
