@@ -23,9 +23,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const source = "file://" + resolve(here, "og-blynai-eu.html");
 const target = resolve(here, "..", "..", "public", "og.png");
 
-// Twitter and LinkedIn sometimes show the card in a container wider than 1200, and a
-// 1x image goes soft there. 2x costs nothing as long as the file stays under a megabyte.
-const SCALE = 2;
+// 1200x630 exactly, which is what every platform documents. It was 2x for a while, on
+// the theory that Twitter and LinkedIn show the card in a wider container and 1x goes
+// soft there - but 2x is 2400x1260 and 630 KB, and a chat client showed a blank frame
+// where the picture should be. The sharpness was worth less than the certainty: at the
+// documented size and a fifth of the weight there is nothing left for a client to
+// choke on.
+const SCALE = 1;
 
 const browser = await chromium.launch();
 const page = await browser.newPage({
