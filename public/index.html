@@ -1351,6 +1351,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     // Each tester's own dashboard opens on their own account. An explicit choice
     // still wins: the query string, or a switch made earlier on this host.
     const HOST_TENANTS = {
+      // The project's own domain is the LUKO dashboard, named explicitly rather than
+      // left to fall through to the default - which happened to be LUKAS anyway, and
+      // a default that is right by accident stops being right the day it changes.
+      "blynai.eu": "LUKAS",
       "blynai.meetluko.eu": "LUKAS",
       "blynai.bykovas.lt": "DENISAS",
       // The dashboards moved off algo.*, which now redirects. A link that has
