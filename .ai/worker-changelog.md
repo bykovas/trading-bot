@@ -1,3 +1,10 @@
+## 2026-08-24-realized-pnl-was-the-cycle-delta-not-the-trade
+
+- A closed trade showed `portfolio_value_after - portfolio_value_before`, the portfolio's move during the cycle the trade closed in. That is not the trade's result: the loss has been carried as unrealized for hours by then, so closing barely moves the portfolio and the delta is the last tick plus fees. On 2026-08-24 futures-live closed DOT at -20.63 and ARB at -32.00; the page reported -1.38 and -1.47, and the day's realized total read -2.85 against an actual -52.63. The headline day figure was right the whole time - it is measured from the previous close - so only the breakdown lied, which is the harder kind to notice.
+- The amount now comes from the execution log, beside the percentage that was already read from it, so the two cannot disagree. The portfolio delta stays as the fallback: a paper close has no execution log, and there the portfolio move is the realized result.
+- Both regexes needed `(?<!un)`. An exit log carries `unrealized PnL USD -19.94` before `realized PnL USD -20.63`, and "realized" is a substring of the first - the amount matched the unrealized figure. The percentage parser had the same flaw and had been landing on the right number by luck: it started inside "unrealized" and ran forward to the first bracket, which happened to be the realized one. Caught by running both patterns against the live logs before shipping, not after.
+- API only. No worker behaviour touched.
+
 ## 2026-08-23-aktas-seal
 
 - The signature card's seal was a round bordered span with three stacked lines. It is the drawn seal now: three outer rings, `MAŽOJI BENDRIJA · BLYNAI` on the upper arc and `L&D FINANCE LAB · 2026` on the lower one - both in the same band, both read left to right - stars at the ends of the text, and only the BlynAI mark in the middle, with no shield and no `MB` letters.

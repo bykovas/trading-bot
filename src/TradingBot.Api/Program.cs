@@ -2609,7 +2609,15 @@ static async Task<DashboardTodayDto> ReadTodayTrades(
                 reader.GetDecimal(9),
                 reader.GetDecimal(10),
                 reader.GetDecimal(11),
-                isExit ? valueAfter - valueBefore : null,
+                // The trade's own result, read from the execution log beside the
+                // percentage that was already read from it. The portfolio delta is
+                // not that result: by the time a position closes, its loss has been
+                // carried as unrealized for hours, so closing barely moves the
+                // portfolio and the delta is the last tick plus fees. DOT closed at
+                // -20.63 on 2026-08-24 and this line reported -1.38.
+                // The delta stays as the fallback: a paper close has no execution
+                // log, and there the portfolio move IS the realized result.
+                isExit ? ParseRealizedAmount(log) ?? valueAfter - valueBefore : null,
                 isExit ? ParseRealizedPercent(log) : null,
                 ReadNullableString(reader, 14),
                 ReadNullableString(reader, 15),
@@ -2664,11 +2672,33 @@ static bool IsTakeProfitExit(DashboardTradeDto trade) =>
 // Exit logs carry the exchange's own realised percentage, e.g.
 // "realized PnL USD -3.0708 (-2.0488 %)". The absolute figure is taken from the
 // portfolio delta instead; only the percentage is read back out of the log.
+// "realized PnL USD -20.6304 (-1.4763%)" — the amount, from the same string the
+// percentage comes from, so the two can never disagree with each other.
+static decimal? ParseRealizedAmount(string log)
+{
+    var match = System.Text.RegularExpressions.Regex.Match(
+        log,
+        // (?<!un) matters: an exit log carries "unrealized PnL USD -19.94" before
+        // "realized PnL USD -20.63", and "realized" is a substring of the first.
+        @"(?<!un)realized\s+PnL\s+(?:[A-Z]{3}\s+)?(?<value>[-+−]?\d+(?:[.,]\d+)?)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    if (!match.Success)
+    {
+        return null;
+    }
+
+    var raw = match.Groups["value"].Value.Replace('−', '-').Replace(',', '.');
+    return decimal.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : null;
+}
+
 static decimal? ParseRealizedPercent(string log)
 {
     var match = System.Text.RegularExpressions.Regex.Match(
         log,
-        @"realized\s+PnL[^()]*\(\s*(?<value>[-+−]?\d+(?:[.,]\d+)?)\s*%",
+        // Same lookbehind as the amount. This one used to land on the right number
+        // by luck: it started inside "unrealized" and ran forward to the first
+        // bracket, which happened to be the realized one.
+        @"(?<!un)realized\s+PnL[^()]*\(\s*(?<value>[-+−]?\d+(?:[.,]\d+)?)\s*%",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     if (!match.Success)
     {
