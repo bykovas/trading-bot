@@ -49,6 +49,12 @@ public sealed class FuturesInstanceConfigurationTests
             ("Futures", "MaxNotionalUsd"),
             ("Futures", "MaxTotalNotionalUsd"),
             ("Futures", "MaxPositions"),
+            // Same exposure, different collateral: futures-live holds 150 USD of its
+            // own against a 150 USD position, futures-lukas-live holds 15 and borrows
+            // the rest. The notional caps and the risk budget are identical because
+            // the money at risk does not depend on the leverage under it.
+            ("Futures", "MaxLeverage"),
+            ("Futures", "DefaultLeverage"),
             // Staking lives in two sections: the notional caps under Futures and the
             // money-at-risk that sizes into them under Risk. Allowing one without the
             // other fails the moment an account is actually resized.

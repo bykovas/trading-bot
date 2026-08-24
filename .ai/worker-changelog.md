@@ -1,3 +1,11 @@
+## 2026-08-24-futures-live-drops-the-leverage
+
+- futures-live trades 150 USD of its own money at 1x instead of 15 USD at 10x. Exposure per position goes from 1500 USD to 150 - the same size futures-lukas-live carries - and the collateral behind it stops being borrowed.
+- Margin usage is unchanged: 150 USD locked per position either way, three positions still want 450. What changed is what that collateral controls. At 1x a long cannot be liquidated by any move the market makes in a day; the stop is the only exit that matters.
+- The notional caps and the whole risk budget are now identical to the publisher's - 150 per position, 450 across three, 4.5 USD of stop-distance risk per entry, 13.5 across the book. Money at risk is a function of notional and stop distance, not of the leverage under them, so at the same size the two accounts must carry the same numbers. `TargetRiskUsd` was left at 45 for a moment during this edit, which would have made the risk sizer inert and let the notional cap do all the work silently.
+- The guard test now allows the two instances to differ on leverage. It would otherwise have failed the build, the same way it caught `Risk.TargetRiskUsd` when the stake was first raised.
+- The open XMR position keeps the 10x it was opened at; the exchange reports leverage per position and the sync books what it reports. The change applies to the next entry.
+
 ## 2026-08-24-realized-pnl-was-the-cycle-delta-not-the-trade
 
 - A closed trade showed `portfolio_value_after - portfolio_value_before`, the portfolio's move during the cycle the trade closed in. That is not the trade's result: the loss has been carried as unrealized for hours by then, so closing barely moves the portfolio and the delta is the last tick plus fees. On 2026-08-24 futures-live closed DOT at -20.63 and ARB at -32.00; the page reported -1.38 and -1.47, and the day's realized total read -2.85 against an actual -52.63. The headline day figure was right the whole time - it is measured from the previous close - so only the breakdown lied, which is the harder kind to notice.
