@@ -111,9 +111,9 @@ public sealed class FuturesInstanceConfigurationTests
                 profile["Risk"]!["MaxConcurrentOpenRiskUsd"]!.GetValue<decimal>());
         }
 
-        // 150 at 4x against 15 at 10x: the same 150 of collateral is no longer the same
-        // exposure - futures-live now carries four times what the publisher does.
-        Assert.Equal(600m, primary["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
+        // Back to the publisher's stake exactly: 15 at 10x on both, 150 of exposure.
+        // The 4x afternoon lasted two mirrored entries and cost 24 USD in stop-outs.
+        Assert.Equal(150m, primary["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
         Assert.Equal(150m, lukas["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
 
         var normalizedLukas = lukas.DeepClone().AsObject();

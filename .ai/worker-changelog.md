@@ -1,3 +1,11 @@
+## 2026-08-24-futures-live-back-to-the-publishers-stake
+
+- futures-live returns to 15 USD at 10x - the publisher's stake exactly, 150 of exposure per position. The 4x sizing lasted one afternoon and two mirrored entries (ADA, BOME), both stopped out at the new 12 USD budget for -24.11 total; at the old size the same two stops would have cost about -6.
+- Every knob that moved this morning moves back, because they bind together: leverage 4 -> 10, MaxNotionalUsd 600 -> 150, TargetMarginUsd / MaxMarginPerPositionUsd 150 -> 15, MaxTotalNotionalUsd 1800 -> 450, TargetRiskUsd 12 -> 4.5, MaxConcurrentOpenRiskUsd 36 -> 13.5.
+- The two sizing profiles are now bit-identical, which the invariant test verifies field by field; the pinned expectations move from 600/150 to 150/150.
+- Note the sizing arithmetic that stays true either way: with TargetRiskUsd 4.5 and MaxNotionalUsd 150 the notional ceiling binds at the 2% stop floor (risk budget would size 225), so the effective per-stop risk is 3.0 USD, same as the publisher's.
+- Logic untouched: mirror, flip gate, announcements, TP/SL 4/2 working, x200 on the exchange.
+
 ## 2026-08-24-futures-live-takes-four-times-the-exposure
 
 - futures-live moves from 150 USD at 1x to 150 at 4x: the collateral behind a position is unchanged, the position itself is 600 USD instead of 150. futures-lukas-live stays exactly where it was, 15 at 10x for the same 150.
