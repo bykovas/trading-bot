@@ -9,7 +9,13 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://blynai.eu/">
 <meta property="og:title" content="MB „BlynAI“ — algoritminės prekybos tyrimų bendrija">
-<meta property="og:description" content="Programa prekiauja. Mes tyrinėjame, kaip ji tai daro. Atvirasis kodas, viešas žurnalas, savos lėšos.">
+<meta property="og:description" content="Algoritminė prekyba kriptovaliutomis. Tyrimai, inovacijos, sprendimai.">
+<meta property="og:image" content="https://blynai.eu/og.png">
+<meta property="og:image:width" content="2400">
+<meta property="og:image:height" content="1260">
+<meta property="og:image:alt" content="BlynAI Capital — algoritminė prekyba kriptovaliutomis">
+<meta property="og:locale" content="lt_LT">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#050505">
 <link rel="icon" href="/favicon.ico" sizes="32x32">
 <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
@@ -76,13 +82,16 @@ a:hover{color:var(--gold-deep)}
 .be-rule{height:3px;background:linear-gradient(90deg,var(--gold),#C98F63 42%,#8C6BC9 74%,var(--purple))}
 
 /* --- hero --- */
-.be-hero{padding:70px var(--pad) 54px;border-bottom:1px solid var(--line);
+.be-hero{padding:44px var(--pad) 48px;border-bottom:1px solid var(--line);
   background:
     radial-gradient(760px 460px at 4% 0%,rgba(245,184,79,.20),transparent 68%),
     radial-gradient(700px 520px at 98% 96%,rgba(107,78,219,.16),transparent 70%),
     var(--paper-warm)}
+/* align-items:start, ne end. Su `end` 147px kortele buvo nustumta i 341px eilutes
+   apacia, o virs jos likdavo 193px tuscios vietos - visas virsutinis desinys kampas.
+   Nuo virsaus kortele stovi salia antrastes, kaip ir turi. */
 .be-hero-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:56px;
-  margin-top:26px;align-items:end}
+  margin-top:22px;align-items:start}
 .be-h1{font:400 56px/1.03 var(--display);letter-spacing:-.035em;max-width:22ch;text-wrap:pretty}
 /* Gradientinis tekstas: "programa prekiauja". Fallback — vientisas auksas,
    jei background-clip:text neveikia. */
@@ -164,12 +173,15 @@ a:hover{color:var(--gold-deep)}
   font:13px var(--mono)}
 .be-legal dt{color:var(--muted)}
 .be-legal dd{color:var(--ink)}
-.be-members{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:24px}
-/* height:auto butinas. width/height atributai zymejime virsta prezentacine CSS
-   height uzuomina, o aiskus aukstis nugali aspect-ratio - be sios eilutes kadras
-   isejo 285x256 vietoj kvadrato, ir Luko kadravimas 50% 12% skaiciuojamas ne nuo to
-   ploto, kuriam buvo parinktas. */
-.be-member img{width:100%;height:auto;aspect-ratio:1;border-radius:3px;object-fit:cover;
+/* Stulpeliai pagal nuotrauka, ne per puse. Kai nuotrauka tapo 167px, o lastele liko
+   285px, tarp Luko ir Deniso atsivere tuscia juosta. */
+.be-members{display:grid;grid-template-columns:repeat(2,max-content);justify-content:start;
+  gap:22px;margin-top:24px}
+/* Aukstis lygiuojamas i desiniojo stulpelio rekvizitu sarasa (dl = 167px), kad abi
+   puses baigtusi vienoje linijoje. Aukstis nurodomas, plotis seka is aspect-ratio -
+   kadras lieka kvadratas, o Luko 50% 12% skaiciuojamas nuo to pacio ploto, kuriam
+   buvo parinktas. Siaurame ekrane sitai atsukama atgal (zr. media). */
+.be-member img{height:167px;width:auto;aspect-ratio:1;border-radius:3px;object-fit:cover;
   background:rgba(26,23,18,.06)}
 /* Lukas: kadras nuleistas, kitaip apkerpa galvą. */
 .be-member--l img{object-position:50% 12%;border:1px solid rgba(185,127,46,.35)}
@@ -224,7 +236,11 @@ a:hover{color:var(--gold-deep)}
   .be-coin small{font-size:10px}
   .be-legal{grid-template-columns:1fr;gap:0}
   .be-legal-div{display:none}
-  .be-members{gap:16px;margin-top:20px}
+  /* Siaurame ekrane atgal per puse: nuotraukos vel per visa ploti. */
+  .be-members{grid-template-columns:1fr 1fr;gap:16px;margin-top:20px}
+  /* Siaurame ekrane grazinamas pilnas plotis: 167px kvadratas telefone atrodo kaip
+     miniatiura, o desiniojo stulpelio, i kuri buvo lygiuojamasi, cia jau nera. */
+  .be-member img{width:100%;height:auto}
   .be-member b{margin-top:10px;font-size:14px}
   .be-member small{font-size:11px}
   .be-legal-req{margin-top:28px;padding-top:24px;border-top:1px solid var(--line)}
