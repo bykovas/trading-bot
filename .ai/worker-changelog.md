@@ -1,3 +1,12 @@
+## 2026-08-24-mirror-flips-again-and-the-pair-says-who-did-it
+
+- `EntryMirror.InvertSide` is on again, on BOTH sides: futures-lukas-live goes long, futures-live goes short on the same signal. It is read by the publisher, which writes the target side into the command, and by the follower, which checks the side it expects - set on one side only, every command is rejected as `MIRROR_SIDE_MISMATCH` and the mirror goes quiet rather than loud. The guard test asserts they agree and now asserts they are on.
+- `FlipLongEntries` stays off on both. It flips a bot's own long signals, and futures-live has no own entries; the mirror's InvertSide is what makes the two accounts trade against each other.
+- TP/SL untouched: 4% and 2% working for the bot, x200 on the exchange, so 8% and 4% sit as orders.
+- Beside every pair there is now a mark saying who did it. A hand keeps the blue the legend already gives a person; the bot's mark is muted, because marking the ordinary case loudly is how a page becomes noise.
+- It claims only what is known: a position the bot never ordered arrives as `KRAKEN_SYNC`, and a close no order of ours caused is `EXCHANGE_CLOSE`. A position RESIZED by hand still reads as the bot's - the sync adopts whatever quantity Kraken reports without remembering what it asked for. That gap is real and unmarked.
+- `origin` is exposed by the API for this; it was already stored, just never read out.
+
 ## 2026-08-24-a-close-is-attributed-to-the-order-that-caused-it
 
 - A position leaving the exchange was labelled by whichever of the stop and the target the fill landed nearer to, and one of the two was always named. A close made by hand sits in the middle of that range, so it always arrived as a stop or a target: ETH/USD exited 0.21% from its entry against a 2% stop and the page said stop-loss.

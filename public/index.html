@@ -198,6 +198,15 @@
   color:var(--green);font:13.5px var(--font-mono)}
 .bc-live-s{margin-top:10px;font:12.5px var(--font-mono);color:var(--muted-2)}
 .bc-live-s b{color:var(--ink-soft);font-weight:400} .bc-live-s i{font-style:normal;color:var(--blue)}
+/* Who did it, beside the pair. The hand keeps the blue the legend already gives a
+   person; the bot's mark is muted, because it is the ordinary case and marking the
+   ordinary case loudly is how a page becomes noise. */
+.bc-owner{flex:none;display:inline-flex;align-items:center;justify-content:center;
+  width:14px;height:14px;margin-right:7px;vertical-align:-2px}
+.bc-owner svg{display:block;width:100%;height:100%}
+.bc-owner--hand{border-radius:3px;background:var(--blue)}
+.bc-owner--hand svg{width:8px;height:8px}
+.bc-owner--bot{color:var(--muted-3)}
 .bc-legend{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
 .bc-legend-l{font:10.5px var(--font-mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted-3);text-align:right}
 /* One pill, four groups, hairlines between them. Two framed rows read as two boxes
@@ -2518,6 +2527,25 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         : `${price(priceValue)} (${signedMoney(amount)})`;
     }
 
+    // Who did this one. Blue is already the page's colour for a person - the legend
+    // says so about transfers - so a hand keeps that colour and a plate, and the bot
+    // gets a quiet mark: the exception should be what catches the eye, not the norm.
+    //
+    // It only claims what is known. A position the bot never ordered arrives from the
+    // exchange as KRAKEN_SYNC, and a close no order of ours caused is EXCHANGE_CLOSE.
+    // A position RESIZED by hand still looks like the bot's, because the sync adopts
+    // whatever quantity Kraken reports without remembering what it asked for.
+    function ownerMark(byHand, title) {
+      return byHand
+        ? `<span class="bc-owner bc-owner--hand" title="${esc(title)}" aria-label="${esc(title)}">` +
+            `<svg viewBox="0 0 8 8" aria-hidden="true"><path d="M1.5 6.5 L6.5 1.5" stroke="#0e2a48" ` +
+            `stroke-width="1.7" stroke-linecap="round" fill="none"/></svg></span>`
+        : `<span class="bc-owner bc-owner--bot" title="${esc(title)}" aria-label="${esc(title)}">` +
+            `<svg viewBox="0 0 14 14" aria-hidden="true"><g fill="none" stroke="currentColor" ` +
+            `stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">` +
+            `<path d="M5.2 3.6 L2.4 7 L5.2 10.4"/><path d="M8.8 3.6 L11.6 7 L8.8 10.4"/></g></svg></span>`;
+    }
+
     function kv(label, value, tone) {
       return `<span class="bc-kv"><span class="bc-kv-l">${esc(label)}</span>` +
         `<span class="bc-kv-v ${tone || "bc-t-soft"}">${esc(value)}</span></span>`;
@@ -2703,7 +2731,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       return `<details class="bc-card bc-card--pos" data-key="pos:${esc(position.pair)}" open>
         <summary class="bc-card-sum">
           <div class="bc-id">
-            <span class="bc-pair">${esc(position.pair)}</span>
+            <span class="bc-pair">${ownerMark(
+              String(position.origin || "").toUpperCase() !== "BOT",
+              String(position.origin || "").toUpperCase() === "BOT"
+                ? "Atidarė botas"
+                : "Pozicija atsirado biržoje ne boto orderiu")}${esc(position.pair)}</span>
             <span class="bc-badges">${badges}</span>
             <span class="bc-when">atidariau ${esc(ltDateTime(position.openedAtUtc, false))} LT · prieš ${esc(duration(position.openedAtUtc))}</span>
             <span class="bc-params bc-only-wide">${params}</span>
@@ -2782,7 +2814,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       return `<details class="bc-card bc-card--trade" data-key="${esc(key)}" open>
         <summary class="bc-card-sum">
           <div class="bc-id">
-            <span class="bc-pair">${esc(trade.pair)}</span>
+            <span class="bc-pair">${ownerMark(
+              String(trade.exitReasonCode || "").toUpperCase() === "EXCHANGE_CLOSE",
+              String(trade.exitReasonCode || "").toUpperCase() === "EXCHANGE_CLOSE"
+                ? "Uždarė ne boto orderis — greičiausiai ranka"
+                : "Boto sandoris")}${esc(trade.pair)}</span>
             <span class="bc-badges">${badges.join("")}</span>
             <span class="bc-when">${esc(ltDateTime(trade.utc, false))} LT</span>
             <span class="bc-params bc-only-wide">${params}</span>

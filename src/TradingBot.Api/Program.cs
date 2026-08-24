@@ -533,7 +533,10 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             tp_order_state,
             sl_order_state,
             trailing_stop_state,
-            trailing_stop_percent
+            trailing_stop_percent,
+            -- BOT when the bot opened it, KRAKEN_SYNC when it appeared on the exchange
+            -- without the bot ordering it. The page marks the difference by the pair.
+            origin
         from portfolio_position_state position
         where (@bot_instance_id is null or position.bot_instance_id = @bot_instance_id)
         -- Newest first. Ordering by market value put the biggest position on top,
@@ -593,7 +596,8 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             GetNullableDecimal(reader, 24),
             // Stored values are the worker's net-of-fees liquidation figures (spot).
             storedPnlEur,
-            storedPnlPercent));
+            storedPnlPercent,
+            reader.IsDBNull(25) ? null : reader.GetString(25)));
     }
 
     return positions;
@@ -2802,8 +2806,12 @@ internal sealed record PortfolioPositionDto(
     // Net-of-fees unrealized PnL (worker's conservative liquidation basis). The
     // MarketValueEur/UnrealizedPnl* fields above are gross, at last price, for Kraken
     // parity; these show what the position would net after round-trip costs.
+    // (Origin is appended after these two; see the record's tail.)
     decimal NetUnrealizedPnlEur,
-    decimal NetUnrealizedPnlPercent);
+    decimal NetUnrealizedPnlPercent,
+    // BOT, or KRAKEN_SYNC for a position that appeared on the exchange without the
+    // bot ordering it. Null on rows written before the column existed.
+    string? Origin);
 
 internal sealed record PageRequest(int Limit, int Offset)
 {

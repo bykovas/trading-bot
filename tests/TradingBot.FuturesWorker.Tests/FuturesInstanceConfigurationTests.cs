@@ -13,8 +13,9 @@ public sealed class FuturesInstanceConfigurationTests
         var primary = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.json"));
         var lukas = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.lukas.json"));
 
-        // The flip experiment ended on 2026-08-22: futures-live trades what
-        // futures-lukas-live trades, in the same direction.
+        // FlipLongEntries flips a bot's OWN long signals. futures-live has no own
+        // entries, so it stays off on both; the mirror's InvertSide below is what
+        // makes the two accounts trade against each other.
         Assert.False(primary["Futures"]?["FlipLongEntries"]?.GetValue<bool>());
         Assert.False(lukas["Futures"]?["FlipLongEntries"]?.GetValue<bool>());
 
@@ -30,7 +31,9 @@ public sealed class FuturesInstanceConfigurationTests
         var publisherInverts = lukas["EntryMirror"]?["InvertSide"]?.GetValue<bool>();
         var followerInverts = primary["EntryMirror"]?["InvertSide"]?.GetValue<bool>();
         Assert.Equal(publisherInverts, followerInverts);
-        Assert.False(followerInverts);
+        // Mirrored against the publisher since 2026-08-24: lukas goes long, futures-live
+        // goes short on the same signal.
+        Assert.True(followerInverts);
 
         // futures-live is mirror-only: it opens nothing from its own signals and takes
         // every entry from lukas. lukas trades his own and publishes them.
