@@ -47,6 +47,12 @@ public sealed class FuturesInstanceConfigurationTests
             primary["Futures"]?["DisabledLongEntryChannels"]?.AsArray().Single()?.GetValue<string>());
         Assert.Equal(0m, primary["Shorts"]?["MaxBtc24hRisePercentForShort"]?.GetValue<decimal>());
         Assert.Equal(0.08m, primary["Strategy"]?["MaxEntrySpreadPercent"]?.GetValue<decimal>());
+        // The arm's exit structure: winners run to +6% before the trail arms, and a faded
+        // signal no longer closes the position. The control keeps 4% and the reversal.
+        Assert.Equal(6m, primary["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
+        Assert.False(primary["Exits"]?["SignalReversalExitEnabled"]?.GetValue<bool>());
+        Assert.Equal(4m, lukas["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
+        Assert.Null(lukas["Exits"]?["SignalReversalExitEnabled"]);
         // The control carries neither knob: the experiment must never leak into it.
         Assert.Null(lukas["Futures"]?["DisabledLongEntryChannels"]);
         Assert.Null(lukas["Shorts"]?["MaxBtc24hRisePercentForShort"]);
@@ -93,6 +99,8 @@ public sealed class FuturesInstanceConfigurationTests
             ("Futures", "DisabledLongEntryChannels"),
             ("Shorts", "MaxBtc24hRisePercentForShort"),
             ("Strategy", "MaxEntrySpreadPercent"),
+            ("TpSl", "TakeProfitPercent"),
+            ("Exits", "SignalReversalExitEnabled"),
         };
 
         // What each account actually puts in the market, pinned. The sizer takes notional

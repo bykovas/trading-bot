@@ -1,3 +1,13 @@
+## 2026-08-24-the-experiment-arm-lets-winners-run
+
+- Second half of the own-strategy experiment, chosen from a ten-variant exit sweep re-walked over the same 84,788 one-minute-backtest entries: futures-live now arms its trailing stop at +6% instead of +4% (`TpSl.TakeProfitPercent: 6`) and no longer closes a position when the entry signal fades (`Exits.SignalReversalExitEnabled: false`). futures-lukas-live keeps 4% and the reversal close - the control stays the control.
+- Why these two: on the arm's own entry set the current structure scored -0.075%/trade on held-out 2026; arm-at-6-without-reversal scored +0.042% - the best of ten and the first structure to go positive on a year the choice never saw. The reversal close was a quarter of all exits, and a quarter of those closed trades that were in profit.
+- What can close a position on the arm now: the 2% stop, the 0.75% trail once +6% is reached, the stale-loss max-hold at 360 minutes (that branch runs BEFORE the held-position decision, so a stale loser still cannot outlive it), and liquidation. The exchange safety net follows the config to SL 4% / TP 12% (x200).
+- The character changes and is worth saying out loud: win rate drops to ~22% with winners around +6.2%, so losing streaks of ten and more are NORMAL WEATHER on this arm, not a malfunction. Pinned here so a bad week does not get read as one.
+- Honest caveats, same as the changelog above: the two held-out positives carry confidence intervals that include zero, and they were selected from ten variants - some of the shine is selection. The experiment measures the live delta between the arms; the backtest only chose what to try.
+- The switch defaults to true and the instance guard test pins the whole split: 6/false on the arm, 4/absent on the control.
+- Entry side unchanged from this morning's entry: no Continuation longs, shorts only with BTC 24h at or below zero, spread gate 0.08.
+
 ## 2026-08-24-the-own-strategy-experiment-begins
 
 - The mirror is OFF on both sides: futures-live no longer follows, futures-lukas-live no longer publishes. Both accounts trade their own signals at the same 15 USD x 10x stake - lukas as the unmodified CONTROL, futures-live as the EXPERIMENT arm.

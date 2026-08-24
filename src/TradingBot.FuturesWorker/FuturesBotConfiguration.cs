@@ -803,6 +803,13 @@ internal sealed class FuturesFilterOptions
 
 internal sealed class FuturesExitOptions
 {
+    // When false, a faded signal no longer closes a bot-owned position: only the stop,
+    // the trailing stop once armed, the stale-loss max-hold and liquidation do. Part of
+    // the own-strategy experiment - the reversal close was a quarter of all exits and
+    // removing it added +0.12%/trade on held-out 2026 data. Default true: the control
+    // account keeps closing on reversals exactly as before.
+    public bool SignalReversalExitEnabled { get; set; } = true;
+
     // ATR stop multiplier: stopPct = clamp(StopAtrMult * atrPct, floor, cap).
     // Default 1.0 so a 0.75% ATR at the legacy floor stays ~flat vs old fixed 0.75% SL
     // when TargetRiskEur is calibrated to that risk; volatile names widen stop and shrink size.

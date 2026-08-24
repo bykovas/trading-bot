@@ -82,3 +82,14 @@ public sealed class FuturesEntryExperimentGateTests
             FuturesDesiredExposure.Short, "ShortReclaim", new FuturesOptions(), shorts, null));
     }
 }
+
+// The reversal-exit switch defaults ON: a config that never mentions it keeps closing
+// on faded signals, which is what the control account runs.
+public sealed class FuturesSignalReversalSwitchTests
+{
+    [Fact]
+    public void Reversal_exit_defaults_on()
+    {
+        Assert.True(new FuturesExitOptions().SignalReversalExitEnabled);
+    }
+}

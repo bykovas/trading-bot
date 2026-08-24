@@ -243,11 +243,21 @@ internal sealed class FuturesDecisionWorker(
                     var desired = strategy.DecideHeld(held, signal);
                     var minHoldBlocked = desired == FuturesDesiredExposure.Flat && IsMinHoldActive(held, utc);
                     var externalSoftExitBlocked = desired == FuturesDesiredExposure.Flat && IsExternalFuturesPosition(held);
+                    // The own-strategy experiment: with the reversal exit switched off, a
+                    // faded signal is ignored and the position lives until the stop, the
+                    // armed trail or the stale-loss max-hold takes it. The max-hold branch
+                    // above runs FIRST, so a stale loser still cannot outlive 360 minutes.
+                    var reversalExitDisabled = desired == FuturesDesiredExposure.Flat
+                        && !config.Exits.SignalReversalExitEnabled;
                     if (minHoldBlocked)
                     {
                         desired = held.Side == "SHORT" ? FuturesDesiredExposure.Short : FuturesDesiredExposure.Long;
                     }
                     else if (externalSoftExitBlocked)
+                    {
+                        desired = held.Side == "SHORT" ? FuturesDesiredExposure.Short : FuturesDesiredExposure.Long;
+                    }
+                    else if (reversalExitDisabled)
                     {
                         desired = held.Side == "SHORT" ? FuturesDesiredExposure.Short : FuturesDesiredExposure.Long;
                     }
@@ -263,7 +273,9 @@ internal sealed class FuturesDecisionWorker(
                                 ? "external/adopted Kraken Futures position: signal reversal ignored; exchange TP/SL or manual close only"
                                 : minHoldBlocked
                                     ? "minimum hold active; reversal ignored"
-                                    : string.Empty,
+                                    : reversalExitDisabled
+                                        ? "EXPERIMENT: signal reversal ignored; reversal exit disabled on this instance"
+                                        : string.Empty,
                         exitTriggerSource: null,
                         instrument: marketState.Instrument,
                         entryPlan: null,
