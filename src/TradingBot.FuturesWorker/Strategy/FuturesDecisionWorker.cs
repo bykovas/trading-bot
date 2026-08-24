@@ -1222,7 +1222,7 @@ internal sealed class FuturesDecisionWorker(
     // order id, because that one we placed ourselves and stored. Take profit and stop
     // loss are told apart by where the fill landed: their levels sit 4% and 2% from
     // entry, far enough that the nearer one is never in doubt.
-    private static string ClosureReason(
+    internal static string ClosureReason(
         PortfolioPosition position,
         IReadOnlyList<FuturesFill> closing,
         decimal fillPrice)
@@ -1238,16 +1238,54 @@ internal sealed class FuturesDecisionWorker(
             return "EXCHANGE_TRAILING_STOP";
         }
 
-        var stop = position.StopLossPrice;
-        var target = position.TakeProfitPrice;
-        if (stop is > 0m && target is > 0m)
+        if (Caused(position.StopLossOrderId))
         {
-            return Math.Abs(fillPrice - target.Value) <= Math.Abs(fillPrice - stop.Value)
-                ? "EXCHANGE_TAKE_PROFIT"
-                : "EXCHANGE_STOP_LOSS";
+            return "EXCHANGE_STOP_LOSS";
         }
 
-        return "EXCHANGE_FILL";
+        if (Caused(position.TakeProfitOrderId))
+        {
+            return "EXCHANGE_TAKE_PROFIT";
+        }
+
+        // No order of ours produced this fill, so fall back to the price - but ask
+        // whether a level was actually REACHED, not which one the fill landed nearer
+        // to. Nearest always names one of the two, which is how a position closed by
+        // hand in the middle of the range was reported as a stop: ETH/USD on
+        // 2026-08-24 exited 0.21% from its entry against a 2% stop and the page said
+        // stop-loss. A close that reached neither is a close we did not make.
+        var isShort = position.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
+        if (Reached(position.StopLossPrice, isShort ? 1 : -1))
+        {
+            return "EXCHANGE_STOP_LOSS";
+        }
+
+        if (Reached(position.TakeProfitPrice, isShort ? -1 : 1))
+        {
+            return "EXCHANGE_TAKE_PROFIT";
+        }
+
+        return "EXCHANGE_CLOSE";
+
+        bool Caused(string? orderId) =>
+            !string.IsNullOrWhiteSpace(orderId)
+            && closing.Any(fill => fill.OrderId.Equals(orderId, StringComparison.OrdinalIgnoreCase));
+
+        // direction is +1 when the level sits above the entry and the price has to rise
+        // through it, -1 when it sits below. A trigger fills at or past its level, never
+        // short of it, so a small tolerance covers rounding only.
+        bool Reached(decimal? level, int direction)
+        {
+            if (level is not > 0m)
+            {
+                return false;
+            }
+
+            var tolerance = level.Value * 0.0005m;
+            return direction > 0
+                ? fillPrice >= level.Value - tolerance
+                : fillPrice <= level.Value + tolerance;
+        }
     }
 
     // Deliberately does NOT route through FuturesVirtualPortfolio.Apply/Close. Those
@@ -1335,7 +1373,7 @@ internal sealed class FuturesDecisionWorker(
                 // The percentage has to be in the text and in this exact shape: the
                 // dashboard reads it back out of the reason with a regex, the way it
                 // does for the closes the bot performs itself.
-                Reason = $"{reason}: closed by the exchange, entry {position.EntryPrice:0.########}, "
+                Reason = $"{reason}: {(reason == "EXCHANGE_CLOSE" ? "position gone from the exchange, closed by an order that is not mine" : "closed by the exchange")}, entry {position.EntryPrice:0.########}, "
                     + $"fill {fillPrice:0.########}"
                     + (realized.HasValue
                         ? $", realized PnL USD {realized.Value:0.####} ({realizedPct:0.####}%)"
@@ -2237,6 +2275,8 @@ internal sealed class FuturesDecisionWorker(
                 TrailingStopState = tpSl.TrailingStopState,
                 TrailingStopPercent = tpSl.TrailingStopPercent,
                 TrailingStopOrderId = tpSl.TrailingStopOrderId,
+                StopLossOrderId = tpSl.StopLossOrderId,
+                TakeProfitOrderId = tpSl.TakeProfitOrderId,
                 TrailingActivatedAtUtc = tpSl.TrailingActivatedAtUtc,
                 EntryChannel = existing?.EntryChannel,
                 FlippedEntry = existing?.FlippedEntry ?? false,
@@ -2375,7 +2415,7 @@ internal sealed class FuturesDecisionWorker(
                 cancellationToken);
             if (stop.Accepted)
             {
-                result = result with { SlOrderState = "EXCHANGE_OPEN", ExchangeStopLossPrice = stopPrice };
+                result = result with { SlOrderState = "EXCHANGE_OPEN", ExchangeStopLossPrice = stopPrice, StopLossOrderId = stop.OrderId };
                 Console.WriteLine($"futures-tpsl-arm: symbol={instrument.KrakenPair} side={remote.Side} kind=stop_loss orderId={stop.OrderId ?? "-"} price={stopPrice:0.########}");
             }
             else
@@ -2398,7 +2438,7 @@ internal sealed class FuturesDecisionWorker(
                 cancellationToken);
             if (takeProfit.Accepted)
             {
-                result = result with { TpOrderState = "EXCHANGE_OPEN", ExchangeTakeProfitPrice = takeProfitPrice };
+                result = result with { TpOrderState = "EXCHANGE_OPEN", ExchangeTakeProfitPrice = takeProfitPrice, TakeProfitOrderId = takeProfit.OrderId };
                 Console.WriteLine($"futures-tpsl-arm: symbol={instrument.KrakenPair} side={remote.Side} kind=take_profit orderId={takeProfit.OrderId ?? "-"} price={takeProfitPrice:0.########}");
             }
             else
@@ -2438,6 +2478,11 @@ internal sealed class FuturesDecisionWorker(
         var trailingActivatedAtUtc = existingTrailingStop is not null
             ? existing?.TrailingActivatedAtUtc
             : existing?.TrailingActivatedAtUtc;
+        // Held from the previous cycle when the order is no longer listed: a stop that
+        // fills leaves the open-orders list in the same breath as the position, and its
+        // id is the only evidence of what closed it.
+        var stopLossOrderId = existingStopLoss?.OrderId ?? existing?.StopLossOrderId;
+        var takeProfitOrderId = existingTakeProfit?.OrderId ?? existing?.TakeProfitOrderId;
 
         if (!config.TpSl.Enabled || entryPrice <= 0m || stopDistancePct <= 0m || takeProfitDistancePct <= 0m)
         {
@@ -2454,7 +2499,9 @@ internal sealed class FuturesDecisionWorker(
                 trailingStopState,
                 trailingStopPercent,
                 trailingStopOrderId,
-                trailingActivatedAtUtc);
+                trailingActivatedAtUtc,
+                stopLossOrderId,
+                takeProfitOrderId);
         }
 
         var isShort = side.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
@@ -2508,7 +2555,9 @@ internal sealed class FuturesDecisionWorker(
             trailingStopState,
             trailingStopPercent,
             trailingStopOrderId,
-            trailingActivatedAtUtc);
+            trailingActivatedAtUtc,
+            stopLossOrderId,
+            takeProfitOrderId);
     }
 
     private static decimal DistancePct(decimal entryPrice, decimal price) =>
@@ -2656,7 +2705,9 @@ internal sealed class FuturesDecisionWorker(
         string? TrailingStopState,
         decimal? TrailingStopPercent,
         string? TrailingStopOrderId,
-        DateTimeOffset? TrailingActivatedAtUtc);
+        DateTimeOffset? TrailingActivatedAtUtc,
+        string? StopLossOrderId = null,
+        string? TakeProfitOrderId = null);
 
     private bool IsLiveInstance =>
         config.BotInstance.Id.Equals("live", StringComparison.OrdinalIgnoreCase)

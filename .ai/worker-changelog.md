@@ -1,3 +1,12 @@
+## 2026-08-24-a-close-is-attributed-to-the-order-that-caused-it
+
+- A position leaving the exchange was labelled by whichever of the stop and the target the fill landed nearer to, and one of the two was always named. A close made by hand sits in the middle of that range, so it always arrived as a stop or a target: ETH/USD exited 0.21% from its entry against a 2% stop and the page said stop-loss.
+- Every fill carries the id of the order that produced it, and that is now the first evidence used. The bot already matched its trailing stop that way; the stop and target ids were returned by the exchange when the protection was armed, written into a log line and dropped. They are kept on the position now, and held from the previous cycle when the order is no longer listed - a stop that fills leaves the open-orders list in the same breath as the position, and its id is all that remains of it.
+- Where no order of ours produced the fill, the price is asked whether a level was REACHED rather than which one is nearer. A trigger fills at or past its level, never short of it, so a close that reached neither is a close we did not make: `EXCHANGE_CLOSE`, shown as "Ne mano orderis" with the plain sentence that the position went and none of our orders took it.
+- The technical line no longer says "closed by the exchange" for those either; the exchange did not do it.
+- Five tests over the attribution, built on the ETH figures: reached neither, reached the stop, reached the target, an order id outranking the price, and liquidation outranking everything.
+- This is the missing half of telling the bot's trades from a hand's. The other half - a position resized by hand - still has no marker: the sync adopts whatever quantity Kraken reports without remembering what it ordered.
+
 ## 2026-08-24-futures-live-drops-the-leverage
 
 - futures-live trades 150 USD of its own money at 1x instead of 15 USD at 10x. Exposure per position goes from 1500 USD to 150 - the same size futures-lukas-live carries - and the collateral behind it stops being borrowed.

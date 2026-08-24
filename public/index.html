@@ -2242,7 +2242,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       SELL_TRAILING_STOP: { text: "Slenkantis stop", tone: "green" },
       SELL_KILL_SWITCH: { text: "Avarinis stabdys", tone: "red" },
       SELL_EMERGENCY_RISK: { text: "Avarinė rizika", tone: "red" },
-      SELL_BROKER_SAFETY: { text: "Brokerio apsauga", tone: "red" }
+      SELL_BROKER_SAFETY: { text: "Brokerio apsauga", tone: "red" },
+      // The position went, and none of our orders took it. Named rather than
+      // guessed: the old code picked whichever of stop and target the fill sat
+      // nearer to, so a close by hand always arrived labelled as one of them.
+      SELL_EXCHANGE_CLOSE: { text: "Ne mano orderis", tone: "warn" }
     };
 
     // The original returned a structured code unchanged and looked it straight up
@@ -2294,7 +2298,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         SELL_TRAILING_STOP: `${closed} pagal slenkantį stop: pozicija jau buvo pelne, bet atsitraukė nuo vietinės viršūnės.`,
         SELL_KILL_SWITCH: `${closed} dėl avarinio stabdžio. Tai apsauginė priemonė.`,
         SELL_EMERGENCY_RISK: `${closed} dėl avarinės rizikos taisyklės.`,
-        SELL_BROKER_SAFETY: `${closed} dėl brokerio arba sąskaitos saugos taisyklės.`
+        SELL_BROKER_SAFETY: `${closed} dėl brokerio arba sąskaitos saugos taisyklės.`,
+        SELL_EXCHANGE_CLOSE: `Pozicija dingo iš biržos, bet jos uždarė ne mano orderis — nei stop, nei tikslas, nei slenkantis stop nesuveikė. Greičiausiai uždaryta ranka.`
       };
       const inferred = inferExitCode(code, reason);
       if (inferred && map[inferred]) return map[inferred];

@@ -131,6 +131,13 @@ public sealed class PortfolioPosition
     public string? TrailingStopState { get; set; }
     public decimal? TrailingStopPercent { get; set; }
     public string? TrailingStopOrderId { get; set; }
+
+    // The exchange ids of the stop and target this position is protected by. Kept so a
+    // close can be attributed to the order that caused it instead of guessed from how
+    // near the fill landed to each level - which is how a position closed by hand came
+    // to be reported as a stop-loss.
+    public string? StopLossOrderId { get; set; }
+    public string? TakeProfitOrderId { get; set; }
     public DateTimeOffset? TrailingActivatedAtUtc { get; set; }
 
     // Consecutive decision cycles in which the current score sat at or below the
@@ -196,6 +203,8 @@ public sealed class PortfolioPosition
         TrailingStopState = TrailingStopState,
         TrailingStopPercent = TrailingStopPercent,
         TrailingStopOrderId = TrailingStopOrderId,
+        StopLossOrderId = StopLossOrderId,
+        TakeProfitOrderId = TakeProfitOrderId,
         TrailingActivatedAtUtc = TrailingActivatedAtUtc,
         LowScoreCycles = LowScoreCycles,
         Leverage = Leverage,
