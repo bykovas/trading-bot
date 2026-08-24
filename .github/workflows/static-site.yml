@@ -239,6 +239,10 @@ jobs:
       TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED: ${{ vars.TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED }}
       TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY: ${{ secrets.TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY }}
       TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET: ${{ secrets.TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET }}
+      # Announces each entry to the Telegram channel. Only futures-lukas-live gets it:
+      # it is the account with its own signals, and the follower would post the same
+      # trade a second time. Unset simply means the channel stays quiet.
+      TRADINGBOT_TELEGRAM_BOT_TOKEN: ${{ secrets.TRADINGBOT_TELEGRAM_BOT_TOKEN }}
       # Optional: a keyed Base RPC for the coin rate. Unset falls back to the
       # public endpoints the API already rotates through. deploy.sh builds the
       # URL from the bare key.

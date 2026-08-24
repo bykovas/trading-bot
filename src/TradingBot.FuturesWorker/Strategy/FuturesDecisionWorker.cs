@@ -16,9 +16,12 @@ internal sealed class FuturesDecisionWorker(
     IFuturesBroker? broker = null,
     IClock? clock = null,
     IUniverseProvider? universeProvider = null,
-    IFuturesEntryMirrorStore? entryMirrorStore = null)
+    IFuturesEntryMirrorStore? entryMirrorStore = null,
+    ITelegramNotifier? telegramNotifier = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
+    private readonly ITelegramNotifier _telegram = telegramNotifier
+        ?? (config.Telegram.IsConfigured ? new TelegramNotifier(config.Telegram) : new NullTelegramNotifier());
     private readonly IUniverseProvider _universeProvider = universeProvider ?? new ConfiguredUniverseProvider(config.CandidateUniverse);
     private readonly IFuturesEntryMirrorStore _entryMirrorStore = entryMirrorStore ?? new NullFuturesEntryMirrorStore();
     private readonly WorkerBuildInfo _buildInfo = WorkerBuildInfo.FromEnvironment();
@@ -549,6 +552,19 @@ internal sealed class FuturesDecisionWorker(
                             }
 
                             newEntriesThisCycle++;
+                            // Announced from the own-signal branch only. futures-live has
+                            // no own entries - everything it holds arrives through the
+                            // mirror - so the channel gets one post per trade rather than
+                            // the publisher's and the copy's four seconds apart.
+                            await AnnounceEntryAsync(
+                                marketState.Instrument.Pair,
+                                executedDesired,
+                                fill,
+                                entryChannel,
+                                openedPosition,
+                                btcRegime.Change24hPct,
+                                pair24hChangePct,
+                                cancellationToken);
                             await PublishMirrorEntryAsync(
                                 cycleId,
                                 marketState.Instrument,
@@ -746,6 +762,45 @@ internal sealed class FuturesDecisionWorker(
             AppendFastCycle(utc, portfolioBefore, state, decisions, heldInstruments.Select(instrument => instrument.Pair));
             Console.WriteLine($"futures fast-exit-check: recorded={recorded} closed={closed} remainingPositions={state.Positions.Count}");
         }
+    }
+
+    // One post per opened position, and only what the bot intended: the pair, the way it
+    // went, where it gets out either way, and why. No size, no leverage, no money - those
+    // are on the dashboard, behind a link, where a reader who wants them can look.
+    private async Task AnnounceEntryAsync(
+        string pair,
+        FuturesDesiredExposure side,
+        FuturesFillResult fill,
+        string? entryChannel,
+        PortfolioPosition? opened,
+        decimal? btc24hChangePct,
+        decimal? pair24hChangePct,
+        CancellationToken cancellationToken)
+    {
+        if (!config.Telegram.IsConfigured || !fill.PositionOpened)
+        {
+            return;
+        }
+
+        var price = fill.Action.AverageFillPrice ?? fill.Action.FillPrice;
+        if (price <= 0m)
+        {
+            return;
+        }
+
+        var text = FuturesEntryAnnouncement.Compose(
+            pair,
+            ExposureSide(side),
+            price,
+            entryChannel,
+            opened?.TakeProfitPrice,
+            opened?.StopLossPrice,
+            config.TpSl.TakeProfitPercent,
+            config.TpSl.StopLossPercent,
+            btc24hChangePct,
+            pair24hChangePct);
+
+        await _telegram.SendAsync(text, cancellationToken);
     }
 
     private async Task PublishMirrorEntryAsync(

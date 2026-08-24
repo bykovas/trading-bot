@@ -281,6 +281,9 @@ echo "Writing Lukas futures live environment to ${FUTURES_LUKAS_LIVE_ENV_FILE}"
   printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=%s\n' "${FUTURES_LUKAS_LIVE_TRADING_FLAG}"
   printf 'TRADINGBOT_KRAKEN_FUTURES_API_KEY=%s\n' "${TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY:-}"
   printf 'TRADINGBOT_KRAKEN_FUTURES_API_SECRET=%s\n' "${TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET:-}"
+  # Only this worker announces entries, so only this worker gets the token. The chat id
+  # is not here: it is not a credential and lives in appsettings, in the open.
+  printf 'TRADINGBOT_TELEGRAM_BOT_TOKEN=%s\n' "${TRADINGBOT_TELEGRAM_BOT_TOKEN:-}"
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${FUTURES_LUKAS_LIVE_ENV_FILE}"
 

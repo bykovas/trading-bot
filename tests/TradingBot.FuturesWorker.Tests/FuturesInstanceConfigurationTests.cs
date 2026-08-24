@@ -40,6 +40,19 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.False(primary["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
         Assert.True(lukas["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
 
+        // The announcement follows the own signals, not the position: whoever decides
+        // is who speaks. Both point at the same channel, so if this ever flips the
+        // channel gets each trade twice rather than not at all - loud, not quiet.
+        Assert.True(lukas["Telegram"]?["Enabled"]?.GetValue<bool>());
+        Assert.False(primary["Telegram"]?["Enabled"]?.GetValue<bool>());
+        Assert.Equal(
+            primary["Telegram"]?["ChatId"]?.GetValue<string>(),
+            lukas["Telegram"]?["ChatId"]?.GetValue<string>());
+
+        // The token is a credential and never appears in a tracked file.
+        Assert.Null(primary["Telegram"]?["BotToken"]);
+        Assert.Null(lukas["Telegram"]?["BotToken"]);
+
         // What the two accounts are allowed to disagree about: who they are, their
         // role in the mirror, whether they act on their own signals, and how much
         // they stake. Everything else - exits, gates, leverage, cooldowns - must
@@ -63,6 +76,10 @@ public sealed class FuturesInstanceConfigurationTests
             // other fails the moment an account is actually resized.
             ("Risk", "TargetRiskUsd"),
             ("Risk", "MaxConcurrentOpenRiskUsd"),
+            // Only the account with its own signals announces an entry. futures-live
+            // takes every position from the mirror four seconds later, so letting it
+            // post too would put the same trade in the channel twice.
+            ("Telegram", "Enabled"),
         };
 
         var normalizedLukas = lukas.DeepClone().AsObject();

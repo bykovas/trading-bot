@@ -30,6 +30,8 @@ internal sealed class FuturesBotConfiguration
     public FuturesRiskOptions Risk { get; set; } = new();
     public FuturesExecutionPolicyOptions ExecutionPolicy { get; set; } = new();
     public FuturesEntryMirrorOptions EntryMirror { get; set; } = new();
+
+    public TelegramNotificationOptions Telegram { get; set; } = new();
     public CorrelationRiskOptions CorrelationRisk { get; set; } = new();
     public TpSlOptions TpSl { get; set; } = new();
     public FuturesPortfolioOptions Portfolio { get; set; } = new();
@@ -157,6 +159,9 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_FUTURES_MAX_MARGIN_UTILIZATION_PERCENT", value => config.Margin.MaxAccountMarginUtilizationPercent = ParseDecimal(value, config.Margin.MaxAccountMarginUtilizationPercent));
         SetIfPresent("TRADINGBOT_FUTURES_DEAD_MAN_SWITCH_ENABLED", value => config.Futures.DeadManSwitchEnabled = ParseBool(value, config.Futures.DeadManSwitchEnabled));
         SetIfPresent("TRADINGBOT_FUTURES_DEAD_MAN_SWITCH_SECONDS", value => config.Futures.DeadManSwitchSeconds = ParseInt(value, config.Futures.DeadManSwitchSeconds));
+        SetIfPresent("TRADINGBOT_TELEGRAM_BOT_TOKEN", value => config.Telegram.BotToken = value);
+        SetIfPresent("TRADINGBOT_TELEGRAM_CHAT_ID", value => config.Telegram.ChatId = value);
+        SetIfPresent("TRADINGBOT_TELEGRAM_ENABLED", value => config.Telegram.Enabled = ParseBool(value, config.Telegram.Enabled));
     }
 
     private void Normalize()
@@ -498,6 +503,21 @@ internal sealed class FuturesBotConfiguration
 
     private static string? NormalizeOptionalInstanceId(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : BotInstanceId.Normalize(value);
+}
+
+// Where the bot announces an entry. The token is a credential and only ever arrives
+// through the environment; the chat id is not secret - without the token it opens
+// nothing - so it lives in appsettings where it can be read and changed in the open.
+internal sealed class TelegramNotificationOptions
+{
+    public bool Enabled { get; set; }
+    public string? BotToken { get; set; }
+    public string? ChatId { get; set; }
+
+    public bool IsConfigured =>
+        Enabled
+        && !string.IsNullOrWhiteSpace(BotToken)
+        && !string.IsNullOrWhiteSpace(ChatId);
 }
 
 internal sealed class FuturesEntryMirrorOptions

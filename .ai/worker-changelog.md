@@ -1,3 +1,16 @@
+## 2026-08-24-the-bot-says-what-it-intends-before-it-opens
+
+- Every position futures-lukas-live opens is now announced to the Telegram channel, in Lithuanian, at the moment the decision becomes an order.
+- It is an intention, not a report. Pair, direction, take profit, stop loss, and one sentence saying why. No size, no leverage, no margin, no quantity, no fees, no account figures - a channel post carrying stakes turns every entry into an invitation to copy the trade, and the numbers belong on the dashboard behind a link. A test asserts each of those words stays out.
+- The "why" is the entry channel put into a sentence: Breakout, Continuation, Reclaim, DipBounce and their three SHORT counterparts each get their own. An unmapped channel falls back to the plain-signal wording rather than inventing a pattern that was not found, so a channel added next month cannot make the bot claim something it did not see.
+- A closing line carries the two readings the flip gate weighs - BTC's 24h change and the pair's own. Nothing is flipped on either account today; the line is there because it says what the bot was looking at.
+- Only the account with its own signals speaks. futures-live takes every position from the mirror four seconds later, so letting it post too would put the same trade in the channel twice. Its `Telegram.Enabled` is false and the guard test pins that both accounts point at the same chat, so a future mistake makes the channel loud rather than silent.
+- Number formatting is spelled out instead of taken from `lt-LT`. A container built with InvariantGlobalization, or run with DOTNET_SYSTEM_GLOBALIZATION_INVARIANT set, hands back the invariant culture without erroring - and the channel would quietly start posting "2,338.91" to Lithuanian readers.
+- Delivery can never disturb trading: the send is caught, timed out at 10 seconds, and logged as `TELEGRAM_SEND_FAILED` without the token. A missing token or chat id simply means no post.
+- The token travels as `TRADINGBOT_TELEGRAM_BOT_TOKEN`, GitHub secret to workflow to deploy.sh to the worker's env, and only into futures-lukas-live - the account that does not announce does not get the credential. The chat id is not secret without it, so it sits in appsettings in the open.
+- Only openings. Closes, rejections and entries blocked by the risk gate say nothing: a channel filled with what did not happen is worse than a quiet one.
+- TP/SL untouched: 4% and 2% working, x200 on the exchange.
+
 ## 2026-08-24-a-position-opened-by-a-hand-can-finally-say-so
 
 - Active positions did draw a mark already; the mark was simply blank for every position the bot had not opened, because `positionDoer` returns nothing when provenance is unknown. On futures-live that is every position a hand opens, so the list looked unmarked.
