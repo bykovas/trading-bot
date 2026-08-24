@@ -198,15 +198,16 @@
   color:var(--green);font:13.5px var(--font-mono)}
 .bc-live-s{margin-top:10px;font:12.5px var(--font-mono);color:var(--muted-2)}
 .bc-live-s b{color:var(--ink-soft);font-weight:400} .bc-live-s i{font-style:normal;color:var(--blue)}
-/* Who did it, beside the pair. The hand keeps the blue the legend already gives a
-   person; the bot's mark is muted, because it is the ordinary case and marking the
-   ordinary case loudly is how a page becomes noise. */
-.bc-owner{flex:none;display:inline-flex;align-items:center;justify-content:center;
-  width:14px;height:14px;margin-right:7px;vertical-align:-2px}
-.bc-owner svg{display:block;width:100%;height:100%}
-.bc-owner--hand{border-radius:3px;background:var(--blue)}
-.bc-owner--hand svg{width:8px;height:8px}
-.bc-owner--bot{color:var(--muted-3)}
+/* Who did it, after the pair. No plate behind it: the first version put a filled
+   blue square in FRONT of the pair and it fought the pair for the eye. Stroke only,
+   at the pair's own scale, in the colours the page already assigns - gold the bot,
+   purple the mirror, blue a person. */
+.bc-doer{flex:none;display:inline-flex;width:13px;height:13px;margin-left:8px;
+  vertical-align:-1px}
+.bc-doer svg{display:block;width:100%;height:100%}
+.bc-doer--bot{color:var(--muted-2)}
+.bc-doer--mirror{color:var(--purple)}
+.bc-doer--hand{color:var(--blue)}
 .bc-legend{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
 .bc-legend-l{font:10.5px var(--font-mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted-3);text-align:right}
 /* One pill, four groups, hairlines between them. Two framed rows read as two boxes
@@ -2527,23 +2528,56 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         : `${price(priceValue)} (${signedMoney(amount)})`;
     }
 
-    // Who did this one. Blue is already the page's colour for a person - the legend
-    // says so about transfers - so a hand keeps that colour and a plate, and the bot
-    // gets a quiet mark: the exception should be what catches the eye, not the norm.
+    // Who did it, after the pair. Three states and three glyphs, in the colours the
+    // page already uses: gold is the bot, purple is the lab's second voice and stands
+    // for the mirror, blue is a person - the legend gives transfers that colour.
     //
-    // It only claims what is known. A position the bot never ordered arrives from the
-    // exchange as KRAKEN_SYNC, and a close no order of ours caused is EXCHANGE_CLOSE.
-    // A position RESIZED by hand still looks like the bot's, because the sync adopts
-    // whatever quantity Kraken reports without remembering what it asked for.
-    function ownerMark(byHand, title) {
-      return byHand
-        ? `<span class="bc-owner bc-owner--hand" title="${esc(title)}" aria-label="${esc(title)}">` +
-            `<svg viewBox="0 0 8 8" aria-hidden="true"><path d="M1.5 6.5 L6.5 1.5" stroke="#0e2a48" ` +
-            `stroke-width="1.7" stroke-linecap="round" fill="none"/></svg></span>`
-        : `<span class="bc-owner bc-owner--bot" title="${esc(title)}" aria-label="${esc(title)}">` +
-            `<svg viewBox="0 0 14 14" aria-hidden="true"><g fill="none" stroke="currentColor" ` +
-            `stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">` +
-            `<path d="M5.2 3.6 L2.4 7 L5.2 10.4"/><path d="M8.8 3.6 L11.6 7 L8.8 10.4"/></g></svg></span>`;
+    // Nothing is drawn when it cannot be told. A position opened in the seconds before
+    // the container is recreated loses its provenance: the state never reached the
+    // store, so on restart it is re-read from Kraken as KRAKEN_SYNC with no channel.
+    // An empty space there means "not known", not "the bot". A position RESIZED by hand
+    // is unmarked for a different reason - the sync adopts Kraken's quantity without
+    // remembering what it ordered, so nothing records that a hand was in it.
+    const DOER = {
+      bot: {
+        cls: "bc-doer--bot",
+        title: "Boto sprendimas",
+        svg: '<path d="M4.6 3.2 L1.9 6 L4.6 8.8"/><path d="M7.4 3.2 L10.1 6 L7.4 8.8"/>'
+      },
+      mirror: {
+        cls: "bc-doer--mirror",
+        title: "Zerkalas: įėjimas iš kito boto",
+        svg: '<path d="M6 1.4 V10.6" stroke-dasharray="1.6 1.5"/>' +
+          '<path d="M4.2 4.2 L1.6 6 L4.2 7.8 Z"/><path d="M7.8 4.2 L10.4 6 L7.8 7.8 Z"/>'
+      },
+      hand: {
+        cls: "bc-doer--hand",
+        title: "Ranka: uždarė ne boto orderis",
+        svg: '<path d="M2.4 9.6 L3.9 9.1 L9.6 3.4"/><path d="M7.8 1.9 L10.1 4.2"/>' +
+          '<path d="M2.4 9.6 L2.9 8.1"/>'
+      }
+    };
+
+    function doerMark(kind) {
+      const mark = DOER[kind];
+      if (!mark) return "";
+      return `<span class="bc-doer ${mark.cls}" title="${esc(mark.title)}" aria-label="${esc(mark.title)}">` +
+        `<svg viewBox="0 0 12 12" aria-hidden="true"><g fill="none" stroke="currentColor" ` +
+        `stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${mark.svg}</g></svg></span>`;
+    }
+
+    function tradeDoer(trade) {
+      if (String(trade.exitReasonCode || "").toUpperCase() === "EXCHANGE_CLOSE") return "hand";
+      if (String(trade.entryChannel || "").toLowerCase() === "mirror") return "mirror";
+      return "bot";
+    }
+
+    function positionDoer(position) {
+      if (String(position.entryChannel || "").toLowerCase() === "mirror") return "mirror";
+      if (String(position.origin || "").toUpperCase() === "BOT") return "bot";
+      // KRAKEN_SYNC or nothing at all: it arrived without the bot ordering it, or its
+      // provenance did not survive a restart. Either way we do not know.
+      return null;
     }
 
     function kv(label, value, tone) {
@@ -2731,11 +2765,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       return `<details class="bc-card bc-card--pos" data-key="pos:${esc(position.pair)}" open>
         <summary class="bc-card-sum">
           <div class="bc-id">
-            <span class="bc-pair">${ownerMark(
-              String(position.origin || "").toUpperCase() !== "BOT",
-              String(position.origin || "").toUpperCase() === "BOT"
-                ? "Atidarė botas"
-                : "Pozicija atsirado biržoje ne boto orderiu")}${esc(position.pair)}</span>
+            <span class="bc-pair">${esc(position.pair)}${doerMark(positionDoer(position))}</span>
             <span class="bc-badges">${badges}</span>
             <span class="bc-when">atidariau ${esc(ltDateTime(position.openedAtUtc, false))} LT · prieš ${esc(duration(position.openedAtUtc))}</span>
             <span class="bc-params bc-only-wide">${params}</span>
@@ -2814,11 +2844,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       return `<details class="bc-card bc-card--trade" data-key="${esc(key)}" open>
         <summary class="bc-card-sum">
           <div class="bc-id">
-            <span class="bc-pair">${ownerMark(
-              String(trade.exitReasonCode || "").toUpperCase() === "EXCHANGE_CLOSE",
-              String(trade.exitReasonCode || "").toUpperCase() === "EXCHANGE_CLOSE"
-                ? "Uždarė ne boto orderis — greičiausiai ranka"
-                : "Boto sandoris")}${esc(trade.pair)}</span>
+            <span class="bc-pair">${esc(trade.pair)}${doerMark(tradeDoer(trade))}</span>
             <span class="bc-badges">${badges.join("")}</span>
             <span class="bc-when">${esc(ltDateTime(trade.utc, false))} LT</span>
             <span class="bc-params bc-only-wide">${params}</span>

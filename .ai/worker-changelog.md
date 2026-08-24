@@ -1,3 +1,12 @@
+## 2026-08-24-same-direction-again-and-three-marks-for-who-did-it
+
+- `EntryMirror.InvertSide` is off again on both sides: futures-live repeats the publisher instead of trading against it. Only the size differs - 15 USD at 10x against 150 at 1x, which is the same 150 of exposure either way.
+- Three marks after the pair, not one before it. The first version put a filled blue square in FRONT of the pair, where it fought the pair for the eye, and it drew something for every card including the ordinary ones. Now: gold chevrons for the bot's own decision, a purple reflection for a mirrored entry, a blue pen for a close no order of ours produced. Stroke only, no plate, at the pair's own scale.
+- Nothing is drawn when it cannot be told, and the first version got this wrong in the worst direction: it marked a position as a hand's whenever `origin` was not BOT, and both live positions read KRAKEN_SYNC - so the page accused the bot of the two trades it had just made itself.
+- The cause is narrow and worth knowing. `origin` and `entry_channel` are stored and read back correctly; those two positions opened at 04:59 and 05:00 and the container was recreated in that minute, so the state never reached the store and the restart re-read them from Kraken as unowned. Trades do not have this hole - `entry_channel` and `exit_reason_code` are columns on the journalled action.
+- A position resized by hand is still unmarked, for a different reason: the sync adopts whatever quantity Kraken reports without remembering what it asked for, so nothing records that a hand was in it.
+- TP/SL untouched: 4% and 2% working, x200 on the exchange.
+
 ## 2026-08-24-mirror-flips-again-and-the-pair-says-who-did-it
 
 - `EntryMirror.InvertSide` is on again, on BOTH sides: futures-lukas-live goes long, futures-live goes short on the same signal. It is read by the publisher, which writes the target side into the command, and by the follower, which checks the side it expects - set on one side only, every command is rejected as `MIRROR_SIDE_MISMATCH` and the mirror goes quiet rather than loud. The guard test asserts they agree and now asserts they are on.

@@ -31,9 +31,9 @@ public sealed class FuturesInstanceConfigurationTests
         var publisherInverts = lukas["EntryMirror"]?["InvertSide"]?.GetValue<bool>();
         var followerInverts = primary["EntryMirror"]?["InvertSide"]?.GetValue<bool>();
         Assert.Equal(publisherInverts, followerInverts);
-        // Mirrored against the publisher since 2026-08-24: lukas goes long, futures-live
-        // goes short on the same signal.
-        Assert.True(followerInverts);
+        // Same direction again: futures-live repeats lukas. Only the size differs -
+        // 15 USD at 10x against 150 at 1x, which is the same exposure either way.
+        Assert.False(followerInverts);
 
         // futures-live is mirror-only: it opens nothing from its own signals and takes
         // every entry from lukas. lukas trades his own and publishes them.

@@ -535,8 +535,12 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             trailing_stop_state,
             trailing_stop_percent,
             -- BOT when the bot opened it, KRAKEN_SYNC when it appeared on the exchange
-            -- without the bot ordering it. The page marks the difference by the pair.
-            origin
+            -- without the bot ordering it, and Mirror when the entry came from the
+            -- publisher. Both are lost if the container is recreated in the seconds
+            -- between an entry and the next save, so the page shows no mark rather than
+            -- a wrong one when they are missing.
+            origin,
+            entry_channel
         from portfolio_position_state position
         where (@bot_instance_id is null or position.bot_instance_id = @bot_instance_id)
         -- Newest first. Ordering by market value put the biggest position on top,
@@ -597,7 +601,8 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             // Stored values are the worker's net-of-fees liquidation figures (spot).
             storedPnlEur,
             storedPnlPercent,
-            reader.IsDBNull(25) ? null : reader.GetString(25)));
+            reader.IsDBNull(25) ? null : reader.GetString(25),
+            reader.IsDBNull(26) ? null : reader.GetString(26)));
     }
 
     return positions;
@@ -2811,7 +2816,9 @@ internal sealed record PortfolioPositionDto(
     decimal NetUnrealizedPnlPercent,
     // BOT, or KRAKEN_SYNC for a position that appeared on the exchange without the
     // bot ordering it. Null on rows written before the column existed.
-    string? Origin);
+    string? Origin,
+    // "Mirror" when the entry came from the publisher rather than this bot's own signal.
+    string? EntryChannel);
 
 internal sealed record PageRequest(int Limit, int Offset)
 {
