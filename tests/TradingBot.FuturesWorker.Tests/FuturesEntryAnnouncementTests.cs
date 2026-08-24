@@ -24,17 +24,15 @@ public sealed class FuturesEntryAnnouncementTests
         Assert.Contains("2 485,09", text);
     }
 
-    // On a short the target is below and the stop above. Getting these the wrong way
-    // round would read as a bot that does not know which way it is facing.
+    // On a short the target percentage is negative and the stop positive. Getting these
+    // the wrong way round would read as a bot that does not know which way it is facing.
     [Fact]
     public void A_short_targets_downward_and_stops_upward()
     {
         var text = EthShort("ShortReclaim");
-        var target = text[text.IndexOf("Tikslas", StringComparison.Ordinal)..];
-        var stop = text[text.IndexOf("Stopas", StringComparison.Ordinal)..];
 
-        Assert.Contains("−4 %", target[..target.IndexOf('\n')]);
-        Assert.Contains("+2 %", stop[..stop.IndexOf('\n')]);
+        Assert.Contains("\"Take Profit\" limitą daryčiau −4 % (ties 2 338,91 $)", text);
+        Assert.Contains("\"stop-loss\" +2 % (ties 2 485,09 $)", text);
     }
 
     [Fact]
@@ -48,8 +46,8 @@ public sealed class FuturesEntryAnnouncementTests
 
         Assert.Contains("🟢", text);
         Assert.Contains("į viršų", text);
-        var target = text[text.IndexOf("Tikslas", StringComparison.Ordinal)..];
-        Assert.Contains("+4 %", target[..target.IndexOf('\n')]);
+        Assert.Contains("\"Take Profit\" limitą daryčiau +4 %", text);
+        Assert.Contains("\"stop-loss\" −2 %", text);
     }
 
     // The rule the format exists for.
@@ -110,30 +108,32 @@ public sealed class FuturesEntryAnnouncementTests
             btc24hChangePct: null, pair24hChangePct: null);
 
         Assert.DoesNotContain("per parą", text);
-        Assert.Contains("Tikslas", text);
+        Assert.Contains("Take Profit", text);
     }
 
+    // The exits are one spoken sentence under the reason - percent first, the price
+    // level in brackets - not a table and not a pair of marked lines.
     [Fact]
-    public void The_bracket_carries_the_move_in_dollars_as_well_as_percent()
+    public void The_exits_are_one_sentence_with_percent_and_level()
     {
         var text = EthShort("ShortReclaim");
+        var line = text.Split('\n')[2];
 
-        // 4% of 2 436,37 is 97,45; 2% is 48,73. The signs follow the levels: on a short
-        // the target sits below the entry and the stop above it.
-        Assert.Contains("(−4 % · −97,45 $)", text);
-        Assert.Contains("(+2 % · +48,73 $)", text);
+        Assert.Equal(
+            "\"Take Profit\" limitą daryčiau −4 % (ties 2 338,91 $), \"stop-loss\" +2 % (ties 2 485,09 $)",
+            line);
     }
 
-    // A cent-priced pair would round to 0,00 at two decimals, which reads as "no move".
+    // A cent-priced pair would show "ties 0,10 $" at two decimals - both levels the same.
     [Fact]
-    public void A_small_priced_pair_keeps_enough_decimals_to_show_the_move()
+    public void A_small_priced_pair_keeps_enough_decimals_in_its_levels()
     {
         var text = FuturesEntryAnnouncement.Compose(
             "ARB/USD", "LONG", 0.10329m, "Breakout",
             0.1074216m, 0.1012242m, 4m, 2m, 0.85m, 2.42m);
 
-        Assert.Contains("+0,00413 $", text);
-        Assert.DoesNotContain("0,00 $", text);
+        Assert.Contains("ties 0,10742 $", text);
+        Assert.Contains("ties 0,10122 $", text);
     }
 
     [Fact]
@@ -168,12 +168,13 @@ public sealed class FuturesEntryAnnouncementTests
         var text = EthShort("ShortReclaim");
 
         Assert.DoesNotContain("Signalai", text);
-        Assert.Contains("Tikslas", text);
+        Assert.Contains("Take Profit", text);
         Assert.DoesNotContain("svertas", text);
     }
 
-    // The shape of the post, pinned: header and intent together, a blank line, the two
-    // levels, a blank line, then everything the bot was reading in one unbroken block.
+    // The shape of the post, pinned: header, intent, the exits sentence right under it,
+    // a blank line, then everything the bot was reading - the white circle on the regime
+    // line, Signalai and Kontekstas bare.
     [Fact]
     public void The_post_keeps_its_agreed_shape()
     {
@@ -182,14 +183,12 @@ public sealed class FuturesEntryAnnouncementTests
         Assert.StartsWith("\U0001F534 BlynAI · ETH/USD SHORT", lines[0]);
         Assert.StartsWith("Dabar atidaryčiau", lines[1]);
         Assert.Contains("Kodėl:", lines[1]);
-        Assert.Equal("", lines[2]);
-        Assert.StartsWith("\U0001F7E2 Tikslas", lines[3]);
-        Assert.StartsWith("\U0001F534 Stopas", lines[4]);
-        Assert.Equal("", lines[5]);
-        Assert.StartsWith("BTC per parą", lines[6]);
-        Assert.StartsWith("\U000026AA Signalai", lines[7]);
-        Assert.StartsWith("Kontekstas:", lines[8]);
-        Assert.Equal(9, lines.Length);
+        Assert.StartsWith("\"Take Profit\" limitą daryčiau", lines[2]);
+        Assert.Equal("", lines[3]);
+        Assert.StartsWith("\U000026AA BTC per parą", lines[4]);
+        Assert.StartsWith("Signalai", lines[5]);
+        Assert.StartsWith("Kontekstas:", lines[6]);
+        Assert.Equal(7, lines.Length);
     }
 
     // One family of marks. A dart board, a road sign and a cog are three drawing styles

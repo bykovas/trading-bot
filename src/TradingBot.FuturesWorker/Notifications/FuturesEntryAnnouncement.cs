@@ -73,27 +73,26 @@ internal static class FuturesEntryAnnouncement
         }
 
         text.Append("Dabar atidaryčiau ").Append(pair).Append(isLong ? " į viršų" : " žemyn")
-            .Append(", kaina ").Append(Money(price)).Append(" $. Kodėl: ").Append(reason).Append(".\n");
+            .Append(", kaina ").Append(Money(price)).Append(" $. Kodėl: ").Append(reason).Append('.');
 
-        // The target is the direction the position wants to go, the stop the direction it
-        // must not: on a short the target sits below and the stop above. The bracket says
-        // how far, in percent and in the distance the price has to travel - never what
-        // the move would be worth, which is the one number that gives the stake away.
-        //
-        // The signs need no special-casing: a level below the entry subtracts, and that
-        // is exactly when its percentage is negative too.
+        // Both exits in one spoken sentence right under the reason, percent first and the
+        // price level in brackets - the same voice as the intention above it, not a table.
+        // On a short the target percentage is negative and the stop positive, which the
+        // levels themselves already agree with.
+        var exits = new List<string>();
         if (takeProfitPrice is { } tp)
         {
-            text.Append('\n').Append(Green).Append(" Tikslas  ").Append(Money(tp)).Append(" $   (")
-                .Append(Signed(isLong ? takeProfitPercent : -takeProfitPercent)).Append(" % · ")
-                .Append(SignedMoney(tp - price, price)).Append(" $)");
+            exits.Add($"\"Take Profit\" limitą daryčiau {Signed(isLong ? takeProfitPercent : -takeProfitPercent)} % (ties {Money(tp)} $)");
         }
 
         if (stopLossPrice is { } sl)
         {
-            text.Append('\n').Append(Red).Append(" Stopas   ").Append(Money(sl)).Append(" $   (")
-                .Append(Signed(isLong ? -stopLossPercent : stopLossPercent)).Append(" % · ")
-                .Append(SignedMoney(sl - price, price)).Append(" $)");
+            exits.Add($"\"stop-loss\" {Signed(isLong ? -stopLossPercent : stopLossPercent)} % (ties {Money(sl)} $)");
+        }
+
+        if (exits.Count > 0)
+        {
+            text.Append('\n').Append(string.Join(", ", exits));
         }
 
         // Everything the bot was reading, in one unbroken block: the regime the flip gate
@@ -113,7 +112,7 @@ internal static class FuturesEntryAnnouncement
 
         if (regime.Count > 0)
         {
-            tail.Add(string.Join(" · ", regime));
+            tail.Add(Neutral + " " + string.Join(" · ", regime));
         }
 
         tail.AddRange(DetailLines(details, entryChannel));
@@ -144,7 +143,7 @@ internal static class FuturesEntryAnnouncement
         signals.AddRange(details.Contributions
             .Where(contribution => contribution.Value != 0m)
             .Select(contribution => $"{contribution.Name} {Signed(contribution.Value, 2)}"));
-        lines.Add($"{Neutral} Signalai  {string.Join(" · ", signals)}");
+        lines.Add($"Signalai  {string.Join(" · ", signals)}");
 
         var context = new List<string>();
         if (details.SpreadPercent is { } spread)
@@ -189,14 +188,6 @@ internal static class FuturesEntryAnnouncement
         return magnitude >= 1m ? 2
             : magnitude >= 0.01m ? 5
             : 8;
-    }
-
-    // A distance is shown at the precision of the price it belongs to: 97,46 next to
-    // 2 436,37, but 0,00413 next to 0,10329, where two decimals would round it to zero.
-    private static string SignedMoney(decimal value, decimal reference)
-    {
-        var text = Math.Abs(value).ToString("N" + Decimals(reference).ToString(CultureInfo.InvariantCulture), Lt);
-        return (value > 0m ? "+" : value < 0m ? "−" : "") + text;
     }
 
     private static string Signed(decimal value, int? fixedDecimals = null) =>

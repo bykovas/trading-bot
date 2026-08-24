@@ -1,3 +1,11 @@
+## 2026-08-24-the-exits-become-a-sentence
+
+- The Telegram post's two level lines collapse into one spoken sentence right under the reason: `"Take Profit" limitą daryčiau +4 % (ties 1,62 $), "stop-loss" −2 % (ties 1,52 $)`. Percent first, the price level in brackets - the same voice as the intention above it, not a table. The per-level dollar distances go with the lines that carried them.
+- The marks thin out with it: the green and red circles leave the levels (the header keeps its one), and the white circle moves from `Signalai` to the regime line, so the tail block reads as one unit with a single quiet mark on top.
+- The shape test is repinned to the new seven lines; the direction tests now assert the sentence itself - a short's target percentage negative, its stop positive.
+- Two normalizations of the requested wording, flagged rather than silent: "Take Profite" read as "Take Profit" (typo), "limita" written "limitą", and the stop's "(- 1,52 $)" made symmetric with the target as "(ties 1,52 $)".
+- Wiring untouched: only lukas announces, only openings, delivery still cannot disturb trading.
+
 ## 2026-08-24-futures-live-back-to-the-publishers-stake
 
 - futures-live returns to 15 USD at 10x - the publisher's stake exactly, 150 of exposure per position. The 4x sizing lasted one afternoon and two mirrored entries (ADA, BOME), both stopped out at the new 12 USD budget for -24.11 total; at the old size the same two stops would have cost about -6.
