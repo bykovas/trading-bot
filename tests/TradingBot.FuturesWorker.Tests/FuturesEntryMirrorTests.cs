@@ -42,12 +42,15 @@ public sealed class FuturesEntryMirrorTests
             PriceDecimals = 4
         };
 
+        // Inversion is no longer unconditional: BTC has to be flat or falling for the
+        // copy to be turned around. -1.6% is 22 August, the last day the flip ran live.
         await InvokePublishAsync(
             sourceWorker,
             "futures-lukas-live-20260819120000",
             instrument,
             FuturesDesiredExposure.Short,
-            sourceFill);
+            sourceFill,
+            btc24hChangePct: -1.59m);
 
         Assert.NotNull(publishedStore.Published);
         var command = publishedStore.Published!;
@@ -238,18 +241,117 @@ public sealed class FuturesEntryMirrorTests
             entryMirrorStore: mirrorStore);
     }
 
+    // 19-21 August: BTC ran +21% over three days while the mirror inverted every entry
+    // regardless, and the follower lost 26.91 across four days shorting a rally. The
+    // publisher now leaves the side alone when BTC is rising.
+    [Fact]
+    public async Task A_rising_btc_publishes_the_source_side_unchanged()
+    {
+        var publishedStore = new StubMirrorStore();
+        var sourceConfig = CreateConfig("futures-lukas-live");
+        sourceConfig.EntryMirror.PublishToBotInstanceId = "futures-live";
+        var sourceWorker = CreateWorker(sourceConfig, new StubBroker(), publishedStore);
+
+        await InvokePublishAsync(
+            sourceWorker,
+            "futures-lukas-live-20260819120000",
+            new InstrumentOptions
+            {
+                Pair = "BOME/USD",
+                KrakenPair = "PF_BOMEUSD",
+                QuantityDecimals = 8,
+                PriceDecimals = 4
+            },
+            FuturesDesiredExposure.Short,
+            new FuturesFillResult(
+                new DryRunAction
+                {
+                    Pair = "BOME/USD",
+                    Action = "WOULD_OPEN_SHORT",
+                    Reason = "source entry",
+                    FilledNotionalEur = 150.25m,
+                    SizedNotionalEur = 150m,
+                    AverageFillPrice = 2.02m,
+                    EffectiveLeverage = 10m
+                },
+                PositionOpened: true,
+                PositionClosed: false),
+            btc24hChangePct: 6.95m);
+
+        var command = Assert.IsType<FuturesEntryMirrorCommand>(publishedStore.Published);
+        Assert.Equal("SHORT", command.SourceSide);
+        Assert.Equal("SHORT", command.TargetSide);
+    }
+
+    // The follower can no longer recompute one expected side, because the publisher now
+    // decides per trade. The permission has to survive that: an inverted command must be
+    // refused outright when this account is not running the flip, not quietly executed.
+    [Fact]
+    public async Task An_inverted_command_is_refused_when_inversion_is_disabled()
+    {
+        var command = new FuturesEntryMirrorCommand(
+            Id: 9,
+            SourceBotInstanceId: "futures-lukas-live",
+            SourceCycleId: "futures-lukas-live-20260824120000",
+            TargetBotInstanceId: "futures-live",
+            Pair: "BOME/USD",
+            KrakenSymbol: "PF_BOMEUSD",
+            SourceSide: "LONG",
+            TargetSide: "SHORT",
+            TargetNotionalUsd: 150m,
+            Leverage: 10m,
+            SourceFillPrice: 2.02m,
+            QuantityDecimals: 8,
+            PriceDecimals: 4,
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            AttemptCount: 1);
+        var followerStore = new StubMirrorStore { Next = command };
+        var followerBroker = new StubBroker();
+        var followerConfig = CreateConfig("futures-live");
+        followerConfig.EntryMirror.FollowSourceBotInstanceId = "futures-lukas-live";
+        followerConfig.EntryMirror.InvertSide = false;
+        var followerWorker = CreateWorker(followerConfig, followerBroker, followerStore);
+        var state = new PortfolioState
+        {
+            CashEur = 600m,
+            CashQuoteValue = 600m,
+            CashQuoteCurrency = "USD"
+        };
+        var decisions = new List<DryRunDecisionRecord>();
+
+        await InvokeProcessAsync(
+            followerWorker,
+            state,
+            [new InstrumentOptions
+            {
+                Pair = "BOME/USD",
+                KrakenPair = "PF_BOMEUSD",
+                QuantityDecimals = 8,
+                PriceDecimals = 4
+            }],
+            decisions);
+
+        Assert.Empty(state.Positions);
+        Assert.Equal(0, followerBroker.EntryCalls);
+        Assert.Equal(9, followerStore.FailedId);
+        Assert.Null(followerStore.CompletedId);
+    }
+
     private static async Task InvokePublishAsync(
         FuturesDecisionWorker worker,
         string cycleId,
         InstrumentOptions instrument,
         FuturesDesiredExposure sourceSide,
-        FuturesFillResult fill)
+        FuturesFillResult fill,
+        decimal? btc24hChangePct = null)
     {
         var method = typeof(FuturesDecisionWorker).GetMethod(
             "PublishMirrorEntryAsync",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new MissingMethodException(nameof(FuturesDecisionWorker), "PublishMirrorEntryAsync");
-        var task = (Task)method.Invoke(worker, [cycleId, instrument, sourceSide, fill, CancellationToken.None])!;
+        var task = (Task)method.Invoke(
+            worker,
+            [cycleId, instrument, sourceSide, fill, btc24hChangePct, CancellationToken.None])!;
         await task;
     }
 

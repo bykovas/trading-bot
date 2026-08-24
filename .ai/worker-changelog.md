@@ -1,3 +1,16 @@
+## 2026-08-24-the-mirror-asks-the-regime-before-it-turns-a-copy-around
+
+- `EntryMirror.InvertSide` stops being a standing order and becomes a permission. With it on, `FuturesMirrorFlipGate` decides per entry from BTC's closed-candle 24h change: rising, the copy keeps the publisher's side; flat or falling, it is turned around. Threshold is `EntryMirror.InvertMaxBtc24hRisePercent`, default 0.
+- Symmetric on purpose, and this is where it differs from `FuturesFlipRegimeGate`. That gate guards the bot's OWN signals, only ever turns a LONG into a SHORT, and also asks about the pair's 24h rise. The mirror copies both directions, so inverting only the longs would leave the follower neither a copy of the publisher nor its opposite.
+- Both accounts still run `InvertSide: false`, so nothing changes on the exchange today. With the switch off the gate is not consulted at all and the follower behaves exactly as it did.
+- Why it was worth doing: the regime gate has existed since 17 August but only ever covered own signals, and the mirror inverted unconditionally. Over 19-21 August BTC ran +21% while every one of the publisher's entries was copied backwards; the follower lost 26.91 across four days against the publisher's +42.23. Under this rule those days are copied, not inverted.
+- No migration. The command already carries `SourceSide` and `TargetSide`, so whether a copy was turned around is derivable from what is already stored.
+- The follower's side check had to change with it. It used to recompute one expected side from its own config and demand exact equality - which a per-trade decision would trip as `MIRROR_SIDE_MISMATCH` on every conditional entry. It now accepts either the source side or its opposite, and refuses an inverted command outright as `MIRROR_INVERSION_REFUSED` when inversion is switched off here. The permission survives; only the recomputation is gone.
+- `FlippedEntry` on the opened position now comes from the command rather than from local config, so it records what was actually done rather than what this account happens to be set to.
+- The API exposes it as `mirrorInverted`, which lights the `] | [` mark the page has been carrying unused since the doer marks were redrawn. It was already a column; it was simply never read out.
+- Eleven tests: the gate's boundary either side of zero, a missing BTC reading copying rather than guessing, the 19-21 August rally as a named case, the publisher leaving a side alone while BTC rises, and the follower refusing an inverted command it has no permission to execute.
+- TP/SL untouched: 4% and 2% working, x200 on the exchange.
+
 ## 2026-08-24-same-direction-again-and-three-marks-for-who-did-it
 
 - `EntryMirror.InvertSide` is off again on both sides: futures-live repeats the publisher instead of trading against it. Only the size differs - 15 USD at 10x against 150 at 1x, which is the same 150 of exposure either way.

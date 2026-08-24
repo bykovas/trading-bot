@@ -540,7 +540,10 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             -- between an entry and the next save, so the page shows no mark rather than
             -- a wrong one when they are missing.
             origin,
-            entry_channel
+            entry_channel,
+            -- True when the mirrored copy was turned around: the follower opened the
+            -- opposite side of what the publisher did. Only ever true on a Mirror entry.
+            flipped_entry
         from portfolio_position_state position
         where (@bot_instance_id is null or position.bot_instance_id = @bot_instance_id)
         -- Newest first. Ordering by market value put the biggest position on top,
@@ -602,7 +605,8 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             storedPnlEur,
             storedPnlPercent,
             reader.IsDBNull(25) ? null : reader.GetString(25),
-            reader.IsDBNull(26) ? null : reader.GetString(26)));
+            reader.IsDBNull(26) ? null : reader.GetString(26),
+            !reader.IsDBNull(27) && reader.GetBoolean(27)));
     }
 
     return positions;
@@ -2818,7 +2822,10 @@ internal sealed record PortfolioPositionDto(
     // bot ordering it. Null on rows written before the column existed.
     string? Origin,
     // "Mirror" when the entry came from the publisher rather than this bot's own signal.
-    string? EntryChannel);
+    string? EntryChannel,
+    // True when that mirrored entry was inverted - the follower took the opposite side
+    // of the publisher's. Always false outside the mirror.
+    bool MirrorInverted);
 
 internal sealed record PageRequest(int Limit, int Offset)
 {

@@ -549,6 +549,7 @@ internal sealed class FuturesDecisionWorker(
                                 marketState.Instrument,
                                 executedDesired,
                                 fill,
+                                btcRegime.Change24hPct,
                                 cancellationToken);
                         }
 
@@ -747,6 +748,7 @@ internal sealed class FuturesDecisionWorker(
         InstrumentOptions instrument,
         FuturesDesiredExposure sourceSide,
         FuturesFillResult fill,
+        decimal? btc24hChangePct,
         CancellationToken cancellationToken)
     {
         if (!IsMirrorPublisher || !fill.PositionOpened)
@@ -755,9 +757,18 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var sourceSideText = ExposureSide(sourceSide);
-        var targetSideText = config.EntryMirror.InvertSide
+        // Decided here, where the regime reading for this very entry is still at hand,
+        // and carried to the follower as a side rather than as a rule to re-evaluate:
+        // the two workers must not be able to disagree about what was meant.
+        var flipDecision = FuturesMirrorFlipGate.Evaluate(config.EntryMirror, btc24hChangePct);
+        var targetSideText = flipDecision.Invert
             ? OppositeSide(sourceSideText)
             : sourceSideText;
+        if (flipDecision.Permitted)
+        {
+            Console.WriteLine(
+                $"MIRROR_FLIP_REGIME pair={instrument.Pair} source={sourceSideText} target={targetSideText} inverted={flipDecision.Invert} btc24h={flipDecision.Btc24hChangePct:0.###}% maxBtc24h={config.EntryMirror.InvertMaxBtc24hRisePercent:0.###}% reason={flipDecision.Reason}");
+        }
         var filledNotional = fill.Action.FilledNotionalEur
             ?? fill.Action.GrossNotionalEur;
         var sizedNotional = fill.Action.SizedNotionalEur;
@@ -848,14 +859,27 @@ internal sealed class FuturesDecisionWorker(
                 continue;
             }
 
-            var expectedTargetSide = config.EntryMirror.InvertSide
-                ? OppositeSide(command.SourceSide)
-                : command.SourceSide.ToUpperInvariant();
-            if (!command.TargetSide.Equals(expectedTargetSide, StringComparison.OrdinalIgnoreCase))
+            // The publisher now decides per trade whether the copy is turned around, so
+            // there is no single expected side to recompute here. What the follower still
+            // enforces is the permission: an inverted command arriving while inversion is
+            // switched off is refused outright rather than quietly executed.
+            var sameSide = command.SourceSide.ToUpperInvariant();
+            var invertedSide = OppositeSide(command.SourceSide);
+            var isSameSide = command.TargetSide.Equals(sameSide, StringComparison.OrdinalIgnoreCase);
+            var isInvertedSide = command.TargetSide.Equals(invertedSide, StringComparison.OrdinalIgnoreCase);
+            if (!isSameSide && !isInvertedSide)
             {
-                var sideReason = $"mirror command target side {command.TargetSide} does not match expected {expectedTargetSide}";
+                var sideReason = $"mirror command target side {command.TargetSide} is neither {sameSide} nor {invertedSide}";
                 await _entryMirrorStore.MarkFailedAsync(command.Id, sideReason, cancellationToken);
                 decisions.Add(BuildMirrorDecisionRecord(command, MirrorNoOrder(state, command, sideReason, "MIRROR_SIDE_MISMATCH"), false));
+                continue;
+            }
+
+            if (isInvertedSide && !config.EntryMirror.InvertSide)
+            {
+                var sideReason = $"mirror command inverts {sameSide} to {command.TargetSide} while inversion is disabled here";
+                await _entryMirrorStore.MarkFailedAsync(command.Id, sideReason, cancellationToken);
+                decisions.Add(BuildMirrorDecisionRecord(command, MirrorNoOrder(state, command, sideReason, "MIRROR_INVERSION_REFUSED"), false));
                 continue;
             }
 
@@ -959,7 +983,7 @@ internal sealed class FuturesDecisionWorker(
                 entryPlan: null,
                 cancellationToken,
                 signalPrice: command.SourceFillPrice,
-                flippedEntry: config.EntryMirror.InvertSide);
+                flippedEntry: isInvertedSide);
             fill.Action.EntryChannel = "Mirror";
 
             if (fill.PositionOpened)
@@ -967,7 +991,7 @@ internal sealed class FuturesDecisionWorker(
                 var opened = state.Positions.First(position =>
                     position.Pair.Equals(instrument.Pair, StringComparison.OrdinalIgnoreCase));
                 opened.EntryChannel = "Mirror";
-                opened.FlippedEntry = config.EntryMirror.InvertSide;
+                opened.FlippedEntry = isInvertedSide;
                 await _entryMirrorStore.MarkCompletedAsync(
                     command.Id,
                     $"opened {command.TargetSide} notional USD {fill.Action.FilledNotionalEur:0.####}",

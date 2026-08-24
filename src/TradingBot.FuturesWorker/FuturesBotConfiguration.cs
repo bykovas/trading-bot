@@ -504,7 +504,15 @@ internal sealed class FuturesEntryMirrorOptions
 {
     public string? PublishToBotInstanceId { get; set; }
     public string? FollowSourceBotInstanceId { get; set; }
+    // Permission to turn a copied entry around, not an order to do it: when true the
+    // 24h BTC regime decides per trade (see FuturesMirrorFlipGate). When false nothing
+    // is ever inverted and the gate is never consulted.
     public bool InvertSide { get; set; } = true;
+
+    // Invert while BTC's 24h change is at or below this. Zero means "invert only when
+    // BTC is not rising" - the same threshold the own-signal flip uses, kept separate
+    // because the two experiments are not the same and should not move together.
+    public decimal InvertMaxBtc24hRisePercent { get; set; }
     public int MaxCommandAgeSeconds { get; set; } = 60;
     public int MaxAttempts { get; set; } = 3;
 
