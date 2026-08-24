@@ -1,3 +1,11 @@
+## 2026-08-24-one-family-of-marks-and-a-tighter-post
+
+- The post now has the shape it was asked for: header and intent on consecutive lines, a blank line, the two levels, a blank line, then the regime, the signals and the context as one unbroken block. The score and its contributions share a line; `Kontekstas:` carries its own.
+- Every mark comes from one family - filled circles - and the colour carries the meaning: green is up or good, red is down or bad, white is neither. The set before it was a dart board, a road sign and a cog: three different drawing styles pretending to be a series.
+- Green marks the target on both sides, red the stop, and the header takes whichever matches the direction. On a long the header and the target share green, which is right: both are the direction the trade wants to go.
+- Two tests pin this. One asserts the exact line order and count, so a stray blank line cannot creep back in. The other asserts no mark from another series survives - the old three are named explicitly, because the way this drifts is somebody adding one more "just here".
+- TP/SL untouched: 4% and 2% working, x200 on the exchange.
+
 ## 2026-08-24-the-entry-post-shows-its-reasoning
 
 - The take profit and stop loss brackets now carry the move in dollars beside the percentage: `(−4 % · −97,45 $)`. That is the distance the PRICE has to travel, not what the move would be worth - the second would give the position size away, and the post still says nothing about the stake.

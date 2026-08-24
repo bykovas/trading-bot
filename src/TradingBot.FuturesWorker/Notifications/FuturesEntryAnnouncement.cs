@@ -16,6 +16,12 @@ internal static class FuturesEntryAnnouncement
     // built with InvariantGlobalization, or with DOTNET_SYSTEM_GLOBALIZATION_INVARIANT
     // set, silently hands back the invariant culture and the channel starts posting
     // "2,338.91" to Lithuanian readers. This cannot drift with the base image.
+    // One series, three colours. Filled circles only - a dart board, a road sign and a
+    // cog render in three different drawing styles and read as borrowed clip art.
+    private const string Green = "\U0001F7E2";
+    private const string Red = "\U0001F534";
+    private const string Neutral = "\U000026AA";
+
     private static readonly NumberFormatInfo Lt = new()
     {
         NumberDecimalSeparator = ",",
@@ -54,44 +60,46 @@ internal static class FuturesEntryAnnouncement
         var isLong = side.Equals("LONG", StringComparison.OrdinalIgnoreCase);
         var text = new StringBuilder();
 
-        text.Append(isLong ? "🟢" : "🔴").Append(" BlynAI · ").Append(pair).Append(' ')
-            .Append(isLong ? "LONG" : "SHORT").Append("\n\n");
-
-        text.Append("Dabar atidaryčiau ").Append(pair).Append(isLong ? " į viršų" : " žemyn")
-            .Append(", kaina ").Append(Money(price)).Append(" $.\n");
+        // One family of marks throughout: a filled circle, and the colour carries the
+        // meaning - green is up or good, red is down or bad, white is neither. A dart
+        // board, a road sign and a cog are three different drawing styles pretending to
+        // be a set.
+        text.Append(isLong ? Green : Red).Append(" BlynAI · ").Append(pair).Append(' ')
+            .Append(isLong ? "LONG" : "SHORT").Append('\n');
 
         if (!Reasons.TryGetValue(entryChannel ?? "Standard", out var reason))
         {
             reason = Reasons["Standard"];
         }
 
-        text.Append("Kodėl: ").Append(reason).Append(".\n\n");
+        text.Append("Dabar atidaryčiau ").Append(pair).Append(isLong ? " į viršų" : " žemyn")
+            .Append(", kaina ").Append(Money(price)).Append(" $. Kodėl: ").Append(reason).Append(".\n");
 
         // The target is the direction the position wants to go, the stop the direction it
-        // must not: on a SHORT that means the target sits below and the stop above.
-        // The bracket carries how far, twice: in percent and in the distance the price
-        // has to travel. Both describe the price, not the stake - what the move would be
-        // WORTH is the one number that would give the position size away.
+        // must not: on a short the target sits below and the stop above. The bracket says
+        // how far, in percent and in the distance the price has to travel - never what
+        // the move would be worth, which is the one number that gives the stake away.
         //
         // The signs need no special-casing: a level below the entry subtracts, and that
         // is exactly when its percentage is negative too.
         if (takeProfitPrice is { } tp)
         {
-            text.Append("🎯 Tikslas  ").Append(Money(tp)).Append(" $   (")
+            text.Append('\n').Append(Green).Append(" Tikslas  ").Append(Money(tp)).Append(" $   (")
                 .Append(Signed(isLong ? takeProfitPercent : -takeProfitPercent)).Append(" % · ")
-                .Append(SignedMoney(tp - price, price)).Append(" $)\n");
+                .Append(SignedMoney(tp - price, price)).Append(" $)");
         }
 
         if (stopLossPrice is { } sl)
         {
-            text.Append("🛑 Stopas   ").Append(Money(sl)).Append(" $   (")
+            text.Append('\n').Append(Red).Append(" Stopas   ").Append(Money(sl)).Append(" $   (")
                 .Append(Signed(isLong ? -stopLossPercent : stopLossPercent)).Append(" % · ")
-                .Append(SignedMoney(sl - price, price)).Append(" $)\n");
+                .Append(SignedMoney(sl - price, price)).Append(" $)");
         }
 
-        // The two readings the flip gate weighs. They are here because they explain what
-        // the bot was looking at, not because anything was flipped - nothing on this
-        // account is.
+        // Everything the bot was reading, in one unbroken block: the regime the flip gate
+        // weighs, what each signal contributed, and the context it was read in.
+        var tail = new List<string>();
+
         var regime = new List<string>();
         if (btc24hChangePct is { } btc)
         {
@@ -105,10 +113,15 @@ internal static class FuturesEntryAnnouncement
 
         if (regime.Count > 0)
         {
-            text.Append('\n').Append(string.Join(" · ", regime));
+            tail.Add(string.Join(" · ", regime));
         }
 
-        AppendDetails(text, details, entryChannel);
+        tail.AddRange(DetailLines(details, entryChannel));
+
+        if (tail.Count > 0)
+        {
+            text.Append("\n\n").Append(string.Join("\n", tail));
+        }
 
         return text.ToString().TrimEnd();
     }
@@ -117,23 +130,21 @@ internal static class FuturesEntryAnnouncement
     // each signal contributed to the score, then the context the score was read in.
     // Still no stake and no leverage - those say how much is on the table, and this
     // section is about why the bot thinks the trade is there at all.
-    private static void AppendDetails(StringBuilder text, EntrySignalDetails? details, string? entryChannel)
+    private static List<string> DetailLines(EntrySignalDetails? details, string? entryChannel)
     {
+        var lines = new List<string>();
         if (details is null)
         {
-            return;
+            return lines;
         }
 
-        text.Append("\n\n⚙️ Signalai  ").Append(details.Score.ToString("0.00", Lt));
-
-        var parts = details.Contributions
+        var signals = new List<string> { details.Score.ToString("0.00", Lt) };
+        // A contribution that scored nothing says nothing, and a list padded with +0,00
+        // pushes the ones that mattered off the first screen.
+        signals.AddRange(details.Contributions
             .Where(contribution => contribution.Value != 0m)
-            .Select(contribution => $"{contribution.Name} {Signed(contribution.Value, 2)}")
-            .ToList();
-        if (parts.Count > 0)
-        {
-            text.Append('\n').Append(string.Join(" · ", parts));
-        }
+            .Select(contribution => $"{contribution.Name} {Signed(contribution.Value, 2)}"));
+        lines.Add($"{Neutral} Signalai  {string.Join(" · ", signals)}");
 
         var context = new List<string>();
         if (details.SpreadPercent is { } spread)
@@ -154,8 +165,9 @@ internal static class FuturesEntryAnnouncement
 
         context.Add(details.EmaFullyConfirmed ? "EMA patvirtinta" : "EMA nepatvirtinta");
         context.Add($"kanalas {entryChannel ?? "Standard"}");
+        lines.Add($"Kontekstas: {string.Join(" · ", context)}");
 
-        text.Append("\n\nKontekstas\n").Append(string.Join(" · ", context));
+        return lines;
     }
 
     // "XMR/USD" -> "XMR". The quote side is always USD here and repeating it in a line

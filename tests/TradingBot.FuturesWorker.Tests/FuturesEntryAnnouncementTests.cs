@@ -172,6 +172,60 @@ public sealed class FuturesEntryAnnouncementTests
         Assert.DoesNotContain("svertas", text);
     }
 
+    // The shape of the post, pinned: header and intent together, a blank line, the two
+    // levels, a blank line, then everything the bot was reading in one unbroken block.
+    [Fact]
+    public void The_post_keeps_its_agreed_shape()
+    {
+        var lines = WithDetails().Split('\n');
+
+        Assert.StartsWith("\U0001F534 BlynAI · ETH/USD SHORT", lines[0]);
+        Assert.StartsWith("Dabar atidaryčiau", lines[1]);
+        Assert.Contains("Kodėl:", lines[1]);
+        Assert.Equal("", lines[2]);
+        Assert.StartsWith("\U0001F7E2 Tikslas", lines[3]);
+        Assert.StartsWith("\U0001F534 Stopas", lines[4]);
+        Assert.Equal("", lines[5]);
+        Assert.StartsWith("BTC per parą", lines[6]);
+        Assert.StartsWith("\U000026AA Signalai", lines[7]);
+        Assert.StartsWith("Kontekstas:", lines[8]);
+        Assert.Equal(9, lines.Length);
+    }
+
+    // One family of marks. A dart board, a road sign and a cog are three drawing styles
+    // pretending to be a set; filled circles are a set.
+    [Theory]
+    [InlineData("🎯")]
+    [InlineData("🛑")]
+    [InlineData("⚙")]
+    public void No_mark_comes_from_another_series(string stray)
+    {
+        Assert.DoesNotContain(stray, WithDetails());
+    }
+
+    [Fact]
+    public void Every_mark_is_a_filled_circle()
+    {
+        var marks = WithDetails()
+            .Where(character => character >= 0x2000)
+            .Select(character => character.ToString())
+            .Where(character => character is not ("·" or "—" or "−" or "\u00a0"))
+            .Distinct()
+            .ToList();
+
+        Assert.All(marks, mark => Assert.Contains(mark, new[] { "\U0001F534", "\U0001F7E2", "\U000026AA" }
+            .SelectMany(circle => circle.Select(part => part.ToString()))));
+    }
+
+    private static string WithDetails() =>
+        FuturesEntryAnnouncement.Compose(
+            "ETH/USD", "SHORT", EthPrice, "ShortReclaim",
+            EthTarget, EthStop, 4m, 2m, 0.85m, 1.66m,
+            new EntrySignalDetails(
+                0.85m,
+                [new SignalContribution("EMA", 0.30m, "")],
+                0.24m, "FALLING", -0.10m, 0.22m, true));
+
     private static string EthShort(string? channel) =>
         FuturesEntryAnnouncement.Compose(
             "ETH/USD", "SHORT", EthPrice, channel,
