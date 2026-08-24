@@ -58,10 +58,12 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.Null(lukas["Futures"]?["DisabledLongEntryChannels"]);
         Assert.Null(lukas["Shorts"]?["MaxBtc24hRisePercentForShort"]);
 
-        // Only the control announces: the channel documents the base strategy, and the
-        // experiment arm's entries would read as the bot contradicting itself.
+        // Both announce since 2026-08-24, each under its own label - the label is what
+        // keeps two voices in one channel from reading as one bot contradicting itself.
         Assert.True(lukas["Telegram"]?["Enabled"]?.GetValue<bool>());
-        Assert.False(primary["Telegram"]?["Enabled"]?.GetValue<bool>());
+        Assert.True(primary["Telegram"]?["Enabled"]?.GetValue<bool>());
+        Assert.Equal("LUKO", lukas["Telegram"]?["Label"]?.GetValue<string>());
+        Assert.Equal("BYKO", primary["Telegram"]?["Label"]?.GetValue<string>());
         Assert.Equal(
             primary["Telegram"]?["ChatId"]?.GetValue<string>(),
             lukas["Telegram"]?["ChatId"]?.GetValue<string>());
@@ -93,9 +95,7 @@ public sealed class FuturesInstanceConfigurationTests
             // other fails the moment an account is actually resized.
             ("Risk", "TargetRiskUsd"),
             ("Risk", "MaxConcurrentOpenRiskUsd"),
-            // The channel is the base strategy's log, and only the control writes it.
-            // The experiment arm trades differently and stays silent for now.
-            ("Telegram", "Enabled"),
+            ("Telegram", "Label"),
             // The experiment arm's own knobs; absent on the control by design.
             ("Futures", "DisabledLongEntryChannels"),
             ("Shorts", "MaxBtc24hRisePercentForShort"),

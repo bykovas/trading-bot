@@ -3,9 +3,10 @@ using Xunit;
 
 namespace TradingBot.FuturesWorker.Tests;
 
-// The announcement says what the bot intends, not what it staked. These tests pin that
-// boundary, because it is the whole point of the format: a channel post carrying size
-// and leverage turns every entry into an invitation to copy the trade.
+// The channel posts. Openings state a fact - the label, the direction, the money put in,
+// the exits placed. Closings state the outcome in the reader's own money and say why the
+// position left. Both bots write the same channel, so the label at the head is what keeps
+// two voices from reading as one bot contradicting itself.
 public sealed class FuturesEntryAnnouncementTests
 {
     // Real numbers: futures-lukas-live opened this ETH short on 2026-08-24 at 04:10.
@@ -14,54 +15,56 @@ public sealed class FuturesEntryAnnouncementTests
     private const decimal EthTarget = 2338.91252459m;
 
     [Fact]
-    public void A_short_names_the_pair_the_direction_and_both_exits()
+    public void An_opening_names_the_label_the_fact_and_the_money_put_in()
     {
         var text = EthShort("ShortReclaim");
 
-        Assert.Contains("ETH/USD SHORT", text);
-        Assert.Contains("žemyn", text);
-        Assert.Contains("2 338,91", text);
-        Assert.Contains("2 485,09", text);
+        Assert.StartsWith("\U0001F534 LUKO · ETH/USD SHORT", text);
+        Assert.Contains("Atidariau ETH/USD žemyn, kaina 2 436,37 $.", text);
+        Assert.Contains("Įdėjau 15,00 $ savo pinigų (pozicijoje dirba 150,00 $, svertas 10×).", text);
+        Assert.DoesNotContain("atidaryčiau", text);
     }
 
-    // On a short the target percentage is negative and the stop positive. Getting these
-    // the wrong way round would read as a bot that does not know which way it is facing.
     [Fact]
-    public void A_short_targets_downward_and_stops_upward()
+    public void The_exits_are_one_sentence_with_percent_and_level()
     {
         var text = EthShort("ShortReclaim");
 
-        Assert.Contains("\"Take Profit\" limitą daryčiau −4 % (ties 2 338,91 $)", text);
-        Assert.Contains("\"stop-loss\" +2 % (ties 2 485,09 $)", text);
+        Assert.Contains(
+            "\"Take Profit\" limitą pastačiau −4 % (ties 2 338,91 $), \"stop-loss\" +2 % (ties 2 485,09 $)",
+            text);
     }
 
     [Fact]
     public void A_long_targets_upward_and_stops_downward()
     {
         var text = FuturesEntryAnnouncement.Compose(
-            "ARB/USD", "LONG", 0.10329m, "Breakout",
-            takeProfitPrice: 0.1074216m, stopLossPrice: 0.1012242m,
-            takeProfitPercent: 4m, stopLossPercent: 2m,
-            btc24hChangePct: 0.85m, pair24hChangePct: 2.42m);
+            "BYKO", "ARB/USD", "LONG", 0.10329m, 15m, 150m, 10m, "Breakout",
+            0.1074216m, 0.1012242m, 4m, 2m, 0.85m, 2.42m);
 
-        Assert.Contains("🟢", text);
-        Assert.Contains("į viršų", text);
-        Assert.Contains("\"Take Profit\" limitą daryčiau +4 %", text);
-        Assert.Contains("\"stop-loss\" −2 %", text);
+        Assert.StartsWith("\U0001F7E2 BYKO ·", text);
+        Assert.Contains("Atidariau ARB/USD į viršų", text);
+        Assert.Contains("\"Take Profit\" limitą pastačiau +4 % (ties 0,10742 $)", text);
+        Assert.Contains("\"stop-loss\" −2 % (ties 0,10122 $)", text);
     }
 
-    // The rule the format exists for.
-    [Theory]
-    [InlineData("svertas")]
-    [InlineData("marža")]
-    [InlineData("pozicija")]
-    [InlineData("kiekis")]
-    [InlineData("mokestis")]
-    [InlineData("148")]
-    [InlineData("14,86")]
-    public void The_post_carries_no_stake_no_leverage_and_no_money(string forbidden)
+    // Header, intent, money, exits, blank, then the tail block - pinned so a stray line
+    // cannot creep back in.
+    [Fact]
+    public void The_post_keeps_its_agreed_shape()
     {
-        Assert.DoesNotContain(forbidden, EthShort("ShortReclaim"));
+        var lines = WithDetails().Split('\n');
+
+        Assert.StartsWith("\U0001F534 LUKO · ETH/USD SHORT", lines[0]);
+        Assert.StartsWith("Atidariau", lines[1]);
+        Assert.Contains("Kodėl:", lines[1]);
+        Assert.StartsWith("Įdėjau", lines[2]);
+        Assert.StartsWith("\"Take Profit\" limitą pastačiau", lines[3]);
+        Assert.Equal("", lines[4]);
+        Assert.StartsWith("\U000026AA BTC per parą", lines[5]);
+        Assert.StartsWith("Signalai", lines[6]);
+        Assert.StartsWith("Kontekstas:", lines[7]);
+        Assert.Equal(8, lines.Length);
     }
 
     [Fact]
@@ -79,8 +82,6 @@ public sealed class FuturesEntryAnnouncementTests
         Assert.Equal(channels.Length, sentences.Distinct().Count());
     }
 
-    // An unknown channel must not invent a pattern that was not found - it falls back to
-    // the plain-signal sentence, which claims nothing about the shape of the move.
     [Fact]
     public void An_unknown_channel_falls_back_rather_than_inventing_a_pattern()
     {
@@ -89,21 +90,21 @@ public sealed class FuturesEntryAnnouncementTests
     }
 
     [Fact]
-    public void The_regime_line_carries_the_two_readings_the_flip_gate_weighs()
+    public void The_details_block_repeats_what_the_dashboard_shows()
     {
-        var text = EthShort("ShortReclaim");
+        var text = WithDetails();
 
-        Assert.Contains("BTC per parą +0,85 %", text);
-        Assert.Contains("ETH per parą", text);
+        Assert.Contains("Signalai  0,85", text);
+        Assert.Contains("EMA +0,30", text);
+        Assert.Contains("spredas 0,24 %", text);
+        Assert.Contains("kanalas ShortReclaim", text);
     }
 
-    // No reading, no claim: the line disappears rather than printing a zero that would
-    // read as "BTC did not move".
     [Fact]
     public void A_missing_regime_reading_is_omitted_not_zeroed()
     {
         var text = FuturesEntryAnnouncement.Compose(
-            "ETH/USD", "SHORT", EthPrice, "ShortReclaim",
+            "LUKO", "ETH/USD", "SHORT", EthPrice, 15m, 150m, 10m, "ShortReclaim",
             EthTarget, EthStop, 4m, 2m,
             btc24hChangePct: null, pair24hChangePct: null);
 
@@ -111,114 +112,75 @@ public sealed class FuturesEntryAnnouncementTests
         Assert.Contains("Take Profit", text);
     }
 
-    // The exits are one spoken sentence under the reason - percent first, the price
-    // level in brackets - not a table and not a pair of marked lines.
+    // ---- closes ---------------------------------------------------------
+
     [Fact]
-    public void The_exits_are_one_sentence_with_percent_and_level()
+    public void A_profitable_close_is_green_and_counts_from_the_money_put_in()
     {
-        var text = EthShort("ShortReclaim");
-        var line = text.Split('\n')[2];
+        var text = FuturesEntryAnnouncement.ComposeClose(
+            "LUKO", "XLM/USD", "LONG", 15m, 150m, 10m,
+            entryPrice: 0.3812m, exitPrice: 0.3976m, pnlUsd: 6.45m,
+            held: new TimeSpan(2, 14, 0), reasonCode: "SELL_TRAILING_STOP");
 
-        Assert.Equal(
-            "\"Take Profit\" limitą daryčiau −4 % (ties 2 338,91 $), \"stop-loss\" +2 % (ties 2 485,09 $)",
-            line);
-    }
-
-    // A cent-priced pair would show "ties 0,10 $" at two decimals - both levels the same.
-    [Fact]
-    public void A_small_priced_pair_keeps_enough_decimals_in_its_levels()
-    {
-        var text = FuturesEntryAnnouncement.Compose(
-            "ARB/USD", "LONG", 0.10329m, "Breakout",
-            0.1074216m, 0.1012242m, 4m, 2m, 0.85m, 2.42m);
-
-        Assert.Contains("ties 0,10742 $", text);
-        Assert.Contains("ties 0,10122 $", text);
+        Assert.StartsWith("\U0001F7E2 LUKO · XLM/USD LONG uždaryta", text);
+        Assert.Contains("Įdėjau 15,00 $ savo pinigų (pozicijoje dirbo 150,00 $, svertas 10×).", text);
+        Assert.Contains("Uždirbau +6,45 $ — tai +43 % nuo įdėtų.", text);
+        Assert.Contains("Atidariau už 0,38120 $, uždariau už 0,39760 $ · laikiau 2 val. 14 min.", text);
+        Assert.Contains("Kodėl uždaryta: kaina nuėjo į pelną ir atsitraukė nuo viršūnės — trailing stop.", text);
     }
 
     [Fact]
-    public void The_details_block_repeats_what_the_dashboard_shows()
+    public void A_losing_close_is_red_and_says_so_plainly()
     {
-        var text = FuturesEntryAnnouncement.Compose(
-            "ETH/USD", "SHORT", EthPrice, "ShortReclaim",
-            EthTarget, EthStop, 4m, 2m, 0.85m, 1.66m,
-            new EntrySignalDetails(
-                0.85m,
-                [new SignalContribution("EMA", 0.30m, "fast EMA above slow"),
-                 new SignalContribution("RSI", 0.05m, "rsi in band")],
-                SpreadPercent: 0.24m,
-                PriceActionDirection: "FALLING",
-                PriceActionTrendPercent: -0.10m,
-                EmaGapPercent: 0.22m,
-                EmaFullyConfirmed: true));
+        var text = FuturesEntryAnnouncement.ComposeClose(
+            "BYKO", "PENDLE/USD", "LONG", 15m, 150m, 10m,
+            entryPrice: 2.4818m, exitPrice: 2.4278m, pnlUsd: -3.27m,
+            held: TimeSpan.FromMinutes(52), reasonCode: "SELL_STOP_LOSS");
 
-        Assert.Contains("Signalai  0,85", text);
-        Assert.Contains("EMA +0,30 · RSI +0,05", text);
-        Assert.Contains("spredas 0,24 %", text);
-        Assert.Contains("PA FALLING −0,10 %", text);
-        Assert.Contains("EMA tarpas +0,22 %", text);
-        Assert.Contains("kanalas ShortReclaim", text);
+        Assert.StartsWith("\U0001F534 BYKO · PENDLE/USD LONG uždaryta", text);
+        Assert.Contains("Praradau −3,27 $ — tai −22 % nuo įdėtų.", text);
+        Assert.Contains("laikiau 52 min.", text);
+        Assert.Contains("Kodėl uždaryta: kaina pasiekė stop-loss.", text);
     }
 
-    // Details are optional: without them the post is still complete, and the stake still
-    // never appears - the block adds reasoning, not money.
+    // The one close the bot did not make must say so, not claim it as its own.
     [Fact]
-    public void Without_details_the_post_is_still_whole()
+    public void A_manual_close_is_attributed_to_the_hand()
     {
-        var text = EthShort("ShortReclaim");
+        var text = FuturesEntryAnnouncement.ComposeClose(
+            "BYKO", "XMR/USD", "LONG", 15m, 150m, 10m,
+            424.11m, 421.98m, -17.76m, TimeSpan.FromHours(3), "EXCHANGE_CLOSE");
 
-        Assert.DoesNotContain("Signalai", text);
-        Assert.Contains("Take Profit", text);
-        Assert.DoesNotContain("svertas", text);
+        Assert.Contains("uždaryta ne boto orderiu — rankomis", text);
     }
 
-    // The shape of the post, pinned: header, intent, the exits sentence right under it,
-    // a blank line, then everything the bot was reading - the white circle on the regime
-    // line, Signalai and Kontekstas bare.
+    // A code added next month cannot silently say nothing: it falls through with the
+    // code visible, so the channel shows something odd rather than something wrong.
     [Fact]
-    public void The_post_keeps_its_agreed_shape()
+    public void An_unknown_close_reason_shows_its_code()
     {
-        var lines = WithDetails().Split('\n');
+        var text = FuturesEntryAnnouncement.ComposeClose(
+            "LUKO", "ETH/USD", "SHORT", 15m, 150m, 10m,
+            2436m, 2400m, 2.1m, TimeSpan.FromMinutes(9), "SOMETHING_NEW");
 
-        Assert.StartsWith("\U0001F534 BlynAI · ETH/USD SHORT", lines[0]);
-        Assert.StartsWith("Dabar atidaryčiau", lines[1]);
-        Assert.Contains("Kodėl:", lines[1]);
-        Assert.StartsWith("\"Take Profit\" limitą daryčiau", lines[2]);
-        Assert.Equal("", lines[3]);
-        Assert.StartsWith("\U000026AA BTC per parą", lines[4]);
-        Assert.StartsWith("Signalai", lines[5]);
-        Assert.StartsWith("Kontekstas:", lines[6]);
-        Assert.Equal(7, lines.Length);
-    }
-
-    // One family of marks. A dart board, a road sign and a cog are three drawing styles
-    // pretending to be a set; filled circles are a set.
-    [Theory]
-    [InlineData("🎯")]
-    [InlineData("🛑")]
-    [InlineData("⚙")]
-    public void No_mark_comes_from_another_series(string stray)
-    {
-        Assert.DoesNotContain(stray, WithDetails());
+        Assert.Contains("uždaryta pagal boto taisykles (SOMETHING_NEW)", text);
     }
 
     [Fact]
-    public void Every_mark_is_a_filled_circle()
+    public void Hold_time_reads_naturally_at_every_scale()
     {
-        var marks = WithDetails()
-            .Where(character => character >= 0x2000)
-            .Select(character => character.ToString())
-            .Where(character => character is not ("·" or "—" or "−" or "\u00a0"))
-            .Distinct()
-            .ToList();
+        string close(TimeSpan held) => FuturesEntryAnnouncement.ComposeClose(
+            "LUKO", "ETH/USD", "LONG", 15m, 150m, 10m, 100m, 101m, 1m, held, "SELL_STOP_LOSS");
 
-        Assert.All(marks, mark => Assert.Contains(mark, new[] { "\U0001F534", "\U0001F7E2", "\U000026AA" }
-            .SelectMany(circle => circle.Select(part => part.ToString()))));
+        Assert.Contains("laikiau 5 min.", close(TimeSpan.FromMinutes(5)));
+        Assert.Contains("laikiau 1 min.", close(TimeSpan.FromSeconds(20)));
+        Assert.Contains("laikiau 2 val. 14 min.", close(new TimeSpan(2, 14, 30)));
+        Assert.Contains("laikiau 1 d. 3 val.", close(new TimeSpan(27, 5, 0)));
     }
 
     private static string WithDetails() =>
         FuturesEntryAnnouncement.Compose(
-            "ETH/USD", "SHORT", EthPrice, "ShortReclaim",
+            "LUKO", "ETH/USD", "SHORT", EthPrice, 15m, 150m, 10m, "ShortReclaim",
             EthTarget, EthStop, 4m, 2m, 0.85m, 1.66m,
             new EntrySignalDetails(
                 0.85m,
@@ -227,9 +189,8 @@ public sealed class FuturesEntryAnnouncementTests
 
     private static string EthShort(string? channel) =>
         FuturesEntryAnnouncement.Compose(
-            "ETH/USD", "SHORT", EthPrice, channel,
-            EthTarget, EthStop, 4m, 2m,
-            btc24hChangePct: 0.85m, pair24hChangePct: 1.66m);
+            "LUKO", "ETH/USD", "SHORT", EthPrice, 15m, 150m, 10m, channel,
+            EthTarget, EthStop, 4m, 2m, 0.85m, 1.66m);
 
     private static string Sentence(string text)
     {

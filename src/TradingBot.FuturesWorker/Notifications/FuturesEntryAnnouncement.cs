@@ -45,9 +45,13 @@ internal static class FuturesEntryAnnouncement
     };
 
     public static string Compose(
+        string label,
         string pair,
         string side,
         decimal price,
+        decimal marginUsd,
+        decimal notionalUsd,
+        decimal leverage,
         string? entryChannel,
         decimal? takeProfitPrice,
         decimal? stopLossPrice,
@@ -64,16 +68,18 @@ internal static class FuturesEntryAnnouncement
         // meaning - green is up or good, red is down or bad, white is neither. A dart
         // board, a road sign and a cog are three different drawing styles pretending to
         // be a set.
-        text.Append(isLong ? Green : Red).Append(" BlynAI · ").Append(pair).Append(' ')
-            .Append(isLong ? "LONG" : "SHORT").Append('\n');
+        text.Append(isLong ? Green : Red).Append(' ').Append(label).Append(" · ").Append(pair)
+            .Append(' ').Append(isLong ? "LONG" : "SHORT").Append('\n');
 
         if (!Reasons.TryGetValue(entryChannel ?? "Standard", out var reason))
         {
             reason = Reasons["Standard"];
         }
 
-        text.Append("Dabar atidaryčiau ").Append(pair).Append(isLong ? " į viršų" : " žemyn")
+        text.Append("Atidariau ").Append(pair).Append(isLong ? " į viršų" : " žemyn")
             .Append(", kaina ").Append(Money(price)).Append(" $. Kodėl: ").Append(reason).Append('.');
+        text.Append("\nĮdėjau ").Append(Money(marginUsd)).Append(" $ savo pinigų (pozicijoje dirba ")
+            .Append(Money(notionalUsd)).Append(" $, svertas ").Append(leverage.ToString("0.##", Lt)).Append("×).");
 
         // Both exits in one spoken sentence right under the reason, percent first and the
         // price level in brackets - the same voice as the intention above it, not a table.
@@ -82,7 +88,7 @@ internal static class FuturesEntryAnnouncement
         var exits = new List<string>();
         if (takeProfitPrice is { } tp)
         {
-            exits.Add($"\"Take Profit\" limitą daryčiau {Signed(isLong ? takeProfitPercent : -takeProfitPercent)} % (ties {Money(tp)} $)");
+            exits.Add($"\"Take Profit\" limitą pastačiau {Signed(isLong ? takeProfitPercent : -takeProfitPercent)} % (ties {Money(tp)} $)");
         }
 
         if (stopLossPrice is { } sl)
@@ -123,6 +129,76 @@ internal static class FuturesEntryAnnouncement
         }
 
         return text.ToString().TrimEnd();
+    }
+
+    // What each way of leaving a position sounds like in the reader's language. Keys are
+    // exit-reason codes from every close site; anything unmapped falls through to the
+    // plain sentence with the code attached, so a new code cannot silently say nothing.
+    private static readonly Dictionary<string, string> CloseReasons = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["SELL_STOP_LOSS"] = "kaina pasiekė stop-loss",
+        ["EXCHANGE_STOP_LOSS"] = "kaina pasiekė stop-loss",
+        ["SELL_TRAILING_STOP"] = "kaina nuėjo į pelną ir atsitraukė nuo viršūnės — trailing stop",
+        ["EXCHANGE_TRAILING_STOP"] = "kaina nuėjo į pelną ir atsitraukė nuo viršūnės — trailing stop",
+        ["SELL_TAKE_PROFIT"] = "pasiektas tikslas biržoje",
+        ["EXCHANGE_TAKE_PROFIT"] = "pasiektas tikslas biržoje",
+        ["SELL_MAX_HOLD"] = "per 6 valandas pozicija neišjudėjo į pelną — uždariau seną nuostolį",
+        ["SIGNAL_REVERSAL"] = "signalas, dėl kurio atidariau, užgeso — uždariau",
+        ["EXCHANGE_CLOSE"] = "uždaryta ne boto orderiu — rankomis",
+        ["EXCHANGE_LIQUIDATION"] = "pozicija likviduota biržos"
+    };
+
+    // The close post: the outcome in the reader's money first, the prices and the hold
+    // time after it, the reason last. The circle is the OUTCOME - green earned, red
+    // lost - where the opening's circle is the direction; an opening has no outcome yet
+    // and a close has no intention left.
+    public static string ComposeClose(
+        string label,
+        string pair,
+        string side,
+        decimal marginUsd,
+        decimal notionalUsd,
+        decimal leverage,
+        decimal entryPrice,
+        decimal exitPrice,
+        decimal pnlUsd,
+        TimeSpan held,
+        string reasonCode)
+    {
+        var text = new StringBuilder();
+        text.Append(pnlUsd > 0m ? Green : Red).Append(' ').Append(label).Append(" · ")
+            .Append(pair).Append(' ').Append(side.ToUpperInvariant()).Append(" uždaryta\n");
+        text.Append("Įdėjau ").Append(Money(marginUsd)).Append(" $ savo pinigų (pozicijoje dirbo ")
+            .Append(Money(notionalUsd)).Append(" $, svertas ").Append(leverage.ToString("0.##", Lt)).Append("×).\n");
+
+        var pct = marginUsd > 0m ? pnlUsd / marginUsd * 100m : 0m;
+        text.Append(pnlUsd > 0m ? "Uždirbau " : "Praradau ")
+            .Append(Signed(pnlUsd, 2)).Append(" $ — tai ").Append(Signed(pct, 0)).Append(" % nuo įdėtų.\n");
+
+        text.Append("Atidariau už ").Append(Money(entryPrice)).Append(" $, uždariau už ")
+            .Append(Money(exitPrice)).Append(" $ · laikiau ").Append(Hold(held)).Append('\n');
+
+        if (!CloseReasons.TryGetValue(reasonCode ?? "", out var why))
+        {
+            why = $"uždaryta pagal boto taisykles ({reasonCode})";
+        }
+
+        text.Append("Kodėl uždaryta: ").Append(why).Append('.');
+        return text.ToString();
+    }
+
+    private static string Hold(TimeSpan held)
+    {
+        if (held < TimeSpan.Zero)
+        {
+            held = TimeSpan.Zero;
+        }
+
+        return held.TotalDays >= 1
+            ? $"{(int)held.TotalDays} d. {held.Hours} val."
+            : held.TotalHours >= 1
+                ? $"{(int)held.TotalHours} val. {held.Minutes} min."
+                : $"{Math.Max(1, held.Minutes)} min.";
     }
 
     // The same breakdown the dashboard shows under a decision, in the same words: what

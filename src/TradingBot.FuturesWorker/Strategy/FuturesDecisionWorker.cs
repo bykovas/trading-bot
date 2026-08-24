@@ -237,6 +237,14 @@ internal sealed class FuturesDecisionWorker(
                         cancellationToken);
                     fill.Action.ExitReasonCode = "SELL_MAX_HOLD";
                     riskReasons = new[] { maxHold.Reason ?? $"hard exit: maxHold {config.Exits.MaxHoldMinutes}m elapsed" };
+                    if (fill.PositionClosed)
+                    {
+                        await AnnounceCloseAsync(
+                            held,
+                            fill.Action.AverageFillPrice ?? fill.Action.FillPrice,
+                            fill.Action.NetNotionalEur == 0m ? null : fill.Action.NetNotionalEur,
+                            "SELL_MAX_HOLD", utc, cancellationToken);
+                    }
                 }
                 else
                 {
@@ -289,6 +297,14 @@ internal sealed class FuturesDecisionWorker(
                         : minHoldBlocked
                         ? new[] { $"minimum hold active: reversal ignored until {config.ExecutionPolicy.MinHoldSeconds}s" }
                         : new[] { "holding existing exposure; TP/SL and reversal rules govern this pair" };
+                    if (fill.PositionClosed)
+                    {
+                        await AnnounceCloseAsync(
+                            held,
+                            fill.Action.AverageFillPrice ?? fill.Action.FillPrice,
+                            fill.Action.NetNotionalEur == 0m ? null : fill.Action.NetNotionalEur,
+                            "SIGNAL_REVERSAL", utc, cancellationToken);
+                    }
                 }
             }
             else
@@ -786,6 +802,11 @@ internal sealed class FuturesDecisionWorker(
                 {
                     closed++;
                     Console.WriteLine($"futures fast-exit-check: closed {held.Pair} reason={fill.Action.ExitReasonCode ?? fill.Action.Reason}");
+                    await AnnounceCloseAsync(
+                        held,
+                        fill.Action.AverageFillPrice ?? fill.Action.FillPrice,
+                        fill.Action.NetNotionalEur == 0m ? null : fill.Action.NetNotionalEur,
+                        fill.Action.ExitReasonCode ?? "SIGNAL_REVERSAL", utc, cancellationToken);
                 }
                 else
                 {
@@ -800,6 +821,52 @@ internal sealed class FuturesDecisionWorker(
             AppendFastCycle(utc, portfolioBefore, state, decisions, heldInstruments.Select(instrument => instrument.Pair));
             Console.WriteLine($"futures fast-exit-check: recorded={recorded} closed={closed} remainingPositions={state.Positions.Count}");
         }
+    }
+
+    // One post per CLOSED position: the outcome in the reader's own money, the prices,
+    // the hold time and the reason. Called from every site where a bot-owned position
+    // actually leaves the book - the ordered closes, the fast exits and the positions
+    // the reconcile finds gone from the exchange. Never from the backfill path: those
+    // are history, not news.
+    private async Task AnnounceCloseAsync(
+        PortfolioPosition position,
+        decimal? exitPrice,
+        decimal? realizedUsd,
+        string reasonCode,
+        DateTimeOffset closedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        if (!config.Telegram.IsConfigured || position.EntryPrice <= 0m)
+        {
+            return;
+        }
+
+        var exit = exitPrice ?? position.LastPrice;
+        var direction = position.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? -1m : 1m;
+        var notional = position.EntryNotionalEur;
+        // The realized figure from the fill is net of fees and is preferred; the price
+        // arithmetic is the fallback for closes whose fills reported nothing.
+        var pnl = realizedUsd ?? direction * (exit / position.EntryPrice - 1m) * notional;
+        var leverage = position.Leverage ?? 1m;
+        var margin = position.InitialMarginEur is { } initialMargin && initialMargin > 0m
+            ? initialMargin
+            : (leverage > 0m ? notional / leverage : notional);
+        var held = position.OpenedAtUtc is { } openedAt ? closedAtUtc - openedAt : TimeSpan.Zero;
+
+        await _telegram.SendAsync(
+            FuturesEntryAnnouncement.ComposeClose(
+                config.Telegram.Label,
+                position.Pair,
+                position.Side,
+                margin,
+                notional,
+                leverage,
+                position.EntryPrice,
+                exit,
+                pnl,
+                held,
+                reasonCode),
+            cancellationToken);
     }
 
     // One post per opened position, and only what the bot intended: the pair, the way it
@@ -827,10 +894,20 @@ internal sealed class FuturesDecisionWorker(
             return;
         }
 
+        var notional = opened?.EntryNotionalEur
+            ?? fill.Action.FilledNotionalEur
+            ?? fill.Action.GrossNotionalEur;
+        var announceLeverage = opened?.Leverage ?? fill.Action.EffectiveLeverage ?? config.Futures.DefaultLeverage;
+        var margin = opened?.InitialMarginEur
+            ?? (announceLeverage > 0m ? notional / announceLeverage : notional);
         var text = FuturesEntryAnnouncement.Compose(
+            config.Telegram.Label,
             pair,
             ExposureSide(side),
             price,
+            margin,
+            notional,
+            announceLeverage,
             entryChannel,
             opened?.TakeProfitPrice,
             opened?.StopLossPrice,
@@ -1490,6 +1567,7 @@ internal sealed class FuturesDecisionWorker(
             var reason = ClosureReason(position, closing, fillPrice);
             var realizedPct = RealizedPercent(position.Side, position.EntryPrice, fillPrice);
 
+            await AnnounceCloseAsync(position, fillPrice, realized, reason, utc, cancellationToken);
             var action = new DryRunAction
             {
                 Pair = position.Pair,

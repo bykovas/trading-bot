@@ -1,3 +1,14 @@
+## 2026-08-24-both-bots-speak-and-closes-get-announced
+
+- Both workers write the Telegram channel now, each under its own label - `Telegram.Label`: LUKO for the control, BYKO for the experiment arm. The label heads every post; two voices in one channel without it would read as one bot contradicting itself. deploy.sh routes the token into futures-live's env as well.
+- Openings state facts instead of intentions: "Atidariau ... į viršų/žemyn" for both directions (not nupirkau/pardaviau - one verb, side-neutral), "limitą pastačiau" for the exits. A new line says what actually went in: "Įdėjau 15 $ savo pinigų (pozicijoje dirba 150 $, svertas 10×)" - the figures are the position's own, so a trimmed entry reports its trimmed size, not the config's.
+- Closings are announced too, from every site where a bot-owned position leaves the book: the ordered closes (signal reversal, max-hold), the fast exits (stop, trailing) and the positions the reconcile finds gone from the exchange (EXCHANGE_*, including the manual EXCHANGE_CLOSE, honestly attributed "ne boto orderiu - rankomis"). The backfill path stays silent: that is history, not news.
+- The close post: outcome first in the reader's own money ("Uždirbau +6,45 $ - tai +43 % nuo įdėtų", percent from the 15 actually put in), then entry and exit prices with the hold time, then the reason in words. Every exit-reason code has a sentence; an unmapped code falls through with the code visible, so a new one cannot silently say nothing wrong.
+- The close circle is the OUTCOME (green earned, red lost) where the opening's is the direction: an opening has no outcome yet, a close has no intention left.
+- Realized PnL prefers the fill's net-of-fees figure and falls back to price arithmetic only when the fills reported nothing.
+- The earlier privacy stance - no sums, no leverage in the channel - is explicitly reversed by the owner: stake and leverage are now public in every post.
+- TP/SL untouched: control 4/2, arm 6/2, x200 on the exchange.
+
 ## 2026-08-24-the-experiment-arm-runs-wider
 
 - futures-live gets more concurrent slots for the entry classes that price positive under its new exits: `MaxPositions` 3 -> 5, `CorrelationRisk.MaxOpenPositionsPerGroup` 1 -> 2 (`MaxExposureUsdPerGroup` 150 -> 300), `Trading.MaxActiveInstruments` 50 -> 78 - the whole universe is scanned. The derived totals follow per-position x slots: `MaxTotalNotionalUsd` 450 -> 750, `MaxConcurrentOpenRiskUsd` 13.5 -> 22.5.

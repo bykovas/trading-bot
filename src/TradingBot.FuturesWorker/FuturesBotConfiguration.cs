@@ -511,6 +511,11 @@ internal sealed class FuturesBotConfiguration
 internal sealed class TelegramNotificationOptions
 {
     public bool Enabled { get; set; }
+
+    // The name the channel reads at the head of every post: LUKO for the control,
+    // BYKO for the experiment arm. Two bots writing one channel without it would
+    // read as one bot contradicting itself.
+    public string Label { get; set; } = "BlynAI";
     public string? BotToken { get; set; }
     public string? ChatId { get; set; }
 
