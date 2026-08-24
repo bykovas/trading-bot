@@ -173,6 +173,12 @@ public sealed class PortfolioPosition
     // legacy state, and normally-opened positions.
     public bool FlippedEntry { get; set; }
 
+    // True when the position appeared on the exchange while this process was already
+    // watching, so the bot knows it did not order it - a hand did. Distinct from a
+    // KRAKEN_SYNC adoption at the first sync after a restart, where the bot cannot tell
+    // its own lost record from someone else's position and must say nothing.
+    public bool AdoptedWhileRunning { get; set; }
+
     public PortfolioPosition Clone() => new()
     {
         Pair = Pair,
@@ -217,7 +223,8 @@ public sealed class PortfolioPosition
         SlOrderState = SlOrderState,
         Origin = Origin,
         EntryChannel = EntryChannel,
-        FlippedEntry = FlippedEntry
+        FlippedEntry = FlippedEntry,
+        AdoptedWhileRunning = AdoptedWhileRunning
     };
 }
 

@@ -1,3 +1,14 @@
+## 2026-08-24-a-position-opened-by-a-hand-can-finally-say-so
+
+- Active positions did draw a mark already; the mark was simply blank for every position the bot had not opened, because `positionDoer` returns nothing when provenance is unknown. On futures-live that is every position a hand opens, so the list looked unmarked.
+- `KRAKEN_SYNC` covered two different facts. One is someone else's position. The other is the bot's own record lost when the container died in the seconds before the state was saved. Both read as "not in my state", so the page had to stay silent about both.
+- The moment of arrival separates them. Before the first exchange sync of a process the bot has seen nothing and can claim nothing; after it the bot has been watching, so a position that turns up without it ordering one was opened by a person. `PortfolioPosition.AdoptedWhileRunning` records exactly that, set from `_syncedOnce` at adoption and persisted in `adopted_while_running` (added with `add column if not exists`, default false, so unmigrated rows keep the old silence).
+- `Origin` deliberately does NOT change. The soft-exit path and the TP/SL orchestrator both key off `KRAKEN_SYNC` to keep their hands off a position the bot did not open; a new origin value for "a hand opened this" would quietly hand those positions back to the bot to manage. A test pins that.
+- The API exposes it as `adoptedWhileRunning`, and the page draws the hand mark for it - the same blue mark a close by a foreign order already gets, because it is the same fact about a different moment.
+- Legend wording widened accordingly: the hand now covers a position opened by hand as well as a trade closed by an order that was not ours.
+- Still unmarked, and still deliberately: a position adopted at the first sync after a restart. There the bot genuinely cannot tell its own lost record from someone else's, and guessing is what once had the page accusing the bot of its own trades.
+- TP/SL untouched: 4% and 2% working, x200 on the exchange.
+
 ## 2026-08-24-the-mirror-asks-the-regime-before-it-turns-a-copy-around
 
 - `EntryMirror.InvertSide` stops being a standing order and becomes a permission. With it on, `FuturesMirrorFlipGate` decides per entry from BTC's closed-candle 24h change: rising, the copy keeps the publisher's side; flat or falling, it is turned around. Threshold is `EntryMirror.InvertMaxBtc24hRisePercent`, default 0.

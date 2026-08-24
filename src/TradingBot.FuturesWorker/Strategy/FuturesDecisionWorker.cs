@@ -29,6 +29,11 @@ internal sealed class FuturesDecisionWorker(
     // from the persisted market snapshots so the guard is not blind after restarts.
     private readonly SnapshotPriceHistory _priceHistory = new();
 
+    // Set once the first exchange sync of this process is done. Before it, an unknown
+    // position may be the bot's own record lost to a restart; after it, the bot has
+    // been watching, so anything new that it did not order was opened by a hand.
+    private bool _syncedOnce;
+
     private bool IsMirrorPublisher =>
         config.Futures.LiveTradingEnabled
         && !string.IsNullOrWhiteSpace(config.EntryMirror.PublishToBotInstanceId);
@@ -2270,6 +2275,10 @@ internal sealed class FuturesDecisionWorker(
                 botOwned: existing?.Origin?.Equals(PositionOrigins.Bot, StringComparison.OrdinalIgnoreCase) == true,
                 cancellationToken);
             var origin = existing?.Origin ?? PositionOrigins.KrakenSync;
+            // Origin stays KRAKEN_SYNC either way - the exit and TP/SL paths key off it
+            // to keep their hands off a position they did not open. This only records
+            // whether the bot was watching when it turned up.
+            var adoptedWhileRunning = existing?.AdoptedWhileRunning ?? _syncedOnce;
             var importedPosition = new PortfolioPosition
             {
                 Pair = instrument.Pair,
@@ -2291,6 +2300,7 @@ internal sealed class FuturesDecisionWorker(
                 TpOrderState = tpSl.TpOrderState,
                 SlOrderState = tpSl.SlOrderState,
                 Origin = origin,
+                AdoptedWhileRunning = adoptedWhileRunning,
                 StopLossPrice = tpSl.StopLossPrice,
                 TakeProfitPrice = tpSl.TakeProfitPrice,
                 ExchangeStopLossPrice = tpSl.ExchangeStopLossPrice,
@@ -2355,6 +2365,10 @@ internal sealed class FuturesDecisionWorker(
                 $"futures-kraken-wallet: name={account.Name} currency={account.Currency} " +
                 $"marginBalance={account.MarginBalance:0.####} availableMargin={account.AvailableMargin:0.####}");
         }
+
+        // From here on the bot has seen the exchange with its own eyes. Anything that
+        // turns up next and is not in its state was opened by someone else.
+        _syncedOnce = true;
 
         return vanished.Count > 0;
     }

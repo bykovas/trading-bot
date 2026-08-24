@@ -543,7 +543,11 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             entry_channel,
             -- True when the mirrored copy was turned around: the follower opened the
             -- opposite side of what the publisher did. Only ever true on a Mirror entry.
-            flipped_entry
+            flipped_entry,
+            -- True when the position turned up on the exchange while the worker was
+            -- already watching, which makes it someone else's rather than merely
+            -- unattributed. False for one adopted at the first sync after a restart.
+            adopted_while_running
         from portfolio_position_state position
         where (@bot_instance_id is null or position.bot_instance_id = @bot_instance_id)
         -- Newest first. Ordering by market value put the biggest position on top,
@@ -606,7 +610,8 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             storedPnlPercent,
             reader.IsDBNull(25) ? null : reader.GetString(25),
             reader.IsDBNull(26) ? null : reader.GetString(26),
-            !reader.IsDBNull(27) && reader.GetBoolean(27)));
+            !reader.IsDBNull(27) && reader.GetBoolean(27),
+            !reader.IsDBNull(28) && reader.GetBoolean(28)));
     }
 
     return positions;
@@ -2825,7 +2830,11 @@ internal sealed record PortfolioPositionDto(
     string? EntryChannel,
     // True when that mirrored entry was inverted - the follower took the opposite side
     // of the publisher's. Always false outside the mirror.
-    bool MirrorInverted);
+    bool MirrorInverted,
+    // True when the position appeared on the exchange under a running worker's nose:
+    // it did not order it, so a person did. A position adopted at the first sync after
+    // a restart is NOT this - there the bot cannot tell its own lost record apart.
+    bool AdoptedWhileRunning);
 
 internal sealed record PageRequest(int Limit, int Offset)
 {

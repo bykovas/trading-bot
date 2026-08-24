@@ -251,7 +251,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                    sl_order_state,
                    origin,
                    entry_channel,
-                   flipped_entry
+                   flipped_entry,
+                   adopted_while_running
             from portfolio_position_state
             where bot_instance_id = @bot_instance_id
             order by position_index
@@ -304,7 +305,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     SlOrderState = GetNullableString(reader, 37),
                     Origin = GetNullableString(reader, 38),
                     EntryChannel = GetNullableString(reader, 39),
-                    FlippedEntry = !reader.IsDBNull(40) && reader.GetBoolean(40)
+                    FlippedEntry = !reader.IsDBNull(40) && reader.GetBoolean(40),
+                    AdoptedWhileRunning = !reader.IsDBNull(41) && reader.GetBoolean(41)
                 });
             }
         }
@@ -733,6 +735,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 origin text,
                 entry_channel text,
                 flipped_entry boolean not null default false,
+                adopted_while_running boolean not null default false,
                 primary key (bot_instance_id, position_index)
             );
 
@@ -741,6 +744,9 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
 
             alter table portfolio_position_state
                 add column if not exists flipped_entry boolean not null default false;
+
+            alter table portfolio_position_state
+                add column if not exists adopted_while_running boolean not null default false;
 
             alter table portfolio_state_summary
                 add column if not exists cash_quote_value numeric,
@@ -1435,7 +1441,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     sl_order_state,
                     origin,
                     entry_channel,
-                    flipped_entry)
+                    flipped_entry,
+                    adopted_while_running)
                 values (
                     @bot_instance_id,
                     @updated_at,
@@ -1480,7 +1487,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     @sl_order_state,
                     @origin,
                     @entry_channel,
-                    @flipped_entry)
+                    @flipped_entry,
+                    @adopted_while_running)
                 """,
                 connection,
                 transaction);
@@ -1528,6 +1536,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             Add(command, "origin", NpgsqlDbType.Text, position.Origin);
             Add(command, "entry_channel", NpgsqlDbType.Text, position.EntryChannel);
             Add(command, "flipped_entry", NpgsqlDbType.Boolean, position.FlippedEntry);
+            Add(command, "adopted_while_running", NpgsqlDbType.Boolean, position.AdoptedWhileRunning);
             command.ExecuteNonQuery();
         }
 

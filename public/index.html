@@ -957,7 +957,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <div class="bc-help-row"><span class="bc-help-keys" data-doer="bot"></span>
           <p><b>Kvadratas skliaustuose.</b> Poziciją atidarė arba sandorį įvykdė botas pagal savo taisykles. Žmogaus čia nebuvo.</p></div>
         <div class="bc-help-row"><span class="bc-help-keys" data-doer="hand"></span>
-          <p><b>Brūkšnys skliaustuose.</b> Padaryta rankomis: pozicija dingo iš biržos, bet ją uždarė ne boto orderis — nei stop, nei tikslas.</p></div>
+          <p><b>Brūkšnys skliaustuose.</b> Padaryta rankomis. Pozicijai: ji atsirado biržoje, kai botas jau dirbo, o orderio nedavė — vadinasi, davė žmogus. Sandoriui: pozicija dingo iš biržos, bet ją uždarė ne boto orderis — nei stop, nei tikslas.</p></div>
         <div class="bc-help-row"><span class="bc-help-keys" data-doer="fix"></span>
           <p><b>Praplėštas skliaustas.</b> Botas atidarė, o kiekį pakeitė ranka. Rėmas jo, bet tai, kas jame, jau ne tik jo.</p></div>
         <div class="bc-help-row"><span class="bc-help-keys" data-doer="mirror"></span>
@@ -2630,6 +2630,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // A hand changed the size of something the bot had opened. Checked before origin,
       // because it is still the bot's position - the mark says what happened to it last.
       if (position.manualQtyChange) return "fix";
+      // It turned up on the exchange while the worker was watching and it was not the
+      // worker that put it there. That is a person, and it is known rather than guessed:
+      // a position adopted at the first sync after a restart does not set this.
+      if (position.adoptedWhileRunning) return "hand";
       if (String(position.origin || "").toUpperCase() === "BOT") return "bot";
       // KRAKEN_SYNC or nothing at all: it arrived without the bot ordering it, or its
       // provenance did not survive a restart. Either way we do not know.
