@@ -48,7 +48,8 @@ internal static class FuturesEntryAnnouncement
         decimal takeProfitPercent,
         decimal stopLossPercent,
         decimal? btc24hChangePct,
-        decimal? pair24hChangePct)
+        decimal? pair24hChangePct,
+        EntrySignalDetails? details = null)
     {
         var isLong = side.Equals("LONG", StringComparison.OrdinalIgnoreCase);
         var text = new StringBuilder();
@@ -68,16 +69,24 @@ internal static class FuturesEntryAnnouncement
 
         // The target is the direction the position wants to go, the stop the direction it
         // must not: on a SHORT that means the target sits below and the stop above.
+        // The bracket carries how far, twice: in percent and in the distance the price
+        // has to travel. Both describe the price, not the stake - what the move would be
+        // WORTH is the one number that would give the position size away.
+        //
+        // The signs need no special-casing: a level below the entry subtracts, and that
+        // is exactly when its percentage is negative too.
         if (takeProfitPrice is { } tp)
         {
             text.Append("🎯 Tikslas  ").Append(Money(tp)).Append(" $   (")
-                .Append(Signed(isLong ? takeProfitPercent : -takeProfitPercent)).Append(" %)\n");
+                .Append(Signed(isLong ? takeProfitPercent : -takeProfitPercent)).Append(" % · ")
+                .Append(SignedMoney(tp - price, price)).Append(" $)\n");
         }
 
         if (stopLossPrice is { } sl)
         {
             text.Append("🛑 Stopas   ").Append(Money(sl)).Append(" $   (")
-                .Append(Signed(isLong ? -stopLossPercent : stopLossPercent)).Append(" %)\n");
+                .Append(Signed(isLong ? -stopLossPercent : stopLossPercent)).Append(" % · ")
+                .Append(SignedMoney(sl - price, price)).Append(" $)\n");
         }
 
         // The two readings the flip gate weighs. They are here because they explain what
@@ -99,7 +108,54 @@ internal static class FuturesEntryAnnouncement
             text.Append('\n').Append(string.Join(" · ", regime));
         }
 
+        AppendDetails(text, details, entryChannel);
+
         return text.ToString().TrimEnd();
+    }
+
+    // The same breakdown the dashboard shows under a decision, in the same words: what
+    // each signal contributed to the score, then the context the score was read in.
+    // Still no stake and no leverage - those say how much is on the table, and this
+    // section is about why the bot thinks the trade is there at all.
+    private static void AppendDetails(StringBuilder text, EntrySignalDetails? details, string? entryChannel)
+    {
+        if (details is null)
+        {
+            return;
+        }
+
+        text.Append("\n\n⚙️ Signalai  ").Append(details.Score.ToString("0.00", Lt));
+
+        var parts = details.Contributions
+            .Where(contribution => contribution.Value != 0m)
+            .Select(contribution => $"{contribution.Name} {Signed(contribution.Value, 2)}")
+            .ToList();
+        if (parts.Count > 0)
+        {
+            text.Append('\n').Append(string.Join(" · ", parts));
+        }
+
+        var context = new List<string>();
+        if (details.SpreadPercent is { } spread)
+        {
+            context.Add($"spredas {spread.ToString("0.###", Lt)} %");
+        }
+
+        if (!string.IsNullOrWhiteSpace(details.PriceActionDirection))
+        {
+            var move = details.PriceActionTrendPercent is { } trend ? $" {Signed(trend, 2)} %" : "";
+            context.Add($"PA {details.PriceActionDirection}{move}");
+        }
+
+        if (details.EmaGapPercent is { } gap)
+        {
+            context.Add($"EMA tarpas {Signed(gap, 2)} %");
+        }
+
+        context.Add(details.EmaFullyConfirmed ? "EMA patvirtinta" : "EMA nepatvirtinta");
+        context.Add($"kanalas {entryChannel ?? "Standard"}");
+
+        text.Append("\n\nKontekstas\n").Append(string.Join(" · ", context));
     }
 
     // "XMR/USD" -> "XMR". The quote side is always USD here and repeating it in a line
@@ -112,16 +168,37 @@ internal static class FuturesEntryAnnouncement
 
     // Prices here span 0.000012 to 75 000, so a fixed number of decimals is either
     // useless at the bottom or absurd at the top.
-    private static string Money(decimal value)
+    private static string Money(decimal value) =>
+        value.ToString("N" + Decimals(value).ToString(CultureInfo.InvariantCulture), Lt);
+
+    private static int Decimals(decimal value)
     {
         var magnitude = Math.Abs(value);
-        var decimals = magnitude >= 1000m ? 2
-            : magnitude >= 1m ? 2
+        return magnitude >= 1m ? 2
             : magnitude >= 0.01m ? 5
             : 8;
-        return value.ToString("N" + decimals.ToString(CultureInfo.InvariantCulture), Lt);
     }
 
-    private static string Signed(decimal value) =>
-        (value > 0m ? "+" : value < 0m ? "−" : "") + Math.Abs(value).ToString("0.##", Lt);
+    // A distance is shown at the precision of the price it belongs to: 97,46 next to
+    // 2 436,37, but 0,00413 next to 0,10329, where two decimals would round it to zero.
+    private static string SignedMoney(decimal value, decimal reference)
+    {
+        var text = Math.Abs(value).ToString("N" + Decimals(reference).ToString(CultureInfo.InvariantCulture), Lt);
+        return (value > 0m ? "+" : value < 0m ? "−" : "") + text;
+    }
+
+    private static string Signed(decimal value, int? fixedDecimals = null) =>
+        (value > 0m ? "+" : value < 0m ? "−" : "")
+        + Math.Abs(value).ToString(fixedDecimals is { } d ? "F" + d.ToString(CultureInfo.InvariantCulture) : "0.##", Lt);
 }
+
+// What the dashboard shows under a decision, carried into the post so a reader sees the
+// same breakdown in both places rather than two versions of the same trade.
+internal sealed record EntrySignalDetails(
+    decimal Score,
+    IReadOnlyList<SignalContribution> Contributions,
+    decimal? SpreadPercent,
+    string? PriceActionDirection,
+    decimal? PriceActionTrendPercent,
+    decimal? EmaGapPercent,
+    bool EmaFullyConfirmed);

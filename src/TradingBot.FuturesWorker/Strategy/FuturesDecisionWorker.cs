@@ -564,6 +564,18 @@ internal sealed class FuturesDecisionWorker(
                                 openedPosition,
                                 btcRegime.Change24hPct,
                                 pair24hChangePct,
+                                new EntrySignalDetails(
+                                    executedDesired == FuturesDesiredExposure.Short && signal.ShortScore > 0m
+                                        ? signal.ShortScore
+                                        : signal.Score,
+                                    signal.Contributions,
+                                    SpreadPercentOf(marketState),
+                                    priceAction?.Direction.ToString(),
+                                    priceAction?.TrendPercent,
+                                    executedDesired == FuturesDesiredExposure.Short
+                                        ? signal.BearishEmaGapPercent
+                                        : signal.BullishEmaGapPercent,
+                                    signal.EmaFullyConfirmed),
                                 cancellationToken);
                             await PublishMirrorEntryAsync(
                                 cycleId,
@@ -775,6 +787,7 @@ internal sealed class FuturesDecisionWorker(
         PortfolioPosition? opened,
         decimal? btc24hChangePct,
         decimal? pair24hChangePct,
+        EntrySignalDetails details,
         CancellationToken cancellationToken)
     {
         if (!config.Telegram.IsConfigured || !fill.PositionOpened)
@@ -798,7 +811,8 @@ internal sealed class FuturesDecisionWorker(
             config.TpSl.TakeProfitPercent,
             config.TpSl.StopLossPercent,
             btc24hChangePct,
-            pair24hChangePct);
+            pair24hChangePct,
+            details);
 
         await _telegram.SendAsync(text, cancellationToken);
     }

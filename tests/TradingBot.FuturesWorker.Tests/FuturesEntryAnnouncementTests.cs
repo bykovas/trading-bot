@@ -1,3 +1,4 @@
+using TradingBot.Core.Common;
 using Xunit;
 
 namespace TradingBot.FuturesWorker.Tests;
@@ -110,6 +111,65 @@ public sealed class FuturesEntryAnnouncementTests
 
         Assert.DoesNotContain("per parą", text);
         Assert.Contains("Tikslas", text);
+    }
+
+    [Fact]
+    public void The_bracket_carries_the_move_in_dollars_as_well_as_percent()
+    {
+        var text = EthShort("ShortReclaim");
+
+        // 4% of 2 436,37 is 97,45; 2% is 48,73. The signs follow the levels: on a short
+        // the target sits below the entry and the stop above it.
+        Assert.Contains("(−4 % · −97,45 $)", text);
+        Assert.Contains("(+2 % · +48,73 $)", text);
+    }
+
+    // A cent-priced pair would round to 0,00 at two decimals, which reads as "no move".
+    [Fact]
+    public void A_small_priced_pair_keeps_enough_decimals_to_show_the_move()
+    {
+        var text = FuturesEntryAnnouncement.Compose(
+            "ARB/USD", "LONG", 0.10329m, "Breakout",
+            0.1074216m, 0.1012242m, 4m, 2m, 0.85m, 2.42m);
+
+        Assert.Contains("+0,00413 $", text);
+        Assert.DoesNotContain("0,00 $", text);
+    }
+
+    [Fact]
+    public void The_details_block_repeats_what_the_dashboard_shows()
+    {
+        var text = FuturesEntryAnnouncement.Compose(
+            "ETH/USD", "SHORT", EthPrice, "ShortReclaim",
+            EthTarget, EthStop, 4m, 2m, 0.85m, 1.66m,
+            new EntrySignalDetails(
+                0.85m,
+                [new SignalContribution("EMA", 0.30m, "fast EMA above slow"),
+                 new SignalContribution("RSI", 0.05m, "rsi in band")],
+                SpreadPercent: 0.24m,
+                PriceActionDirection: "FALLING",
+                PriceActionTrendPercent: -0.10m,
+                EmaGapPercent: 0.22m,
+                EmaFullyConfirmed: true));
+
+        Assert.Contains("Signalai  0,85", text);
+        Assert.Contains("EMA +0,30 · RSI +0,05", text);
+        Assert.Contains("spredas 0,24 %", text);
+        Assert.Contains("PA FALLING −0,10 %", text);
+        Assert.Contains("EMA tarpas +0,22 %", text);
+        Assert.Contains("kanalas ShortReclaim", text);
+    }
+
+    // Details are optional: without them the post is still complete, and the stake still
+    // never appears - the block adds reasoning, not money.
+    [Fact]
+    public void Without_details_the_post_is_still_whole()
+    {
+        var text = EthShort("ShortReclaim");
+
+        Assert.DoesNotContain("Signalai", text);
+        Assert.Contains("Tikslas", text);
+        Assert.DoesNotContain("svertas", text);
     }
 
     private static string EthShort(string? channel) =>

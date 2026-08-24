@@ -1,3 +1,15 @@
+## 2026-08-24-the-entry-post-shows-its-reasoning
+
+- The take profit and stop loss brackets now carry the move in dollars beside the percentage: `(−4 % · −97,45 $)`. That is the distance the PRICE has to travel, not what the move would be worth - the second would give the position size away, and the post still says nothing about the stake.
+- Signs need no special-casing: a level below the entry subtracts, which is exactly when its percentage is negative too.
+- Distances are shown at the precision of the price they belong to. ARB moves 0,00413 on a 4% target; at two decimals that rounds to 0,00 and reads as "no move".
+- Below the post now sits the same breakdown the dashboard shows under a decision, in the same words: `Signalai` with the score and each contribution (EMA, Momentum, RSI, Volatility, Trend), then `Kontekstas` with spread, price-action direction and trend, EMA gap, whether EMA is confirmed, and the entry channel. A reader who follows both sees one version of the trade rather than two.
+- SHORT entries report the short score and the bearish EMA gap; LONG entries the long ones. Reporting the long score on a short would be a quietly wrong number in a place nobody would check.
+- Contributions that scored zero are left out. A list padded with `+0,00` says nothing and pushes the ones that mattered off the first screen.
+- Still absent, deliberately: size, leverage, margin, quantity, fees. The details block explains why the bot thinks the trade is there, not how much is on the table.
+- The block is optional in the composer, so a post without it is still complete - and the tests assert the stake stays out either way.
+- TP/SL untouched: 4% and 2% working, x200 on the exchange.
+
 ## 2026-08-24-the-bot-says-what-it-intends-before-it-opens
 
 - Every position futures-lukas-live opens is now announced to the Telegram channel, in Lithuanian, at the moment the decision becomes an order.
