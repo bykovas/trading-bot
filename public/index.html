@@ -198,16 +198,19 @@
   color:var(--green);font:13.5px var(--font-mono)}
 .bc-live-s{margin-top:10px;font:12.5px var(--font-mono);color:var(--muted-2)}
 .bc-live-s b{color:var(--ink-soft);font-weight:400} .bc-live-s i{font-style:normal;color:var(--blue)}
-/* Who did it, after the pair. No plate behind it: the first version put a filled
-   blue square in FRONT of the pair and it fought the pair for the eye. Stroke only,
-   at the pair's own scale, in the colours the page already assigns - gold the bot,
-   purple the mirror, blue a person. */
+/* Who did it, after the pair. One family for all five states: the brackets are the
+   record, what sits inside them is what happened to it, and the dashed axis says the
+   record is a copy. Stroke only, at the pair's own scale, in the colours the page
+   already assigns - muted the bot, blue a person, amber a person who changed what the
+   bot had done, purple the mirror. The bot mark is the most frequent one on the page,
+   so it sits on --muted rather than --muted-2: quiet, but still legible. */
 .bc-doer{flex:none;display:inline-flex;width:13px;height:13px;margin-left:8px;
   vertical-align:-1px}
 .bc-doer svg{display:block;width:100%;height:100%}
-.bc-doer--bot{color:var(--muted-2)}
-.bc-doer--mirror{color:var(--purple)}
+.bc-doer--bot{color:var(--muted)}
 .bc-doer--hand{color:var(--blue)}
+.bc-doer--fix{color:var(--amber)}
+.bc-doer--mirror,.bc-doer--mirror-flip{color:var(--purple)}
 .bc-legend{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
 .bc-legend-l{font:10.5px var(--font-mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted-3);text-align:right}
 /* One pill, four groups, hairlines between them. Two framed rows read as two boxes
@@ -935,7 +938,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
     <dialog class="bc-modal" id="bcLegendHelp" aria-labelledby="bcLegendHelpTitle">
       <div class="bc-modal-head">
-        <h2 class="bc-modal-t" id="bcLegendHelpTitle">Ką rodo kiekvienas kvadratas</h2>
+        <h2 class="bc-modal-t" id="bcLegendHelpTitle">Ką rodo grafiko kvadratai ir ženklai prie porų</h2>
         <button type="button" class="bc-modal-x" id="bcLegendHelpClose" aria-label="Uždaryti">&#10005;</button>
       </div>
       <div class="bc-modal-body">
@@ -950,6 +953,18 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <div class="bc-help-row"><span class="bc-help-keys"><span class="bc-sq bc-sq--gap"></span></span>
           <p><b>Pilkas.</b> Tos dienos duomenų nėra — botas stovėjo arba ryšys nutrūko. Pasirodo tik tada, kai grafike tokia diena iš tikrųjų yra.</p></div>
         <p class="bc-help-end">Šiandiena grafike stovi atskirai, dešinėje nuo skirtuko, ir į uždarytų dienų sumą neįeina — kiek jų rodoma, parašyta virš grafiko.</p>
+        <h3>Ženklai prie poros</h3>
+        <div class="bc-help-row"><span class="bc-help-keys" data-doer="bot"></span>
+          <p><b>Kvadratas skliaustuose.</b> Poziciją atidarė arba sandorį įvykdė botas pagal savo taisykles. Žmogaus čia nebuvo.</p></div>
+        <div class="bc-help-row"><span class="bc-help-keys" data-doer="hand"></span>
+          <p><b>Brūkšnys skliaustuose.</b> Padaryta rankomis: pozicija dingo iš biržos, bet ją uždarė ne boto orderis — nei stop, nei tikslas.</p></div>
+        <div class="bc-help-row"><span class="bc-help-keys" data-doer="fix"></span>
+          <p><b>Praplėštas skliaustas.</b> Botas atidarė, o kiekį pakeitė ranka. Rėmas jo, bet tai, kas jame, jau ne tik jo.</p></div>
+        <div class="bc-help-row"><span class="bc-help-keys" data-doer="mirror"></span>
+          <p><b>Du skliaustai į tą pačią pusę.</b> Zerkalas: įėjimas nukopijuotas iš kito boto ta pačia kryptimi.</p></div>
+        <div class="bc-help-row"><span class="bc-help-keys" data-doer="mirrorFlip"></span>
+          <p><b>Skliaustai vienas prieš kitą.</b> Tas pats zerkalas, tik apverstas: kopija atlikta į priešingą pusę nei šaltinis.</p></div>
+        <p class="bc-help-end">Jei ženklo nėra — vadinasi, nežinoma. Po perkrovimo pozicija nuskaitoma iš biržos be istorijos, todėl tuščia vieta reiškia „neatsekama“, o ne „botas“.</p>
       </div>
     </dialog>
 
@@ -1442,6 +1457,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       initModal("bcDisclaimer", "bcDisclaimerOpen", "bcDisclaimerClose");
       initModal("bcPages", "bcPagesOpen", "bcPagesClose");
       initModal("bcLegendHelp", "bcLegendHelpOpen", "bcLegendHelpClose");
+      // The legend draws its marks from DOER through the same doerMark() the lists use,
+      // so the explanation cannot drift away from the thing it explains.
+      document.querySelectorAll("#bcLegendHelp [data-doer]").forEach((slot) => {
+        slot.innerHTML = doerMark(slot.getAttribute("data-doer"));
+      });
     }
 
     // ---- status ---------------------------------------------------------
@@ -2532,33 +2552,56 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         : `${price(priceValue)} (${signedMoney(amount)})`;
     }
 
-    // Who did it, after the pair. Three states and three glyphs, in the colours the
-    // page already uses: gold is the bot, purple is the lab's second voice and stands
-    // for the mirror, blue is a person - the legend gives transfers that colour.
+    // Who did it, after the pair. One family of five: the brackets are the record, what
+    // sits inside them is what happened to it, and the dashed axis says the record is a
+    // copy. Muted is the bot, blue a person, amber a person who edited what the bot had
+    // already done, purple the mirror - the colours the page assigns elsewhere.
     //
     // Nothing is drawn when it cannot be told. A position opened in the seconds before
     // the container is recreated loses its provenance: the state never reached the
     // store, so on restart it is re-read from Kraken as KRAKEN_SYNC with no channel.
-    // An empty space there means "not known", not "the bot". A position RESIZED by hand
-    // is unmarked for a different reason - the sync adopts Kraken's quantity without
-    // remembering what it ordered, so nothing records that a hand was in it.
+    // An empty space there means "not known", not "the bot".
+    //
+    // Two of the five wait on the API: mirrorFlip needs `mirrorInverted`, fix needs
+    // `manualQtyChange`. Until those fields arrive the marks live only in the legend -
+    // an inverted copy reads as a plain mirror, and a hand-resized position stays
+    // unmarked. That is deliberate: guessing a hand from price or quantity would put
+    // the page back to accusing the bot of its own trades.
     const DOER = {
       bot: {
         cls: "bc-doer--bot",
         title: "Boto sprendimas",
-        svg: '<path d="M4.6 3.2 L1.9 6 L4.6 8.8"/><path d="M7.4 3.2 L10.1 6 L7.4 8.8"/>'
-      },
-      mirror: {
-        cls: "bc-doer--mirror",
-        title: "Zerkalas: įėjimas iš kito boto",
-        svg: '<path d="M6 1.4 V10.6" stroke-dasharray="1.6 1.5"/>' +
-          '<path d="M4.2 4.2 L1.6 6 L4.2 7.8 Z"/><path d="M7.8 4.2 L10.4 6 L7.8 7.8 Z"/>'
+        svg: '<path d="M3.6 2.4 H2.1 V9.6 H3.6"/><path d="M8.4 2.4 H9.9 V9.6 H8.4"/>' +
+          '<rect x="5.1" y="5.1" width="1.8" height="1.8" fill="currentColor" stroke="none"/>'
       },
       hand: {
         cls: "bc-doer--hand",
-        title: "Ranka: uždarė ne boto orderis",
-        svg: '<path d="M2.4 9.6 L3.9 9.1 L9.6 3.4"/><path d="M7.8 1.9 L10.1 4.2"/>' +
-          '<path d="M2.4 9.6 L2.9 8.1"/>'
+        title: "Padaryta rankomis: ne boto orderis",
+        svg: '<path d="M3.6 2.4 H2.1 V9.6 H3.6"/><path d="M8.4 2.4 H9.9 V9.6 H8.4"/>' +
+          '<path d="M4.9 8.3 L7.1 3.7"/>'
+      },
+      // The right bracket is torn open: the frame is the bot's, but a hand reached into
+      // it and changed what was already there. Amber, not blue - blue is a whole action
+      // by a person, this is an edit on top of the bot's own.
+      fix: {
+        cls: "bc-doer--fix",
+        title: "Pakoreguota rankomis",
+        svg: '<path d="M3.6 2.4 H2.1 V9.6 H3.6"/><path d="M8.4 2.4 H9.9 V4.7"/>' +
+          '<path d="M9.9 7.3 V9.6 H8.4"/><path d="M4.9 8.3 L7.1 3.7"/>'
+      },
+      // ] | ] - two identical brackets facing the same way: the same trade, copied.
+      mirror: {
+        cls: "bc-doer--mirror",
+        title: "Zerkalas: kopija ta pa\u010dia kryptimi",
+        svg: '<path d="M2.1 2.4 H3.5 V9.6 H2.1"/><path d="M8.4 2.4 H9.9 V9.6 H8.4"/>' +
+          '<path d="M6 1.6 V10.4" stroke-dasharray="1.5 1.5" stroke-width="1"/>'
+      },
+      // ] | [ - the second bracket is turned: the copy went the other way.
+      mirrorFlip: {
+        cls: "bc-doer--mirror-flip",
+        title: "Zerkalas apverstas: kopija \u012f prie\u0161ing\u0105 pus\u0119",
+        svg: '<path d="M2.1 2.4 H3.5 V9.6 H2.1"/><path d="M9.9 2.4 H8.5 V9.6 H9.9"/>' +
+          '<path d="M6 1.6 V10.4" stroke-dasharray="1.5 1.5" stroke-width="1"/>'
       }
     };
 
@@ -2572,12 +2615,21 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
     function tradeDoer(trade) {
       if (String(trade.exitReasonCode || "").toUpperCase() === "EXCHANGE_CLOSE") return "hand";
-      if (String(trade.entryChannel || "").toLowerCase() === "mirror") return "mirror";
+      if (String(trade.entryChannel || "").toLowerCase() === "mirror") {
+        // The inverted copy is a different fact about the same channel, not a different
+        // channel: absent the flag, a mirror is a mirror.
+        return trade.mirrorInverted ? "mirrorFlip" : "mirror";
+      }
       return "bot";
     }
 
     function positionDoer(position) {
-      if (String(position.entryChannel || "").toLowerCase() === "mirror") return "mirror";
+      if (String(position.entryChannel || "").toLowerCase() === "mirror") {
+        return position.mirrorInverted ? "mirrorFlip" : "mirror";
+      }
+      // A hand changed the size of something the bot had opened. Checked before origin,
+      // because it is still the bot's position - the mark says what happened to it last.
+      if (position.manualQtyChange) return "fix";
       if (String(position.origin || "").toUpperCase() === "BOT") return "bot";
       // KRAKEN_SYNC or nothing at all: it arrived without the bot ordering it, or its
       // provenance did not survive a restart. Either way we do not know.
