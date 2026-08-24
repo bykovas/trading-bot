@@ -43,8 +43,9 @@ public sealed class FuturesInstanceConfigurationTests
         // subtractions plus the tighter spread gate.
         Assert.True(primary["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
         Assert.True(lukas["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
-        Assert.Equal("Continuation",
-            primary["Futures"]?["DisabledLongEntryChannels"]?.AsArray().Single()?.GetValue<string>());
+        Assert.Equal(
+            new[] { "Continuation", "Reclaim" },
+            primary["Futures"]?["DisabledLongEntryChannels"]?.AsArray().Select(node => node?.GetValue<string>()).ToArray());
         Assert.Equal(0m, primary["Shorts"]?["MaxBtc24hRisePercentForShort"]?.GetValue<decimal>());
         Assert.Equal(0.08m, primary["Strategy"]?["MaxEntrySpreadPercent"]?.GetValue<decimal>());
         // The arm's exit structure: winners run to +6% before the trail arms, and a faded
@@ -101,6 +102,11 @@ public sealed class FuturesInstanceConfigurationTests
             ("Strategy", "MaxEntrySpreadPercent"),
             ("TpSl", "TakeProfitPercent"),
             ("Exits", "SignalReversalExitEnabled"),
+            // The arm runs wider: five slots, two per correlated sector, the full
+            // universe scanned. The totals above already scale per-position x slots.
+            ("Trading", "MaxActiveInstruments"),
+            ("CorrelationRisk", "MaxOpenPositionsPerGroup"),
+            ("CorrelationRisk", "MaxExposureUsdPerGroup"),
         };
 
         // What each account actually puts in the market, pinned. The sizer takes notional

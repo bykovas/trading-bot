@@ -1,3 +1,12 @@
+## 2026-08-24-the-experiment-arm-runs-wider
+
+- futures-live gets more concurrent slots for the entry classes that price positive under its new exits: `MaxPositions` 3 -> 5, `CorrelationRisk.MaxOpenPositionsPerGroup` 1 -> 2 (`MaxExposureUsdPerGroup` 150 -> 300), `Trading.MaxActiveInstruments` 50 -> 78 - the whole universe is scanned. The derived totals follow per-position x slots: `MaxTotalNotionalUsd` 450 -> 750, `MaxConcurrentOpenRiskUsd` 13.5 -> 22.5.
+- The one-per-sector rule was the binding constraint, not MaxPositions: on a day one sector flies the bot could take exactly one pair from it, which is why the account sat in two positions while pairs ran.
+- `Reclaim` joins `Continuation` on the arm's disabled long channels. Under the arm's own exit structure it is negative in BOTH years - -0.065% on 2025 and -0.190% on held-out 2026 - and every Reclaim entry occupies a slot a Breakout could have taken. The arm's longs are now Breakout and DipBounce only.
+- Per-position sizing, leverage and stops are UNCHANGED: 15 USD margin at 10x, 150 notional, ~3 USD per stop. This change multiplies the number of simultaneous bets, not the size of any bet: concurrent stop-risk rises from 13.5 to 22.5 USD, 3.9% of the current 581 balance.
+- Said plainly in the session and repeated here: more slots multiply whatever the true per-trade expectancy is. If the arm's held-out +0.042%/trade is real, this compounds it; if it is zero, this compounds friction. The control (futures-lukas-live) keeps 3 slots, 1 per group, 50 instruments.
+- TP/SL per position untouched: stop 2%, trail arms at +6% on the arm (4% on the control), x200 exchange net.
+
 ## 2026-08-24-the-experiment-arm-lets-winners-run
 
 - Second half of the own-strategy experiment, chosen from a ten-variant exit sweep re-walked over the same 84,788 one-minute-backtest entries: futures-live now arms its trailing stop at +6% instead of +4% (`TpSl.TakeProfitPercent: 6`) and no longer closes a position when the entry signal fades (`Exits.SignalReversalExitEnabled: false`). futures-lukas-live keeps 4% and the reversal close - the control stays the control.
