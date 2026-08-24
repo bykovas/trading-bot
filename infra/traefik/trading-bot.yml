@@ -1,10 +1,15 @@
 # Deployed by infra/deploy.sh to /opt/traefik/dynamic/trading-bot.yml on every
 # release: edit this file, never the copy on the server.
 #
-# The dashboards live on blynai.meetluko.eu and blynai.bykovas.lt; fin.bykovas.lt
-# is the original shared entry point. The two per-tester hosts differ only in
-# which account the page opens on, which the page decides from the hostname —
-# the routing is identical, so /api stays same-origin on every host.
+# The dashboards live on blynai.meetluko.eu and blynai.bykovas.lt; blynai.eu is
+# the project's own front door and fin.bykovas.lt the original one. The two
+# per-tester hosts differ only in which account the page opens on, which the page
+# decides from the hostname — the routing is identical, so /api stays same-origin
+# on every host. The front doors match no hostname there and open on LUKAS.
+#
+# www.blynai.eu is deliberately absent: it has no DNS record at all, and asking
+# letsencrypt for a name that does not point here spends the certificate budget
+# on a challenge that cannot pass. Add the record first, then the host.
 #
 # algo.meetluko.eu and algo.bykovas.lt were those dashboards until 2026-08-23 and
 # now redirect here. They are kept because the share cards that carried them are
@@ -18,7 +23,7 @@
 http:
   routers:
     trading-bot-http:
-      rule: "(Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`))"
+      rule: "(Host(`blynai.eu`) || Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`))"
       entryPoints:
         - web
       middlewares:
@@ -26,7 +31,7 @@ http:
       service: trading-bot
 
     trading-bot-https:
-      rule: "(Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`))"
+      rule: "(Host(`blynai.eu`) || Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`))"
       entryPoints:
         - websecure
       tls:
@@ -34,7 +39,7 @@ http:
       service: trading-bot
 
     trading-bot-web-https:
-      rule: "(Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`)) && PathPrefix(`/web`)"
+      rule: "(Host(`blynai.eu`) || Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`)) && PathPrefix(`/web`)"
       entryPoints:
         - websecure
       priority: 1100
@@ -43,7 +48,7 @@ http:
       service: trading-bot-web
 
     trading-bot-api-https:
-      rule: "(Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`)) && PathPrefix(`/api`)"
+      rule: "(Host(`blynai.eu`) || Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`)) && PathPrefix(`/api`)"
       entryPoints:
         - websecure
       priority: 1000
