@@ -82,6 +82,40 @@ public sealed class FuturesInstanceConfigurationTests
             ("Telegram", "Enabled"),
         };
 
+        // What each account actually puts in the market, pinned. The sizer takes notional
+        // from the RISK budget - TargetRiskUsd / stopPct - and only then applies the caps,
+        // so raising leverage on its own moves nothing: it changes the margin behind a
+        // notional the risk budget already decided. These three have to agree, or one of
+        // them is dead config that reads like a setting.
+        foreach (var (profile, name) in new[] { (primary, "futures-live"), (lukas, "futures-lukas-live") })
+        {
+            var stopPct = profile["TpSl"]!["StopLossPercent"]!.GetValue<decimal>();
+            var risk = profile["Risk"]!["TargetRiskUsd"]!.GetValue<decimal>();
+            var maxNotional = profile["Futures"]!["MaxNotionalUsd"]!.GetValue<decimal>();
+            var marginCap = profile["Futures"]!["MaxMarginPerPositionUsd"]!.GetValue<decimal>();
+            var leverage = profile["Futures"]!["MaxLeverage"]!.GetValue<decimal>();
+
+            // What the sizer actually produces at the floor stop, which is the size the
+            // account carries in practice. MaxNotionalUsd must equal it: higher and the
+            // ceiling never engages, lower and it silently overrides both other knobs.
+            var fromRisk = risk / (stopPct / 100m);
+            var fromMargin = marginCap * leverage;
+            Assert.True(Math.Min(fromRisk, fromMargin) == maxNotional,
+                $"{name}: sizes to {Math.Min(fromRisk, fromMargin)} (risk {fromRisk}, margin {fromMargin}) "
+                + $"but MaxNotionalUsd says {maxNotional}");
+            Assert.Equal(
+                maxNotional * profile["Futures"]!["MaxPositions"]!.GetValue<decimal>(),
+                profile["Futures"]!["MaxTotalNotionalUsd"]!.GetValue<decimal>());
+            Assert.Equal(
+                risk * profile["Futures"]!["MaxPositions"]!.GetValue<decimal>(),
+                profile["Risk"]!["MaxConcurrentOpenRiskUsd"]!.GetValue<decimal>());
+        }
+
+        // 150 at 4x against 15 at 10x: the same 150 of collateral is no longer the same
+        // exposure - futures-live now carries four times what the publisher does.
+        Assert.Equal(600m, primary["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
+        Assert.Equal(150m, lukas["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
+
         var normalizedLukas = lukas.DeepClone().AsObject();
         normalizedLukas["BotInstance"] = primary["BotInstance"]?.DeepClone();
         normalizedLukas["EntryMirror"] = primary["EntryMirror"]?.DeepClone();

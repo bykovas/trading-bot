@@ -1,3 +1,15 @@
+## 2026-08-24-futures-live-takes-four-times-the-exposure
+
+- futures-live moves from 150 USD at 1x to 150 at 4x: the collateral behind a position is unchanged, the position itself is 600 USD instead of 150. futures-lukas-live stays exactly where it was, 15 at 10x for the same 150.
+- Leverage alone would have moved nothing, and this is worth stating plainly because it looks like the one knob that matters. The sizer takes notional from the RISK budget - `TargetRiskUsd / stopPct` - and only then applies the caps; leverage merely converts notional into margin. At `TargetRiskUsd 4.5` and a 2% stop the risk budget sizes 225, so raising leverage to 4x would have produced 225, not 600.
+- Four values move together, because any one of them left behind becomes the binding constraint: `DefaultLeverage`/`MaxLeverage` 1 -> 4, `MaxNotionalUsd` 150 -> 600, `TargetRiskUsd` 4.5 -> 12, and the two portfolio totals that are per-position x MaxPositions - `MaxTotalNotionalUsd` 450 -> 1800, `MaxConcurrentOpenRiskUsd` 13.5 -> 36. `TargetMarginUsd` and `MaxMarginPerPositionUsd` stay at 150, which is the whole point: same collateral, four times the position.
+- What a losing trade now costs: 12 USD at the 2% stop floor against 3 before. On a 581 USD account that is 2.1% per stop-out, against 3.1% for the publisher on its own balance - relatively smaller, in absolute terms four times larger.
+- A wider stop sizes smaller, not riskier: the budget is fixed, so a 3% stop gives 400 notional on 100 margin and the same 12 USD at risk. 150 at 4x is the tightest-stop case, not the typical one.
+- Margin headroom is the thing to watch. Three positions at 150 is 450, and `MaxAccountMarginUtilizationPercent` 80 allows 465 of the current 581. It fits, with 15 USD to spare; `FitToAvailableCollateral` trims the third entry if the account falls, so a drawdown quietly becomes a smaller book rather than a rejected order.
+- A test now pins that the three knobs agree: `MaxNotionalUsd` must equal what the sizer actually produces at the floor stop, `min(TargetRiskUsd/stopPct, MaxMarginPerPositionUsd x leverage)`. Higher and the ceiling never engages; lower and it silently overrides the other two. It also pins both portfolio totals as per-position x MaxPositions.
+- Writing that test surfaced something on the publisher, left alone deliberately: its risk budget sizes 225 against a 150 notional ceiling, so the ceiling binds at the 2% floor and it risks 3.0, not the 4.5 configured. `TargetRiskUsd` only engages there once ATR widens the stop past 3%. That is a coherent "risk up to 4.5, never more than 150 notional", not a fault - and changing it would have changed the publisher's sizing, which was to stay as it is.
+- Strategy, exits and the mirror are untouched. TP/SL untouched: 4% and 2% working, x200 on the exchange.
+
 ## 2026-08-24-one-family-of-marks-and-a-tighter-post
 
 - The post now has the shape it was asked for: header and intent on consecutive lines, a blank line, the two levels, a blank line, then the regime, the signals and the context as one unbroken block. The score and its contributions share a line; `Kontekstas:` carries its own.
