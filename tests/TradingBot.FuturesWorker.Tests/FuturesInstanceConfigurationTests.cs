@@ -19,8 +19,11 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.False(primary["Futures"]?["FlipLongEntries"]?.GetValue<bool>());
         Assert.False(lukas["Futures"]?["FlipLongEntries"]?.GetValue<bool>());
 
-        Assert.Equal("futures-lukas-live", primary["EntryMirror"]?["FollowSourceBotInstanceId"]?.GetValue<string>());
-        Assert.Equal("futures-live", lukas["EntryMirror"]?["PublishToBotInstanceId"]?.GetValue<string>());
+        // The mirror is OFF since the own-strategy experiment of 2026-08-24: neither a
+        // follower source nor a publish target anywhere. Re-linking is a decision, not a
+        // leftover, so its absence is pinned.
+        Assert.Null(primary["EntryMirror"]?["FollowSourceBotInstanceId"]);
+        Assert.Null(lukas["EntryMirror"]?["PublishToBotInstanceId"]);
         Assert.Equal("futures-lukas-live", lukas["BotInstance"]?["Id"]?.GetValue<string>());
         Assert.Equal("Lukas live futures worker", lukas["BotInstance"]?["Name"]?.GetValue<string>());
 
@@ -35,14 +38,21 @@ public sealed class FuturesInstanceConfigurationTests
         // 15 USD at 10x against 150 at 1x, which is the same exposure either way.
         Assert.False(followerInverts);
 
-        // futures-live is mirror-only: it opens nothing from its own signals and takes
-        // every entry from lukas. lukas trades his own and publishes them.
-        Assert.False(primary["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
+        // Both trade their own signals since 2026-08-24. lukas is the unmodified control;
+        // futures-live is the experiment arm and carries the two held-out-validated
+        // subtractions plus the tighter spread gate.
+        Assert.True(primary["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
         Assert.True(lukas["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
+        Assert.Equal("Continuation",
+            primary["Futures"]?["DisabledLongEntryChannels"]?.AsArray().Single()?.GetValue<string>());
+        Assert.Equal(0m, primary["Shorts"]?["MaxBtc24hRisePercentForShort"]?.GetValue<decimal>());
+        Assert.Equal(0.08m, primary["Strategy"]?["MaxEntrySpreadPercent"]?.GetValue<decimal>());
+        // The control carries neither knob: the experiment must never leak into it.
+        Assert.Null(lukas["Futures"]?["DisabledLongEntryChannels"]);
+        Assert.Null(lukas["Shorts"]?["MaxBtc24hRisePercentForShort"]);
 
-        // The announcement follows the own signals, not the position: whoever decides
-        // is who speaks. Both point at the same channel, so if this ever flips the
-        // channel gets each trade twice rather than not at all - loud, not quiet.
+        // Only the control announces: the channel documents the base strategy, and the
+        // experiment arm's entries would read as the bot contradicting itself.
         Assert.True(lukas["Telegram"]?["Enabled"]?.GetValue<bool>());
         Assert.False(primary["Telegram"]?["Enabled"]?.GetValue<bool>());
         Assert.Equal(
@@ -76,10 +86,13 @@ public sealed class FuturesInstanceConfigurationTests
             // other fails the moment an account is actually resized.
             ("Risk", "TargetRiskUsd"),
             ("Risk", "MaxConcurrentOpenRiskUsd"),
-            // Only the account with its own signals announces an entry. futures-live
-            // takes every position from the mirror four seconds later, so letting it
-            // post too would put the same trade in the channel twice.
+            // The channel is the base strategy's log, and only the control writes it.
+            // The experiment arm trades differently and stays silent for now.
             ("Telegram", "Enabled"),
+            // The experiment arm's own knobs; absent on the control by design.
+            ("Futures", "DisabledLongEntryChannels"),
+            ("Shorts", "MaxBtc24hRisePercentForShort"),
+            ("Strategy", "MaxEntrySpreadPercent"),
         };
 
         // What each account actually puts in the market, pinned. The sizer takes notional

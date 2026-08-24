@@ -449,7 +449,21 @@ internal sealed class FuturesDecisionWorker(
                         : qualityGate.Approved && freshness is { Blocked: true }
                             ? new RiskEvaluation(false, new[] { freshness.BlockReason ?? "entry stale near high" })
                             : qualityGate;
-                    var portfolioGate = freshnessGate.Approved
+                    // The own-strategy experiment: a subtraction-only gate, off on the
+                    // control account. Classified here from the same inputs the post-fill
+                    // label uses, so the gate and the label can never disagree.
+                    var experimentBlock = freshnessGate.Approved
+                        ? FuturesEntryExperimentGate.Block(
+                            desired,
+                            ClassifyEntryChannel(dipBounce, freshness, longRange, shortEntry),
+                            config.Futures,
+                            config.Shorts,
+                            btcRegime.Change24hPct)
+                        : null;
+                    var experimentGate = experimentBlock is not null
+                        ? new RiskEvaluation(false, new[] { experimentBlock })
+                        : freshnessGate;
+                    var portfolioGate = experimentGate.Approved
                         ? EvaluatePortfolioEntryGuards(
                             state,
                             pair,
@@ -458,7 +472,7 @@ internal sealed class FuturesDecisionWorker(
                             entryPlan?.SizedNotionalEur > 0m
                                 ? entryPlan.SizedNotionalEur
                                 : entryPlan!.RequestedNotionalEur)
-                        : freshnessGate;
+                        : experimentGate;
                     var evaluation = portfolioGate.Approved
                         ? riskManager.EvaluateEntry(BuildRiskInputs(state, marketState, desired, signal, entryPlan, btcRegime))
                         : portfolioGate;

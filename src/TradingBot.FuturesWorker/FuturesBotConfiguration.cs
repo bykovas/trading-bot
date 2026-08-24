@@ -589,6 +589,10 @@ internal sealed class FuturesOptions
     // still managed and closed as normal - this gates new entries, never exits,
     // and an account that could not close what it opened would be a trap.
     public bool OwnSignalEntriesEnabled { get; set; } = true;
+
+    // Long entry channels this instance refuses to trade (by ClassifyEntryChannel name,
+    // case-insensitive). Part of the own-strategy experiment; empty on the control.
+    public List<string> DisabledLongEntryChannels { get; set; } = new();
     public decimal FlipMaxPair24hRisePercent { get; set; } = 3m;
     public decimal FlipMaxBtc24hRisePercent { get; set; } = 0m;
 
@@ -863,6 +867,11 @@ internal sealed class FuturesRegimeOptions
 
 internal sealed class FuturesShortOptions
 {
+    // Shorts are allowed only while BTC's 24h change is at or below this. Null means no
+    // ceiling - the control account's behaviour. Part of the own-strategy experiment:
+    // shorting into a rising BTC averaged -0.245%/trade on held-out 2026 data.
+    public decimal? MaxBtc24hRisePercentForShort { get; set; }
+
     public decimal MaxChaseDrawdownPct { get; set; } = 3.0m;
     public decimal MinShortScore { get; set; } = 0.90m;
 

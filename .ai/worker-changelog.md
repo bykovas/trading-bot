@@ -1,3 +1,15 @@
+## 2026-08-24-the-own-strategy-experiment-begins
+
+- The mirror is OFF on both sides: futures-live no longer follows, futures-lukas-live no longer publishes. Both accounts trade their own signals at the same 15 USD x 10x stake - lukas as the unmodified CONTROL, futures-live as the EXPERIMENT arm.
+- The experiment is subtraction-only, and both subtractions were trained on 2025 and held up on held-out 2026 (base: +0.012% train / -0.118% test per trade; the package: +0.119% / -0.055%):
+  - `Futures.DisabledLongEntryChannels: ["Continuation"]` - Continuation longs averaged -0.184%/trade over 10.6k held-out entries, the strategy's worst and most frequent class.
+  - `Shorts.MaxBtc24hRisePercentForShort: 0` - shorts only while BTC's 24h change is at or below zero; shorting a rising BTC averaged -0.245%/trade held out. A missing BTC reading ALLOWS the entry: the validated rule was "BTC demonstrably up", not "BTC unknown".
+- Third change on the experiment arm only: `Strategy.MaxEntrySpreadPercent` 0.25 -> 0.08. The 2026 gross edge is ~zero, so friction decides the sign; entries that pay a quarter-percent spread are the most expensive kind. Not held-out-validated (the sim carried no spread) - this one is cost arithmetic, labelled as such.
+- Implementation: `FuturesEntryExperimentGate`, a pure subtraction gate in the entry cascade after the freshness guard. It classifies the entry channel BEFORE execution from the same inputs the post-fill label uses, so the gate and the label cannot disagree. Rejections carry EXPERIMENT_* reasons into the decision record.
+- Both knobs default OFF, so the gate's existence changes nothing for the control; the instance guard test now pins the whole arrangement - mirror absent on both sides, both knobs present on the experiment arm, both absent on the control.
+- Expectation setting, so nobody reads a week of this as an answer: the package's held-out result is CUTTING LOSSES (-0.118 -> -0.055), not profit; monthly spread is wide on both arms. This is an experiment about the delta between the arms, and it needs weeks, not days.
+- Telegram: only the control announces - the channel documents the base strategy. TP/SL untouched: 4% and 2% working, x200 on the exchange.
+
 ## 2026-08-24-the-exits-become-a-sentence
 
 - The Telegram post's two level lines collapse into one spoken sentence right under the reason: `"Take Profit" limitą daryčiau +4 % (ties 1,62 $), "stop-loss" −2 % (ties 1,52 $)`. Percent first, the price level in brackets - the same voice as the intention above it, not a table. The per-level dollar distances go with the lines that carried them.
