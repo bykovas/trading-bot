@@ -47,7 +47,13 @@ public sealed class FuturesInstanceConfigurationTests
             new[] { "Continuation", "Reclaim" },
             primary["Futures"]?["DisabledLongEntryChannels"]?.AsArray().Select(node => node?.GetValue<string>()).ToArray());
         Assert.Equal(0m, primary["Shorts"]?["MaxBtc24hRisePercentForShort"]?.GetValue<decimal>());
-        Assert.Equal(0.08m, primary["Strategy"]?["MaxEntrySpreadPercent"]?.GetValue<decimal>());
+        // The spread ceiling is back to the control's 0.25 after a day at 0.08 showed
+        // it was cutting four fifths of the universe: the median decision carries a
+        // 0.308% spread. It was the arm's only change with no held-out evidence, so it
+        // is also the only one worth undoing on a single day's observation.
+        Assert.Equal(
+            lukas["Strategy"]?["MaxEntrySpreadPercent"]?.GetValue<decimal>(),
+            primary["Strategy"]?["MaxEntrySpreadPercent"]?.GetValue<decimal>());
         // The arm's exit structure: winners run to +6% before the trail arms, and a faded
         // signal no longer closes the position. The control keeps 4% and the reversal.
         Assert.Equal(6m, primary["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
@@ -99,7 +105,6 @@ public sealed class FuturesInstanceConfigurationTests
             // The experiment arm's own knobs; absent on the control by design.
             ("Futures", "DisabledLongEntryChannels"),
             ("Shorts", "MaxBtc24hRisePercentForShort"),
-            ("Strategy", "MaxEntrySpreadPercent"),
             ("TpSl", "TakeProfitPercent"),
             ("Exits", "SignalReversalExitEnabled"),
             // The arm runs wider: five slots, two per correlated sector, the full

@@ -20,10 +20,10 @@ internal static class FuturesEntryAnnouncement
     // bet, a verdict for the outcome. One glyph per state, no two states sharing a
     // silhouette, so a notification preview reads at a glance. The white circle stays
     // on the regime line as the one neutral mark.
-    private const string OpenLong = "\u2197\uFE0F";
-    private const string OpenShort = "\u2198\uFE0F";
-    private const string CloseProfit = "\u2705";
-    private const string CloseLoss = "\u274C";
+    private const string OpenLong = "\u2B06\uFE0F\U0001F4B2";
+    private const string OpenShort = "\u2B07\uFE0F\U0001F4B2";
+    private const string CloseProfit = "\U0001F4B2\U0001F4B0";
+    private const string CloseLoss = "\U0001F4B2\U0001F4B8";
     private const string Neutral = "\U000026AA";
 
     private static readonly NumberFormatInfo Lt = new()
@@ -73,7 +73,7 @@ internal static class FuturesEntryAnnouncement
         // board, a road sign and a cog are three different drawing styles pretending to
         // be a set.
         text.Append(isLong ? OpenLong : OpenShort).Append(' ').Append(label).Append(" · ").Append(pair)
-            .Append(' ').Append(isLong ? "LONG" : "SHORT").Append('\n');
+            .Append(' ').Append(Bold(isLong ? "LONG" : "SHORT")).Append('\n');
 
         if (!Reasons.TryGetValue(entryChannel ?? "Standard", out var reason))
         {
@@ -81,8 +81,8 @@ internal static class FuturesEntryAnnouncement
         }
 
         text.Append("Atidariau ").Append(pair).Append(isLong ? " į viršų" : " žemyn")
-            .Append(", kaina ").Append(Money(price)).Append(" $. Kodėl: ").Append(reason).Append('.');
-        text.Append("\nĮdėjau ").Append(Money(marginUsd)).Append(" $ savo pinigų (pozicijoje dirba ")
+            .Append(", kaina ").Append(Bold(Money(price) + " $")).Append(". Kodėl: ").Append(reason).Append('.');
+        text.Append("\nĮdėjau ").Append(Bold(Money(marginUsd) + " $")).Append(" savo pinigų (pozicijoje dirba ")
             .Append(Money(notionalUsd)).Append(" $, svertas ").Append(leverage.ToString("0.##", Lt)).Append("×).");
 
         // Both exits in one spoken sentence right under the reason, percent first and the
@@ -92,12 +92,12 @@ internal static class FuturesEntryAnnouncement
         var exits = new List<string>();
         if (takeProfitPrice is { } tp)
         {
-            exits.Add($"\"Take Profit\" limitą pastačiau {Signed(isLong ? takeProfitPercent : -takeProfitPercent)} % (ties {Money(tp)} $)");
+            exits.Add($"\"Take Profit\" limitą pastačiau {Bold(Signed(isLong ? takeProfitPercent : -takeProfitPercent) + " %")} (ties {Money(tp)} $)");
         }
 
         if (stopLossPrice is { } sl)
         {
-            exits.Add($"\"stop-loss\" {Signed(isLong ? -stopLossPercent : stopLossPercent)} % (ties {Money(sl)} $)");
+            exits.Add($"\"stop-loss\" {Bold(Signed(isLong ? -stopLossPercent : stopLossPercent) + " %")} (ties {Money(sl)} $)");
         }
 
         if (exits.Count > 0)
@@ -171,13 +171,14 @@ internal static class FuturesEntryAnnouncement
     {
         var text = new StringBuilder();
         text.Append(pnlUsd > 0m ? CloseProfit : CloseLoss).Append(' ').Append(label).Append(" · ")
-            .Append(pair).Append(' ').Append(side.ToUpperInvariant()).Append(" uždaryta\n");
-        text.Append("Įdėjau ").Append(Money(marginUsd)).Append(" $ savo pinigų (pozicijoje dirbo ")
+            .Append(pair).Append(' ').Append(Bold(side.ToUpperInvariant())).Append(" uždaryta\n");
+        text.Append("Įdėjau ").Append(Bold(Money(marginUsd) + " $")).Append(" savo pinigų (pozicijoje dirbo ")
             .Append(Money(notionalUsd)).Append(" $, svertas ").Append(leverage.ToString("0.##", Lt)).Append("×).\n");
 
         var pct = marginUsd > 0m ? pnlUsd / marginUsd * 100m : 0m;
-        text.Append(pnlUsd > 0m ? "Uždirbau " : "Praradau ")
-            .Append(Signed(pnlUsd, 2)).Append(" $ — tai ").Append(Signed(pct, 0)).Append(" % nuo įdėtų.\n");
+        text.Append(Bold(pnlUsd > 0m ? "Uždirbau" : "Praradau")).Append(' ')
+            .Append(Bold(Signed(pnlUsd, 2) + " $")).Append(" — tai ")
+            .Append(Bold(Signed(pct, 0) + " %")).Append(" nuo įdėtų.\n");
 
         text.Append("Atidariau už ").Append(Money(entryPrice)).Append(" $, uždariau už ")
             .Append(Money(exitPrice)).Append(" $ · laikiau ").Append(Hold(held)).Append('\n');
@@ -190,6 +191,15 @@ internal static class FuturesEntryAnnouncement
         text.Append("Kodėl uždaryta: ").Append(why).Append('.');
         return text.ToString();
     }
+
+    // Telegram gives a bot bold but no colour, so the numbers carry the emphasis and
+    // the icons carry the verdict. HTML rather than MarkdownV2: the only characters
+    // needing escapes are the three below, where MarkdownV2 would demand a backslash
+    // in front of every dot and dash in a price.
+    private static string Bold(string text) => "<b>" + Escape(text) + "</b>";
+
+    private static string Escape(string text) =>
+        text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     private static string Hold(TimeSpan held)
     {

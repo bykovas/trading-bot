@@ -1,3 +1,11 @@
+## 2026-08-25-bold-figures-new-marks-and-the-spread-ceiling-goes-back
+
+- Post marks change again at the owner's direction: up-arrow+dollar for a LONG opening, down-arrow+dollar for a SHORT, dollar+moneybag for a profitable close, dollar+flying-money for a loss.
+- Figures are bold now. Telegram gives a bot bold but no colour at all - there is no colour in the Bot API, and the only trick that produces one (a diff-highlighted code block) forces monospace, a code frame, a leading +/- and colours whole lines, so it was shown and declined. Posts switch to HTML parse mode; the composer escapes the three characters that mode cares about, which is why HTML and not MarkdownV2 - the latter would need a backslash before every dot and dash in a price.
+- `Strategy.MaxEntrySpreadPercent` on the experiment arm goes back to the control's 0.25 after one day at 0.08. Measured on the arm's own decision stream: the median decision carries a 0.308% spread and 80.5% of them exceed 0.08, so the ceiling was refusing four fifths of the universe. It was the arm's only change with no held-out evidence behind it, which makes it the only one worth undoing on a single day's observation.
+- A correction to yesterday's note, on the record: the claim that the spread gate cost the arm the ZEC winner was NOT established. The ZEC decisions available for inspection are from 07:08-08:01 while the control entered at 00:04, and the one that could be read in full says "no position and desired exposure is flat" - the strategy did not want the pair at that moment, no gate refused it. The cause was asserted without evidence and is withdrawn.
+- The arms now differ only on things validated on held-out 2026: disabled long channels, the BTC ceiling for shorts, the exit structure, and the slot count.
+
 ## 2026-08-25-the-channel-gets-its-final-icon-set
 
 - The post head marks settle on the quietest of four reviewed sets: a bare diagonal arrow for the bet (arrow-up-right LONG, arrow-down-right SHORT), a verdict for the outcome (check profit, cross loss). One glyph per state, no two states sharing a silhouette, so a notification preview reads at a glance. The white circle stays on the regime line as the one neutral mark.

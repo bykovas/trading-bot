@@ -27,9 +27,10 @@ internal sealed class TelegramNotifier(TelegramNotificationOptions options, Http
 
         try
         {
-            // No parse_mode: the text carries emoji and currency signs but no markup, and
-            // Telegram's markdown would demand escaping every '.' and '-' in a price.
-            var payload = JsonSerializer.Serialize(new { chat_id = options.ChatId, text });
+            // HTML, not MarkdownV2: the posts carry <b> around the figures, and markdown
+            // would demand a backslash in front of every dot and dash in a price. The
+            // composer escapes the three characters HTML mode cares about.
+            var payload = JsonSerializer.Serialize(new { chat_id = options.ChatId, text, parse_mode = "HTML" });
             using var content = new StringContent(payload, Encoding.UTF8, "application/json");
             using var response = await _http.PostAsync(
                 $"https://api.telegram.org/bot{options.BotToken}/sendMessage",
