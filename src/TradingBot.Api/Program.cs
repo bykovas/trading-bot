@@ -2235,8 +2235,15 @@ static async Task BackfillDailyEquity(
             where median.median > 0
               and series.median > 0
               and median.median >= series.median / 10.0
+              -- Both bounds widen by the day's cash movement, not just the upper one.
+              -- The upper widening came from a 562 USD deposit the band was deleting;
+              -- the lower bound kept its bare median/3 until a 400 USD withdrawal on
+              -- 2026-08-24 pushed every later cycle under it. The whole evening was
+              -- discarded as noise: the day closed on a value from before the
+              -- withdrawal, the observed window shrank so the withdrawal fell outside
+              -- it, and the page painted the missing money as the bot's loss.
               and value.value
-                  between median.median / 3.0
+                  between greatest(median.median - coalesce(cash.moved, 0), 0) / 3.0
                   and (median.median + coalesce(cash.moved, 0)) * 3.0
         )
         insert into portfolio_daily_equity
@@ -3587,7 +3594,10 @@ internal static class DashboardDefaults
 
     // Bump when the daily rollup's computation changes: stored days from an older
     // revision are dropped and rebuilt on the next read.
-    public const int RollupRevision = 6;
+    // 7: the outlier band's lower bound widens by the day's cash movement (the upper
+    // already did). Bumping forces the daily rollup to re-materialize, which is the
+    // point - 2026-08-24 is stored with its post-withdrawal evening discarded.
+    public const int RollupRevision = 7;
 }
 
 internal readonly record struct DecisionKey(string CycleId, int DecisionIndex);
