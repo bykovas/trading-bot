@@ -17,10 +17,8 @@ jobs:
     steps:
       - name: Ledger rows for futures-live since Aug 22
         run: |
-          docker exec trading-bot-database psql -U tradingbot -d tradingbot -c \
-            "select occurred_at_utc, kind, round(amount_eur::numeric,2) as amount, asset from portfolio_cash_events where bot_instance_id='futures-live' and occurred_at_utc > '2026-08-22' order by occurred_at_utc" \
-          || docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select occurred_at_utc, kind, round(amount_eur::numeric,2) as amount, asset from portfolio_cash_events where bot_instance_id='futures-live' and occurred_at_utc > '2026-08-22' order by occurred_at_utc"
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select occurred_at, event_type, round(amount::numeric,2) as amount, asset, source from portfolio_cash_events where bot_instance_id='futures-live' and occurred_at > '2026-08-22' order by occurred_at"
 
       - name: Worker cash-event log lines, last 36h
         run: |
