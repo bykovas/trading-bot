@@ -1,0 +1,54 @@
+# One-off server diagnostics, runnable only by hand (workflow_dispatch) and only by
+# someone with write access. It exists because the workstation has no interactive SSH
+# into the box while the deploy runner lives on it.
+#
+# The repo is PUBLIC, so everything echoed here is public. The steps therefore print
+# only what the dashboard already publishes - transfer kinds, amounts and dates - and
+# whatever they read from the worker env stays inside the runner: keys are used to SIGN
+# one read-only request and are never echoed.
+name: server-diagnose
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cash-events:
+    runs-on: self-hosted
+    steps:
+      - name: Ledger rows for futures-live since Aug 22
+        run: |
+          docker exec trading-bot-database psql -U tradingbot -d tradingbot -c \
+            "select occurred_at_utc, kind, round(amount_eur::numeric,2) as amount, asset from portfolio_cash_events where bot_instance_id='futures-live' and occurred_at_utc > '2026-08-22' order by occurred_at_utc" \
+          || docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select occurred_at_utc, kind, round(amount_eur::numeric,2) as amount, asset from portfolio_cash_events where bot_instance_id='futures-live' and occurred_at_utc > '2026-08-22' order by occurred_at_utc"
+
+      - name: Worker cash-event log lines, last 36h
+        run: |
+          docker logs --since 36h trading-bot-futures-worker-live 2>&1 | grep -i "cash-event" | tail -25 || true
+
+      - name: Raw Kraken account-log entry kinds, last 4 days
+        run: |
+          docker run --rm --env-file /opt/trading-bot/futures/live/.env python:3.12-alpine python - <<'PY'
+          import base64, hashlib, hmac, json, os, time, urllib.request
+          key = os.environ["TRADINGBOT_KRAKEN_FUTURES_API_KEY"]
+          secret = os.environ["TRADINGBOT_KRAKEN_FUTURES_API_SECRET"]
+          path = "/api/history/v3/account-log"
+          post = "count=500&sort=desc"
+          nonce = str(int(time.time() * 1000))
+          digest = hashlib.sha256((post + nonce + path).encode()).digest()
+          authent = base64.b64encode(hmac.new(base64.b64decode(secret), digest, hashlib.sha512).digest()).decode()
+          req = urllib.request.Request(
+              "https://futures.kraken.com" + path + "?" + post,
+              headers={"APIKey": key, "Nonce": nonce, "Authent": authent, "Accept": "application/json"})
+          data = json.load(urllib.request.urlopen(req, timeout=30))
+          cutoff = "2026-08-21"
+          for row in data.get("logs", []):
+              date = str(row.get("date", ""))
+              if date < cutoff:
+                  continue
+              info = str(row.get("info", ""))
+              if info in ("futures trade", "funding rate change"):
+                  continue
+              print(f"{date[:19]}  info={info!r}  asset={row.get('asset')}  change={row.get('change')}  "
+                    f"old={row.get('old_balance')}  new={row.get('new_balance')}  type={row.get('entry_type', row.get('type'))}")
+          PY
