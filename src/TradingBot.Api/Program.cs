@@ -53,6 +53,43 @@ app.MapGet("/api/bot-instances", async (CancellationToken cancellationToken) =>
     }
 });
 
+// Public status strip for blynai.eu. Deliberately tiny where /api/dashboard is ~40 KB:
+// the company page shows five numbers and must not pull a journal payload to do it.
+//
+// The field names below are a PUBLIC CONTRACT consumed by blynai.eu - do not rename
+// them after shipping. The page fetches this host, falls back to the other journal,
+// and shows em-dashes if both fail, so an outage here never breaks the page. CORS is
+// not set here: Traefik's trading-bot-cors middleware already answers every /api path
+// with access-control-allow-origin *, which is where /api/dashboard gets it too.
+app.MapGet("/api/public-stats", async (CancellationToken cancellationToken) =>
+{
+    var connectionString = GetConnectionString(builder.Configuration);
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    var liveSince = PublicStatsLiveSinceUtc(builder.Configuration);
+    var now = DateTimeOffset.UtcNow;
+
+    try
+    {
+        var stats = await ReadPublicStats(connectionString, liveSince, now, cancellationToken);
+        return Results.Ok(stats);
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+        throw;
+    }
+    catch (Exception ex)
+    {
+        // No partial JSON: the page prefers em-dashes to half a truth, and a 503 is
+        // what makes it fall back to the other journal rather than render zeros.
+        Console.WriteLine($"public-stats FAILED: {ex.GetType().Name}: {ex.Message}");
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+});
+
 app.MapGet("/api/bot-status", async (string? botInstanceId, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
@@ -398,6 +435,132 @@ app.MapGet("/api/export/cycles-and-snapshots.csv", () =>
 });
 
 app.Run();
+
+// The date the project went live, which predates the oldest row in the database - so
+// it is configured, not derived. PublicStats:LiveSinceUtc, or the env form
+// PublicStats__LiveSinceUtc, lets it be corrected without a rebuild.
+static DateTimeOffset PublicStatsLiveSinceUtc(IConfiguration configuration)
+{
+    var configured = configuration["PublicStats:LiveSinceUtc"];
+    return DateTimeOffset.TryParse(
+        configured,
+        CultureInfo.InvariantCulture,
+        DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+        out var parsed)
+        ? parsed
+        : PublicStatsDefaults.LiveSinceUtc;
+}
+
+// One database round trip behind a process-wide cache. The count is the expensive part
+// and the numbers are for a status strip that stamps its own timestamp, so serving one
+// up to PublicStatsDefaults.CacheFor old is honest and keeps a scraped page from
+// counting several million rows per request.
+static async Task<PublicStatsDto> ReadPublicStats(
+    string connectionString,
+    DateTimeOffset liveSinceUtc,
+    DateTimeOffset now,
+    CancellationToken cancellationToken)
+{
+    lock (PublicStatsCache.Gate)
+    {
+        if (PublicStatsCache.Value is { } cached && now - cached.Utc < PublicStatsDefaults.CacheFor)
+        {
+            return cached;
+        }
+    }
+
+    await PublicStatsCache.Lock.WaitAsync(cancellationToken);
+    try
+    {
+        lock (PublicStatsCache.Gate)
+        {
+            if (PublicStatsCache.Value is { } cached && now - cached.Utc < PublicStatsDefaults.CacheFor)
+            {
+                return cached;
+            }
+        }
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var instances = await ReadPublicStatsInstances(connection, cancellationToken);
+        var decisionsTotal = await ReadDecisionsTotal(connection, cancellationToken);
+
+        // "Running" is the dashboard's own rule: a cycle no older than ten minutes.
+        // The night-window state it can also produce only applies to spot instances,
+        // which are excluded here anyway, so a futures worker is running or stale.
+        var running = instances
+            .Where(instance => now - instance.LatestCycleUtc <= PublicStatsDefaults.StaleAfter)
+            .ToList();
+
+        var fresh = new PublicStatsDto(
+            now,
+            running.Count == 0 ? null : running.Max(instance => instance.LatestCycleUtc),
+            liveSinceUtc,
+            running.Sum(instance => instance.ActivePairsCount),
+            decisionsTotal,
+            running);
+
+        lock (PublicStatsCache.Gate)
+        {
+            PublicStatsCache.Value = fresh;
+        }
+
+        return fresh;
+    }
+    finally
+    {
+        PublicStatsCache.Lock.Release();
+    }
+}
+
+// Latest cycle per instance, from the index on (bot_instance_id, utc desc, cycle_id
+// desc) - a handful of index seeks rather than a scan.
+//
+// Spot and virtual workers are left out: the strip is about the live futures book, and
+// a paper account inflating the pair count would be a lie of the quiet kind.
+static async Task<List<PublicStatsInstanceDto>> ReadPublicStatsInstances(
+    NpgsqlConnection connection,
+    CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand(
+        """
+        select distinct on (bot_instance_id)
+            bot_instance_id,
+            utc,
+            coalesce(active_pairs_count, 0)
+        from dry_run_cycle_facts
+        where bot_instance_id not like 'spot-%'
+          and bot_instance_id not like '%virtual%'
+        order by bot_instance_id, utc desc
+        """,
+        connection);
+    command.CommandTimeout = PublicStatsDefaults.QueryTimeoutSeconds;
+
+    var instances = new List<PublicStatsInstanceDto>();
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    while (await reader.ReadAsync(cancellationToken))
+    {
+        instances.Add(new PublicStatsInstanceDto(
+            reader.GetString(0),
+            reader.GetInt32(2),
+            new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc))));
+    }
+
+    return instances;
+}
+
+// Every per-pair decision row ever written, across all instances: one row per pair per
+// cycle in dry_run_decision_facts. That table is what the dry_run_decisions view - and
+// therefore /api/decisions - reads from, so this counts exactly the records the site
+// calls "irasytu sprendimu". Cycles, actions and diagnostics live in their own tables
+// and are deliberately NOT counted.
+static async Task<long> ReadDecisionsTotal(NpgsqlConnection connection, CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand("select count(*) from dry_run_decision_facts", connection);
+    command.CommandTimeout = PublicStatsDefaults.QueryTimeoutSeconds;
+    return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+}
 
 static string GetConnectionString(IConfiguration configuration) =>
     Environment.GetEnvironmentVariable("TRADINGBOT_DATABASE_CONNECTION_STRING")
@@ -3568,6 +3731,49 @@ partial class Program
 
 // Per-instance cache for the drawdown scan; top-level statements cannot hold
 // static state, so it lives here next to the schema flag.
+// The public contract behind /api/public-stats. blynai.eu reads these names, so they
+// are frozen: renaming one silently blanks a number on the company page.
+internal sealed record PublicStatsDto(
+    DateTimeOffset Utc,
+    // Null when no live worker has reported inside the staleness window, which the page
+    // renders as an em-dash rather than as a stale time pretending to be current.
+    DateTimeOffset? LastCycleUtc,
+    DateTimeOffset LiveSinceUtc,
+    int MarketsNow,
+    long DecisionsTotal,
+    IReadOnlyList<PublicStatsInstanceDto> Instances);
+
+internal sealed record PublicStatsInstanceDto(
+    string BotInstanceId,
+    int ActivePairsCount,
+    DateTimeOffset LatestCycleUtc);
+
+internal static class PublicStatsDefaults
+{
+    // Matches the dashboard's own staleness rule, so a worker the journal calls stale
+    // is not called live by the company page thirty seconds later.
+    public static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(10);
+
+    // The page stamps the response's own utc as "Ismatuota {ts}", so serving a value up
+    // to two minutes old is accurate rather than merely tolerable.
+    public static readonly TimeSpan CacheFor = TimeSpan.FromSeconds(120);
+
+    // Neither query may hold a request open long enough to matter: the page gives up
+    // after about four seconds and falls back to the other journal.
+    public const int QueryTimeoutSeconds = 5;
+
+    // When the project started trading, which is earlier than the first row in the
+    // database. Overridden by PublicStats:LiveSinceUtc.
+    public static readonly DateTimeOffset LiveSinceUtc = new(2026, 3, 24, 0, 0, 0, TimeSpan.Zero);
+}
+
+internal static class PublicStatsCache
+{
+    public static readonly object Gate = new();
+    public static readonly SemaphoreSlim Lock = new(1, 1);
+    public static PublicStatsDto? Value;
+}
+
 internal static class DrawdownCache
 {
     public static readonly Dictionary<string, (decimal Percent, DateTimeOffset At)> Values = new();

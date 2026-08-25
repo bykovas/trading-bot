@@ -443,6 +443,13 @@ run_healthcheck_with_retries "trading-bot-api container" 30 2 \
   docker run --rm --network container:trading-bot-ui busybox:1.36 \
     wget -q -O /dev/null http://trading-bot-api:8080/api/health
 
+# Public stats: blynai.eu's status strip reads this, and it is the one endpoint whose
+# failure is invisible from the journals - the company page just shows em-dashes. It
+# needs the database, unlike /api/health, so it also proves the API can reach Postgres.
+run_healthcheck_with_retries "trading-bot-api public stats" 30 2 \
+  docker run --rm --network container:trading-bot-ui busybox:1.36 \
+    wget -q -O /dev/null http://trading-bot-api:8080/api/public-stats
+
 # Worker health: workers have no HTTP endpoint, so verify every enabled container.
 # Only the workers that handle real money. The three paper ones moved behind the
 # `paper` compose profile: they never placed an order, and health-checking a container
