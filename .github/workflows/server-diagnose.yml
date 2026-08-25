@@ -20,6 +20,11 @@ jobs:
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
             "select occurred_at, event_type, round(amount::numeric,2) as amount, asset, source from portfolio_cash_events where bot_instance_id='futures-live' and occurred_at > '2026-08-22' order by occurred_at"
 
+      - name: Why futures-live skipped HYPE while the control took it
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.utc, d.bot_instance_id, d.action, d.desired_position, round(d.score::numeric,2) as score, round(d.spread_percent::numeric,4) as spread, d.entry_rejection_reason, left(coalesce(d.reason,''),120) as reason from dry_run_decisions d where d.pair='HYPE/USD' and d.utc between '2026-08-25 00:30' and '2026-08-25 01:00' order by d.utc, d.bot_instance_id"
+
       - name: Worker cash-event log lines, last 36h
         run: |
           docker logs --since 36h trading-bot-futures-worker-live 2>&1 | grep -i "cash-event" | tail -25 || true
