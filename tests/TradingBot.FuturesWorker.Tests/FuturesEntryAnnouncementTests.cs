@@ -19,7 +19,7 @@ public sealed class FuturesEntryAnnouncementTests
     {
         var text = EthShort("ShortReclaim");
 
-        Assert.StartsWith("\U0001F534 LUKO · ETH/USD SHORT", text);
+        Assert.StartsWith("\u2198\uFE0F LUKO · ETH/USD SHORT", text);
         Assert.Contains("Atidariau ETH/USD žemyn, kaina 2 436,37 $.", text);
         Assert.Contains("Įdėjau 15,00 $ savo pinigų (pozicijoje dirba 150,00 $, svertas 10×).", text);
         Assert.DoesNotContain("atidaryčiau", text);
@@ -42,7 +42,7 @@ public sealed class FuturesEntryAnnouncementTests
             "BYKO", "ARB/USD", "LONG", 0.10329m, 15m, 150m, 10m, "Breakout",
             0.1074216m, 0.1012242m, 4m, 2m, 0.85m, 2.42m);
 
-        Assert.StartsWith("\U0001F7E2 BYKO ·", text);
+        Assert.StartsWith("\u2197\uFE0F BYKO ·", text);
         Assert.Contains("Atidariau ARB/USD į viršų", text);
         Assert.Contains("\"Take Profit\" limitą pastačiau +4 % (ties 0,10742 $)", text);
         Assert.Contains("\"stop-loss\" −2 % (ties 0,10122 $)", text);
@@ -55,7 +55,7 @@ public sealed class FuturesEntryAnnouncementTests
     {
         var lines = WithDetails().Split('\n');
 
-        Assert.StartsWith("\U0001F534 LUKO · ETH/USD SHORT", lines[0]);
+        Assert.StartsWith("\u2198\uFE0F LUKO · ETH/USD SHORT", lines[0]);
         Assert.StartsWith("Atidariau", lines[1]);
         Assert.Contains("Kodėl:", lines[1]);
         Assert.StartsWith("Įdėjau", lines[2]);
@@ -122,7 +122,7 @@ public sealed class FuturesEntryAnnouncementTests
             entryPrice: 0.3812m, exitPrice: 0.3976m, pnlUsd: 6.45m,
             held: new TimeSpan(2, 14, 0), reasonCode: "SELL_TRAILING_STOP");
 
-        Assert.StartsWith("\U0001F7E2 LUKO · XLM/USD LONG uždaryta", text);
+        Assert.StartsWith("\u2705 LUKO · XLM/USD LONG uždaryta", text);
         Assert.Contains("Įdėjau 15,00 $ savo pinigų (pozicijoje dirbo 150,00 $, svertas 10×).", text);
         Assert.Contains("Uždirbau +6,45 $ — tai +43 % nuo įdėtų.", text);
         Assert.Contains("Atidariau už 0,38120 $, uždariau už 0,39760 $ · laikiau 2 val. 14 min.", text);
@@ -137,7 +137,7 @@ public sealed class FuturesEntryAnnouncementTests
             entryPrice: 2.4818m, exitPrice: 2.4278m, pnlUsd: -3.27m,
             held: TimeSpan.FromMinutes(52), reasonCode: "SELL_STOP_LOSS");
 
-        Assert.StartsWith("\U0001F534 BYKO · PENDLE/USD LONG uždaryta", text);
+        Assert.StartsWith("\u274C BYKO · PENDLE/USD LONG uždaryta", text);
         Assert.Contains("Praradau −3,27 $ — tai −22 % nuo įdėtų.", text);
         Assert.Contains("laikiau 52 min.", text);
         Assert.Contains("Kodėl uždaryta: kaina pasiekė stop-loss.", text);

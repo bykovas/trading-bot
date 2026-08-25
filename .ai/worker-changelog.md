@@ -1,3 +1,9 @@
+## 2026-08-25-the-channel-gets-its-final-icon-set
+
+- The post head marks settle on the quietest of four reviewed sets: a bare diagonal arrow for the bet (arrow-up-right LONG, arrow-down-right SHORT), a verdict for the outcome (check profit, cross loss). One glyph per state, no two states sharing a silhouette, so a notification preview reads at a glance. The white circle stays on the regime line as the one neutral mark.
+- Chosen by the owner from four rendered candidates - two of his (chart+arrow openings, dollar+arrow closes) and two counter-proposals; the minimalist set won.
+- Text, wiring and everything else in the posts unchanged.
+
 ## 2026-08-24-both-bots-speak-and-closes-get-announced
 
 - Both workers write the Telegram channel now, each under its own label - `Telegram.Label`: LUKO for the control, BYKO for the experiment arm. The label heads every post; two voices in one channel without it would read as one bot contradicting itself. deploy.sh routes the token into futures-live's env as well.

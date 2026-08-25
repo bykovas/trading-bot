@@ -16,10 +16,14 @@ internal static class FuturesEntryAnnouncement
     // built with InvariantGlobalization, or with DOTNET_SYSTEM_GLOBALIZATION_INVARIANT
     // set, silently hands back the invariant culture and the channel starts posting
     // "2,338.91" to Lithuanian readers. This cannot drift with the base image.
-    // One series, three colours. Filled circles only - a dart board, a road sign and a
-    // cog render in three different drawing styles and read as borrowed clip art.
-    private const string Green = "\U0001F7E2";
-    private const string Red = "\U0001F534";
+    // The quietest set of the four the owner reviewed: a bare diagonal arrow for the
+    // bet, a verdict for the outcome. One glyph per state, no two states sharing a
+    // silhouette, so a notification preview reads at a glance. The white circle stays
+    // on the regime line as the one neutral mark.
+    private const string OpenLong = "\u2197\uFE0F";
+    private const string OpenShort = "\u2198\uFE0F";
+    private const string CloseProfit = "\u2705";
+    private const string CloseLoss = "\u274C";
     private const string Neutral = "\U000026AA";
 
     private static readonly NumberFormatInfo Lt = new()
@@ -68,7 +72,7 @@ internal static class FuturesEntryAnnouncement
         // meaning - green is up or good, red is down or bad, white is neither. A dart
         // board, a road sign and a cog are three different drawing styles pretending to
         // be a set.
-        text.Append(isLong ? Green : Red).Append(' ').Append(label).Append(" · ").Append(pair)
+        text.Append(isLong ? OpenLong : OpenShort).Append(' ').Append(label).Append(" · ").Append(pair)
             .Append(' ').Append(isLong ? "LONG" : "SHORT").Append('\n');
 
         if (!Reasons.TryGetValue(entryChannel ?? "Standard", out var reason))
@@ -166,7 +170,7 @@ internal static class FuturesEntryAnnouncement
         string reasonCode)
     {
         var text = new StringBuilder();
-        text.Append(pnlUsd > 0m ? Green : Red).Append(' ').Append(label).Append(" · ")
+        text.Append(pnlUsd > 0m ? CloseProfit : CloseLoss).Append(' ').Append(label).Append(" · ")
             .Append(pair).Append(' ').Append(side.ToUpperInvariant()).Append(" uždaryta\n");
         text.Append("Įdėjau ").Append(Money(marginUsd)).Append(" $ savo pinigų (pozicijoje dirbo ")
             .Append(Money(notionalUsd)).Append(" $, svertas ").Append(leverage.ToString("0.##", Lt)).Append("×).\n");
