@@ -3762,9 +3762,10 @@ internal static class PublicStatsDefaults
     // after about four seconds and falls back to the other journal.
     public const int QueryTimeoutSeconds = 5;
 
-    // When the project started trading, which is earlier than the first row in the
-    // database. Overridden by PublicStats:LiveSinceUtc.
-    public static readonly DateTimeOffset LiveSinceUtc = new(2026, 3, 24, 0, 0, 0, TimeSpan.Zero);
+    // The day the project started: commit 295bd35 "Initial commit", 2026-07-02 09:02
+    // +03:00. Earlier than the oldest row in the database, which is why this is a
+    // constant. Overridden by PublicStats:LiveSinceUtc without a rebuild.
+    public static readonly DateTimeOffset LiveSinceUtc = new(2026, 7, 2, 0, 0, 0, TimeSpan.Zero);
 }
 
 internal static class PublicStatsCache
