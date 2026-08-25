@@ -69,7 +69,7 @@ internal sealed class FuturesDecisionWorker(
             Console.WriteLine("!!! FUTURES LIVE TRADING ENABLED: approved decisions will place REAL Kraken Futures market orders !!!");
         }
         Console.WriteLine($"futures limits: leverage<= {config.Futures.MaxLeverage:0.#}x, positions<= {config.Futures.MaxPositions}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flipLongEntries={config.Futures.FlipLongEntries}, ownSignalEntries={(config.Futures.OwnSignalEntriesEnabled ? "on" : "off (mirror only)")}, mirrorRole={MirrorRole}");
-        Console.WriteLine($"futures exit checks: fastExit={config.Futures.FastExitCheckSeconds}s fullCycle={config.Worker.LoopIntervalSeconds}s");
+        Console.WriteLine($"futures exit checks: fastExit={config.Futures.FastExitCheckSeconds}s fullCycle={config.Worker.LoopIntervalSeconds}s aligned={config.Worker.AlignCyclesToClock}");
         HydratePriceHistory();
 
         // One-shot repair when the operator asks for it, before the first cycle so the
@@ -103,9 +103,21 @@ internal sealed class FuturesDecisionWorker(
         }
     }
 
+    // The next cycle lands on a fixed wall-clock grid rather than "whenever this one
+    // finished, plus the interval". Scheduling from the finish time adds the cycle's own
+    // duration to every gap - 120s configured came out as 133s measured - and, worse, the
+    // phase drifts continuously, so two workers on the same interval poll the market
+    // 10-30 seconds apart and read different sides of a threshold. futures-live saw a
+    // HYPE breakout 11 seconds before futures-lukas-live did on 2026-08-25, scored it
+    // identically at 0.85, and came out FLAT where the other came out LONG.
+    //
+    // On the grid both wake at the same instant, and a cycle that overruns simply misses
+    // its slot instead of pushing the whole schedule along.
     private async Task WaitUntilNextDecisionCycleAsync(CancellationToken cancellationToken)
     {
-        var nextDecisionUtc = DateTimeOffset.UtcNow.AddSeconds(config.Worker.LoopIntervalSeconds);
+        var nextDecisionUtc = config.Worker.AlignCyclesToClock
+            ? NextAlignedCycleUtc(DateTimeOffset.UtcNow, config.Worker.LoopIntervalSeconds)
+            : DateTimeOffset.UtcNow.AddSeconds(config.Worker.LoopIntervalSeconds);
         var fastExitInterval = TimeSpan.FromSeconds(config.Futures.FastExitCheckSeconds);
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -135,6 +147,15 @@ internal sealed class FuturesDecisionWorker(
                 Console.WriteLine($"futures fast-exit-check FAILED: {ex.Message}");
             }
         }
+    }
+
+    // The first grid point strictly after `now`. Ticks rather than seconds so an interval
+    // that does not divide the minute still lands on a repeatable grid shared by every
+    // process using the same interval.
+    internal static DateTimeOffset NextAlignedCycleUtc(DateTimeOffset now, int intervalSeconds)
+    {
+        var ticks = TimeSpan.FromSeconds(Math.Max(1, intervalSeconds)).Ticks;
+        return new DateTimeOffset((now.UtcTicks / ticks + 1) * ticks, TimeSpan.Zero);
     }
 
     public async Task RunCycleAsync(CancellationToken cancellationToken)

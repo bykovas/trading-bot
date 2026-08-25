@@ -24,6 +24,13 @@ public sealed class WorkerOptions
     public bool RunOnce { get; set; } = true;
     public int LoopIntervalSeconds { get; set; } = 300;
 
+    // Schedule cycles on a fixed wall-clock grid instead of from the previous cycle's
+    // finish time. Scheduling from the finish adds the cycle's own duration to every
+    // gap - 120s configured measured 133s on futures-live - and the phase drifts, so
+    // two workers on the same interval end up polling the market 10-30 seconds apart
+    // and reading opposite sides of a value sitting on a threshold.
+    public bool AlignCyclesToClock { get; set; } = true;
+
     // Optional light-market polling cadence between full decision cycles. When set
     // below LoopIntervalSeconds, the spot worker persists extra ticker snapshots and
     // feeds the price-action guard without running full candle/scoring/order logic.

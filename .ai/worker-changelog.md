@@ -1,3 +1,12 @@
+## 2026-08-25-cycles-land-on-a-clock-grid
+
+- Decision cycles are scheduled on a fixed wall-clock grid instead of "when this one finished, plus the interval" (`Worker.AlignCyclesToClock`, default true, so both instances share it without either configuring it).
+- Why: scheduling from the finish adds the cycle's own duration to every gap - 120s configured measured 133s on futures-live, the cycle itself taking ~13s over 78 pairs - and the phase drifts continuously. Two workers on the same interval therefore poll the market 10-30 seconds apart, which is enough to land on opposite sides of a threshold.
+- The case that found it: on 2026-08-25 at 00:42 futures-live polled HYPE/USD 11 seconds before futures-lukas-live. Both scored it 0.85, both had free slots, the spread was tighter on the arm (0.046 vs 0.058) - and the arm came out `desired=FLAT` while the control came out `LONG`. The difference is `AllowsLong`, which turns on only when the EMA gap clears 0.2%; the gap was sitting on that line and the two polls read it differently. No experimental filter was involved.
+- Consequence for the experiment: cycle-phase drift produces divergences between the arms all by itself, of a size comparable to the effect being measured. On the grid both wake at the same instant, so what differs between the arms is what was configured to differ.
+- An overrunning cycle now misses its slot instead of pushing the schedule along, so the drift cannot re-accumulate. Effective cadence becomes the configured 120s rather than 133s - about 60 more cycles a day, applied equally to both arms.
+- Two corrections on the record from the same investigation: the arm did NOT skip HYPE because its slots were busy (its book was empty), and it did NOT skip it on the spread gate (the spread passed even at the old 0.08 ceiling). Both causes were asserted here before being checked, and both are withdrawn.
+
 ## 2026-08-25-bold-figures-new-marks-and-the-spread-ceiling-goes-back
 
 - Post marks change again at the owner's direction: up-arrow+dollar for a LONG opening, down-arrow+dollar for a SHORT, dollar+moneybag for a profitable close, dollar+flying-money for a loss.
