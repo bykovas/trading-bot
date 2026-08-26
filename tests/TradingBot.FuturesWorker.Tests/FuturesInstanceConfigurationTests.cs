@@ -136,6 +136,10 @@ public sealed class FuturesInstanceConfigurationTests
             ("Futures", "DisabledLongEntryChannels"),
             ("Shorts", "MaxBtc24hRisePercentForShort"),
             ("TpSl", "TakeProfitPercent"),
+            // Trailing distance: 0.5 on the arm against the control's 0.75. The only
+            // exit parameter where a 45-day counterfactual and an independent forward
+            // day agreed on both sign and size (+0.05-0.06pp per trade each).
+            ("TpSl", "TrailingStopPercent"),
             ("Exits", "SignalReversalExitEnabled"),
             // The arm runs wider: five slots, two per correlated sector, the full
             // universe scanned. The totals above already scale per-position x slots.

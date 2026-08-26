@@ -1,3 +1,12 @@
+## 2026-08-26-the-arm-trails-tighter
+
+- `TpSl.TrailingStopPercent` on futures-live goes 0.75 -> 0.5. The control keeps 0.75, so this is the arm's sixth deliberate difference and the first exit parameter changed since 2026-08-24.
+- Why this one and nothing else from a long day of measurement: it is the only setting where two independent calculations agreed on both sign and size. A 45-day counterfactual over the arm's own scan universe put it at +0.05-0.06pp per trade, and an independent forward day on live decisions (2026-08-25 10:10 - 2026-08-26 11:18, 69 completed trades) put it at +0.05-0.06pp as well. Everything else measured today either failed a held-out test or was refuted on that same forward data.
+- Size honestly: 0.05pp on a 150 USD position is about 7 cents a trade. This is not a fix for the arm's economics, it is the one change the evidence actually supports.
+- Exit structure is otherwise untouched: stop 2%, trail arms at the arm's `TakeProfitPercent` of 6%, max hold 360 minutes, reversal exit still off on the arm.
+- Explicitly NOT shipped, on today's evidence: removing the RSI>72 and volatility penalties (the volatility one was measured twice as actively harmful - newly admitted bars returned -1.196% over 30 forward trades), the "+2% within 120 minutes" freshness gate (its apparent gain was a composition effect in near-dead-tape symbols), acceleration-based candidate discovery (an early-impulse condition drops to 5.73% precision against a 5.85% base rate once the coin is required not to have moved yet), the six-rising-5m-candles trigger (-0.167%/trade over six untouched months), any volume-ratio filter (worse than no filter in both windows), trailing from entry, fixed take-profits, and wider slots.
+- The guard test's allow-list of permitted arm/control divergences grows by one entry, so the pair cannot drift further without a deliberate edit.
+
 ## 2026-08-26-maxpositions-was-clamped-to-three
 
 - `Normalize` clamped `Futures.MaxPositions` to `1..3`, so the slot count in appsettings was never the slot count that ran. futures-live asked for 5 on 2026-08-24 and executed on 3 for two days, with nothing in the log to say so and a changelog entry on the record ("MaxPositions 3 -> 5") describing a widening that never took effect. The clamp is now a typo guard at 10, and a value above it says so on stdout instead of being silently rewritten.
