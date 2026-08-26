@@ -16,7 +16,7 @@ public sealed class FuturesInstanceConfigurationTests
         var primary = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.json"));
         var lukas = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.lukas.json"));
 
-        AssertSlotsAreFunded(primary, expectedSlots: 5);
+        AssertSlotsAreFunded(primary, expectedSlots: 12);
         AssertSlotsAreFunded(lukas, expectedSlots: 3);
     }
 
@@ -84,11 +84,15 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.Equal(
             lukas["Strategy"]?["MaxEntrySpreadPercent"]?.GetValue<decimal>(),
             primary["Strategy"]?["MaxEntrySpreadPercent"]?.GetValue<decimal>());
-        // The arm's exit structure: winners run to +6% before the trail arms, and a faded
-        // signal no longer closes the position. The control keeps 4% and the reversal.
-        Assert.Equal(6m, primary["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
+        // Both arms hand off to the trail at the same +4% now - the arm came down from 6
+        // at the owner's direction - so the handoff POINT is no longer an experimental
+        // difference and is pinned equal. What still differs after the handoff is the
+        // trailing distance, and the reversal exit the arm does not use.
+        Assert.Equal(
+            lukas["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>(),
+            primary["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
+        Assert.Equal(4m, primary["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
         Assert.False(primary["Exits"]?["SignalReversalExitEnabled"]?.GetValue<bool>());
-        Assert.Equal(4m, lukas["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
         Assert.Null(lukas["Exits"]?["SignalReversalExitEnabled"]);
         // The control carries neither knob: the experiment must never leak into it.
         Assert.Null(lukas["Futures"]?["DisabledLongEntryChannels"]);
@@ -135,7 +139,6 @@ public sealed class FuturesInstanceConfigurationTests
             // The experiment arm's own knobs; absent on the control by design.
             ("Futures", "DisabledLongEntryChannels"),
             ("Shorts", "MaxBtc24hRisePercentForShort"),
-            ("TpSl", "TakeProfitPercent"),
             // Trailing distance: 0.5 on the arm against the control's 0.75. The only
             // exit parameter where a 45-day counterfactual and an independent forward
             // day agreed on both sign and size (+0.05-0.06pp per trade each).

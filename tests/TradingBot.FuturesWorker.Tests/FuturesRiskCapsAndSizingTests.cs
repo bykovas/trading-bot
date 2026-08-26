@@ -373,7 +373,7 @@ public sealed class FuturesRiskCapsAndSizingTests
     [Theory]
     [InlineData(3, 3)]   // the control
     [InlineData(5, 5)]   // the experiment arm - this is the case that used to be lost
-    [InlineData(10, 10)] // at the ceiling
+    [InlineData(12, 12)] // the arm
     public void Configured_slot_count_survives_normalization(int configured, int expected)
     {
         var config = LiveConfig();
@@ -385,7 +385,8 @@ public sealed class FuturesRiskCapsAndSizingTests
 
     // The ceiling still catches a typo, and a missing value still falls back to 3.
     [Theory]
-    [InlineData(50, 10)]
+    [InlineData(20, 20)]
+    [InlineData(50, 20)]
     [InlineData(0, 3)]
     [InlineData(-2, 3)]
     public void Nonsense_slot_counts_are_still_corrected(int configured, int expected)

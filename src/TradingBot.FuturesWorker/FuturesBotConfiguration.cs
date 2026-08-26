@@ -4,10 +4,12 @@ namespace TradingBot.FuturesWorker;
 
 internal sealed class FuturesBotConfiguration
 {
-    // Typo guard only. Ten slots at the current 15 USD margin is 150 USD of margin,
-    // far past any equity this account has held; the notional and open-risk caps bind
-    // long before it. Raising it is a config decision, not a code change.
-    private const int MaxPositionsCeiling = 10;
+    // Typo guard only. Twenty slots at the current 15 USD margin is 300 USD of margin,
+    // past any equity this account has held; the notional and open-risk caps bind long
+    // before it, and the margin-utilisation ceiling binds before those. Raised from ten
+    // when the arm went to twelve slots - the guard is meant to catch a stray zero, not
+    // to hold a policy the config is entitled to set.
+    private const int MaxPositionsCeiling = 20;
 
     public BotInstanceOptions BotInstance { get; set; } = new();
     public WorkerOptions Worker { get; set; } = new();
