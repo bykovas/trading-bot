@@ -2051,15 +2051,14 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     // position size.
     const HYPO_CAPITAL = 500;
 
-    // basis="portfolio" forces the pair to be the account's open and close.
-    // The margin basis cannot express a losing day: peakMarginEur is the peak
-    // CONCURRENT margin, while botEur is the whole day's result, so two sequential
-    // trades that each lost produced "14,99 $ -> -12,66 $ · -184,4 %" - an arrow
-    // claiming the margin became a negative number, and a percentage dividing a
-    // cumulative loss by a peak that never held it. On a winning day the same
-    // mismatch merely flatters, which is why it went unnoticed until the losing
-    // card was added.
-    function fillDay(fromEl, toEl, sumEl, day, tail, basis) {
+    // Both cards read the money that was at work, winners and losers alike. When a
+    // day loses more than was ever at work at once the pair ends on a negative
+    // number - "14,99 $ -> -12,66 $" - and that is deliberate: it is what happened.
+    // The day burned through the working money and kept going into what was held
+    // back, and a percentage of the portfolio would have softened that into
+    // something it was not. The fine line below spells it out, because the pair
+    // alone reads as a broken figure rather than as the fact it is.
+    function fillDay(fromEl, toEl, sumEl, day, tail) {
       if (!fromEl || !day || !Number.isFinite(Number(day.open))) return;
       const bot = Number(day.botEur);
       // Green is for a realised gain only; a losing day says so in red.
@@ -2075,8 +2074,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // underneath said the bot had 44.98 in play, and the eye took the first pair
       // for the trade.
       const used = Number(day.peakMarginEur);
-      const onCapital = basis !== "portfolio"
-        && used > 0 && Number.isFinite(Number(day.marginPercent));
+      const onCapital = used > 0 && Number.isFinite(Number(day.marginPercent));
       const trades = Number(day.closedTrades) || 0;
       const tradesText = trades > 0 ? ` (${esc(num(trades, 0))} ${esc(tradesWord(trades))})` : tail;
 
@@ -2162,12 +2160,20 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // identically. Until a day actually ends in the red the card keeps its
       // placeholder rather than dressing the smallest gain as a loss.
       const worst = equity.worstDay;
-      const worstUsed = fillDay(els.worstFrom, els.worstTo, els.worstS, worst, "", "portfolio");
+      const worstPortfolio = fillDay(els.worstFrom, els.worstTo, els.worstS, worst, "");
       if (els.worstFine) {
+        const used = Number(worst && worst.peakMarginEur);
+        const lost = Math.abs(Number(worst && worst.botEur));
+        // The pair above ends below zero exactly when the day lost more than was ever
+        // at work at once. Say that in words rather than leaving a negative number to
+        // be read as a rendering fault.
+        const beyondWorking = used > 0 && lost > used;
         els.worstFine.textContent = worst
-          ? (worstUsed ? `${worstUsed} · ` : "")
-            + `Blogiausia para iki šiol (${worst.date}). Taip nutinka — `
-            + "sekasi įvairiai, nes eksperimentuojam."
+          ? (beyondWorking
+              ? `Vienu metu dirbo daugiausia ${money(used)}, o praradom ${money(lost)} `
+                + "— visus dirbusius pinigus ir dalį rezervo. "
+              : (worstPortfolio ? `${worstPortfolio} · ` : ""))
+            + `Blogiausia para iki šiol (${worst.date}).`
           : "Taip nutinka ne visada — kartais para baigiasi minuse.";
       }
     }

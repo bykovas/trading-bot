@@ -11,6 +11,11 @@ jobs:
   stopped-out:
     runs-on: self-hosted
     steps:
+      - name: Every PROFITABLE close of futures-live since 2026-08-19
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select c.utc as closed_utc, a.pair, a.side, round(a.entry_price::numeric,8) as entry, round(a.fill_price::numeric,8) as exit_px, round(a.quantity::numeric,6) as qty, coalesce(a.exit_reason_code,a.action) as reason, round((case when a.side='SHORT' then (a.entry_price-a.fill_price) else (a.fill_price-a.entry_price) end / a.entry_price * 100)::numeric,2) as pct from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and a.action in ('WOULD_SELL','WOULD_CLOSE') and a.entry_price > 0 and a.fill_price > 0 and (case when a.side='SHORT' then (a.entry_price-a.fill_price) else (a.fill_price-a.entry_price) end) > 0 and c.utc >= '2026-08-19' order by c.utc limit 200"
+
       - name: Which exit reasons closed positions since 2026-08-19
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
