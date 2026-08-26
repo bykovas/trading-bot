@@ -137,8 +137,15 @@ internal static class FuturesLongRangeGuard
                     $"long blocked: low-range confirmations {confirmations}/{requiredConfirmations} met, but neither a fresh upward tape nor {thresholds.ContinuationCandleMomentumLookback}-candle momentum >= {thresholds.MinContinuationCandleMomentumPct:0.###}% confirmed the reversal");
             }
         }
-        else if (thresholds.RequireFreshTapeForLowRangeLong && !freshness.HasFreshUpwardTape)
+        else if (thresholds.RequireFreshTapeForLowRangeLong
+            && !freshness.HasFreshUpwardTape
+            && !freshness.HasFreshBreakout)
         {
+            // HasFreshUpwardTape carries the STRICTER freshContinuationTape (raw tape AND
+            // candle momentum), while HasFreshBreakout was computed from the RAW tape. A
+            // confirmed breakout could therefore be refused here for the very tape it had
+            // already satisfied. A breakout exempts this veto, as it does the anti-chase
+            // ones below.
             return Blocked(FreshTapeNotConfirmed,
                 "long blocked: fresh upward tape not confirmed (rising snapshots and candle momentum did not both hold)");
         }
@@ -147,13 +154,16 @@ internal static class FuturesLongRangeGuard
             // Fresh tape is the gate that implies rising snapshots and a positive slope.
             // When it is switched off, fall back to those weaker vetoes so turning the
             // flag off cannot leave the tape completely unchecked.
-            if (freshness.PositiveStepsInLast3 < thresholds.RequiredRisingSnapshotCount)
+            if (freshness.PositiveStepsInLast3 < thresholds.RequiredRisingSnapshotCount
+                && !freshness.HasFreshBreakout)
             {
                 return Blocked(RisingSnapshotsNotConfirmed,
                     $"long blocked: rising snapshots {freshness.PositiveStepsInLast3} < required {thresholds.RequiredRisingSnapshotCount}");
             }
 
-            if (thresholds.RequirePositiveShortSlope && freshness.ShortSnapshotSlopePct is not > 0m)
+            if (thresholds.RequirePositiveShortSlope
+                && freshness.ShortSnapshotSlopePct is not > 0m
+                && !freshness.HasFreshBreakout)
             {
                 return Blocked(ShortSlopeNotPositive,
                     $"long blocked: short snapshot slope {freshness.ShortSnapshotSlopePct:0.###}% is not positive");

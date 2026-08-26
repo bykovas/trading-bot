@@ -3118,7 +3118,7 @@ internal sealed class FuturesDecisionWorker(
         // Taker FOK model: plan the full risk-sized notional. Live still refreshes the
         // quote and enforces MaxEntryPriceDeviationPct before submit.
         var filledNotional = size.SizedNotionalEur;
-        var openRisk = ProjectedConcurrentStopRiskEur(state, markPrice, filledNotional, size.StopDistancePct);
+        var openRisk = ProjectedConcurrentStopRiskEur(state, filledNotional, size.StopDistancePct);
         var shortGate = EvaluateShortGate(desired, signal, btcRegime);
 
         return new FuturesEntryPlan(
@@ -3461,11 +3461,10 @@ internal sealed class FuturesDecisionWorker(
     // added here so the budget stays a clean N-stops figure.
     private decimal ProjectedConcurrentStopRiskEur(
         PortfolioState state,
-        decimal markPrice,
         decimal filledNotionalEur,
         decimal stopDistancePct)
     {
-        var current = state.Positions.Sum(position => PositionRiskEur(position, markPrice));
+        var current = state.Positions.Sum(PositionRiskEur);
         if (filledNotionalEur <= 0m || stopDistancePct <= 0m)
         {
             return current;
@@ -3475,12 +3474,20 @@ internal sealed class FuturesDecisionWorker(
         return decimal.Round(current + Math.Max(0m, newRisk), 8);
     }
 
-    private decimal PositionRiskEur(PortfolioPosition position, decimal markPrice)
+    // Each open position is marked against ITS OWN price. This used to receive the mark
+    // price of the CANDIDATE being evaluated and apply it to every position in the book:
+    // an open ETH short measured against a sub-dollar altcoin produced a six-figure
+    // "risk" that exhausted MaxConcurrentOpenRiskUsd on its own, while the opposite
+    // pairing went negative and clamped to zero, so the cap was simultaneously
+    // impassable and blind. The book's second position was effectively unreachable.
+    private decimal PositionRiskEur(PortfolioPosition position)
     {
         if (position.StopLossPrice is null or <= 0m || position.EntryPrice <= 0m || position.Quantity <= 0m)
         {
             return config.Risk.MaxConcurrentOpenRiskUsd + 1m;
         }
+
+        var markPrice = position.LastPrice > 0m ? position.LastPrice : position.EntryPrice;
 
         return position.Side == "SHORT"
             ? Math.Max(0m, (position.StopLossPrice.Value - markPrice) * position.Quantity)

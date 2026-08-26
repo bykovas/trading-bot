@@ -298,6 +298,38 @@ public sealed class FuturesLongRangeGuardTests
         Assert.InRange(rank!.Value, 40m, 100m);
     }
 
+    // A confirmed breakout must not be refused for the tape it already satisfied.
+    // HasFreshUpwardTape carries the stricter continuation tape (raw tape AND candle
+    // momentum) while HasFreshBreakout is computed from the raw tape, so a breakout
+    // could arrive here with the strict flag false and be blocked by it.
+    [Fact]
+    public void Confirmed_breakout_is_not_blocked_by_the_fresh_tape_veto()
+    {
+        var result = FuturesLongRangeGuard.Evaluate(
+            PercentileMarket(entryPrice: 50m),
+            Freshness(freshTape: false, breakout: true),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.True(result.Evaluated);
+        Assert.NotEqual(FuturesLongRangeGuard.FreshTapeNotConfirmed, result.BlockReasonCode);
+    }
+
+    // The veto itself still fires when there is no breakout to excuse it.
+    [Fact]
+    public void Missing_fresh_tape_without_a_breakout_still_blocks()
+    {
+        var result = FuturesLongRangeGuard.Evaluate(
+            PercentileMarket(entryPrice: 50m),
+            Freshness(freshTape: false, breakout: false),
+            FuturesDesiredExposure.Long,
+            Thresholds());
+
+        Assert.True(result.Evaluated);
+        Assert.True(result.Blocked);
+        Assert.Equal(FuturesLongRangeGuard.FreshTapeNotConfirmed, result.BlockReasonCode);
+    }
+
     private static EntryFreshnessResult Freshness(
         int risingSteps = 2,
         decimal slope = 0.2m,

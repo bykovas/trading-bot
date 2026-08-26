@@ -25,7 +25,14 @@ public sealed class IndicatorEngine
             ema = (values[i] - ema) * multiplier + ema;
         }
 
-        return decimal.Round(ema, 6);
+        // NOT rounded. decimal.Round(ema, 6) collapsed EMA9 and EMA21 onto the same value
+        // for anything priced below ~0.0001 - SHIB at 0.00000502, PEPE at 0.0000033,
+        // BONK at 0.0000027 - so the gap read exactly 0%, AllowsLong and the bearish
+        // branch could never turn on, and those symbols were untradeable in both
+        // directions with no log line saying so. A price that did cross a sixth-decimal
+        // boundary reported a nonsense gap of exactly 25%. The gap is a ratio; rounding
+        // the inputs to a fixed number of decimals buys nothing and destroys small prices.
+        return ema;
     }
 
     private static decimal? CalculateLatestRsi(IReadOnlyList<decimal> values, int period)

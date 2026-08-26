@@ -366,6 +366,74 @@ public sealed class FuturesRiskCapsAndSizingTests
         Assert.Contains(guard.Reasons, r => r.Contains("correlation group"));
     }
 
+    // 11. Open risk of a held position is measured against ITS OWN price, not against the
+    // price of whatever candidate is being evaluated. The old code passed the candidate's
+    // mark price into every position, so an ETH short priced against a sub-dollar altcoin
+    // produced a nonsense six-figure risk that blocked the book's second entry outright.
+    [Fact]
+    public void Open_risk_uses_each_positions_own_price_not_the_candidates()
+    {
+        var config = LiveConfig();
+        Normalize(config);
+        var worker = new FuturesDecisionWorker(config, null!, null!, null!, null!, null!, null!);
+
+        // ETH short: 0.05 @ 3000, stop 3060 -> its true stop risk is 3.00.
+        var state = new PortfolioState { CashEur = 100m };
+        state.Positions.Add(new PortfolioPosition
+        {
+            Pair = "ETH/USD",
+            Side = "SHORT",
+            Quantity = 0.05m,
+            EntryPrice = 3000m,
+            LastPrice = 3000m,
+            StopLossPrice = 3060m,
+            EntryNotionalEur = 150m
+        });
+
+        // A new 150 notional entry at a 2% stop adds exactly 3.00 of risk.
+        var risk = ProjectedRisk(worker, state, filledNotionalEur: 150m, stopDistancePct: 2m);
+
+        Assert.Equal(6.00m, decimal.Round(risk, 2));
+        Assert.True(risk <= config.Risk.MaxConcurrentOpenRiskUsd);
+    }
+
+    // Two positions on wildly different price scales. Any single shared price - which is
+    // what the old code applied to the whole book - gets at least one of them badly wrong:
+    // the ETH short measured at 0.5 reads (3060-0.5)*0.05 = 153, and the altcoin long
+    // measured at 3000 clamps to 0. Only per-position pricing gives 3.00 + 2.00.
+    [Fact]
+    public void Open_risk_sums_each_position_on_its_own_price_scale()
+    {
+        var config = LiveConfig();
+        config.Risk.MaxConcurrentOpenRiskUsd = 1000m;
+        Normalize(config);
+        var worker = new FuturesDecisionWorker(config, null!, null!, null!, null!, null!, null!);
+
+        var state = new PortfolioState { CashEur = 100m };
+        state.Positions.Add(new PortfolioPosition
+        {
+            Pair = "ETH/USD", Side = "SHORT", Quantity = 0.05m,
+            EntryPrice = 3000m, LastPrice = 3000m, StopLossPrice = 3060m, EntryNotionalEur = 150m
+        });
+        state.Positions.Add(new PortfolioPosition
+        {
+            Pair = "CHEAP/USD", Side = "LONG", Quantity = 400m,
+            EntryPrice = 0.5m, LastPrice = 0.5m, StopLossPrice = 0.495m, EntryNotionalEur = 200m
+        });
+
+        // 3.00 (ETH) + 2.00 (CHEAP) + 0 for no new entry.
+        var risk = ProjectedRisk(worker, state, filledNotionalEur: 0m, stopDistancePct: 0m);
+
+        Assert.Equal(5.00m, decimal.Round(risk, 2));
+    }
+
+    private static decimal ProjectedRisk(
+        FuturesDecisionWorker worker, PortfolioState state, decimal filledNotionalEur, decimal stopDistancePct)
+    {
+        var method = typeof(FuturesDecisionWorker).GetMethod("ProjectedConcurrentStopRiskEur", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        return (decimal)method.Invoke(worker, [state, filledNotionalEur, stopDistancePct])!;
+    }
+
     private static RiskEvaluation InvokeGuards(
         FuturesDecisionWorker worker, PortfolioState state, string pair, DateTimeOffset utc, decimal sizedNotionalEur)
     {
