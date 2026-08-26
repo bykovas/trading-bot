@@ -262,9 +262,14 @@
 .bc-sq--dep{background:var(--blue)} .bc-sq--wdr{background:var(--blue-deep);box-shadow:inset 0 0 0 1.5px var(--blue)}
 .bc-chart{margin-top:16px}
 .bc-chart-svg{display:block;overflow:visible}
-.bc-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,175px),1fr));gap:1px;margin-top:18px;
-  border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline);background:rgba(246,218,160,.09)}
-.bc-metric{padding:15px 4px 18px;background:var(--surface-2)}
+/* The account row and the day's tally sit one above the other and answer the same
+   question, so they are the same object: separate cards, not a hairline-joined strip.
+   The strip read as a table header for the cards beneath it. Mobile keeps the joined
+   form for both - four bordered boxes on a phone is more frame than figure. */
+.bc-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,175px),1fr));gap:12px;margin-top:18px}
+.bc-metric{padding:16px 18px;border:1px solid var(--hairline);border-radius:var(--r-lg);
+  background:rgba(17,18,15,.85)}
+.bc-metrics .bc-metric-v{font-size:28px}
 .bc-metric-l{font:600 10px var(--font-mono);letter-spacing:.11em;text-transform:uppercase;color:var(--muted-3)}
 .bc-metric-v{margin-top:8px;font:22px/1 var(--font-mono);font-variant-numeric:tabular-nums;color:var(--cream)}
 .bc-metric-s{margin-top:6px;font-size:12px;color:var(--muted-2)}
@@ -493,9 +498,12 @@
   .bc-lg-w{display:none}
   .bc-lg-n{display:inline}
   .bc-live-head{flex-direction:column;gap:0}
-  .bc-metrics{grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid rgba(246,218,160,.12);border-radius:10px;overflow:hidden}
+  .bc-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;
+    border:1px solid rgba(246,218,160,.12);border-radius:10px;overflow:hidden;background:rgba(246,218,160,.1)}
+  .bc-metrics .bc-metric{border:0;border-radius:0}
   .bc-metric{padding:12px 13px}
   .bc-metric-v{font-size:17px}
+  .bc-metrics .bc-metric-v{font-size:17px}
   .bc-metric-s{display:none}
 
   .bc-tabs{padding:18px 16px;gap:7px}
