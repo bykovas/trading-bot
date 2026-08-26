@@ -1,51 +1,27 @@
 # One-off server diagnostics, runnable only by hand (workflow_dispatch) and only by
 # someone with write access. The repo is PUBLIC: these steps print pairs, timestamps,
-# scores and rejection text - the same class of fact the dashboard already publishes -
+# prices and exit reasons - the same class of fact the dashboard already publishes -
 # and never echo credentials.
 name: server-diagnose
 
 on:
   workflow_dispatch:
 
-env:
-  W0: "2026-08-25 10:10"
-  W1: "2026-08-26 11:18"
-
 jobs:
-  breakout-blockers:
+  stopped-out:
     runs-on: self-hosted
     steps:
-      - name: 1. Reason-bearing tables actually present in the live DB
+      - name: Which exit reasons closed positions since 2026-08-19
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select table_name, count(*) as columns from information_schema.columns where table_schema='public' and table_name in ('dry_run_decision_facts','dry_run_decision_risk_reasons','dry_run_long_range_diagnostics','dry_run_entry_freshness','dry_run_rejection_counts','dry_run_actions','market_snapshots') group by 1 order by 1"
+            "select a.bot_instance_id, coalesce(a.exit_reason_code, a.action) as reason, count(*), round(sum(a.fill_price*a.quantity)::numeric,2) as gross from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.action in ('WOULD_SELL','WOULD_CLOSE') and c.utc >= '2026-08-19' group by 1,2 order by 1,3 desc"
 
-      - name: 2. Wanted-but-blocked vs never-wanted, breakout candidates in the reviewer window
+      - name: Every stop-loss close of futures-live since 2026-08-19
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.bot_instance_id, d.risk_approved, d.desired_position, count(*) from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and d.utc >= '${W0}' and d.utc < '${W1}' group by 1,2,3 order by 4 desc"
+            "select c.utc as closed_utc, a.pair, a.side, round(a.entry_price::numeric,8) as entry, round(a.fill_price::numeric,8) as exit_px, round(a.quantity::numeric,6) as qty, coalesce(a.exit_reason_code,a.action) as reason from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.bot_instance_id='futures-live' and a.action in ('WOULD_SELL','WOULD_CLOSE') and coalesce(a.exit_reason_code,'') ilike '%STOP%' and coalesce(a.exit_reason_code,'') not ilike '%TRAIL%' and c.utc >= '2026-08-19' order by c.utc limit 200"
 
-      - name: 3. The FIRST detailed reason for every blocked breakout candidate
+      - name: When each of those positions was opened
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.bot_instance_id, left(r.reason, 110) as first_reason, count(*) from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where f.entry_freshness_has_fresh_breakout and not d.risk_approved and d.utc >= '${W0}' and d.utc < '${W1}' group by 1,2 order by 3 desc limit 40"
-
-      - name: 4. Every detailed reason text, not just the first
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select left(r.reason, 120) as reason, count(*) from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and not d.risk_approved and d.utc >= '${W0}' and d.utc < '${W1}' group by 1 order by 2 desc limit 40"
-
-      - name: 5. LongRangeGuard block codes and gate context for the same candidates
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select coalesce(l.long_range_block_reason_code,'(passed)') as code, l.zone, l.anti_chase_applied, count(*), round(avg(l.confirmations_met)::numeric,2) as conf_met, round(avg(l.confirmations_required)::numeric,2) as conf_req from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index left join dry_run_long_range_diagnostics l on l.cycle_id=d.cycle_id and l.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and d.utc >= '${W0}' and d.utc < '${W1}' group by 1,2,3 order by 4 desc limit 30"
-
-      - name: 6. Open-risk figures recorded against those decisions
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.bot_instance_id, count(*) as with_open_risk, round(min(a.open_risk_eur)::numeric,2) as min, round(percentile_cont(0.5) within group (order by a.open_risk_eur)::numeric,2) as median, round(max(a.open_risk_eur)::numeric,2) as max from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index join dry_run_actions a on a.cycle_id=d.cycle_id and a.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and a.open_risk_eur is not null and d.utc >= '${W0}' and d.utc < '${W1}' group by 1"
-
-      - name: 7. Each blocked breakout candidate, one row, with its first reason
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.utc, d.bot_instance_id, d.pair, round(d.score::numeric,2) as score, coalesce(l.long_range_block_reason_code,'-') as lr_code, round(a.open_risk_eur::numeric,2) as open_risk, left(r.reason,90) as reason from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index left join dry_run_long_range_diagnostics l on l.cycle_id=d.cycle_id and l.decision_index=d.decision_index left join dry_run_actions a on a.cycle_id=d.cycle_id and a.decision_index=d.decision_index left join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where f.entry_freshness_has_fresh_breakout and not d.risk_approved and d.utc >= '${W0}' and d.utc < '${W1}' order by d.utc limit 200"
+            "select c.utc as opened_utc, a.pair, a.side, round(a.fill_price::numeric,8) as entry_fill, round(a.quantity::numeric,6) as qty from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.bot_instance_id='futures-live' and a.action in ('WOULD_BUY','WOULD_OPEN_LONG','WOULD_OPEN_SHORT') and c.utc >= '2026-08-18' order by c.utc limit 300"
