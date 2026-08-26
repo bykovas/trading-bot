@@ -181,6 +181,10 @@
 .bc-heur p b{color:var(--cream);font-weight:600}
 .bc-heur p+p{color:var(--muted)}
 .bc-heur .bc-heur-dim{color:var(--muted-2)}
+/* Two paragraphs sharing one grid cell: .bc-heur auto-fits its CHILDREN into columns,
+   so a fourth <p> silently became a fourth column instead of sitting under the third. */
+.bc-heur-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.bc-heur-col p+p{color:var(--muted-2)}
 .bc-shell a.bc-cta{display:inline-flex;align-items:center;height:46px;margin-top:26px;padding:0 24px;
   border:1px solid rgba(245,184,79,.45);border-radius:9px;background:rgba(245,184,79,.07);
   color:var(--gold-soft);font:500 15.5px var(--font-display)}
@@ -855,26 +859,27 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       <div class="bc-hero-wide">
         <div class="bc-proof">
           <div class="bc-proof-cell">
-            <p class="bc-proof-l">Vakar · realūs sandoriai</p>
-            <p class="bc-proof-n"><span class="bc-from" id="bcYestFrom">60 $</span><span class="bc-arrow">&#8594;</span><span class="bc-to" id="bcYestTo">89 $</span></p>
-            <p class="bc-proof-s" id="bcYestS"><b>+29 $</b> &#183; +48 % per parą</p>
-            <p class="bc-proof-fine" id="bcYestFine">Uždaryti sandoriai, ne popierinis pelnas.</p>
-          </div>
-          <div class="bc-proof-cell">
             <p class="bc-proof-l">Geriausia para &#183; realūs sandoriai</p>
             <p class="bc-proof-n"><span class="bc-from" id="bcBestFrom">60 $</span><span class="bc-arrow">&#8594;</span><span class="bc-to" id="bcBestTo">89 $</span></p>
             <p class="bc-proof-s" id="bcBestS"><b>+29 $</b> &#183; +48 % &#183; geriausias rezultatas iki šiol</p>
             <p class="bc-proof-fine" id="bcBestFine">Geriausia para iki šiol — bet ne vienintelė, sekasi įvairiai, nes eksperimentuojam.</p>
           </div>
           <div class="bc-proof-cell">
+            <p class="bc-proof-l">Blogiausia para &#183; realūs sandoriai</p>
+            <p class="bc-proof-n"><span class="bc-from" id="bcWorstFrom">—</span><span class="bc-arrow">&#8594;</span><span class="bc-to" id="bcWorstTo">—</span></p>
+            <p class="bc-proof-s" id="bcWorstS">Nuostolingos paros dar nebuvo.</p>
+            <p class="bc-proof-fine" id="bcWorstFine">Taip nutinka ne visada — kartais para baigiasi minuse.</p>
+          </div>
+          <div class="bc-proof-cell">
+            <p class="bc-proof-l">Vakar &#183; realūs sandoriai</p>
+            <p class="bc-proof-n"><span class="bc-from" id="bcYestFrom">60 $</span><span class="bc-arrow">&#8594;</span><span class="bc-to" id="bcYestTo">89 $</span></p>
+            <p class="bc-proof-s" id="bcYestS"><b>+29 $</b> &#183; +48 % per parą</p>
+            <p class="bc-proof-fine" id="bcYestFine">Uždaryti sandoriai, ne popierinis pelnas.</p>
+          </div>
+          <div class="bc-proof-cell">
             <p class="bc-proof-l bc-proof-l--hypo">Jei tada tik būtume žinoję…</p>
             <p class="bc-proof-n bc-proof-n--hypo"><span class="bc-from" id="bcHypoFrom">600 $</span><span class="bc-arrow">&#8594;</span><span class="bc-to" id="bcHypoTo">900 $</span></p>
             <p class="bc-proof-s" id="bcHypoS">+300 $ &#183; ta pati logika, tik nuliai, botui nerūpi, su kokia suma dirba, o mes nepasinaudojom…</p>
-          </div>
-          <div class="bc-proof-cell">
-            <p class="bc-proof-l bc-proof-l--warn">Sąžiningai</p>
-            <p class="bc-proof-p">Taip nutinka <b>ne visada</b> — kartais diena baigiasi minuse. Buvo savaičių, kai praradom daugiau, nei uždirbom.</p>
-            <p class="bc-proof-fine" id="bcHonestyStat">Buvo ir minusinių dienų.</p>
           </div>
         </div>
       </div>
@@ -882,7 +887,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       <div class="bc-heur">
           <p><b>Euristikų rinkinys ir dirbtinis intelektas</b> dirba kartu. Sistema nuskaito ~150 Kraken porų kas minutę — gyvas skaičius telemetrijoje. Kiekviena pora vertinama pagal šimtus parametrų: <span class="term">EMA 9/21 sankirtas</span>, <span class="term">RSI</span>, <span class="term">momentum</span>, <span class="term">ATR volatilumą</span>, spread'ą, 24 h apimtis, <span class="term">order-book gylį</span>, <span class="term">koreliaciją su BTC</span>, rinkos režimą ir visą kainų istoriją.</p>
           <p>Iš viso to gimsta vienas balas — o iš balo sprendimas. Pozicijas atidaro pati, dydį parenka pagal <span class="term">rizikos limitus</span>, <span class="term">stop-loss</span> ir tikslus nustato pati, uždaro anksčiau, nei nuosmukis įsibėgėja, ir užfiksuoja rezultatą. Viskas automatiškai: be rankinio įsikišimo ir be jūsų dalyvavimo.</p>
-        <p class="bc-heur-dim">Netikėk. Patikrink pats. Kiekvienas sprendimas įrašomas — kodėl įėjo, kurie <span class="term">signalai svėrė</span>, kokia buvo rizika. Viską galima atkartoti.</p>
+        <div class="bc-heur-col">
+          <p class="bc-heur-dim">Netikėk. Patikrink pats. Kiekvienas sprendimas įrašomas — kodėl įėjo, kurie <span class="term">signalai svėrė</span>, kokia buvo rizika. Viską galima atkartoti.</p>
+          <p class="bc-heur-dim"><b>Sąžiningai:</b> taip nutinka <b>ne visada</b> — kartais para baigiasi minuse. Buvo savaičių, kai praradom daugiau, nei uždirbom. <span id="bcHonestyStat"></span></p>
+        </div>
       </div>
 
       <div class="bc-next bc-next--live">
@@ -1178,6 +1186,19 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           ? results.reduce((best, result) =>
               (result.marginPercent ?? result.botPercent) > (best.marginPercent ?? best.botPercent)
                 ? result : best)
+          : null,
+        // Ranked the same way as bestDay - by the return on the money that was at
+        // work - so the two cards are comparable. Only genuinely losing days are
+        // eligible: the worst day of a week where every day made money is not a
+        // "blogiausia para", it is the smallest gain, and printing it under a red
+        // label would be the one dishonest card on the page.
+        worstDay: results.length
+          ? results
+              .filter(result => Number(result.botEur) < 0)
+              .reduce((worst, result) =>
+                worst === null
+                || (result.marginPercent ?? result.botPercent) < (worst.marginPercent ?? worst.botPercent)
+                  ? result : worst, null)
           : null
       });
     }
@@ -1345,6 +1366,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       bestTo: el("bcBestTo"),
       bestS: el("bcBestS"),
       bestFine: el("bcBestFine"),
+      worstFrom: el("bcWorstFrom"),
+      worstTo: el("bcWorstTo"),
+      worstS: el("bcWorstS"),
+      worstFine: el("bcWorstFine"),
       hypoFrom: el("bcHypoFrom"),
       hypoTo: el("bcHypoTo"),
       hypoS: el("bcHypoS"),
@@ -2026,7 +2051,15 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
     // position size.
     const HYPO_CAPITAL = 500;
 
-    function fillDay(fromEl, toEl, sumEl, day, tail) {
+    // basis="portfolio" forces the pair to be the account's open and close.
+    // The margin basis cannot express a losing day: peakMarginEur is the peak
+    // CONCURRENT margin, while botEur is the whole day's result, so two sequential
+    // trades that each lost produced "14,99 $ -> -12,66 $ · -184,4 %" - an arrow
+    // claiming the margin became a negative number, and a percentage dividing a
+    // cumulative loss by a peak that never held it. On a winning day the same
+    // mismatch merely flatters, which is why it went unnoticed until the losing
+    // card was added.
+    function fillDay(fromEl, toEl, sumEl, day, tail, basis) {
       if (!fromEl || !day || !Number.isFinite(Number(day.open))) return;
       const bot = Number(day.botEur);
       // Green is for a realised gain only; a losing day says so in red.
@@ -2042,7 +2075,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // underneath said the bot had 44.98 in play, and the eye took the first pair
       // for the trade.
       const used = Number(day.peakMarginEur);
-      const onCapital = used > 0 && Number.isFinite(Number(day.marginPercent));
+      const onCapital = basis !== "portfolio"
+        && used > 0 && Number.isFinite(Number(day.marginPercent));
       const trades = Number(day.closedTrades) || 0;
       const tradesText = trades > 0 ? ` (${esc(num(trades, 0))} ${esc(tradesWord(trades))})` : tail;
 
@@ -2068,6 +2102,10 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       sumEl.innerHTML =
         `<b class="${bot < 0 ? "bc-t-red" : ""}">${esc(signedMoney(bot))}</b> · ` +
         `${esc(signedPercent(day.botPercent, 1))}${tradesText}`;
+      // Mirrors the margin branch: the OTHER basis goes to the fine line, so a reader
+      // comparing the two cards can see that one percent is of the portfolio and the
+      // other of the money at work, instead of reading them as the same measure.
+      return used > 0 ? `Dirbo ${money(used)}` : "";
     }
 
     function renderProof(equity) {
@@ -2119,6 +2157,19 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
           + `Geriausia para iki šiol (${best.date}) — bet ne vienintelė, `
           + "sekasi įvairiai, nes eksperimentuojam.";
       }
+
+      // The losing twin of the card above, filled by the same helper so the two read
+      // identically. Until a day actually ends in the red the card keeps its
+      // placeholder rather than dressing the smallest gain as a loss.
+      const worst = equity.worstDay;
+      const worstUsed = fillDay(els.worstFrom, els.worstTo, els.worstS, worst, "", "portfolio");
+      if (els.worstFine) {
+        els.worstFine.textContent = worst
+          ? (worstUsed ? `${worstUsed} · ` : "")
+            + `Blogiausia para iki šiol (${worst.date}). Taip nutinka — `
+            + "sekasi įvairiai, nes eksperimentuojam."
+          : "Taip nutinka ne visada — kartais para baigiasi minuse.";
+      }
     }
 
     // "12/30 dienų — minuse · blogiausia diena −1,37 $". Ships in the served HTML
@@ -2136,18 +2187,22 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       // futures-live closed 1,81 below its open and the bot had lost 16,30 - the
       // difference was money paid in. Saying -1,81 here would contradict the candle
       // drawn a few centimetres above.
-      let worst = null;
+      // Counts the losing days rather than naming the worst one: the worst day now
+      // has a card of its own a few centimetres above, and printing the same figure
+      // twice made the page look like it was owning up to two separate bad days.
+      let losing = 0;
+      let counted = 0;
       days.forEach(day => {
         const result = dayResult(day);
-        if (!result || !(result.botEur < 0)) return;
-        if (worst === null || result.botEur < worst) worst = result.botEur;
+        if (!result) return;
+        counted += 1;
+        if (result.botEur < 0) losing += 1;
       });
 
-      // Nothing to own up to yet: better silent than claiming a worst day that has
-      // not happened.
-      els.honestyStat.hidden = worst === null;
-      if (worst !== null) {
-        els.honestyStat.textContent = `Blogiausia diena ${signedMoney(worst)}`;
+      // Nothing to own up to yet: better silent than a "0 iš 0" that says nothing.
+      els.honestyStat.hidden = counted === 0 || losing === 0;
+      if (!els.honestyStat.hidden) {
+        els.honestyStat.textContent = `${num(losing, 0)} iš ${num(counted, 0)} parų baigėsi minuse.`;
       }
     }
 
