@@ -3,24 +3,39 @@
 # into the box while the deploy runner lives on it.
 #
 # The repo is PUBLIC, so everything echoed here is public. The steps therefore print
-# only what the dashboard already publishes - transfer kinds, amounts and dates - and
-# whatever they read from the worker env stays inside the runner: keys are used to SIGN
-# one read-only request and are never echoed.
+# only what the dashboard already publishes - pairs, timestamps, scores and rejection
+# reasons - and whatever they read from the worker env stays inside the runner: keys
+# are used to SIGN one read-only request and are never echoed.
 name: server-diagnose
 
 on:
   workflow_dispatch:
 
 jobs:
-  cash-events:
+  breakouts:
     runs-on: self-hosted
     steps:
-      - name: High-score candidates the bots refused on 2026-08-25
+      - name: Confirmed breakouts and what stopped them, last 7 days
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.pair, count(*) as looks, max(round(d.score::numeric,2)) as best_score, min(d.utc) as first_seen, max(d.utc) as last_seen, mode() within group (order by d.entry_rejection_reason) as usual_reason from dry_run_decision_facts d where d.bot_instance_id='futures-lukas-live' and d.utc >= '2026-08-24 21:00' and d.utc < '2026-08-25 21:00' and d.score >= 0.8 and d.desired_position='FLAT' group by d.pair order by looks desc limit 25"
+            "select d.bot_instance_id, count(*) as breakout_decisions, count(distinct d.pair) as pairs, min(d.utc) as first_seen, max(d.utc) as last_seen from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and d.utc >= now() - interval '7 days' group by 1 order by 2 desc"
 
-      - name: What the bots ever wanted but did not open on 2026-08-25
+      - name: What blocked them, by reason
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.bot_instance_id, d.pair, d.desired_position, count(*) as cycles, min(d.utc) as first_seen, mode() within group (order by d.entry_rejection_reason) as usual_reason from dry_run_decision_facts d where d.utc >= '2026-08-24 21:00' and d.utc < '2026-08-25 21:00' and d.desired_position <> 'FLAT' group by 1,2,3 order by cycles desc limit 30"
+            "select d.bot_instance_id, coalesce(d.entry_rejection_reason,'(none)') as reason, coalesce(f.entry_freshness_block_reason,'(none)') as freshness_note, count(*) from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and d.utc >= now() - interval '7 days' group by 1,2,3 order by 4 desc limit 40"
+
+      - name: Every confirmed breakout with its signal price
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.utc, d.bot_instance_id, d.pair, round(d.score::numeric,2) as score, d.desired_position as want, coalesce(d.entry_rejection_reason,'-') as reason, round(f.signal_price::numeric,8) as signal_price, round(f.entry_freshness_position_in_24h_range_pct::numeric,1) as range_pos, round(f.entry_distance_from_local_high_pct::numeric,3) as dist_high, round(f.live_price_vs_signal_close_pct::numeric,3) as drift from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and d.utc >= now() - interval '7 days' order by d.utc limit 300"
+
+      - name: How many breakouts actually became entries
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.bot_instance_id, count(*) filter (where f.filled_quantity > 0) as filled, count(*) filter (where f.filled_quantity is null or f.filled_quantity = 0) as not_filled from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and d.utc >= now() - interval '7 days' group by 1"
+
+      - name: Open-risk rejections overall, to see the fixed bug fade
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select date_trunc('day', d.utc) as day, d.bot_instance_id, count(*) filter (where d.entry_rejection_reason ilike '%open%risk%') as open_risk_rejects, count(*) as decisions from dry_run_decision_facts d where d.utc >= now() - interval '7 days' group by 1,2 order by 1 desc, 2"
