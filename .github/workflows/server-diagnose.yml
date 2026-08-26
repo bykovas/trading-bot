@@ -1,41 +1,51 @@
 # One-off server diagnostics, runnable only by hand (workflow_dispatch) and only by
-# someone with write access. It exists because the workstation has no interactive SSH
-# into the box while the deploy runner lives on it.
-#
-# The repo is PUBLIC, so everything echoed here is public. The steps therefore print
-# only what the dashboard already publishes - pairs, timestamps, scores and rejection
-# reasons - and whatever they read from the worker env stays inside the runner: keys
-# are used to SIGN one read-only request and are never echoed.
+# someone with write access. The repo is PUBLIC: these steps print pairs, timestamps,
+# scores and rejection text - the same class of fact the dashboard already publishes -
+# and never echo credentials.
 name: server-diagnose
 
 on:
   workflow_dispatch:
 
+env:
+  W0: "2026-08-25 10:10"
+  W1: "2026-08-26 11:18"
+
 jobs:
-  breakouts:
+  breakout-blockers:
     runs-on: self-hosted
     steps:
-      - name: Confirmed breakouts and what stopped them, last 7 days
+      - name: 1. Reason-bearing tables actually present in the live DB
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.bot_instance_id, count(*) as breakout_decisions, count(distinct d.pair) as pairs, min(d.utc) as first_seen, max(d.utc) as last_seen from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and d.utc >= now() - interval '7 days' group by 1 order by 2 desc"
+            "select table_name, count(*) as columns from information_schema.columns where table_schema='public' and table_name in ('dry_run_decision_facts','dry_run_decision_risk_reasons','dry_run_long_range_diagnostics','dry_run_entry_freshness','dry_run_rejection_counts','dry_run_actions','market_snapshots') group by 1 order by 1"
 
-      - name: What blocked them, by reason
+      - name: 2. Wanted-but-blocked vs never-wanted, breakout candidates in the reviewer window
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.bot_instance_id, coalesce(d.entry_rejection_reason,'(none)') as reason, coalesce(f.entry_freshness_block_reason,'(none)') as freshness_note, count(*) from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and d.utc >= now() - interval '7 days' group by 1,2,3 order by 4 desc limit 40"
+            "select d.bot_instance_id, d.risk_approved, d.desired_position, count(*) from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and d.utc >= '${W0}' and d.utc < '${W1}' group by 1,2,3 order by 4 desc"
 
-      - name: Every confirmed breakout with its signal price
+      - name: 3. The FIRST detailed reason for every blocked breakout candidate
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.utc, d.bot_instance_id, d.pair, round(d.score::numeric,2) as score, d.desired_position as want, coalesce(d.entry_rejection_reason,'-') as reason, round(f.signal_price::numeric,8) as signal_price, round(f.entry_freshness_position_in_24h_range_pct::numeric,1) as range_pos, round(f.entry_distance_from_local_high_pct::numeric,3) as dist_high, round(f.live_price_vs_signal_close_pct::numeric,3) as drift from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and d.utc >= now() - interval '7 days' order by d.utc limit 300"
+            "select d.bot_instance_id, left(r.reason, 110) as first_reason, count(*) from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where f.entry_freshness_has_fresh_breakout and not d.risk_approved and d.utc >= '${W0}' and d.utc < '${W1}' group by 1,2 order by 3 desc limit 40"
 
-      - name: How many breakouts actually became entries
+      - name: 4. Every detailed reason text, not just the first
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.bot_instance_id, count(*) filter (where f.filled_quantity > 0) as filled, count(*) filter (where f.filled_quantity is null or f.filled_quantity = 0) as not_filled from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and d.utc >= now() - interval '7 days' group by 1"
+            "select left(r.reason, 120) as reason, count(*) from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and not d.risk_approved and d.utc >= '${W0}' and d.utc < '${W1}' group by 1 order by 2 desc limit 40"
 
-      - name: Open-risk rejections overall, to see the fixed bug fade
+      - name: 5. LongRangeGuard block codes and gate context for the same candidates
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select date_trunc('day', d.utc) as day, d.bot_instance_id, count(*) filter (where d.entry_rejection_reason ilike '%open%risk%') as open_risk_rejects, count(*) as decisions from dry_run_decision_facts d where d.utc >= now() - interval '7 days' group by 1,2 order by 1 desc, 2"
+            "select coalesce(l.long_range_block_reason_code,'(passed)') as code, l.zone, l.anti_chase_applied, count(*), round(avg(l.confirmations_met)::numeric,2) as conf_met, round(avg(l.confirmations_required)::numeric,2) as conf_req from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index left join dry_run_long_range_diagnostics l on l.cycle_id=d.cycle_id and l.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and d.utc >= '${W0}' and d.utc < '${W1}' group by 1,2,3 order by 4 desc limit 30"
+
+      - name: 6. Open-risk figures recorded against those decisions
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.bot_instance_id, count(*) as with_open_risk, round(min(a.open_risk_eur)::numeric,2) as min, round(percentile_cont(0.5) within group (order by a.open_risk_eur)::numeric,2) as median, round(max(a.open_risk_eur)::numeric,2) as max from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index join dry_run_actions a on a.cycle_id=d.cycle_id and a.decision_index=d.decision_index where f.entry_freshness_has_fresh_breakout and a.open_risk_eur is not null and d.utc >= '${W0}' and d.utc < '${W1}' group by 1"
+
+      - name: 7. Each blocked breakout candidate, one row, with its first reason
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.utc, d.bot_instance_id, d.pair, round(d.score::numeric,2) as score, coalesce(l.long_range_block_reason_code,'-') as lr_code, round(a.open_risk_eur::numeric,2) as open_risk, left(r.reason,90) as reason from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index left join dry_run_long_range_diagnostics l on l.cycle_id=d.cycle_id and l.decision_index=d.decision_index left join dry_run_actions a on a.cycle_id=d.cycle_id and a.decision_index=d.decision_index left join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where f.entry_freshness_has_fresh_breakout and not d.risk_approved and d.utc >= '${W0}' and d.utc < '${W1}' order by d.utc limit 200"
