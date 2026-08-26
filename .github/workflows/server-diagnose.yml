@@ -15,12 +15,12 @@ jobs:
   cash-events:
     runs-on: self-hosted
     steps:
-      - name: Every closed trade since the experiment started
+      - name: High-score candidates the bots refused on 2026-08-25
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.bot_instance_id, d.utc, d.pair, d.desired_position, a.exit_reason_code, round(a.net_notional_eur::numeric,2) as pnl, left(coalesce(a.reason,''),90) as reason from dry_run_decision_facts d join dry_run_actions a on a.cycle_id=d.cycle_id and a.pair=d.pair where a.action='WOULD_CLOSE' and d.utc >= '2026-08-24 18:25' order by d.utc"
+            "select d.pair, count(*) as looks, max(round(d.score::numeric,2)) as best_score, min(d.utc) as first_seen, max(d.utc) as last_seen, mode() within group (order by d.entry_rejection_reason) as usual_reason from dry_run_decision_facts d where d.bot_instance_id='futures-lukas-live' and d.utc >= '2026-08-24 21:00' and d.utc < '2026-08-25 21:00' and d.score >= 0.8 and d.desired_position='FLAT' group by d.pair order by looks desc limit 25"
 
-      - name: Entries since the experiment started, with channel
+      - name: What the bots ever wanted but did not open on 2026-08-25
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.bot_instance_id, d.utc, d.pair, a.action, a.entry_channel, round(d.score::numeric,2) as score from dry_run_decision_facts d join dry_run_actions a on a.cycle_id=d.cycle_id and a.pair=d.pair where a.action like 'WOULD_OPEN%' and d.utc >= '2026-08-24 18:25' order by d.utc"
+            "select d.bot_instance_id, d.pair, d.desired_position, count(*) as cycles, min(d.utc) as first_seen, mode() within group (order by d.entry_rejection_reason) as usual_reason from dry_run_decision_facts d where d.utc >= '2026-08-24 21:00' and d.utc < '2026-08-25 21:00' and d.desired_position <> 'FLAT' group by 1,2,3 order by cycles desc limit 30"
