@@ -15,51 +15,12 @@ jobs:
   cash-events:
     runs-on: self-hosted
     steps:
-      - name: Ledger rows for futures-live since Aug 22
+      - name: Every closed trade since the experiment started
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select occurred_at, event_type, round(amount::numeric,2) as amount, asset, source from portfolio_cash_events where bot_instance_id='futures-live' and occurred_at > '2026-08-22' order by occurred_at"
+            "select d.bot_instance_id, d.utc, d.pair, d.desired_position, a.exit_reason_code, round(a.net_notional_eur::numeric,2) as pnl, left(coalesce(a.reason,''),90) as reason from dry_run_decision_facts d join dry_run_actions a on a.cycle_id=d.cycle_id and a.pair=d.pair where a.action='WOULD_CLOSE' and d.utc >= '2026-08-24 18:25' order by d.utc"
 
-      - name: Why futures-live skipped HYPE while the control took it
+      - name: Entries since the experiment started, with channel
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.utc, d.bot_instance_id, d.action, d.desired_position, round(d.score::numeric,2) as score, round(d.spread_percent::numeric,4) as spread, d.entry_rejection_reason, left(coalesce(d.reason,''),120) as reason from dry_run_decisions d where d.pair='HYPE/USD' and d.utc between '2026-08-25 00:30' and '2026-08-25 01:00' order by d.utc, d.bot_instance_id"
-
-      - name: Public stats endpoint, live
-        run: |
-          docker run --rm --network container:trading-bot-ui curlimages/curl:8.10.1 \
-            -sS -m 8 -w '\nHTTP %{http_code} in %{time_total}s\n' http://trading-bot-api:8080/api/public-stats
-          echo '--- second call should be served from cache ---'
-          docker run --rm --network container:trading-bot-ui curlimages/curl:8.10.1 \
-            -sS -m 8 -o /dev/null -w 'HTTP %{http_code} in %{time_total}s\n' http://trading-bot-api:8080/api/public-stats
-
-      - name: Worker cash-event log lines, last 36h
-        run: |
-          docker logs --since 36h trading-bot-futures-worker-live 2>&1 | grep -i "cash-event" | tail -25 || true
-
-      - name: Raw Kraken account-log entry kinds, last 4 days
-        run: |
-          docker run --rm --env-file /opt/trading-bot/futures/live/.env python:3.12-alpine python - <<'PY'
-          import base64, hashlib, hmac, json, os, time, urllib.request
-          key = os.environ["TRADINGBOT_KRAKEN_FUTURES_API_KEY"]
-          secret = os.environ["TRADINGBOT_KRAKEN_FUTURES_API_SECRET"]
-          path = "/api/history/v3/account-log"
-          post = "count=500&sort=desc"
-          nonce = str(int(time.time() * 1000))
-          digest = hashlib.sha256((post + nonce + path).encode()).digest()
-          authent = base64.b64encode(hmac.new(base64.b64decode(secret), digest, hashlib.sha512).digest()).decode()
-          req = urllib.request.Request(
-              "https://futures.kraken.com" + path + "?" + post,
-              headers={"APIKey": key, "Nonce": nonce, "Authent": authent, "Accept": "application/json"})
-          data = json.load(urllib.request.urlopen(req, timeout=30))
-          cutoff = "2026-08-21"
-          for row in data.get("logs", []):
-              date = str(row.get("date", ""))
-              if date < cutoff:
-                  continue
-              info = str(row.get("info", ""))
-              if info in ("futures trade", "funding rate change"):
-                  continue
-              print(f"{date[:19]}  info={info!r}  asset={row.get('asset')}  change={row.get('change')}  "
-                    f"old={row.get('old_balance')}  new={row.get('new_balance')}  type={row.get('entry_type', row.get('type'))}")
-          PY
+            "select d.bot_instance_id, d.utc, d.pair, a.action, a.entry_channel, round(d.score::numeric,2) as score from dry_run_decision_facts d join dry_run_actions a on a.cycle_id=d.cycle_id and a.pair=d.pair where a.action like 'WOULD_OPEN%' and d.utc >= '2026-08-24 18:25' order by d.utc"
