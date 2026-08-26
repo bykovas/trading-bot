@@ -480,6 +480,28 @@ public sealed class FuturesRiskCapsAndSizingTests
         return (decimal)method.Invoke(worker, [state, filledNotionalEur, stopDistancePct])!;
     }
 
+    // A SHORT candidate is ranked by its OWN score. The entry loop used to walk the
+    // universe in scan order - by 24h move - so the score decided nothing about who got
+    // a slot; and where a score was consulted it was the LONG one, which for a pair the
+    // bot wants to short measures a trade it is not making.
+    [Fact]
+    public void Short_candidates_are_ranked_by_their_short_score()
+    {
+        var shortSignal = Signal(score: 0.20m, shortScore: 0.95m, allowsShort: true);
+        var longSignal = Signal(score: 0.85m, shortScore: 0.00m, allowsShort: false);
+
+        Assert.Equal(0.95m, FuturesDecisionWorker.EntryRankScore(shortSignal));
+        Assert.Equal(0.85m, FuturesDecisionWorker.EntryRankScore(longSignal));
+        // The short outranks the long, which ordering by the long score reverses.
+        Assert.True(FuturesDecisionWorker.EntryRankScore(shortSignal)
+            > FuturesDecisionWorker.EntryRankScore(longSignal));
+    }
+
+    private static TechnicalSignal Signal(decimal score, decimal shortScore, bool allowsShort) =>
+        new(score, allowsShort ? "SHORT_BIAS" : "LONG_BIAS", !allowsShort, !allowsShort, !allowsShort,
+            allowsShort ? null : 0.5m, 0m, Array.Empty<SignalContribution>(), score, true,
+            allowsShort, allowsShort, allowsShort ? 0.5m : null, shortScore);
+
     private static RiskEvaluation InvokeGuards(
         FuturesDecisionWorker worker, PortfolioState state, string pair, DateTimeOffset utc, decimal sizedNotionalEur)
     {

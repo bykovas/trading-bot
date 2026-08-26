@@ -1,3 +1,11 @@
+## 2026-08-26-slots-go-to-the-best-candidates-not-the-first-ones
+
+- The entry loop walked `fullStates` in scan order and filled slots with whatever it met first. Scan order is the universe ranking - by absolute 24h move, then notional - so the signal score decided NOTHING about who got a slot: a pair scoring 1.00 sixty places down the list lost to one scoring 0.80 near the top. Every usable pair is now scored before the loop and walked best-first.
+- The second half of the same defect: where a score WAS consulted anywhere in this file it was the long score. A pair the bot wants to SHORT has its own `ShortScore`, and the long score measures a trade it is not making. The book on the evening of 2026-08-26 held twelve shorts, so twelve of twelve were ordered by a number unrelated to why they were picked. `EntryRankScore` now returns the score of the side the candidate would actually be entered on.
+- Held pairs sort ahead of everything regardless of score: their exits run on every cycle and must never queue behind an entry candidate. Ties break on the pair name - most admitted longs land on the same score, so an arbitrary order is unavoidable, but an unrepeatable one is not.
+- This was a rounding error at three slots and decides most of the book at twelve. It landed the same evening the arm went to twelve, which is what made it worth fixing now rather than filing.
+- Indicators and price action are computed once in the ranking pass and reused in the loop instead of being recomputed per pair; the work is the same, not doubled.
+
 ## 2026-08-26-the-arm-goes-to-twelve-slots
 
 - futures-live widens to twelve concurrent positions, sized unchanged at 15 USD margin and 10x. The three caps that fund a slot move together, because any one of them left behind becomes the real limit: `MaxPositions` 5 -> 12, `MaxTotalNotionalUsd` 750 -> 1800, `Risk.MaxConcurrentOpenRiskUsd` 22.5 -> 54. `CorrelationRisk` follows at 4 per group and 600 USD.

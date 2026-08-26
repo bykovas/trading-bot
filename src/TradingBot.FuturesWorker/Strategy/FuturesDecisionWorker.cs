@@ -201,7 +201,46 @@ internal sealed class FuturesDecisionWorker(
         var decisions = new List<DryRunDecisionRecord>(mirrorDecisions);
         var newEntriesThisCycle = 0;
 
-        foreach (var marketState in fullStates.Where(candidate => candidate.IsUsable))
+        // Slots are finite, and this loop used to fill them in the order it walked the
+        // universe - which is ranked by 24h move, not by signal quality. The score
+        // therefore played no part in who got a slot: a pair scoring 1.00 sixty places
+        // down the scan list lost to one scoring 0.80 near the top. With three slots
+        // that was a rounding error; at twelve it decides most of the book.
+        //
+        // Every usable pair is scored first and then walked best-first. Held pairs come
+        // ahead of everything regardless of their score: their exits must run on every
+        // cycle and must never queue behind an entry candidate.
+        //
+        // A SHORT candidate is ranked by its OWN score. The long score of a pair the bot
+        // wants to short is a different measurement about a trade it is not making, and
+        // ranking twelve shorts by it - which is what the book currently holds - orders
+        // them by something unrelated to why they were chosen.
+        var ranked = fullStates
+            .Where(candidate => candidate.IsUsable)
+            .Select(candidate =>
+            {
+                var candidateIndicators = indicatorEngine.Calculate(candidate.Candles, config.Strategy);
+                var candidatePriceAction = _priceHistory.Assess(
+                    candidate.Instrument.Pair,
+                    config.Strategy.PriceActionLookbackSnapshots,
+                    config.Strategy.PriceActionMinSnapshots,
+                    utc,
+                    config.Strategy.PriceActionMaxSampleAgeMinutes);
+                return new RankedCandidate(
+                    candidate,
+                    candidateIndicators,
+                    candidatePriceAction,
+                    SignalScorer.Evaluate(candidate, candidateIndicators, config.Strategy, candidatePriceAction));
+            })
+            .OrderByDescending(candidate => heldPairs.Contains(candidate.State.Instrument.Pair))
+            .ThenByDescending(candidate => EntryRankScore(candidate.Signal))
+            // Ties are common - most admitted longs land on the same score - so the
+            // last key is the pair name: an arbitrary order is unavoidable, an
+            // unrepeatable one is not.
+            .ThenBy(candidate => candidate.State.Instrument.Pair, StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var (marketState, indicators, priceAction, signal) in ranked)
         {
             var pair = marketState.Instrument.Pair;
 
@@ -215,14 +254,6 @@ internal sealed class FuturesDecisionWorker(
             }
 
             var markPrice = marketState.LastPrice;
-            var indicators = indicatorEngine.Calculate(marketState.Candles, config.Strategy);
-            var priceAction = _priceHistory.Assess(
-                pair,
-                config.Strategy.PriceActionLookbackSnapshots,
-                config.Strategy.PriceActionMinSnapshots,
-                utc,
-                config.Strategy.PriceActionMaxSampleAgeMinutes);
-            var signal = SignalScorer.Evaluate(marketState, indicators, config.Strategy, priceAction);
             var held = state.Positions.FirstOrDefault(position => position.Pair == pair);
 
             FuturesFillResult fill;
@@ -2952,6 +2983,17 @@ internal sealed class FuturesDecisionWorker(
 
     private static bool IsBotOwnedFuturesPosition(PortfolioPosition position) =>
         position.Origin?.Equals(PositionOrigins.Bot, StringComparison.OrdinalIgnoreCase) == true;
+
+    // The side a candidate is ranked by is the side it would be entered on. AllowsShort
+    // is only ever true with a bearish structure behind it, so a pair cannot be both.
+    internal static decimal EntryRankScore(TechnicalSignal signal) =>
+        signal.AllowsShort ? signal.ShortScore : signal.Score;
+
+    private readonly record struct RankedCandidate(
+        InstrumentMarketState State,
+        IndicatorSnapshot Indicators,
+        PriceActionAssessment? PriceAction,
+        TechnicalSignal Signal);
 
     internal static FuturesMaxHoldExit EvaluateMaxHoldExit(
         PortfolioPosition position,
