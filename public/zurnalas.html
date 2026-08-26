@@ -281,7 +281,7 @@
 .bc-sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
 .bc-sec-head h2{margin:0;font:600 clamp(19px,2.6cqw,22px) var(--font-display);letter-spacing:-.01em;color:var(--cream)}
 .bc-sec-head span{font:12px var(--font-mono);color:var(--muted-3)}
-.bc-tstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,165px),1fr));gap:12px;margin-bottom:14px}
+.bc-tstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,165px),1fr));gap:12px;margin-top:12px}
 .bc-tstats .bc-metric{padding:16px 18px;border:1px solid var(--hairline);border-radius:var(--r-lg);background:rgba(17,18,15,.85)}
 .bc-tstats .bc-metric-v{font-size:28px}
 .bc-list{display:grid;gap:12px}
@@ -923,6 +923,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       </div>
       <div class="bc-chart" id="bcChart"><div id="bcChartCanvas"></div><div class="bc-tip" id="bcChartTip" hidden></div></div>
       <div class="bc-metrics" id="bcMetrics"></div>
+      <!-- The day's tally sits with the account figures above it, not inside the trade
+           list below: both answer "where does the account stand right now", and the
+           reader met the count of today's trades after scrolling past the positions
+           those trades opened. -->
+      <div class="bc-tstats" id="bcTradeStats"></div>
       </section>
 
     <section class="bc-sec">
@@ -932,7 +937,6 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
     <section class="bc-sec">
       <div class="bc-sec-head"><h2>&#352;iandienos sandoriai</h2><span id="bcTradeMeta">kraunama</span></div>
-      <div class="bc-tstats" id="bcTradeStats"></div>
       <div class="bc-list" id="bcTradeList"></div>
     </section>
 
