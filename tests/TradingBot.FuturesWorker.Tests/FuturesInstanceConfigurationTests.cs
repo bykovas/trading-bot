@@ -6,6 +6,36 @@ namespace TradingBot.FuturesWorker.Tests;
 
 public sealed class FuturesInstanceConfigurationTests
 {
+    // Slot counts and the two caps derived from them are pinned together: a slot count
+    // the caps cannot fund is the mismatch that hid the clamped MaxPositions for two days.
+    // Per position is 15 USD margin at 10x = 150 notional, 4.5 USD of stop risk.
+    [Fact]
+    public void Slot_counts_and_their_linked_caps_agree_in_both_instances()
+    {
+        var root = FindRepositoryRoot();
+        var primary = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.json"));
+        var lukas = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.lukas.json"));
+
+        AssertSlotsAreFunded(primary, expectedSlots: 5);
+        AssertSlotsAreFunded(lukas, expectedSlots: 3);
+    }
+
+    private static void AssertSlotsAreFunded(JsonObject config, int expectedSlots)
+    {
+        var futures = config["Futures"]!;
+        var slots = futures["MaxPositions"]!.GetValue<int>();
+        Assert.Equal(expectedSlots, slots);
+
+        var perPositionNotional =
+            futures["TargetMarginUsd"]!.GetValue<decimal>() * futures["DefaultLeverage"]!.GetValue<decimal>();
+        Assert.Equal(perPositionNotional * slots, futures["MaxTotalNotionalUsd"]!.GetValue<decimal>());
+
+        var risk = config["Risk"]!;
+        Assert.Equal(
+            risk["TargetRiskUsd"]!.GetValue<decimal>() * slots,
+            risk["MaxConcurrentOpenRiskUsd"]!.GetValue<decimal>());
+    }
+
     [Fact]
     public void Lukas_profile_matches_primary_profile_except_identity_and_mirror_role()
     {

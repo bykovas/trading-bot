@@ -366,6 +366,51 @@ public sealed class FuturesRiskCapsAndSizingTests
         Assert.Contains(guard.Reasons, r => r.Contains("correlation group"));
     }
 
+    // MaxPositions is a per-instance decision, not something Normalize may overrule.
+    // It used to be clamped to 1..3, so futures-live's configured 5 ran as 3 for two
+    // days without a word in the log and a changelog entry recorded a widening that
+    // never took effect.
+    [Theory]
+    [InlineData(3, 3)]   // the control
+    [InlineData(5, 5)]   // the experiment arm - this is the case that used to be lost
+    [InlineData(10, 10)] // at the ceiling
+    public void Configured_slot_count_survives_normalization(int configured, int expected)
+    {
+        var config = LiveConfig();
+        config.Futures.MaxPositions = configured;
+        Normalize(config);
+
+        Assert.Equal(expected, config.Futures.MaxPositions);
+    }
+
+    // The ceiling still catches a typo, and a missing value still falls back to 3.
+    [Theory]
+    [InlineData(50, 10)]
+    [InlineData(0, 3)]
+    [InlineData(-2, 3)]
+    public void Nonsense_slot_counts_are_still_corrected(int configured, int expected)
+    {
+        var config = LiveConfig();
+        config.Futures.MaxPositions = configured;
+        Normalize(config);
+
+        Assert.Equal(expected, config.Futures.MaxPositions);
+    }
+
+    // The derived open-risk budget follows the real slot count rather than the old
+    // clamped one, when the instance does not set it explicitly.
+    [Fact]
+    public void Derived_open_risk_budget_follows_the_configured_slot_count()
+    {
+        var config = LiveConfig();
+        config.Futures.MaxPositions = 5;
+        config.Risk.TargetRiskUsd = 4.5m;
+        config.Risk.MaxConcurrentOpenRiskUsd = 0m; // let Normalize derive it
+        Normalize(config);
+
+        Assert.Equal(22.5m, config.Risk.MaxConcurrentOpenRiskUsd);
+    }
+
     // 11. Open risk of a held position is measured against ITS OWN price, not against the
     // price of whatever candidate is being evaluated. The old code passed the candidate's
     // mark price into every position, so an ETH short priced against a sub-dollar altcoin

@@ -4,6 +4,11 @@ namespace TradingBot.FuturesWorker;
 
 internal sealed class FuturesBotConfiguration
 {
+    // Typo guard only. Ten slots at the current 15 USD margin is 150 USD of margin,
+    // far past any equity this account has held; the notional and open-risk caps bind
+    // long before it. Raising it is a config decision, not a code change.
+    private const int MaxPositionsCeiling = 10;
+
     public BotInstanceOptions BotInstance { get; set; } = new();
     public WorkerOptions Worker { get; set; } = new();
     public HttpOptions Http { get; set; } = new();
@@ -183,7 +188,19 @@ internal sealed class FuturesBotConfiguration
         // liquidation-distance gate still apply on top of this cap.
         Futures.MaxLeverage = Math.Clamp(Futures.MaxLeverage <= 0m ? 10m : Futures.MaxLeverage, 1m, 10m);
         Futures.DefaultLeverage = Math.Clamp(Futures.DefaultLeverage <= 0m ? 1m : Futures.DefaultLeverage, 1m, Futures.MaxLeverage);
-        Futures.MaxPositions = Math.Clamp(Futures.MaxPositions <= 0 ? 3 : Futures.MaxPositions, 1, 3);
+        // The slot count is a per-instance decision - the control runs 3, the experiment
+        // arm 5 - so this ceiling only exists to catch a typo, not to overrule the file.
+        // It used to clamp to 3, which silently overrode appsettings: futures-live asked
+        // for 5 on 2026-08-24 and ran on 3 for two days with nothing in the log to say so,
+        // and the changelog recorded a widening that never happened. The real risk
+        // envelope is Futures.MaxTotalNotionalUsd and Risk.MaxConcurrentOpenRiskUsd, both
+        // set explicitly per instance and cross-checked at the end of Normalize.
+        if (Futures.MaxPositions > MaxPositionsCeiling)
+        {
+            Console.WriteLine($"config-validation: Futures.MaxPositions={Futures.MaxPositions} exceeds the hard ceiling {MaxPositionsCeiling}; reset to {MaxPositionsCeiling}.");
+        }
+
+        Futures.MaxPositions = Math.Clamp(Futures.MaxPositions <= 0 ? 3 : Futures.MaxPositions, 1, MaxPositionsCeiling);
         Futures.AllowFlip = false;
 
         // The flipped-logic experiment opens real shorts, so it cannot run with
@@ -418,6 +435,26 @@ internal sealed class FuturesBotConfiguration
         {
             Risk.MaxConcurrentOpenRiskUsd = decimal.Round(perPositionOpenRisk * Futures.MaxPositions, 4);
         }
+        // Linked-limit sanity. A slot count that the notional or open-risk cap cannot fund
+        // is not an error - the caps are meant to bind - but it is exactly the kind of
+        // mismatch that reads as a working setting and is not one, so it gets a line in the
+        // log instead of silence. Nothing is mutated here; the caps do their own work.
+        var perPositionNotional = Futures.TargetMarginUsd * Futures.DefaultLeverage;
+        if (perPositionNotional > 0m && Futures.MaxTotalNotionalUsd > 0m)
+        {
+            var fundedSlots = (int)Math.Floor(Futures.MaxTotalNotionalUsd / perPositionNotional);
+            if (fundedSlots < Futures.MaxPositions)
+            {
+                Console.WriteLine($"config-validation: Futures.MaxTotalNotionalUsd={Futures.MaxTotalNotionalUsd:0.##} funds {fundedSlots} of {Futures.MaxPositions} slots at {perPositionNotional:0.##} notional each; the notional cap binds before MaxPositions.");
+            }
+        }
+
+        var slotOpenRisk = decimal.Round(perPositionOpenRisk * Futures.MaxPositions, 4);
+        if (Risk.MaxConcurrentOpenRiskUsd < slotOpenRisk)
+        {
+            Console.WriteLine($"config-validation: Risk.MaxConcurrentOpenRiskUsd={Risk.MaxConcurrentOpenRiskUsd:0.##} is below TargetRiskUsd*MaxPositions={slotOpenRisk:0.##}; the open-risk cap binds before MaxPositions.");
+        }
+
         Risk.EstimatedEmergencyExitCostPct = Math.Max(0m, Risk.EstimatedEmergencyExitCostPct);
         ExecutionPolicy.CooldownAfterCloseSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterCloseSeconds);
         ExecutionPolicy.CooldownAfterStopLossSeconds = Math.Max(0, ExecutionPolicy.CooldownAfterStopLossSeconds);
