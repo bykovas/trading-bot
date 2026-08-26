@@ -11,6 +11,16 @@ jobs:
   stopped-out:
     runs-on: self-hosted
     steps:
+      - name: What futures-live wanted today but had no slot for
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.pair, count(*) as cycles, min(d.utc) as first_wanted, max(d.utc) as last_wanted, max(round(d.score::numeric,2)) as best_score, mode() within group (order by d.desired_position) as side from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index where d.bot_instance_id='futures-live' and r.reason ilike '%slots exhausted%' and d.utc >= '2026-08-26 00:00' group by 1 order by 2 desc limit 40"
+
+      - name: Slot-exhaustion rejections per hour today
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select date_trunc('hour', d.utc) as hour, count(*) as blocked, count(distinct d.pair) as pairs from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index where d.bot_instance_id='futures-live' and r.reason ilike '%slots exhausted%' and d.utc >= '2026-08-26 00:00' group by 1 order by 1"
+
       - name: Every PROFITABLE close of futures-live since 2026-08-19
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
