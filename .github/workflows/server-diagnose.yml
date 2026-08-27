@@ -10,6 +10,21 @@ jobs:
   why-idle:
     runs-on: self-hosted
     steps:
+      - name: The two NVDAX closes side by side
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select c.bot_instance_id, c.utc, a.pair, a.action, a.exit_reason_code, a.hold_reason_code, round(a.fill_price::numeric,4) as fill, c.cycle_id like '%-fast' as fast_cycle, left(a.reason,90) as reason from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.pair='NVDAX/USD' and c.utc >= '2026-08-27 17:00' order by c.utc"
+
+      - name: Today's realised result per instance
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select c.bot_instance_id, coalesce(a.exit_reason_code,a.action) as how, count(*), round(sum(case when a.side='SHORT' then (a.entry_price-a.fill_price) else (a.fill_price-a.entry_price) end * a.quantity)::numeric,2) as usd from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.action in ('WOULD_SELL','WOULD_CLOSE') and a.entry_price>0 and a.fill_price>0 and c.utc >= '2026-08-27 00:00' group by 1,2 order by 1,4"
+
+      - name: Did the max-hold trail arm at all
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select left(r.reason,110) as reason, count(*), min(d.utc) as first_seen from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index where d.bot_instance_id='futures-live' and (r.reason ilike '%max hold%' or r.reason ilike '%trailing%') and d.utc >= '2026-08-27 17:00' group by 1 order by 2 desc limit 12"
+
       - name: What the max-hold rule says about the open positions
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
