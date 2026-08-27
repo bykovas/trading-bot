@@ -202,6 +202,13 @@
   color:var(--green);font:13.5px var(--font-mono)}
 .bc-live-s{margin-top:10px;font:12.5px var(--font-mono);color:var(--muted-2)}
 .bc-live-s b{color:var(--ink-soft);font-weight:400} .bc-live-s i{font-style:normal;color:var(--blue)}
+/* The day's change, broken into the parts that make it up — so "-5,75 today"
+   next to "realised +0,54" and "unrealised 0,00" stops reading as a
+   contradiction. The parts are signed and end in the same total the line
+   above prints. */
+.bc-live-bridge{margin-top:7px;font:12px/1.5 var(--font-mono);color:var(--muted-2)}
+.bc-live-bridge .bc-br-pos{color:var(--ink-soft)} .bc-live-bridge .bc-br-neg{color:var(--ink-soft)}
+.bc-live-bridge .bc-br-eq{color:var(--muted-2)}
 /* Who did it, after the pair. One family for all five states: the brackets are the
    record, what sits inside them is what happened to it, and the dashed axis says the
    record is a copy. Stroke only, at the pair's own scale, in the colours the page
@@ -916,6 +923,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         <div>
           <p class="bc-live-l"><i class="bc-dot" id="bcLiveDot"></i><b id="bcLiveTenant">LUKAS</b><span>&#183; Portfelio vert&#279; dabar &#183; gyvai</span></p>
           <p class="bc-live-n"><span class="bc-big" id="bcLiveValue">&#8212;</span><span class="bc-delta" id="bcLiveDelta"></span></p>
+          <p class="bc-live-bridge" id="bcLiveBridge" hidden></p>
           <p class="bc-live-s" id="bcLiveSince"></p>
         </div>
         <div class="bc-legend">
@@ -1366,6 +1374,7 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       liveTenant: el("bcLiveTenant"),
       liveValue: el("bcLiveValue"),
       liveDelta: el("bcLiveDelta"),
+      liveBridge: el("bcLiveBridge"),
       liveSince: el("bcLiveSince"),
       chart: el("bcChart"),
       chartCanvas: el("bcChartCanvas"),
@@ -2224,12 +2233,62 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       }
     }
 
+    // Break the day's change into the parts that make it up. For a
+    // mark-to-market equity series the identity always holds:
+    //   delta = realizedToday + unrealizedNow + manualToday − unrealizedAtYesterdayClose
+    // Everything on the right except that last term is reported directly by the
+    // API; the last is the single residual, and it IS yesterday's unrealized by
+    // construction — the paper P/N that was baked into yesterday's close and
+    // then either held or evaporated. Printed as its effect on today (−residual),
+    // so "-5,75 today" next to "realised +0,54" and "unrealised 0,00" reads as a
+    // sum instead of a contradiction. When the numbers ever stop reconciling the
+    // residual carries the drift into daylight rather than hiding it.
+    function renderDayBridge(data, delta) {
+      if (!els.liveBridge) return;
+      const realizedToday = Number(data.today && data.today.realizedPnlEur) || 0;
+      const closedToday = Number(data.today && data.today.closed) || 0;
+      const positions = data.positions || [];
+      const unrealizedNow = positions.reduce((sum, p) => sum + (Number(p.unrealizedPnlEur) || 0), 0);
+      const manualToday = Number(data.equity && data.equity.todayManualEur) || 0;
+      const revertedEffect = delta - (realizedToday + unrealizedNow + manualToday); // = −(yesterday's unrealized)
+
+      const SHOW = 0.005;
+      const parts = [];
+      if (Math.abs(realizedToday) > SHOW || closedToday > 0)
+        parts.push({ value: realizedToday, label: "realizuota nuo įėjimo" });
+      if (Math.abs(unrealizedNow) > SHOW)
+        parts.push({ value: unrealizedNow, label: "nerealizuota dabar" });
+      if (Math.abs(manualToday) > SHOW)
+        parts.push({ value: manualToday, label: "pervedimai" });
+      // Precisely −(unrealized carried at yesterday's close): yesterday's value
+      // already counted it, so the day-over-day change takes it back out. True
+      // whether those positions since closed or are still open, so the label
+      // states that rather than claiming the paper P/N "did not hold".
+      if (Math.abs(revertedEffect) > SHOW)
+        parts.push({ value: revertedEffect, label: "vakar jau įskaitytas popierinis P/N" });
+
+      // Nothing moved, or nothing worth decomposing: leave only the headline.
+      if (Math.abs(delta) <= SHOW || parts.length < 2) {
+        els.liveBridge.hidden = true;
+        els.liveBridge.textContent = "";
+        return;
+      }
+
+      const body = parts.map(part => {
+        const tone = part.value >= 0 ? "bc-br-pos" : "bc-br-neg";
+        return `<span class="${tone}">${esc(signedMoney(part.value))}</span> ${esc(part.label)}`;
+      }).join(" · ");
+      els.liveBridge.hidden = false;
+      els.liveBridge.innerHTML = `${body} <span class="bc-br-eq">= ${esc(signedMoney(delta))} šiandien</span>`;
+    }
+
     function renderHeadline(data) {
       const summary = data.summary;
       const days = (data.equity && data.equity.days) || [];
       if (!summary) {
         els.liveValue.textContent = "—";
         els.liveDelta.textContent = "";
+        els.liveBridge.hidden = true;
         els.liveSince.textContent = "Laukiama pirmojo boto ciklo";
         return;
       }
@@ -2243,9 +2302,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         const deltaPercent = delta / Math.abs(lastClose) * 100;
         els.liveDelta.className = `bc-delta ${delta >= 0 ? "" : "bc-delta--down"}`;
         els.liveDelta.innerHTML = `${delta >= 0 ? "▲" : "▼"} ${esc(signedMoney(delta))} (${esc(signedPercent(deltaPercent))}) šiandien`;
+        renderDayBridge(data, delta);
       } else {
         els.liveDelta.className = "bc-delta";
         els.liveDelta.textContent = "";
+        els.liveBridge.hidden = true;
       }
 
       const first = days.length ? Number(days[0].open) : null;
