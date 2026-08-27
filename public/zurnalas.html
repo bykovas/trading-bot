@@ -296,6 +296,23 @@
 .bc-tstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,165px),1fr));gap:12px;margin-top:12px}
 .bc-tstats .bc-metric{padding:16px 18px;border:1px solid var(--hairline);border-radius:var(--r-lg);background:rgba(17,18,15,.85)}
 .bc-tstats .bc-metric-v{font-size:28px}
+
+/* Account at a glance — three groups (Marža / P/N / Sandoriai), each a row of
+   three related figures. Wide screens set the groups side by side (one line of
+   three); the phone stacks them into three rows. Each group's own three values
+   always stay in one three-column row, so the block is a rectangle, never a
+   scattered set of square cards. */
+.bc-account{margin-top:18px}
+.bc-groups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.bc-group{padding:14px 16px;border:1px solid var(--hairline);border-radius:var(--r-lg);background:rgba(17,18,15,.85)}
+.bc-group-l{font:600 10px var(--font-mono);letter-spacing:.11em;text-transform:uppercase;color:var(--gold)}
+.bc-group-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:11px}
+.bc-gcell{display:flex;flex-direction:column;gap:5px;min-width:0}
+.bc-gc-l{font:600 9px var(--font-mono);letter-spacing:.07em;text-transform:uppercase;color:var(--muted-3);line-height:1.3;min-height:2.1em}
+/* Colour comes from the tone class every cell is given (bc-t-cream / green /
+   red), so no hardcoded colour here — it would sit later in the sheet and win. */
+.bc-gc-v{font:18px/1 var(--font-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bc-groups-note{margin-top:11px;font:12px var(--font-mono);color:var(--muted-2)}
 .bc-list{display:grid;gap:12px}
 .bc-card{border:1px solid var(--hairline);border-radius:var(--r-lg);
   background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.008)),var(--surface)}
@@ -523,6 +540,15 @@
     border:1px solid rgba(246,218,160,.12);border-radius:10px;overflow:hidden;background:rgba(246,218,160,.1)}
   .bc-tstats .bc-metric{border:0;border-radius:0;padding:12px 13px}
   .bc-tstats .bc-metric-v{font-size:17px}
+
+  /* Phone: the three groups stack into three rows; each group keeps its own
+     three-column row. One hairline frame around the lot, seams between. */
+  .bc-groups{grid-template-columns:1fr;gap:1px;
+    border:1px solid rgba(246,218,160,.12);border-radius:10px;overflow:hidden;background:rgba(246,218,160,.1)}
+  .bc-group{border:0;border-radius:0;padding:11px 13px}
+  .bc-group-row{gap:9px;margin-top:9px}
+  .bc-gc-l{font-size:8.5px;letter-spacing:.05em}
+  .bc-gc-v{font-size:15px}
 
   /* collapsed rows: headline + risk bar visible, everything else behind the tap */
   .bc-card-sum{display:block;padding:13px 14px}
@@ -938,12 +964,11 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         </div>
       </div>
       <div class="bc-chart" id="bcChart"><div id="bcChartCanvas"></div><div class="bc-tip" id="bcChartTip" hidden></div></div>
-      <div class="bc-metrics" id="bcMetrics"></div>
-      <!-- The day's tally sits with the account figures above it, not inside the trade
-           list below: both answer "where does the account stand right now", and the
-           reader met the count of today's trades after scrolling past the positions
-           those trades opened. -->
-      <div class="bc-tstats" id="bcTradeStats"></div>
+      <!-- Three grouped rows, not scattered cards: Marža, P/N and Sandoriai, each a
+           row of three related figures. The day's tally (opened/closed today) sits
+           here with the account, beside the count of what is open right now, so the
+           "opened 4" no longer reads as "4 open" a screen away from the positions. -->
+      <div class="bc-account" id="bcMetrics"></div>
       </section>
 
     <section class="bc-sec">
@@ -1404,7 +1429,6 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       posMeta: el("bcPosMeta"),
       posList: el("bcPosList"),
       tradeMeta: el("bcTradeMeta"),
-      tradeStats: el("bcTradeStats"),
       tradeList: el("bcTradeList")
     };
 
@@ -2351,38 +2375,72 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         `<p class="bc-metric-s">${sub}</p></div>`;
     }
 
+    function groupCell(label, value, tone) {
+      return `<div class="bc-gcell"><span class="bc-gc-l">${esc(label)}</span>` +
+        `<span class="bc-gc-v ${tone || ""}">${esc(value)}</span></div>`;
+    }
+
+    function accountGroup(title, cells) {
+      return `<div class="bc-group"><p class="bc-group-l">${esc(title)}</p>` +
+        `<div class="bc-group-row">${cells.join("")}</div></div>`;
+    }
+
+    // Three groups, each a row of three: the money (Marža), the profit (P/N) and
+    // the activity (Sandoriai). Within each row the first figure is the sum of
+    // the other two, or — for Sandoriai — three counts that answer three
+    // different questions. "Aktyvūs" (open right now) is deliberately beside
+    // "Atidaryti/Uždaryti" (opened and closed today): the count of what is open
+    // and the count of what was opened today are not the same number, and the
+    // old single "Atidaryta 1" read as "1 open" when nothing was.
     function renderMetrics(data) {
       const summary = data.summary;
-      if (!summary) {
-          paint(els.metrics, "");
-        return;
-      }
+      if (!summary) { paint(els.metrics, ""); return; }
+
       const positions = data.positions || [];
-      const margin = positions.reduce((sum, position) => sum + (Number(position.initialMarginEur) || 0), 0);
-      const unrealized = positions.reduce((sum, position) => sum + (Number(position.unrealizedPnlEur) || 0), 0);
-      const cash = Number(summary.cashEur) || 0;
+      const today = data.today || {};
+
+      const cash = Number(summary.cashEur) || 0;                                              // Laisva
+      const posMargin = positions.reduce((s, p) => s + (Number(p.initialMarginEur) || 0), 0); // Pozicijų
+      const marginTotal = cash + posMargin;                                                   // Viso (collateral)
+
+      const unrealized = positions.reduce((s, p) => s + (Number(p.unrealizedPnlEur) || 0), 0); // Nerealizuotas
+      const realized = Number(today.realizedPnlEur) || 0;                                       // Realizuotas (šiandien)
+      const pnlTotal = unrealized + realized;                                                   // Viso
+
+      const openNow = positions.length;             // Aktyvūs — atviros dabar
+      const openedToday = Number(today.opened) || 0; // Atidaryti šiandien
+      const closedToday = Number(today.closed) || 0; // Uždaryti šiandien
+
+      const groups = [
+        accountGroup("Marža", [
+          groupCell("Viso", money(marginTotal), "bc-t-cream"),
+          groupCell("Pozicijų", money(posMargin), "bc-t-cream"),
+          groupCell("Laisva", money(cash), "bc-t-cream")
+        ]),
+        accountGroup("P/N", [
+          groupCell("Viso", signedMoney(pnlTotal), toneClass(pnlTotal)),
+          groupCell("Nerealizuotas", signedMoney(unrealized), toneClass(unrealized)),
+          groupCell("Realizuotas", signedMoney(realized), toneClass(realized))
+        ]),
+        accountGroup("Sandoriai", [
+          groupCell("Aktyvūs", num(openNow, 0), "bc-t-cream"),
+          groupCell("Atidaryti", num(openedToday, 0), "bc-t-cream"),
+          groupCell("Uždaryti", num(closedToday, 0), "bc-t-cream")
+        ])
+      ].join("");
+
+      // Portfolio value = collateral + unrealised; if that identity ever drifts,
+      // the gap is named, not hidden — the same discipline as the day bridge.
       const total = Number(summary.totalValueEur) || 0;
-
-      // The three parts must add up to the headline. When they do not, the gap
-      // is shown rather than hidden.
-      const gap = total - (cash + margin + unrealized);
+      const gap = total - (marginTotal + unrealized);
       const gapNote = Math.abs(gap) > 0.01
-        ? `<br><span class="bc-t-amber">nesutampa ${esc(signedMoney(gap))}</span>`
-        : "";
-
+        ? ` · <span class="bc-t-amber">nesutampa ${esc(signedMoney(gap))}</span>` : "";
       const drawdown = Number(data.equity && data.equity.maxDrawdownPercent) || 0;
-      const openCount = positions.length;
+      const note = `<p class="bc-groups-note">Maks. nuosmukis ` +
+        `<span class="${drawdown < 0 ? "bc-t-red" : "bc-t-soft"}">${esc(percent(drawdown, 1))}</span>` +
+        ` · giliausias kritimas nuo piko · P/N nuo įėjimo · ${esc(currencyCode)}${gapNote}</p>`;
 
-      paint(els.metrics, [
-        metricCell("Laisva marža", money(cash), "bc-t-cream",
-          `Kraken užstatas · ${esc(currencyCode)}${gapNote}`),
-        metricCell("Pozicijų marža", money(margin), "bc-t-cream",
-          `${esc(num(openCount, 0))} ${esc(positionsWord(openCount))}`),
-        metricCell("Nerealizuotas P/N", signedMoney(unrealized), toneClass(unrealized),
-          "iš atvirų pozicijų"),
-        metricCell("Maks. nuosmukis", percent(drawdown, 1), drawdown < 0 ? "bc-t-red" : "bc-t-soft",
-          "giliausias kritimas nuo piko")
-      ].join(""));
+      paint(els.metrics, `<div class="bc-groups">${groups}</div>${note}`);
     }
 
     // ---- prose ------------------------------------------------------------
@@ -3085,20 +3143,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
         ? `nuo ${today.localDate} 00:00 ${today.timeZone || "Europe/Vilnius"}`
         : "";
 
-      const exits = trades.filter(trade => trade.action === "WOULD_CLOSE" || trade.action === "WOULD_SELL");
-      const exitNote = [
-        today.stopLoss ? `${num(today.stopLoss, 0)} stop loss` : "",
-        today.takeProfit ? `${num(today.takeProfit, 0)} tikslas` : ""
-      ].filter(Boolean).join(" · ") || "uždarytos pozicijos";
-
-      paint(els.tradeStats, [
-        metricCell("Sandoriai šiandien", num(trades.length, 0), "bc-t-gold", "nuo 00:00 LT"),
-        metricCell("Atidaryta", num(today.opened || 0, 0), "bc-t-cream", "naujos pozicijos"),
-        metricCell("Uždaryta", num(today.closed || 0, 0), "bc-t-cream", esc(exitNote)),
-        metricCell("Realizuotas P/N", signedMoney(today.realizedPnlEur || 0), toneClass(today.realizedPnlEur || 0),
-          `iš ${esc(num(exits.length, 0))} ${esc(tradesWord(exits.length))}`)
-      ].join(""));
-
+      // The day's counts and realised P/N moved up into the account groups; here
+      // the section is just the list of what actually happened today.
       paint(els.tradeList, trades.length
         ? trades.map(tradeCard).join("")
         : '<p class="bc-empty">Šiandien sandorių dar nebuvo</p>');
