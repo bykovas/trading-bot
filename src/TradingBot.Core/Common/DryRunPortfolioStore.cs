@@ -252,7 +252,11 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                    origin,
                    entry_channel,
                    flipped_entry,
-                   adopted_while_running
+                   adopted_while_running,
+                   -- Appended at the END on purpose: this SELECT is read by ordinal, so a
+                   -- column inserted next to its sibling would silently shift every field
+                   -- after it.
+                   peak_pnl_at_utc
             from portfolio_position_state
             where bot_instance_id = @bot_instance_id
             order by position_index
@@ -306,7 +310,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     Origin = GetNullableString(reader, 38),
                     EntryChannel = GetNullableString(reader, 39),
                     FlippedEntry = !reader.IsDBNull(40) && reader.GetBoolean(40),
-                    AdoptedWhileRunning = !reader.IsDBNull(41) && reader.GetBoolean(41)
+                    AdoptedWhileRunning = !reader.IsDBNull(41) && reader.GetBoolean(41),
+                    PeakPnlAtUtc = GetNullableDateTimeOffset(reader, 42)
                 });
             }
         }
@@ -706,6 +711,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 opened_at_utc timestamptz,
                 last_action_at_utc timestamptz,
                 peak_pnl_percent numeric,
+                peak_pnl_at_utc timestamptz,
                 entry_score numeric,
                 exit_mode text,
                 entry_atr numeric,
@@ -747,6 +753,10 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
 
             alter table portfolio_position_state
                 add column if not exists adopted_while_running boolean not null default false;
+            -- Live tables were created before this column existed, so the create-if-not-exists
+            -- above never adds it to them.
+            alter table portfolio_position_state
+                add column if not exists peak_pnl_at_utc timestamptz;
 
             alter table portfolio_state_summary
                 add column if not exists cash_quote_value numeric,
@@ -1413,6 +1423,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     opened_at_utc,
                     last_action_at_utc,
                     peak_pnl_percent,
+                    peak_pnl_at_utc,
                     entry_score,
                     exit_mode,
                     entry_atr,
@@ -1459,6 +1470,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     @opened_at_utc,
                     @last_action_at_utc,
                     @peak_pnl_percent,
+                    @peak_pnl_at_utc,
                     @entry_score,
                     @exit_mode,
                     @entry_atr,
@@ -1507,6 +1519,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             Add(command, "opened_at_utc", NpgsqlDbType.TimestampTz, Utc(position.OpenedAtUtc));
             Add(command, "last_action_at_utc", NpgsqlDbType.TimestampTz, Utc(position.LastActionAtUtc));
             Add(command, "peak_pnl_percent", NpgsqlDbType.Numeric, position.PeakPnlPercent);
+            Add(command, "peak_pnl_at_utc", NpgsqlDbType.TimestampTz, Utc(position.PeakPnlAtUtc));
             Add(command, "entry_score", NpgsqlDbType.Numeric, position.EntryScore);
             Add(command, "exit_mode", NpgsqlDbType.Text, position.ExitMode);
             Add(command, "entry_atr", NpgsqlDbType.Numeric, position.EntryAtr);

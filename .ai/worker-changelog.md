@@ -1,3 +1,9 @@
+## 2026-08-27-the-peak-clock-survives-a-restart
+
+- `PeakPnlAtUtc` shipped an hour ago as an in-memory field only: it was never written to `portfolio_position_state` and never read back. Every worker restart therefore reset the peak to whatever the position happened to be worth at that moment, and the max-hold rule read every open position as freshly leading. The two positions open across the 13:05 deploy did exactly that - ORDI at sixteen hours and stalled since 03:08 kept its slot because its peak clock had been zeroed forty minutes earlier.
+- Column added, written on save, read on load, with an `alter table ... add column if not exists` because the live table predates it. The SELECT is read by ordinal, so the column is appended at the END of the list rather than beside `peak_pnl_percent`: inserted next to its sibling it would have shifted every field after it by one.
+- A position still loads with a null timestamp the first time (nothing has written one yet) and falls back to its open time, which past max hold reads as stalled. That is the safe direction and it self-corrects on the first mark-to-market.
+
 ## 2026-08-27-a-position-past-its-hold-keeps-its-slot-only-while-it-leads
 
 - `Exits.MaxHoldPeakFreshMinutes` = 30 on the arm. Past the six-hour hold the position keeps its slot only while it set a new high within the last 30 minutes; otherwise it closes. Above zero this REPLACES the healthy-hold and stop-progress tests; zero is the default and the control is untouched.
