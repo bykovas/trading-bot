@@ -320,7 +320,7 @@ internal sealed class FuturesVirtualPortfolio(
         return new FuturesFillResult(action, PositionOpened: false, PositionClosed: false);
     }
 
-    public void MarkToMarket(PortfolioState state, string pair, decimal markPrice)
+    public void MarkToMarket(PortfolioState state, string pair, decimal markPrice, DateTimeOffset utc)
     {
         var position = state.Positions.FirstOrDefault(p => p.Pair == pair);
         if (position is null || markPrice <= 0m)
@@ -336,6 +336,16 @@ internal sealed class FuturesVirtualPortfolio(
             ? 0m
             : decimal.Round(pnl / position.EntryNotionalEur * 100m, 2);
         position.MarketValueEur = decimal.Round((position.InitialMarginEur ?? 0m) + pnl, 10);
+
+        // The futures worker never tracked the peak - the trailing stop lives on the
+        // exchange - so the max-hold rule had nothing to read. Track it here, with the
+        // moment it was improved, and the peak stays a by-product of marking to market
+        // rather than a second pass over the book.
+        if (position.PeakPnlPercent is not { } peak || position.UnrealizedPnlPercent > peak)
+        {
+            position.PeakPnlPercent = position.UnrealizedPnlPercent;
+            position.PeakPnlAtUtc = utc;
+        }
         if (position.LiquidationPrice is { } liquidation)
         {
             position.LiquidationDistancePercent = FuturesMath.LiquidationDistancePercent(markPrice, liquidation);

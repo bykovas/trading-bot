@@ -146,6 +146,10 @@ public sealed class FuturesInstanceConfigurationTests
             // day agreed on both sign and size (+0.05-0.06pp per trade each).
             ("TpSl", "TrailingStopPercent"),
             ("Exits", "SignalReversalExitEnabled"),
+            // Max hold judged by whether the position is still leading, not by where the
+            // price sits relative to entry. Arm only; the control keeps the old rule, and
+            // the knob at zero is what leaves it untouched.
+            ("Exits", "MaxHoldPeakFreshMinutes"),
             // The arm runs wider: five slots, two per correlated sector, the full
             // universe scanned. The totals above already scale per-position x slots.
             ("Trading", "MaxActiveInstruments"),

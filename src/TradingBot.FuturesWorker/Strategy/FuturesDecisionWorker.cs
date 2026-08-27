@@ -262,7 +262,7 @@ internal sealed class FuturesDecisionWorker(
 
             if (held is not null)
             {
-                portfolio.MarkToMarket(state, pair, markPrice);
+                portfolio.MarkToMarket(state, pair, markPrice, utc);
 
                 // TP/SL first: hard exits outrank the strategy's held desire.
                 var trigger = tpSl.Evaluate(held, markPrice, marketState.LastPrice, marketState.Quote?.Bid, marketState.Quote?.Ask);
@@ -277,7 +277,8 @@ internal sealed class FuturesDecisionWorker(
                         utc,
                         config.Exits.MaxHoldMinutes,
                         config.Exits.MaxHoldMinStopProgressPct,
-                        config.Exits.MaxHoldForFlippedEntriesEnabled) is { ShouldClose: true } maxHold)
+                        config.Exits.MaxHoldForFlippedEntriesEnabled,
+                        config.Exits.MaxHoldPeakFreshMinutes) is { ShouldClose: true } maxHold)
                 {
                     fill = await ApplyOrExecuteLiveAsync(
                         state, pair, FuturesDesiredExposure.Flat, markPrice,
@@ -820,7 +821,7 @@ internal sealed class FuturesDecisionWorker(
                 continue;
             }
 
-            portfolio.MarkToMarket(state, held.Pair, markPrice);
+            portfolio.MarkToMarket(state, held.Pair, markPrice, utc);
             var trigger = tpSl.Evaluate(held, markPrice, marketState.Quote?.Last ?? marketState.LastPrice, marketState.Quote?.Bid, marketState.Quote?.Ask);
             FuturesFillResult? fill = null;
             if (trigger is not null)
@@ -833,7 +834,8 @@ internal sealed class FuturesDecisionWorker(
                     utc,
                     config.Exits.MaxHoldMinutes,
                     config.Exits.MaxHoldMinStopProgressPct,
-                    config.Exits.MaxHoldForFlippedEntriesEnabled) is { ShouldClose: true } maxHold)
+                    config.Exits.MaxHoldForFlippedEntriesEnabled,
+                    config.Exits.MaxHoldPeakFreshMinutes) is { ShouldClose: true } maxHold)
             {
                 fill = await ApplyOrExecuteLiveAsync(
                     state, held.Pair, FuturesDesiredExposure.Flat, markPrice,
@@ -3002,7 +3004,8 @@ internal sealed class FuturesDecisionWorker(
         DateTimeOffset utc,
         int maxHoldMinutes,
         decimal minStopProgressPct,
-        bool maxHoldForFlippedEntriesEnabled = true)
+        bool maxHoldForFlippedEntriesEnabled = true,
+        int peakFreshMinutes = 0)
     {
         if (position.FlippedEntry && !maxHoldForFlippedEntriesEnabled)
         {
@@ -3012,6 +3015,32 @@ internal sealed class FuturesDecisionWorker(
         if (maxHoldMinutes <= 0 || position.OpenedAtUtc is not { } opened || utc - opened < TimeSpan.FromMinutes(maxHoldMinutes))
         {
             return new FuturesMaxHoldExit(false, null);
+        }
+
+        // Two ways to decide whether a position past its hold is worth its slot.
+        //
+        // LEADING (peakFreshMinutes > 0): keep it only while it is still making new
+        // highs. Measured over 2026-08-14..21 with a twelve-slot book this returns +547
+        // against +402 for the rule below - the gap is the slot, not the trade: the old
+        // rule deferred the exit 60,888 times in that week and turned the book over half
+        // as often. "In profit" is NOT the same test and scored worst of everything tried
+        // (+371): a position up 0.3% that has not moved in two hours is stuck with the
+        // right sign, and holding it is how a small gain becomes a loss.
+        //
+        // The old behaviour is the default and the control keeps it.
+        if (peakFreshMinutes > 0)
+        {
+            var peakAt = position.PeakPnlAtUtc ?? position.OpenedAtUtc;
+            if (peakAt is { } since && utc - since <= TimeSpan.FromMinutes(peakFreshMinutes))
+            {
+                return new FuturesMaxHoldExit(
+                    false,
+                    $"MAX_HOLD still leading after {maxHoldMinutes}m: peak {position.PeakPnlPercent:0.##}% set {(utc - since).TotalMinutes:0} min ago (within {peakFreshMinutes}m)");
+            }
+
+            return new FuturesMaxHoldExit(
+                true,
+                $"MAX_HOLD stalled close after {maxHoldMinutes}m: no new high for {(peakAt is { } stale ? (utc - stale).TotalMinutes : double.NaN):0} min (limit {peakFreshMinutes}m), unrealized PnL USD {position.UnrealizedPnlEur:0.####}");
         }
 
         if (position.UnrealizedPnlEur >= 0m)

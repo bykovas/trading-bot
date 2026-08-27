@@ -502,6 +502,81 @@ public sealed class FuturesRiskCapsAndSizingTests
             allowsShort ? null : 0.5m, 0m, Array.Empty<SignalContribution>(), score, true,
             allowsShort, allowsShort, allowsShort ? 0.5m : null, shortScore);
 
+    // Max hold with peak-freshness on: the position keeps its slot only while it is
+    // still making new highs. "In profit" is deliberately NOT the test - a position up
+    // 0.3% that has not moved in two hours is stuck with the right sign.
+    [Theory]
+    [InlineData(10, false)]  // new high ten minutes ago - still leading, keep it
+    [InlineData(29, false)]
+    [InlineData(31, true)]   // stalled past the window - the slot is worth more
+    [InlineData(200, true)]
+    public void A_stalled_position_loses_its_slot_and_a_leading_one_keeps_it(int minutesSincePeak, bool shouldClose)
+    {
+        var utc = new DateTimeOffset(2026, 8, 27, 12, 0, 0, TimeSpan.Zero);
+        var position = new PortfolioPosition
+        {
+            Pair = "ORDI/USD", Side = "LONG", Quantity = 35.58m,
+            EntryPrice = 4.216m, LastPrice = 4.26m, StopLossPrice = 4.132m,
+            OpenedAtUtc = utc.AddHours(-7),
+            UnrealizedPnlEur = 1.56m,                       // in profit, and irrelevant now
+            PeakPnlPercent = 2.63m,
+            PeakPnlAtUtc = utc.AddMinutes(-minutesSincePeak)
+        };
+
+        var result = FuturesDecisionWorker.EvaluateMaxHoldExit(
+            position, utc, maxHoldMinutes: 360, minStopProgressPct: 60m,
+            maxHoldForFlippedEntriesEnabled: true, peakFreshMinutes: 30);
+
+        Assert.Equal(shouldClose, result.ShouldClose);
+    }
+
+    // The control runs with the knob at zero and must behave exactly as before: a
+    // position in profit past its hold is kept, whatever its peak is doing.
+    [Fact]
+    public void With_the_knob_off_a_profitable_position_is_still_held()
+    {
+        var utc = new DateTimeOffset(2026, 8, 27, 12, 0, 0, TimeSpan.Zero);
+        var position = new PortfolioPosition
+        {
+            Pair = "ORDI/USD", Side = "LONG", Quantity = 35.58m,
+            EntryPrice = 4.216m, LastPrice = 4.26m, StopLossPrice = 4.132m,
+            OpenedAtUtc = utc.AddHours(-7),
+            UnrealizedPnlEur = 1.56m,
+            PeakPnlPercent = 2.63m,
+            PeakPnlAtUtc = utc.AddHours(-3)
+        };
+
+        var result = FuturesDecisionWorker.EvaluateMaxHoldExit(
+            position, utc, maxHoldMinutes: 360, minStopProgressPct: 60m,
+            maxHoldForFlippedEntriesEnabled: true, peakFreshMinutes: 0);
+
+        Assert.False(result.ShouldClose);
+        Assert.Contains("healthy hold", result.Reason);
+    }
+
+    // A position carried over from before the field existed has no peak timestamp. It
+    // falls back to the open time, which past max hold always reads as stale - the safe
+    // direction, since the alternative is holding it forever on a missing value.
+    [Fact]
+    public void A_legacy_position_without_a_peak_timestamp_is_treated_as_stalled()
+    {
+        var utc = new DateTimeOffset(2026, 8, 27, 12, 0, 0, TimeSpan.Zero);
+        var position = new PortfolioPosition
+        {
+            Pair = "ETH/USD", Side = "SHORT", Quantity = 0.06m,
+            EntryPrice = 2465.7m, LastPrice = 2463m, StopLossPrice = 2515m,
+            OpenedAtUtc = utc.AddHours(-29),
+            UnrealizedPnlEur = 0.16m,
+            PeakPnlPercent = null, PeakPnlAtUtc = null
+        };
+
+        var result = FuturesDecisionWorker.EvaluateMaxHoldExit(
+            position, utc, maxHoldMinutes: 360, minStopProgressPct: 60m,
+            maxHoldForFlippedEntriesEnabled: true, peakFreshMinutes: 30);
+
+        Assert.True(result.ShouldClose);
+    }
+
     private static RiskEvaluation InvokeGuards(
         FuturesDecisionWorker worker, PortfolioState state, string pair, DateTimeOffset utc, decimal sizedNotionalEur)
     {

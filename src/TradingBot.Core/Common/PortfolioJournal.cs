@@ -113,6 +113,13 @@ public sealed class PortfolioPosition
     // fire the trailing stop until it establishes a fresh peak.
     public decimal? PeakPnlPercent { get; set; }
 
+    // When that peak was last improved. A position past its max hold is judged by
+    // whether it is still LEADING - making new highs - rather than by where the price
+    // sits relative to entry: one that is up 0.3% and has not moved in two hours is
+    // stuck with the right sign, not winning. Null on legacy positions, which are then
+    // treated as stale (the max-hold rule reads the open time as the fallback).
+    public DateTimeOffset? PeakPnlAtUtc { get; set; }
+
     // Strategy score at the moment the position was opened, used by the score-decay
     // defensive exit. Null for legacy positions (decay rules then stay inert).
     public decimal? EntryScore { get; set; }
@@ -193,6 +200,7 @@ public sealed class PortfolioPosition
         OpenedAtUtc = OpenedAtUtc,
         LastActionAtUtc = LastActionAtUtc,
         PeakPnlPercent = PeakPnlPercent,
+        PeakPnlAtUtc = PeakPnlAtUtc,
         EntryScore = EntryScore,
         ExitMode = ExitMode,
         EntryAtr = EntryAtr,

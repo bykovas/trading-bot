@@ -507,6 +507,7 @@ internal sealed class FuturesBotConfiguration
         // clean, explicit name (MinStopDistancePct = minimum stop, not fixed stop) with a
         // backward-compatible mapping from old appsettings/env.
         Exits.MinStopDistancePct = Exits.MinStopDistancePct <= 0m ? TpSl.StopLossPercent : Exits.MinStopDistancePct;
+        Exits.MaxHoldPeakFreshMinutes = Math.Clamp(Exits.MaxHoldPeakFreshMinutes, 0, 720);
         Exits.MinTakeProfitPct = Exits.MinTakeProfitPct <= 0m ? TpSl.TakeProfitPercent : Exits.MinTakeProfitPct;
     }
 
@@ -892,6 +893,12 @@ internal sealed class FuturesExitOptions
     public int MaxHoldMinutes { get; set; } = 360;
     public decimal MaxHoldMinStopProgressPct { get; set; } = 60m;
     public bool MaxHoldForFlippedEntriesEnabled { get; set; }
+
+    // Minutes since the position last set a new high. Above zero this REPLACES the
+    // healthy-hold and stop-progress tests at max hold: the position keeps its slot
+    // only while it is still leading. Zero keeps the old behaviour, which is why the
+    // control is untouched by this existing.
+    public int MaxHoldPeakFreshMinutes { get; set; }
     public decimal TrailingActivationBufferPct { get; set; } = 0m;
 }
 

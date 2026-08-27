@@ -244,12 +244,38 @@ public sealed class FuturesVirtualPortfolioTests
         var (portfolio, state) = Setup();
         portfolio.Apply(state, "XBT/EUR", FuturesDesiredExposure.Short, 100m, 20m, 2m);
 
-        portfolio.MarkToMarket(state, "XBT/EUR", 95m);
+        var t0 = new DateTimeOffset(2026, 8, 27, 12, 0, 0, TimeSpan.Zero);
+        portfolio.MarkToMarket(state, "XBT/EUR", 95m, t0);
         var position = Assert.Single(state.Positions);
         Assert.True(position.UnrealizedPnlEur > 0m);            // short gains on drop
 
-        portfolio.MarkToMarket(state, "XBT/EUR", 105m);
+        portfolio.MarkToMarket(state, "XBT/EUR", 105m, t0.AddMinutes(30));
         Assert.True(position.UnrealizedPnlEur < 0m);            // short loses on rise
+    }
+
+    // The peak and the moment it was set: the max-hold rule reads both, so a position
+    // that stops improving must keep the older timestamp rather than have it refreshed
+    // by every mark that is merely not a new high.
+    [Fact]
+    public void The_peak_records_when_it_was_last_improved()
+    {
+        var (portfolio, state) = Setup();
+        portfolio.Apply(state, "XBT/EUR", FuturesDesiredExposure.Long, 100m, 20m, 2m);
+        var t0 = new DateTimeOffset(2026, 8, 27, 12, 0, 0, TimeSpan.Zero);
+
+        portfolio.MarkToMarket(state, "XBT/EUR", 104m, t0);
+        var position = Assert.Single(state.Positions);
+        var peak = position.PeakPnlPercent;
+        Assert.Equal(t0, position.PeakPnlAtUtc);
+
+        // A new high moves both.
+        portfolio.MarkToMarket(state, "XBT/EUR", 108m, t0.AddMinutes(20));
+        Assert.True(position.PeakPnlPercent > peak);
+        Assert.Equal(t0.AddMinutes(20), position.PeakPnlAtUtc);
+
+        // Falling back does not: the position stopped leading twenty minutes in.
+        portfolio.MarkToMarket(state, "XBT/EUR", 102m, t0.AddMinutes(90));
+        Assert.Equal(t0.AddMinutes(20), position.PeakPnlAtUtc);
     }
 
     [Fact]
