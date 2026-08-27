@@ -10,6 +10,16 @@ jobs:
   why-idle:
     runs-on: self-hosted
     steps:
+      - name: What the max-hold rule says about the open positions
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.pair, d.utc, left(r.reason,120) as reason from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.pair in ('ONDO/USD','ORDI/USD') and d.utc >= now() - interval '25 minutes' order by d.utc desc limit 14"
+
+      - name: Any MAX_HOLD verdicts logged since the deploy
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select left(r.reason,110) as reason, count(*), min(d.utc) as first_seen, max(d.utc) as last_seen from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index where d.bot_instance_id='futures-live' and r.reason like 'MAX_HOLD%' and d.utc >= '2026-08-27 13:05' group by 1 order by 2 desc limit 12"
+
       - name: Movers today, both sides, what stopped each
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
