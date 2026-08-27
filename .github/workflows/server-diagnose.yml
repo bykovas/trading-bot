@@ -10,6 +10,16 @@ jobs:
   why-idle:
     runs-on: self-hosted
     steps:
+      - name: Movers today, both sides, what stopped each
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.pair, count(*) as looks, round(max(d.score)::numeric,2) as best_long, round(max(d.short_score)::numeric,2) as best_short, round(max(d.rsi)::numeric,0) as max_rsi, round(min(d.spread_percent)::numeric,3) as min_spread, count(*) filter (where not d.risk_approved) as gate_blocked from dry_run_decision_facts d where d.bot_instance_id='futures-live' and d.utc >= now() - interval '6 hours' and d.pair in ('BICO/USD','MOVR/USD','VET/USD','RUNE/USD','SPX/USD','ONT/USD','S/USD','CVX/USD','HFT/USD','GRASS/USD','ID/USD','GPS/USD','RIVER/USD','POL/USD','PORTAL/USD','PYTH/USD','STX/USD','ICX/USD','OP/USD','CSPR/USD','FARTCOIN/USD','ATOM/USD') group by 1 order by 3 desc nulls last"
+
+      - name: Their single best bar and the reason it stopped
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select distinct on (d.pair) d.pair, round(d.score::numeric,2) as long_s, round(d.short_score::numeric,2) as short_s, round(d.rsi::numeric,0) as rsi, round(d.bullish_ema_gap_percent::numeric,3) as gap, round(d.spread_percent::numeric,3) as spread, left(r.reason,72) as reason from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.utc >= now() - interval '6 hours' and d.pair in ('BICO/USD','MOVR/USD','VET/USD','RUNE/USD','SPX/USD','ONT/USD','S/USD','CVX/USD','HFT/USD','GRASS/USD','ID/USD','GPS/USD','RIVER/USD','POL/USD','PORTAL/USD','PYTH/USD','STX/USD','ICX/USD','OP/USD','CSPR/USD','FARTCOIN/USD','ATOM/USD') order by d.pair, greatest(d.score, d.short_score) desc"
+
       - name: What the bot saw on the pairs that ran overnight
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
