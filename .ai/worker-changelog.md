@@ -1,3 +1,10 @@
+## 2026-08-27-a-stop-caught-by-the-slow-loop-now-reaches-the-channel
+
+- The two-minute decision cycle closed positions on a TP/SL trigger without announcing them. The fast exit checker, which runs every ~11 seconds, announced from the day it was added. Whether a close reached Telegram therefore came down to which loop happened to see the trigger first, and nothing in the channel said a post was missing.
+- Found from the live pair on 2026-08-27: the control's NVDAX stop fired at 18:34:19 on a fast cycle and was posted; the arm's identical `SELL_STOP_LOSS` fired at 18:50:00 on the two-minute cycle and was not. Same code, same exit reason, different loop.
+- Pre-existing, not from any change made today. Both loops now announce from the same place with the same arguments; the guard inside `AnnounceCloseAsync` still skips anything without a configured channel or a usable entry price.
+- Unrelated but worth recording from the same investigation, because the channel gave the opposite impression: futures-live closed seven positions on 2026-08-27 for **+20.11 USD** - five trailing stops for +24.29 against one stop at -2.29 and one max-hold at -1.89. The control closed two for +4.19. The losses were the two posts that arrived; four of the five wins were the ones nobody saw.
+
 ## 2026-08-27-at-max-hold-the-position-gets-a-trail-not-an-eviction
 
 - `Exits.MaxHoldTrailingStopPercent` = 0.5 on the arm. A position that reaches six hours without having armed a trail of its own is handed one at that distance instead of being closed or held: from there any give-back of half a percent takes it, and until then it runs. Zero is the default and keeps the old close-or-hold path, so the control is untouched.

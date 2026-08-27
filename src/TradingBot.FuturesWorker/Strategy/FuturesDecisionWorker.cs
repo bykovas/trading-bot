@@ -275,6 +275,19 @@ internal sealed class FuturesDecisionWorker(
                 {
                     fill = await HandleTpSlTriggerAsync(state, held, trigger, markPrice, marketState.Instrument, cancellationToken, fast: false);
                     riskReasons = new[] { $"hard exit: {trigger.Kind} via {trigger.TriggerSource} price" };
+                    // The fast checker announced its stops from the day it was added and
+                    // this path never did, so whether a close reached the channel came down
+                    // to which loop happened to see it first. On 2026-08-27 the control's
+                    // NVDAX stop landed on the fast cycle at 18:34 and was posted; the arm's
+                    // identical stop landed on the two-minute cycle at 18:50 and was not.
+                    if (fill.PositionClosed)
+                    {
+                        await AnnounceCloseAsync(
+                            held,
+                            fill.Action.AverageFillPrice ?? fill.Action.FillPrice,
+                            fill.Action.NetNotionalEur == 0m ? null : fill.Action.NetNotionalEur,
+                            fill.Action.ExitReasonCode ?? trigger.Kind, utc, cancellationToken);
+                    }
                 }
                 else if (!IsExternalFuturesPosition(held)
                     && EvaluateMaxHoldExit(
