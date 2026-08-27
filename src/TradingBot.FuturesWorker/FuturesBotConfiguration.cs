@@ -507,7 +507,7 @@ internal sealed class FuturesBotConfiguration
         // clean, explicit name (MinStopDistancePct = minimum stop, not fixed stop) with a
         // backward-compatible mapping from old appsettings/env.
         Exits.MinStopDistancePct = Exits.MinStopDistancePct <= 0m ? TpSl.StopLossPercent : Exits.MinStopDistancePct;
-        Exits.MaxHoldPeakFreshMinutes = Math.Clamp(Exits.MaxHoldPeakFreshMinutes, 0, 720);
+        Exits.MaxHoldTrailingStopPercent = Math.Clamp(Exits.MaxHoldTrailingStopPercent, 0m, 10m);
         Exits.MinTakeProfitPct = Exits.MinTakeProfitPct <= 0m ? TpSl.TakeProfitPercent : Exits.MinTakeProfitPct;
     }
 
@@ -894,11 +894,18 @@ internal sealed class FuturesExitOptions
     public decimal MaxHoldMinStopProgressPct { get; set; } = 60m;
     public bool MaxHoldForFlippedEntriesEnabled { get; set; }
 
-    // Minutes since the position last set a new high. Above zero this REPLACES the
-    // healthy-hold and stop-progress tests at max hold: the position keeps its slot
-    // only while it is still leading. Zero keeps the old behaviour, which is why the
-    // control is untouched by this existing.
-    public int MaxHoldPeakFreshMinutes { get; set; }
+    // Trailing distance, in percent, handed to a position that reaches its max hold
+    // without having armed a trail of its own. Above zero this REPLACES closing at max
+    // hold: the position is not evicted, it stops being given the benefit of the doubt -
+    // from here any give-back of this size closes it, and until then it runs. Zero keeps
+    // the old close-or-hold behaviour, which is what leaves the control untouched.
+    //
+    // Measured 2026-08-14..21, twelve-slot book, 150 USD per position: +745 USD for the
+    // week against +547 for closing the stalled ones and +402 for the rule both replace.
+    // The win rate moves 46.7% -> 55.0%, which no eviction rule managed: price decides
+    // instead of a threshold, so a position still climbing keeps running and one that
+    // has stopped leaves on its first wobble.
+    public decimal MaxHoldTrailingStopPercent { get; set; }
     public decimal TrailingActivationBufferPct { get; set; } = 0m;
 }
 

@@ -1,3 +1,12 @@
+## 2026-08-27-at-max-hold-the-position-gets-a-trail-not-an-eviction
+
+- `Exits.MaxHoldTrailingStopPercent` = 0.5 on the arm. A position that reaches six hours without having armed a trail of its own is handed one at that distance instead of being closed or held: from there any give-back of half a percent takes it, and until then it runs. Zero is the default and keeps the old close-or-hold path, so the control is untouched.
+- Measured 2026-08-14..21, twelve-slot book, 150 USD per position: **+745 USD** for the week, against +547 for closing the stalled ones (the rule shipped two hours ago and now replaced) and +402 for the rule both of them replace. Win rate moves 46.7% -> **55.0%**, which no eviction rule managed - the difference is that price decides rather than a threshold, so a position still climbing keeps climbing and one that has stopped leaves on its first wobble. Distances either side are worse: 0.75% gives +678, 1% +650, 2% +475.
+- This is the owner's idea and it beat everything measured today: unconditional close (+506), close if the peak is older than 30 minutes (+547), "in profit, keep it" (+371, worst of all), nine variants of "has it risen over a window" (+450..+545), and stop-progress at 40/20/10% (+454/+423/+388).
+- `MaxHoldPeakFreshMinutes` is gone, two hours old and never having closed a position in production. `PeakPnlAtUtc` and the peak tracking stay: they are what the trail itself reads.
+- Arming happens BEFORE `tpSl.Evaluate` in the cycle, because it cancels the exchange TP/SL pair and the evaluation reads their state. If arming fails the position is left exactly as it was, protective orders included, and the next cycle tries again rather than running bare.
+- The stale-loser path below it is unchanged, so a position that HAS travelled 60% of the way to its stop still closes on the old rule; switching the trail on does not remove that floor.
+
 ## 2026-08-27-the-peak-clock-survives-a-restart
 
 - `PeakPnlAtUtc` shipped an hour ago as an in-memory field only: it was never written to `portfolio_position_state` and never read back. Every worker restart therefore reset the peak to whatever the position happened to be worth at that moment, and the max-hold rule read every open position as freshly leading. The two positions open across the 13:05 deploy did exactly that - ORDI at sixteen hours and stalled since 03:08 kept its slot because its peak clock had been zeroed forty minutes earlier.

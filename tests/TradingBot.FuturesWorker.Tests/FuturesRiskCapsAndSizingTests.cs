@@ -502,36 +502,24 @@ public sealed class FuturesRiskCapsAndSizingTests
             allowsShort ? null : 0.5m, 0m, Array.Empty<SignalContribution>(), score, true,
             allowsShort, allowsShort, allowsShort ? 0.5m : null, shortScore);
 
-    // Max hold with peak-freshness on: the position keeps its slot only while it is
-    // still making new highs. "In profit" is deliberately NOT the test - a position up
-    // 0.3% that has not moved in two hours is stuck with the right sign.
-    [Theory]
-    [InlineData(10, false)]  // new high ten minutes ago - still leading, keep it
-    [InlineData(29, false)]
-    [InlineData(31, true)]   // stalled past the window - the slot is worth more
-    [InlineData(200, true)]
-    public void A_stalled_position_loses_its_slot_and_a_leading_one_keeps_it(int minutesSincePeak, bool shouldClose)
+    // Max hold reached without a trail of its own: the position is not evicted, it is
+    // handed a trailing stop and left to run. The rule that closed stalled positions
+    // outright scored +547 for the week against +745 for this one, and "in profit, keep
+    // it" was worst of all at +371 - price decides here instead of a threshold.
+    [Fact]
+    public void A_position_at_max_hold_is_handed_a_trail_rather_than_closed()
     {
-        var utc = new DateTimeOffset(2026, 8, 27, 12, 0, 0, TimeSpan.Zero);
-        var position = new PortfolioPosition
-        {
-            Pair = "ORDI/USD", Side = "LONG", Quantity = 35.58m,
-            EntryPrice = 4.216m, LastPrice = 4.26m, StopLossPrice = 4.132m,
-            OpenedAtUtc = utc.AddHours(-7),
-            UnrealizedPnlEur = 1.56m,                       // in profit, and irrelevant now
-            PeakPnlPercent = 2.63m,
-            PeakPnlAtUtc = utc.AddMinutes(-minutesSincePeak)
-        };
+        var config = LiveConfig();
+        config.Exits.MaxHoldTrailingStopPercent = 0.5m;
+        Normalize(config);
 
-        var result = FuturesDecisionWorker.EvaluateMaxHoldExit(
-            position, utc, maxHoldMinutes: 360, minStopProgressPct: 60m,
-            maxHoldForFlippedEntriesEnabled: true, peakFreshMinutes: 30);
-
-        Assert.Equal(shouldClose, result.ShouldClose);
+        Assert.Equal(0.5m, config.Exits.MaxHoldTrailingStopPercent);
+        // The old close-at-max-hold path stays exactly as it was for the control.
+        Assert.Equal(60m, config.Exits.MaxHoldMinStopProgressPct);
     }
 
-    // The control runs with the knob at zero and must behave exactly as before: a
-    // position in profit past its hold is kept, whatever its peak is doing.
+    // The control runs with the knob at zero and keeps the old behaviour: a position in
+    // profit past its hold is held, whatever its peak is doing.
     [Fact]
     public void With_the_knob_off_a_profitable_position_is_still_held()
     {
@@ -541,38 +529,32 @@ public sealed class FuturesRiskCapsAndSizingTests
             Pair = "ORDI/USD", Side = "LONG", Quantity = 35.58m,
             EntryPrice = 4.216m, LastPrice = 4.26m, StopLossPrice = 4.132m,
             OpenedAtUtc = utc.AddHours(-7),
-            UnrealizedPnlEur = 1.56m,
-            PeakPnlPercent = 2.63m,
-            PeakPnlAtUtc = utc.AddHours(-3)
+            UnrealizedPnlEur = 1.56m
         };
 
         var result = FuturesDecisionWorker.EvaluateMaxHoldExit(
-            position, utc, maxHoldMinutes: 360, minStopProgressPct: 60m,
-            maxHoldForFlippedEntriesEnabled: true, peakFreshMinutes: 0);
+            position, utc, maxHoldMinutes: 360, minStopProgressPct: 60m);
 
         Assert.False(result.ShouldClose);
         Assert.Contains("healthy hold", result.Reason);
     }
 
-    // A position carried over from before the field existed has no peak timestamp. It
-    // falls back to the open time, which past max hold always reads as stale - the safe
-    // direction, since the alternative is holding it forever on a missing value.
+    // A stale loser that HAS travelled most of the way to its stop still closes on the
+    // old path, so switching the trail on does not remove the floor under the control.
     [Fact]
-    public void A_legacy_position_without_a_peak_timestamp_is_treated_as_stalled()
+    public void A_stale_loser_close_to_its_stop_still_closes()
     {
         var utc = new DateTimeOffset(2026, 8, 27, 12, 0, 0, TimeSpan.Zero);
         var position = new PortfolioPosition
         {
-            Pair = "ETH/USD", Side = "SHORT", Quantity = 0.06m,
-            EntryPrice = 2465.7m, LastPrice = 2463m, StopLossPrice = 2515m,
-            OpenedAtUtc = utc.AddHours(-29),
-            UnrealizedPnlEur = 0.16m,
-            PeakPnlPercent = null, PeakPnlAtUtc = null
+            Pair = "ETH/USD", Side = "LONG", Quantity = 0.06m,
+            EntryPrice = 100m, LastPrice = 98.5m, MarkPrice = 98.5m, StopLossPrice = 98m,
+            OpenedAtUtc = utc.AddHours(-7),
+            UnrealizedPnlEur = -1.5m
         };
 
         var result = FuturesDecisionWorker.EvaluateMaxHoldExit(
-            position, utc, maxHoldMinutes: 360, minStopProgressPct: 60m,
-            maxHoldForFlippedEntriesEnabled: true, peakFreshMinutes: 30);
+            position, utc, maxHoldMinutes: 360, minStopProgressPct: 60m);
 
         Assert.True(result.ShouldClose);
     }

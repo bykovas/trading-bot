@@ -264,6 +264,11 @@ internal sealed class FuturesDecisionWorker(
             {
                 portfolio.MarkToMarket(state, pair, markPrice, utc);
 
+                // Before anything reads the protective orders: a position at its max hold
+                // with no trail of its own gets one. This cancels the exchange TP/SL, so it
+                // has to happen before tpSl.Evaluate looks at their state.
+                var armedTrail = await TryArmMaxHoldTrailAsync(held, marketState.Instrument, utc, cancellationToken);
+
                 // TP/SL first: hard exits outrank the strategy's held desire.
                 var trigger = tpSl.Evaluate(held, markPrice, marketState.LastPrice, marketState.Quote?.Bid, marketState.Quote?.Ask);
                 if (trigger is not null)
@@ -277,8 +282,7 @@ internal sealed class FuturesDecisionWorker(
                         utc,
                         config.Exits.MaxHoldMinutes,
                         config.Exits.MaxHoldMinStopProgressPct,
-                        config.Exits.MaxHoldForFlippedEntriesEnabled,
-                        config.Exits.MaxHoldPeakFreshMinutes) is { ShouldClose: true } maxHold)
+                        config.Exits.MaxHoldForFlippedEntriesEnabled) is { ShouldClose: true } maxHold)
                 {
                     fill = await ApplyOrExecuteLiveAsync(
                         state, pair, FuturesDesiredExposure.Flat, markPrice,
@@ -310,6 +314,10 @@ internal sealed class FuturesDecisionWorker(
                     // above runs FIRST, so a stale loser still cannot outlive 360 minutes.
                     var reversalExitDisabled = desired == FuturesDesiredExposure.Flat
                         && !config.Exits.SignalReversalExitEnabled;
+                    if (armedTrail is not null)
+                    {
+                        riskReasons = new[] { armedTrail };
+                    }
                     if (minHoldBlocked)
                     {
                         desired = held.Side == "SHORT" ? FuturesDesiredExposure.Short : FuturesDesiredExposure.Long;
@@ -834,8 +842,7 @@ internal sealed class FuturesDecisionWorker(
                     utc,
                     config.Exits.MaxHoldMinutes,
                     config.Exits.MaxHoldMinStopProgressPct,
-                    config.Exits.MaxHoldForFlippedEntriesEnabled,
-                    config.Exits.MaxHoldPeakFreshMinutes) is { ShouldClose: true } maxHold)
+                    config.Exits.MaxHoldForFlippedEntriesEnabled) is { ShouldClose: true } maxHold)
             {
                 fill = await ApplyOrExecuteLiveAsync(
                     state, held.Pair, FuturesDesiredExposure.Flat, markPrice,
@@ -2999,13 +3006,55 @@ internal sealed class FuturesDecisionWorker(
         PriceActionAssessment? PriceAction,
         TechnicalSignal Signal);
 
+    // A position that reaches its max hold without a trail of its own is not evicted;
+    // it stops being given the benefit of the doubt. From here a give-back of
+    // MaxHoldTrailingStopPercent closes it, and until then it runs - so one still
+    // climbing keeps climbing and one that has stopped leaves on its first wobble.
+    // Returns the log line when it armed, null when there was nothing to do.
+    private async Task<string?> TryArmMaxHoldTrailAsync(
+        PortfolioPosition held,
+        InstrumentOptions instrument,
+        DateTimeOffset utc,
+        CancellationToken cancellationToken)
+    {
+        if (config.Exits.MaxHoldTrailingStopPercent <= 0m
+            || config.Exits.MaxHoldMinutes <= 0
+            || !config.Futures.LiveTradingEnabled
+            || IsExternalFuturesPosition(held)
+            || held.OpenedAtUtc is not { } opened
+            || utc - opened < TimeSpan.FromMinutes(config.Exits.MaxHoldMinutes)
+            || held.TrailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return null;
+        }
+
+        // The distance is this rule's own, not the one a take-profit handoff would use.
+        var previous = held.TrailingStopPercent;
+        held.TrailingStopPercent = config.Exits.MaxHoldTrailingStopPercent;
+        var result = await ActivateTrailingStopAsync(
+            held,
+            instrument,
+            cancellationToken,
+            $"max hold {config.Exits.MaxHoldMinutes}m reached without a trail");
+
+        if (held.TrailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) != true)
+        {
+            // Arming failed - leave the position exactly as it was, protective orders
+            // included, so the next cycle tries again instead of running bare.
+            held.TrailingStopPercent = previous;
+            Console.WriteLine($"futures-maxhold-trail: symbol={instrument.KrakenPair} NOT armed: {result}");
+            return null;
+        }
+
+        return result;
+    }
+
     internal static FuturesMaxHoldExit EvaluateMaxHoldExit(
         PortfolioPosition position,
         DateTimeOffset utc,
         int maxHoldMinutes,
         decimal minStopProgressPct,
-        bool maxHoldForFlippedEntriesEnabled = true,
-        int peakFreshMinutes = 0)
+        bool maxHoldForFlippedEntriesEnabled = true)
     {
         if (position.FlippedEntry && !maxHoldForFlippedEntriesEnabled)
         {
@@ -3015,32 +3064,6 @@ internal sealed class FuturesDecisionWorker(
         if (maxHoldMinutes <= 0 || position.OpenedAtUtc is not { } opened || utc - opened < TimeSpan.FromMinutes(maxHoldMinutes))
         {
             return new FuturesMaxHoldExit(false, null);
-        }
-
-        // Two ways to decide whether a position past its hold is worth its slot.
-        //
-        // LEADING (peakFreshMinutes > 0): keep it only while it is still making new
-        // highs. Measured over 2026-08-14..21 with a twelve-slot book this returns +547
-        // against +402 for the rule below - the gap is the slot, not the trade: the old
-        // rule deferred the exit 60,888 times in that week and turned the book over half
-        // as often. "In profit" is NOT the same test and scored worst of everything tried
-        // (+371): a position up 0.3% that has not moved in two hours is stuck with the
-        // right sign, and holding it is how a small gain becomes a loss.
-        //
-        // The old behaviour is the default and the control keeps it.
-        if (peakFreshMinutes > 0)
-        {
-            var peakAt = position.PeakPnlAtUtc ?? position.OpenedAtUtc;
-            if (peakAt is { } since && utc - since <= TimeSpan.FromMinutes(peakFreshMinutes))
-            {
-                return new FuturesMaxHoldExit(
-                    false,
-                    $"MAX_HOLD still leading after {maxHoldMinutes}m: peak {position.PeakPnlPercent:0.##}% set {(utc - since).TotalMinutes:0} min ago (within {peakFreshMinutes}m)");
-            }
-
-            return new FuturesMaxHoldExit(
-                true,
-                $"MAX_HOLD stalled close after {maxHoldMinutes}m: no new high for {(peakAt is { } stale ? (utc - stale).TotalMinutes : double.NaN):0} min (limit {peakFreshMinutes}m), unrealized PnL USD {position.UnrealizedPnlEur:0.####}");
         }
 
         if (position.UnrealizedPnlEur >= 0m)
