@@ -10,6 +10,21 @@ jobs:
   why-idle:
     runs-on: self-hosted
     steps:
+      - name: What the bot saw on the pairs that ran overnight
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.pair, count(*) as looks, round(max(d.score)::numeric,2) as best_long, round(max(d.rsi)::numeric,1) as max_rsi, min(d.utc) as first_seen, max(d.utc) as last_seen, count(*) filter (where d.desired_position <> 'FLAT') as wanted from dry_run_decision_facts d where d.bot_instance_id='futures-live' and d.utc >= '2026-08-26 21:00' and d.pair in ('MOVR/USD','RUNE/USD','BICO/USD','VET/USD','CVX/USD','GRASS/USD','S/USD','SPX/USD','ONT/USD','ID/USD','SOL/USD','ALCH/USD','HFT/USD') group by 1 order by 2 desc"
+
+      - name: Their best long score and why it stopped there
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.pair, round(d.score::numeric,2) as score, round(d.rsi::numeric,1) as rsi, round(d.bullish_ema_gap_percent::numeric,3) as ema_gap, d.utc, left(r.reason,80) as reason from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.utc >= '2026-08-26 21:00' and d.pair in ('MOVR/USD','RUNE/USD','BICO/USD','VET/USD','CVX/USD','GRASS/USD','S/USD','SPX/USD','ONT/USD','ID/USD') and d.score = (select max(d2.score) from dry_run_decision_facts d2 where d2.pair=d.pair and d2.bot_instance_id=d.bot_instance_id and d2.utc >= '2026-08-26 21:00') order by d.score desc limit 20"
+
+      - name: Signal contributions on their best bar
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.pair, sc.name, round(sc.value::numeric,2) as value, left(sc.reason,60) as why from dry_run_decision_facts d join dry_run_signal_contributions sc on sc.cycle_id=d.cycle_id and sc.decision_index=d.decision_index where d.bot_instance_id='futures-live' and d.utc >= '2026-08-26 21:00' and d.pair in ('MOVR/USD','BICO/USD','VET/USD') and d.score = (select max(d2.score) from dry_run_decision_facts d2 where d2.pair=d.pair and d2.bot_instance_id=d.bot_instance_id and d2.utc >= '2026-08-26 21:00') order by d.pair, sc.contribution_index limit 40"
+
       - name: Wanted-but-blocked vs never-wanted, futures-live, last 3 hours
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
