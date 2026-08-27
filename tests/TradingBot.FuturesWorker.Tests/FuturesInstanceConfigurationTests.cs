@@ -136,6 +136,8 @@ public sealed class FuturesInstanceConfigurationTests
             ("Risk", "TargetRiskUsd"),
             ("Risk", "MaxConcurrentOpenRiskUsd"),
             ("Telegram", "Label"),
+            // The face at the head of every post, one per instance, same reason as the label.
+            ("Telegram", "Emoji"),
             // The experiment arm's own knobs; absent on the control by design.
             ("Futures", "DisabledLongEntryChannels"),
             ("Shorts", "MaxBtc24hRisePercentForShort"),

@@ -907,6 +907,7 @@ internal sealed class FuturesDecisionWorker(
 
         await _telegram.SendAsync(
             FuturesEntryAnnouncement.ComposeClose(
+                config.Telegram.Emoji,
                 config.Telegram.Label,
                 position.Pair,
                 position.Side,
@@ -953,6 +954,7 @@ internal sealed class FuturesDecisionWorker(
         var margin = opened?.InitialMarginEur
             ?? (announceLeverage > 0m ? notional / announceLeverage : notional);
         var text = FuturesEntryAnnouncement.Compose(
+            config.Telegram.Emoji,
             config.Telegram.Label,
             pair,
             ExposureSide(side),

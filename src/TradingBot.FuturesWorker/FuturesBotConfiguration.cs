@@ -555,6 +555,11 @@ internal sealed class TelegramNotificationOptions
     // BYKO for the experiment arm. Two bots writing one channel without it would
     // read as one bot contradicting itself.
     public string Label { get; set; } = "BlynAI";
+
+    // The face that heads every post from this instance. Configuration, not code: a
+    // switch on the label inside the shared composer would hardcode which instance is
+    // which in a file both of them run.
+    public string Emoji { get; set; } = string.Empty;
     public string? BotToken { get; set; }
     public string? ChatId { get; set; }
 

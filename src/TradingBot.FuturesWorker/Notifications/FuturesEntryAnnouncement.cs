@@ -20,8 +20,8 @@ internal static class FuturesEntryAnnouncement
     // bet, a verdict for the outcome. One glyph per state, no two states sharing a
     // silhouette, so a notification preview reads at a glance. The white circle stays
     // on the regime line as the one neutral mark.
-    private const string OpenLong = "\u2B06\uFE0F\U0001F4B2";
-    private const string OpenShort = "\u2B07\uFE0F\U0001F4B2";
+    private const string OpenLong = "\u2B06\uFE0F";
+    private const string OpenShort = "\u2B07\uFE0F";
     private const string CloseProfit = "\U0001F4B2\U0001F4B0";
     private const string CloseLoss = "\U0001F4B2\U0001F4B8";
     private const string Neutral = "\U000026AA";
@@ -49,6 +49,7 @@ internal static class FuturesEntryAnnouncement
     };
 
     public static string Compose(
+        string emoji,
         string label,
         string pair,
         string side,
@@ -72,65 +73,28 @@ internal static class FuturesEntryAnnouncement
         // meaning - green is up or good, red is down or bad, white is neither. A dart
         // board, a road sign and a cog are three different drawing styles pretending to
         // be a set.
-        text.Append(isLong ? OpenLong : OpenShort).Append(' ').Append(label).Append(" · ").Append(pair)
+        text.Append(Head(emoji, isLong ? OpenLong : OpenShort)).Append(label).Append(" · ").Append(pair)
             .Append(' ').Append(Bold(isLong ? "LONG" : "SHORT")).Append('\n');
 
-        if (!Reasons.TryGetValue(entryChannel ?? "Standard", out var reason))
-        {
-            reason = Reasons["Standard"];
-        }
-
-        text.Append("Atidariau ").Append(pair).Append(isLong ? " į viršų" : " žemyn")
-            .Append(", kaina ").Append(Bold(Money(price) + " $")).Append(". Kodėl: ").Append(reason).Append('.');
-        text.Append("\nĮdėjau ").Append(Bold(Money(marginUsd) + " $")).Append(" savo pinigų (pozicijoje dirba ")
+        text.Append("Įdėjau ").Append(Bold(Money(marginUsd) + " $")).Append(" savo pinigų (pozicijoje dirba ")
             .Append(Money(notionalUsd)).Append(" $, svertas ").Append(leverage.ToString("0.##", Lt)).Append("×).");
 
         // Both exits in one spoken sentence right under the reason, percent first and the
         // price level in brackets - the same voice as the intention above it, not a table.
         // On a short the target percentage is negative and the stop positive, which the
         // levels themselves already agree with.
-        var exits = new List<string>();
+        var exits = new List<string> { "Kaina " + Bold(Money(price) + " $") };
         if (takeProfitPrice is { } tp)
         {
-            exits.Add($"\"Take Profit\" limitą pastačiau {Bold(Signed(isLong ? takeProfitPercent : -takeProfitPercent) + " %")} (ties {Money(tp)} $)");
+            exits.Add($"TP {Bold(Signed(isLong ? takeProfitPercent : -takeProfitPercent) + " %")} (ties {Money(tp)} $)");
         }
 
         if (stopLossPrice is { } sl)
         {
-            exits.Add($"\"stop-loss\" {Bold(Signed(isLong ? -stopLossPercent : stopLossPercent) + " %")} (ties {Money(sl)} $)");
+            exits.Add($"SL {Bold(Signed(isLong ? -stopLossPercent : stopLossPercent) + " %")} (ties {Money(sl)} $)");
         }
 
-        if (exits.Count > 0)
-        {
-            text.Append('\n').Append(string.Join(", ", exits));
-        }
-
-        // Everything the bot was reading, in one unbroken block: the regime the flip gate
-        // weighs, what each signal contributed, and the context it was read in.
-        var tail = new List<string>();
-
-        var regime = new List<string>();
-        if (btc24hChangePct is { } btc)
-        {
-            regime.Add($"BTC per parą {Signed(btc)} %");
-        }
-
-        if (pair24hChangePct is { } own)
-        {
-            regime.Add($"{BaseAsset(pair)} per parą {Signed(own)} %");
-        }
-
-        if (regime.Count > 0)
-        {
-            tail.Add(Neutral + " " + string.Join(" · ", regime));
-        }
-
-        tail.AddRange(DetailLines(details, entryChannel));
-
-        if (tail.Count > 0)
-        {
-            text.Append("\n\n").Append(string.Join("\n", tail));
-        }
+        text.Append('\n').Append(string.Join(", ", exits));
 
         return text.ToString().TrimEnd();
     }
@@ -157,6 +121,7 @@ internal static class FuturesEntryAnnouncement
     // lost - where the opening's circle is the direction; an opening has no outcome yet
     // and a close has no intention left.
     public static string ComposeClose(
+        string emoji,
         string label,
         string pair,
         string side,
@@ -170,18 +135,17 @@ internal static class FuturesEntryAnnouncement
         string reasonCode)
     {
         var text = new StringBuilder();
-        text.Append(pnlUsd > 0m ? CloseProfit : CloseLoss).Append(' ').Append(label).Append(" · ")
+        text.Append(Head(emoji, pnlUsd > 0m ? CloseProfit : CloseLoss)).Append(label).Append(" · ")
             .Append(pair).Append(' ').Append(Bold(side.ToUpperInvariant())).Append(" uždaryta\n");
-        text.Append("Įdėjau ").Append(Bold(Money(marginUsd) + " $")).Append(" savo pinigų (pozicijoje dirbo ")
-            .Append(Money(notionalUsd)).Append(" $, svertas ").Append(leverage.ToString("0.##", Lt)).Append("×).\n");
 
+        // Outcome, stake and hold time on one line: the reader wants what it did to the
+        // money he put in, and the entry and exit prices were the part nobody read.
         var pct = marginUsd > 0m ? pnlUsd / marginUsd * 100m : 0m;
         text.Append(Bold(pnlUsd > 0m ? "Uždirbau" : "Praradau")).Append(' ')
             .Append(Bold(Signed(pnlUsd, 2) + " $")).Append(" — tai ")
-            .Append(Bold(Signed(pct, 0) + " %")).Append(" nuo įdėtų.\n");
-
-        text.Append("Atidariau už ").Append(Money(entryPrice)).Append(" $, uždariau už ")
-            .Append(Money(exitPrice)).Append(" $ · laikiau ").Append(Hold(held)).Append('\n');
+            .Append(Bold(Signed(pct, 0) + " %")).Append(" nuo įdėtų ")
+            .Append(Bold(Money(marginUsd) + " $")).Append(" savo pinigų · laikiau ")
+            .Append(Hold(held)).Append('\n');
 
         if (!CloseReasons.TryGetValue(reasonCode ?? "", out var why))
         {
@@ -196,6 +160,11 @@ internal static class FuturesEntryAnnouncement
     // the icons carry the verdict. HTML rather than MarkdownV2: the only characters
     // needing escapes are the three below, where MarkdownV2 would demand a backslash
     // in front of every dot and dash in a price.
+    // The instance's face, then the mark for what happened. An instance without a
+    // configured emoji simply starts with the mark, as the posts did before.
+    private static string Head(string emoji, string mark) =>
+        string.IsNullOrWhiteSpace(emoji) ? mark + " " : emoji + mark + " ";
+
     private static string Bold(string text) => "<b>" + Escape(text) + "</b>";
 
     private static string Escape(string text) =>

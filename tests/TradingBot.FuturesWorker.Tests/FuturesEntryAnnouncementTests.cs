@@ -3,144 +3,102 @@ using Xunit;
 
 namespace TradingBot.FuturesWorker.Tests;
 
-// The channel posts. Openings state a fact - the label, the direction, the money put in,
-// the exits placed. Closings state the outcome in the reader's own money and say why the
-// position left. Both bots write the same channel, so the label at the head is what keeps
-// two voices from reading as one bot contradicting itself.
+// The channel posts, trimmed to what the owner actually reads. An opening states the
+// stake, the price and the two exits; a closing states the outcome against the money
+// put in and why the position left. Both bots write the same channel, so each post is
+// headed by its instance's face and label - two voices without them read as one bot
+// contradicting itself.
 public sealed class FuturesEntryAnnouncementTests
 {
+    private const string Luko = "\U0001F60E";
+    private const string Byko = "\U0001F60B";
+
     // Real numbers: futures-lukas-live opened this ETH short on 2026-08-24 at 04:10.
     private const decimal EthPrice = 2436.367213114754m;
     private const decimal EthStop = 2485.09455738m;
     private const decimal EthTarget = 2338.91252459m;
 
     [Fact]
-    public void An_opening_names_the_label_the_fact_and_the_money_put_in()
+    public void An_opening_is_the_face_the_direction_the_stake_and_the_exits()
     {
         var text = EthShort("ShortReclaim");
+        var lines = text.Split('\n');
 
-        Assert.StartsWith("\u2B07\uFE0F\U0001F4B2 LUKO · ETH/USD <b>SHORT</b>", text);
-        Assert.Contains("Atidariau ETH/USD žemyn, kaina <b>2 436,37 $</b>.", text);
-        Assert.Contains("Įdėjau <b>15,00 $</b> savo pinigų (pozicijoje dirba 150,00 $, svertas 10×).", text);
-        Assert.DoesNotContain("atidaryčiau", text);
+        Assert.Equal(3, lines.Length);
+        Assert.Equal(Luko + "⬇️ LUKO · ETH/USD <b>SHORT</b>", lines[0]);
+        Assert.Equal("Įdėjau <b>15,00 $</b> savo pinigų (pozicijoje dirba 150,00 $, svertas 10×).", lines[1]);
+        Assert.StartsWith("Kaina <b>2 436,37 $</b>, TP <b>−4 %</b> (ties 2 338,91 $), SL <b>+2 %</b> (ties 2 485,09 $)", lines[2]);
     }
 
+    // The prose, the regime line, the score breakdown and the context line are gone by
+    // request. They were true and nobody read them.
     [Fact]
-    public void The_exits_are_one_sentence_with_percent_and_level()
+    public void An_opening_carries_no_prose_and_no_diagnostics()
     {
-        var text = EthShort("ShortReclaim");
+        var text = WithDetails();
 
-        Assert.Contains(
-            "\"Take Profit\" limitą pastačiau <b>−4 %</b> (ties 2 338,91 $), \"stop-loss\" <b>+2 %</b> (ties 2 485,09 $)",
-            text);
+        Assert.DoesNotContain("Kodėl:", text);
+        Assert.DoesNotContain("Atidariau", text);
+        Assert.DoesNotContain("per parą", text);
+        Assert.DoesNotContain("Signalai", text);
+        Assert.DoesNotContain("Kontekstas", text);
     }
 
     [Fact]
     public void A_long_targets_upward_and_stops_downward()
     {
         var text = FuturesEntryAnnouncement.Compose(
-            "BYKO", "ARB/USD", "LONG", 0.10329m, 15m, 150m, 10m, "Breakout",
-            0.1074216m, 0.1012242m, 4m, 2m, 0.85m, 2.42m);
+            Byko, "BYKO", "ARB/USD", "LONG", 0.103285m, 15m, 150m, 10m, "Breakout",
+            0.10742m, 0.10122m, 4m, 2m, 0.85m, 1.66m);
 
-        Assert.StartsWith("\u2B06\uFE0F\U0001F4B2 BYKO ·", text);
-        Assert.Contains("Atidariau ARB/USD į viršų", text);
-        Assert.Contains("\"Take Profit\" limitą pastačiau <b>+4 %</b> (ties 0,10742 $)", text);
-        Assert.Contains("\"stop-loss\" <b>−2 %</b> (ties 0,10122 $)", text);
+        Assert.StartsWith(Byko + "⬆️ BYKO ·", text);
+        Assert.Contains("TP <b>+4 %</b> (ties 0,10742 $)", text);
+        Assert.Contains("SL <b>−2 %</b> (ties 0,10122 $)", text);
     }
 
-    // Header, intent, money, exits, blank, then the tail block - pinned so a stray line
-    // cannot creep back in.
+    // An instance with no face configured still posts; the mark simply leads.
     [Fact]
-    public void The_post_keeps_its_agreed_shape()
-    {
-        var lines = WithDetails().Split('\n');
-
-        Assert.StartsWith("\u2B07\uFE0F\U0001F4B2 LUKO · ETH/USD <b>SHORT</b>", lines[0]);
-        Assert.StartsWith("Atidariau", lines[1]);
-        Assert.Contains("Kodėl:", lines[1]);
-        Assert.StartsWith("Įdėjau", lines[2]);
-        Assert.StartsWith("\"Take Profit\" limitą pastačiau", lines[3]);
-        Assert.Equal("", lines[4]);
-        Assert.StartsWith("\U000026AA BTC per parą", lines[5]);
-        Assert.StartsWith("Signalai", lines[6]);
-        Assert.StartsWith("Kontekstas:", lines[7]);
-        Assert.Equal(8, lines.Length);
-    }
-
-    [Fact]
-    public void Every_entry_channel_gets_its_own_sentence()
-    {
-        var channels = new[]
-        {
-            "Breakout", "Continuation", "Reclaim", "DipBounce",
-            "ShortBreakdown", "ShortContinuation", "ShortReclaim", "Standard"
-        };
-
-        var sentences = channels.Select(channel => Sentence(EthShort(channel))).ToList();
-
-        Assert.All(sentences, sentence => Assert.NotEmpty(sentence));
-        Assert.Equal(channels.Length, sentences.Distinct().Count());
-    }
-
-    [Fact]
-    public void An_unknown_channel_falls_back_rather_than_inventing_a_pattern()
-    {
-        Assert.Equal(Sentence(EthShort("Standard")), Sentence(EthShort("SomethingNewNextMonth")));
-        Assert.Equal(Sentence(EthShort("Standard")), Sentence(EthShort(null)));
-    }
-
-    [Fact]
-    public void The_details_block_repeats_what_the_dashboard_shows()
-    {
-        var text = WithDetails();
-
-        Assert.Contains("Signalai  0,85", text);
-        Assert.Contains("EMA +0,30", text);
-        Assert.Contains("spredas 0,24 %", text);
-        Assert.Contains("kanalas ShortReclaim", text);
-    }
-
-    [Fact]
-    public void A_missing_regime_reading_is_omitted_not_zeroed()
+    public void A_missing_face_leaves_the_mark_leading()
     {
         var text = FuturesEntryAnnouncement.Compose(
-            "LUKO", "ETH/USD", "SHORT", EthPrice, 15m, 150m, 10m, "ShortReclaim",
-            EthTarget, EthStop, 4m, 2m,
-            btc24hChangePct: null, pair24hChangePct: null);
+            "", "BlynAI", "ETH/USD", "SHORT", EthPrice, 15m, 150m, 10m, null,
+            EthTarget, EthStop, 4m, 2m, null, null);
 
-        Assert.DoesNotContain("per parą", text);
-        Assert.Contains("Take Profit", text);
+        Assert.StartsWith("⬇️ BlynAI ·", text);
     }
-
-    // ---- closes ---------------------------------------------------------
 
     [Fact]
     public void A_profitable_close_is_green_and_counts_from_the_money_put_in()
     {
         var text = FuturesEntryAnnouncement.ComposeClose(
-            "LUKO", "XLM/USD", "LONG", 15m, 150m, 10m,
+            Luko, "LUKO", "XLM/USD", "LONG", 15m, 150m, 10m,
             entryPrice: 0.3812m, exitPrice: 0.3976m, pnlUsd: 6.45m,
-            held: new TimeSpan(2, 14, 0), reasonCode: "SELL_TRAILING_STOP");
+            held: new TimeSpan(2, 14, 30), reasonCode: "SELL_TRAILING_STOP");
+        var lines = text.Split('\n');
 
-        Assert.StartsWith("\U0001F4B2\U0001F4B0 LUKO · XLM/USD <b>LONG</b> uždaryta", text);
-        Assert.Contains("Įdėjau <b>15,00 $</b> savo pinigų (pozicijoje dirbo 150,00 $, svertas 10×).", text);
-        Assert.Contains("<b>Uždirbau</b> <b>+6,45 $</b> — tai <b>+43 %</b> nuo įdėtų.", text);
-        Assert.Contains("Atidariau už 0,38120 $, uždariau už 0,39760 $ · laikiau 2 val. 14 min.", text);
-        Assert.Contains("Kodėl uždaryta: kaina nuėjo į pelną ir atsitraukė nuo viršūnės — trailing stop.", text);
+        Assert.Equal(3, lines.Length);
+        Assert.Equal(Luko + "\U0001F4B2\U0001F4B0 LUKO · XLM/USD <b>LONG</b> uždaryta", lines[0]);
+        Assert.Equal(
+            "<b>Uždirbau</b> <b>+6,45 $</b> — tai <b>+43 %</b> nuo įdėtų <b>15,00 $</b> savo pinigų · laikiau 2 val. 14 min.",
+            lines[1]);
+        Assert.Equal("Kodėl uždaryta: kaina nuėjo į pelną ir atsitraukė nuo viršūnės — trailing stop.", lines[2]);
     }
 
+    // The entry and exit prices are gone with the "Įdėjau" line: the stake now sits in
+    // the sentence that spends it.
     [Fact]
-    public void A_losing_close_is_red_and_says_so_plainly()
+    public void A_close_no_longer_prints_the_two_prices()
     {
         var text = FuturesEntryAnnouncement.ComposeClose(
-            "BYKO", "PENDLE/USD", "LONG", 15m, 150m, 10m,
+            Byko, "BYKO", "PENDLE/USD", "LONG", 15m, 150m, 10m,
             entryPrice: 2.4818m, exitPrice: 2.4278m, pnlUsd: -3.27m,
             held: TimeSpan.FromMinutes(52), reasonCode: "SELL_STOP_LOSS");
 
-        Assert.StartsWith("\U0001F4B2\U0001F4B8 BYKO · PENDLE/USD <b>LONG</b> uždaryta", text);
-        Assert.Contains("<b>Praradau</b> <b>−3,27 $</b> — tai <b>−22 %</b> nuo įdėtų.", text);
+        Assert.StartsWith(Byko + "\U0001F4B2\U0001F4B8 BYKO · PENDLE/USD <b>LONG</b> uždaryta", text);
+        Assert.Contains("<b>Praradau</b> <b>−3,27 $</b> — tai <b>−22 %</b> nuo įdėtų <b>15,00 $</b>", text);
         Assert.Contains("laikiau 52 min.", text);
-        Assert.Contains("Kodėl uždaryta: kaina pasiekė stop-loss.", text);
+        Assert.DoesNotContain("Atidariau už", text);
+        Assert.DoesNotContain("pozicijoje dirbo", text);
     }
 
     // The one close the bot did not make must say so, not claim it as its own.
@@ -148,7 +106,7 @@ public sealed class FuturesEntryAnnouncementTests
     public void A_manual_close_is_attributed_to_the_hand()
     {
         var text = FuturesEntryAnnouncement.ComposeClose(
-            "BYKO", "XMR/USD", "LONG", 15m, 150m, 10m,
+            Byko, "BYKO", "XMR/USD", "LONG", 15m, 150m, 10m,
             424.11m, 421.98m, -17.76m, TimeSpan.FromHours(3), "EXCHANGE_CLOSE");
 
         Assert.Contains("uždaryta ne boto orderiu — rankomis", text);
@@ -160,7 +118,7 @@ public sealed class FuturesEntryAnnouncementTests
     public void An_unknown_close_reason_shows_its_code()
     {
         var text = FuturesEntryAnnouncement.ComposeClose(
-            "LUKO", "ETH/USD", "SHORT", 15m, 150m, 10m,
+            Luko, "LUKO", "ETH/USD", "SHORT", 15m, 150m, 10m,
             2436m, 2400m, 2.1m, TimeSpan.FromMinutes(9), "SOMETHING_NEW");
 
         Assert.Contains("uždaryta pagal boto taisykles (SOMETHING_NEW)", text);
@@ -170,7 +128,7 @@ public sealed class FuturesEntryAnnouncementTests
     public void Hold_time_reads_naturally_at_every_scale()
     {
         string close(TimeSpan held) => FuturesEntryAnnouncement.ComposeClose(
-            "LUKO", "ETH/USD", "LONG", 15m, 150m, 10m, 100m, 101m, 1m, held, "SELL_STOP_LOSS");
+            Luko, "LUKO", "ETH/USD", "LONG", 15m, 150m, 10m, 100m, 101m, 1m, held, "SELL_STOP_LOSS");
 
         Assert.Contains("laikiau 5 min.", close(TimeSpan.FromMinutes(5)));
         Assert.Contains("laikiau 1 min.", close(TimeSpan.FromSeconds(20)));
@@ -178,9 +136,19 @@ public sealed class FuturesEntryAnnouncementTests
         Assert.Contains("laikiau 1 d. 3 val.", close(new TimeSpan(27, 5, 0)));
     }
 
+    // The two faces must differ, or the label is doing all the work again.
+    [Fact]
+    public void The_two_instances_wear_different_faces()
+    {
+        Assert.NotEqual(Luko, Byko);
+        Assert.StartsWith(Luko, EthShort(null));
+        Assert.StartsWith(Byko, FuturesEntryAnnouncement.ComposeClose(
+            Byko, "BYKO", "ETH/USD", "LONG", 15m, 150m, 10m, 100m, 101m, 1m, TimeSpan.FromMinutes(5), "SELL_STOP_LOSS"));
+    }
+
     private static string WithDetails() =>
         FuturesEntryAnnouncement.Compose(
-            "LUKO", "ETH/USD", "SHORT", EthPrice, 15m, 150m, 10m, "ShortReclaim",
+            Luko, "LUKO", "ETH/USD", "SHORT", EthPrice, 15m, 150m, 10m, "ShortReclaim",
             EthTarget, EthStop, 4m, 2m, 0.85m, 1.66m,
             new EntrySignalDetails(
                 0.85m,
@@ -189,13 +157,6 @@ public sealed class FuturesEntryAnnouncementTests
 
     private static string EthShort(string? channel) =>
         FuturesEntryAnnouncement.Compose(
-            "LUKO", "ETH/USD", "SHORT", EthPrice, 15m, 150m, 10m, channel,
+            Luko, "LUKO", "ETH/USD", "SHORT", EthPrice, 15m, 150m, 10m, channel,
             EthTarget, EthStop, 4m, 2m, 0.85m, 1.66m);
-
-    private static string Sentence(string text)
-    {
-        var start = text.IndexOf("Kodėl:", StringComparison.Ordinal);
-        var rest = text[start..];
-        return rest[..rest.IndexOf('\n')];
-    }
 }

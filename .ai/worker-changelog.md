@@ -1,3 +1,11 @@
+## 2026-08-27-the-posts-get-shorter-and-each-bot-gets-a-face
+
+- Every post is now headed by the instance's own face: sunglasses for LUKO, tongue for BYKO, ahead of the mark for what happened. `Telegram.Emoji` is per-instance configuration, not a switch on the label inside the shared composer - that would hardcode which instance is which in a file both of them run.
+- Openings lose the dollar from their mark (a bare arrow, up or down), the "Atidariau ... Kodėl: ..." sentence, the BTC/pair 24h line, the score breakdown and the context line. What remains is three lines: the head, the stake, and "Kaina X, TP +4 % (ties Y), SL -2 % (ties Z)". Everything removed was true and none of it was read.
+- Closings lose the "Įdėjau" line and the entry/exit prices. The stake moves into the sentence that spends it and the hold time joins it: "Praradau -0,76 $ - tai -5 % nuo įdėtų 14,71 $ savo pinigų · laikiau 7 val. 53 min." Then the reason, unchanged.
+- Close marks are untouched - dollar+moneybag for a gain, dollar+flying-money for a loss - as are every bold and the HTML parse mode.
+- The channel-reason dictionary for entry channels is now unused by the composer. Left in place rather than deleted: it is the only written record of what each entry channel means, and the audit of this file is a separate job from this edit.
+
 ## 2026-08-26-slots-go-to-the-best-candidates-not-the-first-ones
 
 - The entry loop walked `fullStates` in scan order and filled slots with whatever it met first. Scan order is the universe ranking - by absolute 24h move, then notional - so the signal score decided NOTHING about who got a slot: a pair scoring 1.00 sixty places down the list lost to one scoring 0.80 near the top. Every usable pair is now scored before the loop and walked best-first.
