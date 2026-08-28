@@ -7,115 +7,35 @@ on:
   workflow_dispatch:
 
 jobs:
-  why-idle:
+  shorts-vs-btc:
     runs-on: self-hosted
     steps:
-      - name: The MSTRX entry and what the gates saw
+      - name: What action and side values exist since the experiment began
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.utc, round(d.price::numeric,3) as price, round(d.score::numeric,2) as score, round(d.rsi::numeric,1) as rsi, round(d.bullish_ema_gap_percent::numeric,3) as ema_gap, round(d.spread_percent::numeric,3) as spread, d.desired_position, left(coalesce(r.reason,'-'),80) as reason from dry_run_decision_facts d left join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.pair='MSTRX/USD' and d.utc between '2026-08-28 00:00' and '2026-08-28 00:30' order by d.utc limit 20"
+            "select c.bot_instance_id, a.action, coalesce(a.side,'-') as side, count(*) from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where c.utc >= '2026-08-24' and c.bot_instance_id in ('futures-live','futures-lukas-live') group by 1,2,3 order by 1,2,3"
 
-      - name: Freshness and range context on that entry
+      - name: How often BYKO refused a short because BTC was up, by day
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.utc, round(f.entry_freshness_position_in_24h_range_pct::numeric,1) as range_pos_24h, round(f.entry_distance_from_local_high_pct::numeric,3) as dist_local_high, round(f.live_price_vs_signal_close_pct::numeric,3) as drift, f.entry_freshness_has_fresh_breakout as breakout, l.zone, l.anti_chase_applied, round(l.close_percentile::numeric,1) as close_pctile from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index left join dry_run_long_range_diagnostics l on l.cycle_id=d.cycle_id and l.decision_index=d.decision_index where d.bot_instance_id='futures-live' and d.pair='MSTRX/USD' and d.utc between '2026-08-28 00:00' and '2026-08-28 00:30' order by d.utc limit 20"
+            "select date_trunc('day', d.utc)::date as day, count(*) as refusals, count(distinct d.pair) as pairs from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index where d.bot_instance_id='futures-live' and d.utc >= '2026-08-24' and r.reason like '%EXPERIMENT_SHORT_BTC_RISING%' group by 1 order by 1"
 
-      - name: Shorts since 2026-08-24, both bots
+      - name: The pairs BYKO refused that way, and what LUKO did with them
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select c.bot_instance_id, a.side, count(*) as trades, count(*) filter (where (case when a.side='SHORT' then (a.entry_price-a.fill_price) else (a.fill_price-a.entry_price) end) > 0) as winners, round(sum(case when a.side='SHORT' then (a.entry_price-a.fill_price) else (a.fill_price-a.entry_price) end * a.quantity)::numeric,2) as usd, round(avg(case when a.side='SHORT' then (a.entry_price-a.fill_price) else (a.fill_price-a.entry_price) end / a.entry_price * 100)::numeric,3) as avg_pct from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.action in ('WOULD_SELL','WOULD_CLOSE') and a.entry_price>0 and a.fill_price>0 and c.bot_instance_id in ('futures-live','futures-lukas-live') and c.utc >= '2026-08-24' group by 1,2 order by 1,2"
+            "with refused as (select distinct d.pair, date_trunc('hour', d.utc) as hr from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index where d.bot_instance_id='futures-live' and d.utc >= '2026-08-24' and r.reason like '%EXPERIMENT_SHORT_BTC_RISING%'), luko as (select d.pair, date_trunc('hour', d.utc) as hr, bool_or(d.risk_approved and d.desired_position='SHORT') as luko_shorted from dry_run_decision_facts d where d.bot_instance_id='futures-lukas-live' and d.utc >= '2026-08-24' group by 1,2) select count(*) as refused_pair_hours, count(*) filter (where l.luko_shorted) as luko_took_it from refused f left join luko l on l.pair=f.pair and l.hr=f.hr"
 
-      - name: Shorts by day since 2026-08-24
+      - name: Every closed SHORT since 2026-08-24, both bots, with the BTC state at entry
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select date_trunc('day', c.utc)::date as day, c.bot_instance_id, count(*) as shorts, round(sum((a.entry_price-a.fill_price) * a.quantity)::numeric,2) as usd from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.action in ('WOULD_SELL','WOULD_CLOSE') and a.side='SHORT' and a.entry_price>0 and a.fill_price>0 and c.bot_instance_id in ('futures-live','futures-lukas-live') and c.utc >= '2026-08-24' group by 1,2 order by 1,2"
+            "with btc as (select open_time + interval '15 minutes' as ts, close, close/nullif(lag(close,96) over (order by open_time),0)*100-100 as btc24h, close/nullif(lag(close,32) over (order by open_time),0)*100-100 as btc8h from market_candles where pair='XBT/USD' and timeframe_minutes=15), sh as (select c.bot_instance_id as bot, c.utc as closed, a.pair, a.entry_price, a.fill_price, (a.entry_price-a.fill_price)/a.entry_price*100 as pnl_pct from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.action in ('WOULD_SELL','WOULD_CLOSE') and a.side='SHORT' and a.entry_price>0 and a.fill_price>0 and c.bot_instance_id in ('futures-live','futures-lukas-live') and c.utc >= '2026-08-24') select s.bot, s.pair, to_char(s.closed,'MM-DD HH24:MI') as closed, round(s.pnl_pct::numeric,2) as pnl_pct, round(b.btc24h::numeric,2) as btc24h_at_close, round(b.btc8h::numeric,2) as btc8h_at_close from sh s left join lateral (select * from btc where btc.ts <= s.closed order by btc.ts desc limit 1) b on true order by s.bot, s.closed"
 
-      - name: Same three pairs, both bots, this morning
+      - name: Shorts bucketed by the BTC state, both bots
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.bot_instance_id, d.pair, d.utc, d.desired_position, round(d.short_score::numeric,2) as short_s, d.risk_approved, left(r.reason,95) as reason from dry_run_decision_facts d left join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.pair in ('AAVE/USD','ADA/USD','KAS/USD') and d.utc between '2026-08-28 03:28' and '2026-08-28 03:36' order by d.pair, d.utc, d.bot_instance_id limit 40"
+            "with btc as (select open_time + interval '15 minutes' as ts, close/nullif(lag(close,96) over (order by open_time),0)*100-100 as btc24h, close/nullif(lag(close,32) over (order by open_time),0)*100-100 as btc8h from market_candles where pair='XBT/USD' and timeframe_minutes=15), sh as (select c.bot_instance_id as bot, c.utc as closed, (a.entry_price-a.fill_price)/a.entry_price*100 as pnl_pct from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.action in ('WOULD_SELL','WOULD_CLOSE') and a.side='SHORT' and a.entry_price>0 and a.fill_price>0 and c.bot_instance_id in ('futures-live','futures-lukas-live') and c.utc >= '2026-08-24') select s.bot, case when b.btc24h <= 0 then 'BTC 24h down' when b.btc8h > 0 then 'BTC 24h up, 8h still up' else 'BTC 24h up, 8h flat or down' end as regime, count(*) as trades, count(*) filter (where s.pnl_pct > 0) as winners, round(avg(s.pnl_pct)::numeric,3) as avg_pct, round(sum(s.pnl_pct)::numeric,2) as sum_pct from sh s left join lateral (select * from btc where btc.ts <= s.closed order by btc.ts desc limit 1) b on true group by 1,2 order by 1,2"
 
-      - name: What BYKO refused this morning, grouped
+      - name: BTC 24h and 8h over the last five days, every four hours
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select left(r.reason,105) as reason, count(*) from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.utc >= '2026-08-28 00:00' group by 1 order by 2 desc limit 12"
-
-      - name: Opens per instance since midnight
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select c.bot_instance_id, count(*) filter (where a.action in ('WOULD_OPEN_LONG','WOULD_OPEN_SHORT','WOULD_BUY')) as opened, count(*) filter (where a.action in ('WOULD_SELL','WOULD_CLOSE')) as closed from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where c.utc >= '2026-08-28 00:00' group by 1"
-
-      - name: The two NVDAX closes side by side
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select c.bot_instance_id, c.utc, a.pair, a.action, a.exit_reason_code, a.hold_reason_code, round(a.fill_price::numeric,4) as fill, c.cycle_id like '%-fast' as fast_cycle, left(a.reason,90) as reason from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.pair='NVDAX/USD' and c.utc >= '2026-08-27 17:00' order by c.utc"
-
-      - name: Today's realised result per instance
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select c.bot_instance_id, coalesce(a.exit_reason_code,a.action) as how, count(*), round(sum(case when a.side='SHORT' then (a.entry_price-a.fill_price) else (a.fill_price-a.entry_price) end * a.quantity)::numeric,2) as usd from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.action in ('WOULD_SELL','WOULD_CLOSE') and a.entry_price>0 and a.fill_price>0 and c.utc >= '2026-08-27 00:00' group by 1,2 order by 1,4"
-
-      - name: Did the max-hold trail arm at all
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select left(r.reason,110) as reason, count(*), min(d.utc) as first_seen from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index where d.bot_instance_id='futures-live' and (r.reason ilike '%max hold%' or r.reason ilike '%trailing%') and d.utc >= '2026-08-27 17:00' group by 1 order by 2 desc limit 12"
-
-      - name: What the max-hold rule says about the open positions
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.pair, d.utc, left(r.reason,120) as reason from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.pair in ('ONDO/USD','ORDI/USD') and d.utc >= now() - interval '25 minutes' order by d.utc desc limit 14"
-
-      - name: Any MAX_HOLD verdicts logged since the deploy
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select left(r.reason,110) as reason, count(*), min(d.utc) as first_seen, max(d.utc) as last_seen from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index where d.bot_instance_id='futures-live' and r.reason like 'MAX_HOLD%' and d.utc >= '2026-08-27 13:05' group by 1 order by 2 desc limit 12"
-
-      - name: Movers today, both sides, what stopped each
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.pair, count(*) as looks, round(max(d.score)::numeric,2) as best_long, round(max(d.short_score)::numeric,2) as best_short, round(max(d.rsi)::numeric,0) as max_rsi, round(min(d.spread_percent)::numeric,3) as min_spread, count(*) filter (where not d.risk_approved) as gate_blocked from dry_run_decision_facts d where d.bot_instance_id='futures-live' and d.utc >= now() - interval '6 hours' and d.pair in ('BICO/USD','MOVR/USD','VET/USD','RUNE/USD','SPX/USD','ONT/USD','S/USD','CVX/USD','HFT/USD','GRASS/USD','ID/USD','GPS/USD','RIVER/USD','POL/USD','PORTAL/USD','PYTH/USD','STX/USD','ICX/USD','OP/USD','CSPR/USD','FARTCOIN/USD','ATOM/USD') group by 1 order by 3 desc nulls last"
-
-      - name: Their single best bar and the reason it stopped
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select distinct on (d.pair) d.pair, round(d.score::numeric,2) as long_s, round(d.short_score::numeric,2) as short_s, round(d.rsi::numeric,0) as rsi, round(d.bullish_ema_gap_percent::numeric,3) as gap, round(d.spread_percent::numeric,3) as spread, left(r.reason,72) as reason from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.utc >= now() - interval '6 hours' and d.pair in ('BICO/USD','MOVR/USD','VET/USD','RUNE/USD','SPX/USD','ONT/USD','S/USD','CVX/USD','HFT/USD','GRASS/USD','ID/USD','GPS/USD','RIVER/USD','POL/USD','PORTAL/USD','PYTH/USD','STX/USD','ICX/USD','OP/USD','CSPR/USD','FARTCOIN/USD','ATOM/USD') order by d.pair, greatest(d.score, d.short_score) desc"
-
-      - name: What the bot saw on the pairs that ran overnight
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.pair, count(*) as looks, round(max(d.score)::numeric,2) as best_long, round(max(d.rsi)::numeric,1) as max_rsi, min(d.utc) as first_seen, max(d.utc) as last_seen, count(*) filter (where d.desired_position <> 'FLAT') as wanted from dry_run_decision_facts d where d.bot_instance_id='futures-live' and d.utc >= '2026-08-26 21:00' and d.pair in ('MOVR/USD','RUNE/USD','BICO/USD','VET/USD','CVX/USD','GRASS/USD','S/USD','SPX/USD','ONT/USD','ID/USD','SOL/USD','ALCH/USD','HFT/USD') group by 1 order by 2 desc"
-
-      - name: Their best long score and why it stopped there
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.pair, round(d.score::numeric,2) as score, round(d.rsi::numeric,1) as rsi, round(d.bullish_ema_gap_percent::numeric,3) as ema_gap, d.utc, left(r.reason,80) as reason from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.utc >= '2026-08-26 21:00' and d.pair in ('MOVR/USD','RUNE/USD','BICO/USD','VET/USD','CVX/USD','GRASS/USD','S/USD','SPX/USD','ONT/USD','ID/USD') and d.score = (select max(d2.score) from dry_run_decision_facts d2 where d2.pair=d.pair and d2.bot_instance_id=d.bot_instance_id and d2.utc >= '2026-08-26 21:00') order by d.score desc limit 20"
-
-      - name: Signal contributions on their best bar
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.pair, sc.name, round(sc.value::numeric,2) as value, left(sc.reason,60) as why from dry_run_decision_facts d join dry_run_signal_contributions sc on sc.cycle_id=d.cycle_id and sc.decision_index=d.decision_index where d.bot_instance_id='futures-live' and d.utc >= '2026-08-26 21:00' and d.pair in ('MOVR/USD','BICO/USD','VET/USD') and d.score = (select max(d2.score) from dry_run_decision_facts d2 where d2.pair=d.pair and d2.bot_instance_id=d.bot_instance_id and d2.utc >= '2026-08-26 21:00') order by d.pair, sc.contribution_index limit 40"
-
-      - name: Wanted-but-blocked vs never-wanted, futures-live, last 3 hours
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.risk_approved, count(*) as decisions, count(distinct d.pair) as pairs, count(distinct d.cycle_id) as cycles from dry_run_decision_facts d where d.bot_instance_id='futures-live' and d.utc >= now() - interval '3 hours' group by 1"
-
-      - name: The FIRST detailed reason, grouped, last 3 hours
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.risk_approved, left(r.reason, 105) as first_reason, count(*) from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.utc >= now() - interval '3 hours' group by 1,2 order by 3 desc limit 30"
-
-      - name: Any slot-exhaustion at all, last 12 hours
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select date_trunc('hour', d.utc) as hour, count(*) as slot_blocked from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index where d.bot_instance_id='futures-live' and r.reason ilike '%slots exhausted%' and d.utc >= now() - interval '12 hours' group by 1 order by 1 desc limit 12"
-
-      - name: How close the short side is getting to its threshold
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select width_bucket(d.short_score, 0, 1, 10) as bucket, round(min(d.short_score)::numeric,2) as from_score, round(max(d.short_score)::numeric,2) as to_score, count(*) from dry_run_decision_facts d where d.bot_instance_id='futures-live' and d.utc >= now() - interval '3 hours' and d.has_bearish_structure group by 1 order by 1 desc limit 12"
-
-      - name: Opens and closes today
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select date_trunc('hour', c.utc) as hour, count(*) filter (where a.action in ('WOULD_BUY','WOULD_OPEN_LONG','WOULD_OPEN_SHORT')) as opened, count(*) filter (where a.action in ('WOULD_SELL','WOULD_CLOSE')) as closed from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc >= now() - interval '14 hours' group by 1 order by 1 desc limit 14"
+            "with btc as (select open_time + interval '15 minutes' as ts, close, close/nullif(lag(close,96) over (order by open_time),0)*100-100 as btc24h, close/nullif(lag(close,32) over (order by open_time),0)*100-100 as btc8h from market_candles where pair='XBT/USD' and timeframe_minutes=15) select to_char(ts,'MM-DD HH24:MI') as utc, round(close::numeric,0) as btc, round(btc24h::numeric,2) as h24, round(btc8h::numeric,2) as h8, case when btc24h > 0 and btc8h > 0 then 'shorts banned, would stay banned' when btc24h > 0 then 'shorts banned, would be ALLOWED' else 'shorts allowed already' end as effect from btc where ts >= now() - interval '5 days' and extract(hour from ts) in (0,4,8,12,16,20) and extract(minute from ts) = 0 order by ts"
