@@ -7,31 +7,24 @@ on:
   workflow_dispatch:
 
 jobs:
-  mass-close:
+  mstrx-trail:
     runs-on: self-hosted
     steps:
-      - name: The 11:01 closes in full - reason text and origin
+      - name: The MSTRX position as the bot holds it right now
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select a.pair, a.side, to_char(c.utc,'HH24:MI:SS') as utc, a.action, coalesce(a.exit_reason_code,'-') as code, left(coalesce(a.reason,'-'),110) as reason from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc between '2026-08-28 10:55' and '2026-08-28 11:20' and a.action in ('WOULD_SELL','WOULD_CLOSE','WOULD_OPEN_LONG','WOULD_OPEN_SHORT') order by c.utc, a.pair"
+            "with latest as (select bot_instance_id, max(updated_at) as u from portfolio_position_state group by 1) select p.bot_instance_id as bot, p.pair, p.side, round(p.entry_price::numeric,4) as entry, round(p.last_price::numeric,4) as last, round(p.unrealized_pnl_percent::numeric,2) as pnl_pct, round(p.peak_pnl_percent::numeric,2) as peak_pct, p.trailing_stop_state as trail_state, round(p.trailing_stop_percent::numeric,3) as trail_pct, round(p.stop_loss_price::numeric,4) as sl_px, round(p.take_profit_price::numeric,4) as tp_px, round(p.exchange_stop_loss_price::numeric,4) as exch_sl, p.tp_order_state, p.sl_order_state, coalesce(p.strategy,'Momentum') as book from portfolio_position_state p join latest l on l.bot_instance_id=p.bot_instance_id and l.u=p.updated_at where p.pair='MSTRX/USD'"
 
-      - name: Worker restarts and container uptime
+      - name: What the worker logged about the MSTRX trailing stop
         run: |
-          docker ps --filter name=trading-bot-futures --format 'table {{.Names}}\t{{.Status}}\t{{.RunningFor}}'
-          echo '--- restarts ---'
-          docker inspect trading-bot-futures-worker-live --format '{{.Name}} restarts={{.RestartCount}} startedAt={{.State.StartedAt}}' || true
-          docker inspect trading-bot-lukas-futures-worker-live --format '{{.Name}} restarts={{.RestartCount}} startedAt={{.State.StartedAt}}' || true
+          docker logs trading-bot-futures-worker-live --since 2026-08-28T12:40:00Z 2>&1 | grep -iE "MSTRX" | grep -iE "trail|tpsl|arm|protect|cancel|stop" | tail -30 || true
 
-      - name: What the worker logged around 11:00-11:05
-        run: |
-          docker logs trading-bot-futures-worker-live --since 2026-08-28T10:55:00Z --until 2026-08-28T11:06:00Z 2>&1 | grep -iE "sync|reconcil|adopt|close|position|cash-jump|collateral|liquid|error|fail" | head -60 || true
-
-      - name: Cash events and collateral moves today
+      - name: The live spread on MSTRX and the trail distance in money
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select to_char(utc,'HH24:MI:SS') as utc, bot_instance_id as bot, event_type, round(amount_eur::numeric,2) as amount, left(coalesce(note,'-'),80) as note from portfolio_cash_events where utc >= '2026-08-28' order by utc limit 40" || true
+            "select to_char(utc,'HH24:MI:SS') as utc, round(bid::numeric,4) as bid, round(ask::numeric,4) as ask, round(((ask-bid)/((ask+bid)/2)*100)::numeric,3) as spread_pct, round(last_price::numeric,4) as last from market_snapshots where pair='MSTRX/USD' and utc >= '2026-08-28 17:30' order by utc desc limit 12" || true
 
-      - name: Were the same pairs reopened right after the mass close
+      - name: Every MSTRX action the bot took today
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select a.pair, a.side, to_char(c.utc,'HH24:MI') as utc, a.action from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc >= '2026-08-28 10:55' and a.action in ('WOULD_OPEN_SHORT','WOULD_OPEN_LONG','WOULD_CLOSE','WOULD_SELL') and a.pair in ('SOL/USD','OP/USD','APT/USD','ARB/USD','INJ/USD','BCH/USD') order by a.pair, c.utc"
+            "select c.bot_instance_id as bot, to_char(c.utc,'HH24:MI:SS') as utc, a.action, a.side, round(a.entry_price::numeric,4) as entry, round(a.fill_price::numeric,4) as fill, coalesce(a.exit_reason_code,'-') as code, left(coalesce(a.reason,'-'),95) as reason from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.pair='MSTRX/USD' and c.utc >= '2026-08-28 12:00' order by c.utc"
