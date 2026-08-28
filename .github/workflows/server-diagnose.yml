@@ -7,35 +7,31 @@ on:
   workflow_dispatch:
 
 jobs:
-  todays-shorts:
+  mass-close:
     runs-on: self-hosted
     steps:
-      - name: Every SHORT that closed today, both bots, with how it ended
+      - name: The 11:01 closes in full - reason text and origin
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select c.bot_instance_id as bot, a.pair, coalesce(a.strategy,'Momentum') as book, to_char(c.utc,'HH24:MI') as closed, round(a.entry_price::numeric,5) as entry, round(a.fill_price::numeric,5) as exit_px, round(((a.entry_price-a.fill_price)/a.entry_price*100)::numeric,2) as pnl_pct, coalesce(a.exit_reason_code,'-') as why from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.side='SHORT' and a.action in ('WOULD_SELL','WOULD_CLOSE') and a.entry_price>0 and a.fill_price>0 and c.utc >= '2026-08-28' order by c.utc"
+            "select a.pair, a.side, to_char(c.utc,'HH24:MI:SS') as utc, a.action, coalesce(a.exit_reason_code,'-') as code, coalesce(a.origin,'-') as origin, left(coalesce(a.reason,'-'),110) as reason from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc between '2026-08-28 10:55' and '2026-08-28 11:20' and a.action in ('WOULD_SELL','WOULD_CLOSE','WOULD_OPEN_LONG','WOULD_OPEN_SHORT') order by c.utc, a.pair"
 
-      - name: Today by bot, side and book - is it only the shorts
+      - name: Worker restarts and container uptime
         run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select c.bot_instance_id as bot, a.side, coalesce(a.strategy,'Momentum') as book, count(*) as trades, count(*) filter (where (case when a.side='SHORT' then a.entry_price-a.fill_price else a.fill_price-a.entry_price end) > 0) as winners, round(avg(case when a.side='SHORT' then (a.entry_price-a.fill_price)/a.entry_price*100 else (a.fill_price-a.entry_price)/a.entry_price*100 end)::numeric,3) as avg_pct from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.action in ('WOULD_SELL','WOULD_CLOSE') and a.entry_price>0 and a.fill_price>0 and c.utc >= '2026-08-28' group by 1,2,3 order by 1,2,3"
+          docker ps --filter name=trading-bot-futures --format 'table {{.Names}}\t{{.Status}}\t{{.RunningFor}}'
+          echo '--- restarts ---'
+          docker inspect trading-bot-futures-worker-live --format '{{.Name}} restarts={{.RestartCount}} startedAt={{.State.StartedAt}}' || true
+          docker inspect trading-bot-lukas-futures-worker-live --format '{{.Name}} restarts={{.RestartCount}} startedAt={{.State.StartedAt}}' || true
 
-      - name: THE BUG TEST - what the price did AFTER each short entry today
+      - name: What the worker logged around 11:00-11:05
         run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with op as (select c.bot_instance_id as bot, a.pair, c.utc as opened, a.entry_price, coalesce(a.strategy,'Momentum') as book from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.side='SHORT' and a.action='WOULD_OPEN_SHORT' and c.utc >= '2026-08-28') select op.bot, op.pair, op.book, to_char(op.opened,'HH24:MI') as opened, round(op.entry_price::numeric,5) as entry, round(((p1.close-op.entry_price)/op.entry_price*100)::numeric,2) as px_1h, round(((p3.close-op.entry_price)/op.entry_price*100)::numeric,2) as px_3h, round(((p6.close-op.entry_price)/op.entry_price*100)::numeric,2) as px_6h from op left join lateral (select close from market_candles where pair=op.pair and timeframe_minutes=15 and open_time >= op.opened + interval '1 hour' order by open_time limit 1) p1 on true left join lateral (select close from market_candles where pair=op.pair and timeframe_minutes=15 and open_time >= op.opened + interval '3 hours' order by open_time limit 1) p3 on true left join lateral (select close from market_candles where pair=op.pair and timeframe_minutes=15 and open_time >= op.opened + interval '6 hours' order by open_time limit 1) p6 on true order by op.opened"
+          docker logs trading-bot-futures-worker-live --since 2026-08-28T10:55:00Z --until 2026-08-28T11:06:00Z 2>&1 | grep -iE "sync|reconcil|adopt|close|position|cash-jump|collateral|liquid|error|fail" | head -60 || true
 
-      - name: Same test for the LONGS opened today - is the whole book wrong or only shorts
+      - name: Cash events and collateral moves today
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with op as (select c.bot_instance_id as bot, a.pair, c.utc as opened, a.entry_price, coalesce(a.strategy,'Momentum') as book from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.side='LONG' and a.action='WOULD_OPEN_LONG' and c.utc >= '2026-08-28') select op.bot, op.pair, op.book, to_char(op.opened,'HH24:MI') as opened, round(((p1.close-op.entry_price)/op.entry_price*100)::numeric,2) as px_1h, round(((p3.close-op.entry_price)/op.entry_price*100)::numeric,2) as px_3h, round(((p6.close-op.entry_price)/op.entry_price*100)::numeric,2) as px_6h from op left join lateral (select close from market_candles where pair=op.pair and timeframe_minutes=15 and open_time >= op.opened + interval '1 hour' order by open_time limit 1) p1 on true left join lateral (select close from market_candles where pair=op.pair and timeframe_minutes=15 and open_time >= op.opened + interval '3 hours' order by open_time limit 1) p3 on true left join lateral (select close from market_candles where pair=op.pair and timeframe_minutes=15 and open_time >= op.opened + interval '6 hours' order by open_time limit 1) p6 on true order by op.opened"
+            "select to_char(utc,'HH24:MI:SS') as utc, bot_instance_id as bot, event_type, round(amount_eur::numeric,2) as amount, left(coalesce(note,'-'),80) as note from portfolio_cash_events where utc >= '2026-08-28' order by utc limit 40" || true
 
-      - name: What the market itself did today - BTC and the breadth
+      - name: Were the same pairs reopened right after the mass close
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with btc as (select open_time + interval '15 minutes' as ts, close, close/nullif(lag(close,96) over (order by open_time),0)*100-100 as btc24h, close/nullif(lag(close,4) over (order by open_time),0)*100-100 as btc1h from market_candles where pair='XBT/USD' and timeframe_minutes=15) select to_char(ts,'HH24:MI') as utc, round(close::numeric,0) as btc, round(btc24h::numeric,2) as h24, round(btc1h::numeric,2) as h1 from btc where ts >= '2026-08-28' and extract(hour from ts) in (0,3,6,9,12,15,18) and extract(minute from ts)=0 order by ts"
-
-      - name: Has the Reversal book fired at all since it deployed
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select coalesce(a.strategy,'(null=Momentum)') as book, a.action, a.side, count(*) as n, min(to_char(c.utc,'HH24:MI')) as first_seen from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc >= '2026-08-28 10:00' and a.action like 'WOULD_%' and a.side is not null group by 1,2,3 order by 1,2,3"
+            "select a.pair, a.side, to_char(c.utc,'HH24:MI') as utc, a.action from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc >= '2026-08-28 10:55' and a.action in ('WOULD_OPEN_SHORT','WOULD_OPEN_LONG','WOULD_CLOSE','WOULD_SELL') and a.pair in ('SOL/USD','OP/USD','APT/USD','ARB/USD','INJ/USD','BCH/USD') order by a.pair, c.utc"
