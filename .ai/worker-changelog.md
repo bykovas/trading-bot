@@ -1,3 +1,9 @@
+## 2026-08-28-tighter-exits-on-the-arm
+
+- Owner-directed exit change on futures-live (BYKO) only; the control keeps 4/2/0.5. `TpSl.TakeProfitPercent` 4 -> 3 (the trail's activation point), `StopLossPercent` 2 -> 1.5, `TrailingStopPercent` 0.5 -> 0.25.
+- Measured on 2026-07-08..08-21 before shipping: per coin-day this configuration is better than the old one on both sides (LONG -0.201% vs -0.252%, SHORT -0.288% vs -0.350%) - it reshapes the loss, it does not cross zero; the owner knows and chose it while the entry work continues.
+- Knock-ons, checked: the sizing stop floor inherits the new 1.5 (stop = max(ATR, 1.5), still refused above the 3.0 cap); the sizer's TP floor lands at exactly 3.0 when ATR <= 1.5 (max(2x1.5, 3.0)); `MaxHoldTrailingStopPercent` deliberately stays 0.5 - the max-hold handoff is a different lever and was not part of the instruction.
+
 ## 2026-08-28-telegram-two-line-format-and-a-throttled-alert
 
 - New open/close message shape in `FuturesEntryAnnouncement`, owner-specified. Each post is now two lines: a head `{face}{mark} {LABEL} · {PAIR} {SIDE}` and one spoken line of figures.

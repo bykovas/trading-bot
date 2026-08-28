@@ -84,14 +84,16 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.Equal(
             lukas["Strategy"]?["MaxEntrySpreadPercent"]?.GetValue<decimal>(),
             primary["Strategy"]?["MaxEntrySpreadPercent"]?.GetValue<decimal>());
-        // Both arms hand off to the trail at the same +4% now - the arm came down from 6
-        // at the owner's direction - so the handoff POINT is no longer an experimental
-        // difference and is pinned equal. What still differs after the handoff is the
-        // trailing distance, and the reversal exit the arm does not use.
-        Assert.Equal(
-            lukas["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>(),
-            primary["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
-        Assert.Equal(4m, primary["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
+        // The whole exit triple diverges again since 2026-08-28, at the owner's
+        // direction: the arm runs 3/1.5/0.25 (activation/stop/trail) against the
+        // control's 4/2/0.75. Measured on 45 days before shipping - per coin-day it
+        // beats the old exits on both sides without crossing zero; the owner chose it
+        // while the entry work continues. All three pinned so a drift is a decision.
+        Assert.Equal(3m, primary["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
+        Assert.Equal(1.5m, primary["TpSl"]?["StopLossPercent"]?.GetValue<decimal>());
+        Assert.Equal(0.25m, primary["TpSl"]?["TrailingStopPercent"]?.GetValue<decimal>());
+        Assert.Equal(4m, lukas["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
+        Assert.Equal(2m, lukas["TpSl"]?["StopLossPercent"]?.GetValue<decimal>());
         Assert.False(primary["Exits"]?["SignalReversalExitEnabled"]?.GetValue<bool>());
         Assert.Null(lukas["Exits"]?["SignalReversalExitEnabled"]);
         // The control carries neither knob: the experiment must never leak into it.
