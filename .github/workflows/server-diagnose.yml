@@ -13,7 +13,7 @@ jobs:
       - name: The 11:01 closes in full - reason text and origin
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select a.pair, a.side, to_char(c.utc,'HH24:MI:SS') as utc, a.action, coalesce(a.exit_reason_code,'-') as code, coalesce(a.origin,'-') as origin, left(coalesce(a.reason,'-'),110) as reason from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc between '2026-08-28 10:55' and '2026-08-28 11:20' and a.action in ('WOULD_SELL','WOULD_CLOSE','WOULD_OPEN_LONG','WOULD_OPEN_SHORT') order by c.utc, a.pair"
+            "select a.pair, a.side, to_char(c.utc,'HH24:MI:SS') as utc, a.action, coalesce(a.exit_reason_code,'-') as code, left(coalesce(a.reason,'-'),110) as reason from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc between '2026-08-28 10:55' and '2026-08-28 11:20' and a.action in ('WOULD_SELL','WOULD_CLOSE','WOULD_OPEN_LONG','WOULD_OPEN_SHORT') order by c.utc, a.pair"
 
       - name: Worker restarts and container uptime
         run: |
