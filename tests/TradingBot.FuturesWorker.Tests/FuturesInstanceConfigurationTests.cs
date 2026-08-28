@@ -143,9 +143,12 @@ public sealed class FuturesInstanceConfigurationTests
             // The experiment arm's own knobs; absent on the control by design.
             ("Futures", "DisabledLongEntryChannels"),
             ("Shorts", "MaxBtc24hRisePercentForShort"),
-            // Trailing distance: 0.5 on the arm against the control's 0.75. The only
-            // exit parameter where a 45-day counterfactual and an independent forward
-            // day agreed on both sign and size (+0.05-0.06pp per trade each).
+            // The whole exit triple diverges since 2026-08-28 at the owner's direction:
+            // the arm runs 3/1.5/0.25 (activation/stop/trail) against the control's
+            // 4/2/0.75. Measured on 45 days per coin-day before shipping - better than
+            // the old exits on both sides, without crossing zero.
+            ("TpSl", "TakeProfitPercent"),
+            ("TpSl", "StopLossPercent"),
             ("TpSl", "TrailingStopPercent"),
             ("Exits", "SignalReversalExitEnabled"),
             // Max hold judged by whether the position is still leading, not by where the
