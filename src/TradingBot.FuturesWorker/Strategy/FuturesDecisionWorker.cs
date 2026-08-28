@@ -2032,9 +2032,42 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var closeSide = CloseSide(position.Side);
-        var trailingPercent = position.TrailingStopPercent is > 0m
+        var configuredTrailingPercent = position.TrailingStopPercent is > 0m
             ? position.TrailingStopPercent.Value
             : config.TpSl.WorkingTrailingStopPercent(position.FlippedEntry);
+        // Read the spread fresh, at the moment of arming, rather than reusing the
+        // cycle's snapshot: the trail has to survive the book as it is NOW, and a quote
+        // minutes old can be from a different market. A failed read simply leaves the
+        // configured distance alone - a trailing order is protection, and skipping it
+        // over a ticker hiccup would be worse than arming it a little too tight.
+        decimal? spreadPercent = null;
+        if (config.TpSl.TrailingStopMinSpreadMultiple > 0m)
+        {
+            try
+            {
+                var quote = await broker.GetTickerAsync(instrument.KrakenPair, cancellationToken);
+                if (quote is not null && quote.Bid > 0m && quote.Ask >= quote.Bid)
+                {
+                    var mid = (quote.Bid + quote.Ask) / 2m;
+                    if (mid > 0m)
+                    {
+                        spreadPercent = (quote.Ask - quote.Bid) / mid * 100m;
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                Console.WriteLine($"futures-trailing-spread: {instrument.KrakenPair} quote unavailable ({error.GetType().Name}); using the configured distance");
+            }
+        }
+
+        var trailingPercent = config.TpSl.EffectiveTrailingStopPercent(configuredTrailingPercent, spreadPercent);
+        if (trailingPercent != configuredTrailingPercent)
+        {
+            Console.WriteLine(
+                $"futures-trailing-spread: {instrument.KrakenPair} spread={spreadPercent:0.###}% widened trail {configuredTrailingPercent:0.###}% -> {trailingPercent:0.###}% (x{config.TpSl.TrailingStopMinSpreadMultiple:0.##}, cap {config.TpSl.StopLossPercent:0.###}%)");
+        }
+
         var trailing = await broker.SendTrailingStopOrderAsync(
             instrument.KrakenPair,
             closeSide,

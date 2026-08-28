@@ -1077,6 +1077,30 @@ internal sealed class TpSlOptions
     // are replaced with a reduce-only Kraken trailing stop at this distance.
     public decimal TrailingStopPercent { get; set; } = 2m;
 
+    // Floor the trailing distance at this many times the instrument's live spread.
+    // A trail only a hair wider than the spread is closed by the bid-ask bouncing, not
+    // by the move reversing: MSTRX on 2026-08-28 armed a 0.25% trail against a 0.17%
+    // spread - 1.5x - which is noise, not protection. 0 disables the floor, which is
+    // what the control runs. The widened distance is capped at StopLossPercent: a trail
+    // wider than the stop it replaced protects nothing.
+    public decimal TrailingStopMinSpreadMultiple { get; set; }
+
+    // The distance actually sent to the exchange: the configured trail, floored at
+    // TrailingStopMinSpreadMultiple x spread, capped at the working stop. A missing or
+    // nonsensical spread leaves the configured distance untouched - widening on a
+    // reading we do not trust would be worse than not widening at all.
+    public decimal EffectiveTrailingStopPercent(decimal configured, decimal? spreadPercent)
+    {
+        if (TrailingStopMinSpreadMultiple <= 0m || spreadPercent is not { } spread || spread <= 0m)
+        {
+            return configured;
+        }
+
+        var floor = spread * TrailingStopMinSpreadMultiple;
+        var cap = StopLossPercent > 0m ? StopLossPercent : configured;
+        return Math.Min(Math.Max(configured, floor), Math.Max(configured, cap));
+    }
+
     // Flipped LONG-to-SHORT entries use a separately calibrated profit handoff.
     // Their working stop remains StopLossPercent and exchange protection still
     // uses ExchangeProtectionMultiplierPercent.

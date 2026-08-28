@@ -1,3 +1,11 @@
+## 2026-08-28-floor-the-trail-at-twice-the-spread
+
+- Found live on MSTRX/USD: the arm armed a **0.25% trailing stop against a 0.17% spread** (bid 129.78 / ask 130.00) - the trail was 1.5x the book, so the bid-ask bounce would close the position rather than the move reversing. Direction and mechanics were correct (Buy-side trail for a short, TP/SL cancelled on arming, distance exactly as configured); only the distance was economically too tight for that instrument.
+- `TpSl.TrailingStopMinSpreadMultiple` (default 0 = off, arm runs 2.0) floors the trailing distance at N x the live spread. `TpSl.EffectiveTrailingStopPercent(configured, spread)` is the single arithmetic point: it takes the max of the configured distance and the floor, caps the WIDENING at `StopLossPercent` (a trail wider than the stop it replaced protects nothing), never shrinks an explicitly configured distance, and returns the configured value untouched when the multiple is off or the spread is missing/zero/negative.
+- The spread is read FRESH from `GetTickerAsync` at the moment of arming rather than reused from the cycle snapshot - the trail has to survive the book as it is now. A failed ticker read logs and falls back to the configured distance: skipping protection over a quote hiccup would be worse than arming slightly tight. The call only happens when a trail actually arms, so it costs nothing per cycle.
+- Applies to every arming path (take-profit handoff, external-position handoff, max-hold handoff), so the max-hold trail is floored the same way rather than only the take-profit one. Widening is logged as `futures-trailing-spread: <pair> spread=..% widened trail ..% -> ..%`.
+- Control untouched: no section in `appsettings.lukas.json`, binder default 0, and its 0.75% trail is far clear of the book anyway. Profile guard pins both sides.
+
 ## 2026-08-28-surface-the-strategy-in-telegram-and-the-api
 
 - Telegram: the strategy that opened a trade now closes the head line on BOTH posts, at the owner's chosen placement - `... XMR/USD LONG ↗️ · Reversal` on an open, `... LONG uždaryta · Momentum` on a close. `Compose`/`ComposeClose` take an optional `strategy`; the two announce sites pass `position.Strategy`. A null strategy (spot, legacy) leaves the head line exactly as before - no trailing separator.

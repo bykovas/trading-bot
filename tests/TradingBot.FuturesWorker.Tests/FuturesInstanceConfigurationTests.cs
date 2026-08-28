@@ -94,6 +94,11 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.Equal(0.25m, primary["TpSl"]?["TrailingStopPercent"]?.GetValue<decimal>());
         Assert.Equal(4m, lukas["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
         Assert.Equal(2m, lukas["TpSl"]?["StopLossPercent"]?.GetValue<decimal>());
+        // The arm floors its 0.25% trail at twice the live spread, because at that
+        // distance the bid-ask bounce closes the position instead of the reversal.
+        // The control has no such floor - its 0.75% trail is far clear of the book.
+        Assert.Equal(2m, primary["TpSl"]?["TrailingStopMinSpreadMultiple"]?.GetValue<decimal>());
+        Assert.Null(lukas["TpSl"]?["TrailingStopMinSpreadMultiple"]);
         Assert.False(primary["Exits"]?["SignalReversalExitEnabled"]?.GetValue<bool>());
         Assert.Null(lukas["Exits"]?["SignalReversalExitEnabled"]);
         // The control carries neither knob: the experiment must never leak into it.
@@ -157,6 +162,7 @@ public sealed class FuturesInstanceConfigurationTests
             ("TpSl", "TakeProfitPercent"),
             ("TpSl", "StopLossPercent"),
             ("TpSl", "TrailingStopPercent"),
+            ("TpSl", "TrailingStopMinSpreadMultiple"),
             ("Exits", "SignalReversalExitEnabled"),
             // Max hold judged by whether the position is still leading, not by where the
             // price sits relative to entry. Arm only; the control keeps the old rule, and
