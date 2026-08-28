@@ -1,3 +1,13 @@
+## 2026-08-28-telegram-two-line-format-and-a-throttled-alert
+
+- New open/close message shape in `FuturesEntryAnnouncement`, owner-specified. Each post is now two lines: a head `{face}{mark} {LABEL} · {PAIR} {SIDE}` and one spoken line of figures.
+  - Open head mark is 💲 with the direction arrow at the end of the line (↗️ long, ↘️ short); the body is one sentence, the reader's own stake first and bold, everything else folded into one parenthetical: `Įdėjau <b>14,57 $</b> savo pinigų (pozicijoje dirba 145,67 $, svertas 10×, kaina 469,91 $, TP +4%, SL −2%).` The reason paragraph and the signal breakdown are gone - they live on the dashboard.
+  - Close head mark is 💰 plus the outcome face (🤩 profit, 😭 loss); the body is `Praradau <b>−3,18 $</b> (22 % įdėtų pinigų) · laikiau 1 val. 27 min. · why: kaina pasiekė stop-loss.` Percent is the absolute share of the stake, sign carried by the verb.
+  - Both public method signatures are unchanged, so the strategy call sites did not move; the now-unused open reason/detail helpers (Reasons, DetailLines, BaseAsset) and the old direction/close marks were removed as dead code.
+- New 🚨 throttled alert. `ITelegramNotifier.SendAlertAsync(reason)` posts `{face}🚨 {LABEL} · {reason}` and self-throttles to one alert per 30 minutes across ALL reasons (a full book refuses candidates every cycle; an unthrottled alert would bury the channel). The throttle is checked and claimed synchronously so the per-candidate loop pays nothing after the first.
+  - Wired at two sites in `FuturesDecisionWorker`: a real candidate cleared every gate and found no free slot (`nėra laisvų slotų …`), and the cycle-level catch-all (`klaida cikle: …`) so a broken exchange call reaches the channel, not only the server log.
+- No strategy/behaviour change beyond the alert emission; scoring, gates and exits are untouched.
+
 ## 2026-08-28-the-upper-range-guard-is-inverted-and-stays-that-way
 
 - `FuturesLongRangeGuard` blocks the top of the range ONLY WHILE the tape is rising, which is backwards from what the name says: an impulse that has just run out of breath passes, a live one is refused. MSTRX/USD went through exactly there this morning - refused at 00:16 and 00:18 while the tape rose, admitted at 00:20 at the same 139.31, at 100% of the range after a two-day climb from ~95.

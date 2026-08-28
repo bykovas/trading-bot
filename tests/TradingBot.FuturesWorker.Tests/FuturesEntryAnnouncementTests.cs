@@ -24,10 +24,11 @@ public sealed class FuturesEntryAnnouncementTests
         var text = EthShort("ShortReclaim");
         var lines = text.Split('\n');
 
-        Assert.Equal(3, lines.Length);
-        Assert.Equal(Luko + "⬇️ LUKO · ETH/USD <b>SHORT</b>", lines[0]);
-        Assert.Equal("Įdėjau <b>15,00 $</b> savo pinigų (pozicijoje dirba 150,00 $, svertas 10×).", lines[1]);
-        Assert.StartsWith("Kaina <b>2 436,37 $</b>, TP <b>−4 %</b> (ties 2 338,91 $), SL <b>+2 %</b> (ties 2 485,09 $)", lines[2]);
+        Assert.Equal(2, lines.Length);
+        Assert.Equal(Luko + "\U0001F4B2 LUKO · ETH/USD <b>SHORT</b> ↘️", lines[0]);
+        Assert.Equal(
+            "Įdėjau <b>15,00 $</b> savo pinigų (pozicijoje dirba 150,00 $, svertas 10×, kaina 2 436,37 $, TP −4%, SL +2%).",
+            lines[1]);
     }
 
     // The prose, the regime line, the score breakdown and the context line are gone by
@@ -51,9 +52,10 @@ public sealed class FuturesEntryAnnouncementTests
             Byko, "BYKO", "ARB/USD", "LONG", 0.103285m, 15m, 150m, 10m, "Breakout",
             0.10742m, 0.10122m, 4m, 2m, 0.85m, 1.66m);
 
-        Assert.StartsWith(Byko + "⬆️ BYKO ·", text);
-        Assert.Contains("TP <b>+4 %</b> (ties 0,10742 $)", text);
-        Assert.Contains("SL <b>−2 %</b> (ties 0,10122 $)", text);
+        Assert.StartsWith(Byko + "\U0001F4B2 BYKO ·", text);
+        Assert.EndsWith("<b>LONG</b> ↗️", text.Split('\n')[0]);
+        Assert.Contains("TP +4%", text);
+        Assert.Contains("SL −2%", text);
     }
 
     // An instance with no face configured still posts; the mark simply leads.
@@ -64,7 +66,7 @@ public sealed class FuturesEntryAnnouncementTests
             "", "BlynAI", "ETH/USD", "SHORT", EthPrice, 15m, 150m, 10m, null,
             EthTarget, EthStop, 4m, 2m, null, null);
 
-        Assert.StartsWith("⬇️ BlynAI ·", text);
+        Assert.StartsWith("\U0001F4B2 BlynAI ·", text);
     }
 
     [Fact]
@@ -76,12 +78,11 @@ public sealed class FuturesEntryAnnouncementTests
             held: new TimeSpan(2, 14, 30), reasonCode: "SELL_TRAILING_STOP");
         var lines = text.Split('\n');
 
-        Assert.Equal(3, lines.Length);
-        Assert.Equal(Luko + "\U0001F4B2\U0001F4B0 LUKO · XLM/USD <b>LONG</b> uždaryta", lines[0]);
+        Assert.Equal(2, lines.Length);
+        Assert.Equal(Luko + "\U0001F4B0\U0001F929 LUKO · XLM/USD <b>LONG</b> uždaryta", lines[0]);
         Assert.Equal(
-            "<b>Uždirbau</b> <b>+6,45 $</b> — tai <b>+43 %</b> nuo įdėtų <b>15,00 $</b> savo pinigų · laikiau 2 val. 14 min.",
+            "Uždirbau <b>+6,45 $</b> (43 % įdėtų pinigų) · laikiau 2 val. 14 min. · why: kaina nuėjo į pelną ir atsitraukė nuo viršūnės — trailing stop.",
             lines[1]);
-        Assert.Equal("Kodėl uždaryta: kaina nuėjo į pelną ir atsitraukė nuo viršūnės — trailing stop.", lines[2]);
     }
 
     // The entry and exit prices are gone with the "Įdėjau" line: the stake now sits in
@@ -94,9 +95,10 @@ public sealed class FuturesEntryAnnouncementTests
             entryPrice: 2.4818m, exitPrice: 2.4278m, pnlUsd: -3.27m,
             held: TimeSpan.FromMinutes(52), reasonCode: "SELL_STOP_LOSS");
 
-        Assert.StartsWith(Byko + "\U0001F4B2\U0001F4B8 BYKO · PENDLE/USD <b>LONG</b> uždaryta", text);
-        Assert.Contains("<b>Praradau</b> <b>−3,27 $</b> — tai <b>−22 %</b> nuo įdėtų <b>15,00 $</b>", text);
+        Assert.StartsWith(Byko + "\U0001F4B0\U0001F62D BYKO · PENDLE/USD <b>LONG</b> uždaryta", text);
+        Assert.Contains("Praradau <b>−3,27 $</b> (22 % įdėtų pinigų)", text);
         Assert.Contains("laikiau 52 min.", text);
+        Assert.Contains("why: kaina pasiekė stop-loss.", text);
         Assert.DoesNotContain("Atidariau už", text);
         Assert.DoesNotContain("pozicijoje dirbo", text);
     }

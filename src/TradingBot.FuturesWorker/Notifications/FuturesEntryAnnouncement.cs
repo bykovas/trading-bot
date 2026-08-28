@@ -3,29 +3,30 @@ using System.Text;
 
 namespace TradingBot.FuturesWorker;
 
-// What the bot says out loud when it opens a position. Deliberately NOT a report: no
-// size, no leverage, no margin, no fees, no account figures. Only the intention - the
-// pair, the direction, where it gets out either way, and why in a sentence a person can
-// read. Money belongs on the dashboard, which is behind a link; a channel post that
-// carries stakes turns every entry into an invitation to copy it.
+// What the bot says out loud when it opens and closes a position. Two lines each: a head
+// that names the instance, the pair and the direction, and one spoken line of figures.
+// The head carries a fixed family of marks - a dollar sign for an opening, a money bag
+// plus a face for a close - so a notification preview reads at a glance without colour,
+// which Telegram does not give a bot.
 //
 // Composed as a pure function so the wording can be tested without a network.
 internal static class FuturesEntryAnnouncement
 {
+    // One mark per event, one glyph per state. 💲 opens, 💰 closes; the close then carries
+    // the outcome face (🤩 earned, 😭 lost) and the opening carries the direction arrow at
+    // the end of its head line (↗️ long, ↘️ short). The instance's own face (😋 / 😎) is
+    // configuration and precedes every mark.
+    private const string OpenMark = "\U0001F4B2";   // 💲
+    private const string CloseMark = "\U0001F4B0";  // 💰
+    private const string ArrowLong = "↗️";  // ↗️
+    private const string ArrowShort = "↘️"; // ↘️
+    private const string OutcomeProfit = "\U0001F929"; // 🤩
+    private const string OutcomeLoss = "\U0001F62D";   // 😭
+
     // Lithuanian number shape spelled out rather than taken from a culture: a container
     // built with InvariantGlobalization, or with DOTNET_SYSTEM_GLOBALIZATION_INVARIANT
     // set, silently hands back the invariant culture and the channel starts posting
     // "2,338.91" to Lithuanian readers. This cannot drift with the base image.
-    // The quietest set of the four the owner reviewed: a bare diagonal arrow for the
-    // bet, a verdict for the outcome. One glyph per state, no two states sharing a
-    // silhouette, so a notification preview reads at a glance. The white circle stays
-    // on the regime line as the one neutral mark.
-    private const string OpenLong = "\u2B06\uFE0F";
-    private const string OpenShort = "\u2B07\uFE0F";
-    private const string CloseProfit = "\U0001F4B2\U0001F4B0";
-    private const string CloseLoss = "\U0001F4B2\U0001F4B8";
-    private const string Neutral = "\U000026AA";
-
     private static readonly NumberFormatInfo Lt = new()
     {
         NumberDecimalSeparator = ",",
@@ -33,21 +34,11 @@ internal static class FuturesEntryAnnouncement
         NumberGroupSizes = [3]
     };
 
-    // Why this entry, in the reader's language. The keys are what ClassifyEntryChannel
-    // returns; anything unmapped falls through to the plain-signal sentence rather than
-    // inventing a pattern that was not found.
-    private static readonly Dictionary<string, string> Reasons = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["Breakout"] = "kaina ką tik prasimušė pro paros viršūnę ir virš jos išsilaikė — imu tęsinį, ne atšokimą",
-        ["Continuation"] = "kyla be sustojimo ir laikosi paros diapazono viršuje — einu kartu su judėjimu",
-        ["Reclaim"] = "po plataus svyravimo kaina grįžo į vidurį ir vėl kyla — imu atsigavimą",
-        ["DipBounce"] = "kaina smuko ir atšoko nuo dugno — imu atšokimą, kol jis dar šviežias",
-        ["ShortBreakdown"] = "kaina pralaužė paros dugną žemyn ir žemiau jo laikosi",
-        ["ShortContinuation"] = "krinta be sustojimo ir laikosi paros diapazono apačioje — einu kartu su judėjimu",
-        ["ShortReclaim"] = "po smūgio aukštyn kaina vėl gręžiasi žemyn ir laikosi paros diapazono viduryje — tai ne dugno gaudymas, o posūkis",
-        ["Standard"] = "ryškaus modelio nėra, bet signalas surinko pakankamai balų"
-    };
-
+    // The open post. Two lines: the head, then one spoken sentence that puts the money the
+    // reader cares about first - what he put in - and folds the working capital, the price
+    // and both exits into a single parenthetical. No reason paragraph and no signal
+    // breakdown: those live on the dashboard, behind a link. The extra parameters are kept
+    // so the call site does not move while the strategy path around it is still changing.
     public static string Compose(
         string emoji,
         string label,
@@ -69,34 +60,33 @@ internal static class FuturesEntryAnnouncement
         var isLong = side.Equals("LONG", StringComparison.OrdinalIgnoreCase);
         var text = new StringBuilder();
 
-        // One family of marks throughout: a filled circle, and the colour carries the
-        // meaning - green is up or good, red is down or bad, white is neither. A dart
-        // board, a road sign and a cog are three different drawing styles pretending to
-        // be a set.
-        text.Append(Head(emoji, isLong ? OpenLong : OpenShort)).Append(label).Append(" · ").Append(pair)
-            .Append(' ').Append(Bold(isLong ? "LONG" : "SHORT")).Append('\n');
+        text.Append(Head(emoji, OpenMark)).Append(label).Append(" · ").Append(pair)
+            .Append(' ').Append(Bold(isLong ? "LONG" : "SHORT")).Append(' ')
+            .Append(isLong ? ArrowLong : ArrowShort).Append('\n');
 
-        text.Append("Įdėjau ").Append(Bold(Money(marginUsd) + " $")).Append(" savo pinigų (pozicijoje dirba ")
-            .Append(Money(notionalUsd)).Append(" $, svertas ").Append(leverage.ToString("0.##", Lt)).Append("×).");
-
-        // Both exits in one spoken sentence right under the reason, percent first and the
-        // price level in brackets - the same voice as the intention above it, not a table.
-        // On a short the target percentage is negative and the stop positive, which the
-        // levels themselves already agree with.
-        var exits = new List<string> { "Kaina " + Bold(Money(price) + " $") };
-        if (takeProfitPrice is { } tp)
+        // The working capital, the fill price and both exits as one plain detail block;
+        // only the reader's own stake is emphasised. On a short the target percentage is
+        // negative and the stop positive, which is the direction the price actually moves.
+        var detail = new List<string>
         {
-            exits.Add($"TP {Bold(Signed(isLong ? takeProfitPercent : -takeProfitPercent) + " %")} (ties {Money(tp)} $)");
+            "pozicijoje dirba " + Money(notionalUsd) + " $",
+            "svertas " + leverage.ToString("0.##", Lt) + "×",
+            "kaina " + Money(price) + " $"
+        };
+        if (takeProfitPrice is not null)
+        {
+            detail.Add("TP " + Signed(isLong ? takeProfitPercent : -takeProfitPercent) + "%");
         }
 
-        if (stopLossPrice is { } sl)
+        if (stopLossPrice is not null)
         {
-            exits.Add($"SL {Bold(Signed(isLong ? -stopLossPercent : stopLossPercent) + " %")} (ties {Money(sl)} $)");
+            detail.Add("SL " + Signed(isLong ? -stopLossPercent : stopLossPercent) + "%");
         }
 
-        text.Append('\n').Append(string.Join(", ", exits));
+        text.Append("Įdėjau ").Append(Bold(Money(marginUsd) + " $"))
+            .Append(" savo pinigų (").Append(string.Join(", ", detail)).Append(").");
 
-        return text.ToString().TrimEnd();
+        return text.ToString();
     }
 
     // What each way of leaving a position sounds like in the reader's language. Keys are
@@ -116,10 +106,9 @@ internal static class FuturesEntryAnnouncement
         ["EXCHANGE_LIQUIDATION"] = "pozicija likviduota biržos"
     };
 
-    // The close post: the outcome in the reader's money first, the prices and the hold
-    // time after it, the reason last. The circle is the OUTCOME - green earned, red
-    // lost - where the opening's circle is the direction; an opening has no outcome yet
-    // and a close has no intention left.
+    // The close post. Two lines: the head carries the money bag and the outcome face, then
+    // one spoken line - what it did to the money he put in, how long it was held, and why.
+    // The unused price/size parameters are kept so the call site does not move.
     public static string ComposeClose(
         string emoji,
         string label,
@@ -135,36 +124,35 @@ internal static class FuturesEntryAnnouncement
         string reasonCode)
     {
         var text = new StringBuilder();
-        text.Append(Head(emoji, pnlUsd > 0m ? CloseProfit : CloseLoss)).Append(label).Append(" · ")
-            .Append(pair).Append(' ').Append(Bold(side.ToUpperInvariant())).Append(" uždaryta\n");
+        text.Append(Head(emoji, CloseMark + (pnlUsd > 0m ? OutcomeProfit : OutcomeLoss)))
+            .Append(label).Append(" · ").Append(pair).Append(' ')
+            .Append(Bold(side.ToUpperInvariant())).Append(" uždaryta\n");
 
-        // Outcome, stake and hold time on one line: the reader wants what it did to the
-        // money he put in, and the entry and exit prices were the part nobody read.
         var pct = marginUsd > 0m ? pnlUsd / marginUsd * 100m : 0m;
-        text.Append(Bold(pnlUsd > 0m ? "Uždirbau" : "Praradau")).Append(' ')
-            .Append(Bold(Signed(pnlUsd, 2) + " $")).Append(" — tai ")
-            .Append(Bold(Signed(pct, 0) + " %")).Append(" nuo įdėtų ")
-            .Append(Bold(Money(marginUsd) + " $")).Append(" savo pinigų · laikiau ")
-            .Append(Hold(held)).Append('\n');
+        text.Append(pnlUsd > 0m ? "Uždirbau " : "Praradau ")
+            .Append(Bold(Signed(pnlUsd, 2) + " $"))
+            .Append(" (").Append(Math.Abs(pct).ToString("0", Lt)).Append(" % įdėtų pinigų)")
+            .Append(" · laikiau ").Append(Hold(held))
+            .Append(" · why: ");
 
         if (!CloseReasons.TryGetValue(reasonCode ?? "", out var why))
         {
             why = $"uždaryta pagal boto taisykles ({reasonCode})";
         }
 
-        text.Append("Kodėl uždaryta: ").Append(why).Append('.');
+        text.Append(why).Append('.');
         return text.ToString();
     }
 
-    // Telegram gives a bot bold but no colour, so the numbers carry the emphasis and
-    // the icons carry the verdict. HTML rather than MarkdownV2: the only characters
-    // needing escapes are the three below, where MarkdownV2 would demand a backslash
-    // in front of every dot and dash in a price.
-    // The instance's face, then the mark for what happened. An instance without a
-    // configured emoji simply starts with the mark, as the posts did before.
+    // The instance's face, then the mark for what happened, then a space before the label.
+    // An instance without a configured emoji simply starts with the mark, as before.
     private static string Head(string emoji, string mark) =>
         string.IsNullOrWhiteSpace(emoji) ? mark + " " : emoji + mark + " ";
 
+    // Telegram gives a bot bold but no colour, so the figures carry the emphasis and the
+    // icons carry the verdict. HTML rather than MarkdownV2: the only characters needing an
+    // escape are the three below, where MarkdownV2 would demand a backslash in front of
+    // every dot and dash in a price.
     private static string Bold(string text) => "<b>" + Escape(text) + "</b>";
 
     private static string Escape(string text) =>
@@ -184,60 +172,8 @@ internal static class FuturesEntryAnnouncement
                 : $"{Math.Max(1, held.Minutes)} min.";
     }
 
-    // The same breakdown the dashboard shows under a decision, in the same words: what
-    // each signal contributed to the score, then the context the score was read in.
-    // Still no stake and no leverage - those say how much is on the table, and this
-    // section is about why the bot thinks the trade is there at all.
-    private static List<string> DetailLines(EntrySignalDetails? details, string? entryChannel)
-    {
-        var lines = new List<string>();
-        if (details is null)
-        {
-            return lines;
-        }
-
-        var signals = new List<string> { details.Score.ToString("0.00", Lt) };
-        // A contribution that scored nothing says nothing, and a list padded with +0,00
-        // pushes the ones that mattered off the first screen.
-        signals.AddRange(details.Contributions
-            .Where(contribution => contribution.Value != 0m)
-            .Select(contribution => $"{contribution.Name} {Signed(contribution.Value, 2)}"));
-        lines.Add($"Signalai  {string.Join(" · ", signals)}");
-
-        var context = new List<string>();
-        if (details.SpreadPercent is { } spread)
-        {
-            context.Add($"spredas {spread.ToString("0.###", Lt)} %");
-        }
-
-        if (!string.IsNullOrWhiteSpace(details.PriceActionDirection))
-        {
-            var move = details.PriceActionTrendPercent is { } trend ? $" {Signed(trend, 2)} %" : "";
-            context.Add($"PA {details.PriceActionDirection}{move}");
-        }
-
-        if (details.EmaGapPercent is { } gap)
-        {
-            context.Add($"EMA tarpas {Signed(gap, 2)} %");
-        }
-
-        context.Add(details.EmaFullyConfirmed ? "EMA patvirtinta" : "EMA nepatvirtinta");
-        context.Add($"kanalas {entryChannel ?? "Standard"}");
-        lines.Add($"Kontekstas: {string.Join(" · ", context)}");
-
-        return lines;
-    }
-
-    // "XMR/USD" -> "XMR". The quote side is always USD here and repeating it in a line
-    // about the pair's own move reads as noise.
-    private static string BaseAsset(string pair)
-    {
-        var slash = pair.IndexOf('/');
-        return slash > 0 ? pair[..slash] : pair;
-    }
-
-    // Prices here span 0.000012 to 75 000, so a fixed number of decimals is either
-    // useless at the bottom or absurd at the top.
+    // Prices here span 0.000012 to 75 000, so a fixed number of decimals is either useless
+    // at the bottom or absurd at the top.
     private static string Money(decimal value) =>
         value.ToString("N" + Decimals(value).ToString(CultureInfo.InvariantCulture), Lt);
 

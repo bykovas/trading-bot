@@ -92,6 +92,10 @@ internal sealed class FuturesDecisionWorker(
             catch (Exception ex)
             {
                 Console.WriteLine($"futures cycle FAILED: {ex.Message}");
+                // Any error the cycle did not handle - a broken exchange call, a data
+                // read that threw - reaches the channel as one throttled 🚨 rather than
+                // only the server log, so a stuck bot is visible without watching it.
+                await _telegram.SendAlertAsync($"klaida cikle: {ex.Message}", cancellationToken);
             }
 
             if (config.Worker.RunOnce)
@@ -462,6 +466,12 @@ internal sealed class FuturesDecisionWorker(
                     desired = FuturesDesiredExposure.Flat;
                     riskReasons = new[] { $"entry skipped: futures position slots exhausted ({config.Futures.MaxPositions} max)" };
                     riskApproved = false;
+                    // A real candidate cleared every gate and found no free slot: the book
+                    // is full and signals are going by. The notifier throttles this to once
+                    // per window, so the tight per-candidate loop pays nothing after the first.
+                    await _telegram.SendAlertAsync(
+                        $"nėra laisvų slotų (visi {config.Futures.MaxPositions} užimti) — praleidžiu {pair} ir kitus signalus",
+                        cancellationToken);
                 }
                 else
                 {
