@@ -10,6 +10,16 @@ jobs:
   why-idle:
     runs-on: self-hosted
     steps:
+      - name: Shorts since 2026-08-24, both bots
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select c.bot_instance_id, a.side, count(*) as trades, count(*) filter (where (case when a.side='SHORT' then (a.entry_price-a.fill_price) else (a.fill_price-a.entry_price) end) > 0) as winners, round(sum(case when a.side='SHORT' then (a.entry_price-a.fill_price) else (a.fill_price-a.entry_price) end * a.quantity)::numeric,2) as usd, round(avg(case when a.side='SHORT' then (a.entry_price-a.fill_price) else (a.fill_price-a.entry_price) end / a.entry_price * 100)::numeric,3) as avg_pct from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.action in ('WOULD_SELL','WOULD_CLOSE') and a.entry_price>0 and a.fill_price>0 and c.bot_instance_id in ('futures-live','futures-lukas-live') and c.utc >= '2026-08-24' group by 1,2 order by 1,2"
+
+      - name: Shorts by day since 2026-08-24
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select date_trunc('day', c.utc)::date as day, c.bot_instance_id, count(*) as shorts, round(sum((a.entry_price-a.fill_price) * a.quantity)::numeric,2) as usd from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.action in ('WOULD_SELL','WOULD_CLOSE') and a.side='SHORT' and a.entry_price>0 and a.fill_price>0 and c.bot_instance_id in ('futures-live','futures-lukas-live') and c.utc >= '2026-08-24' group by 1,2 order by 1,2"
+
       - name: Same three pairs, both bots, this morning
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
