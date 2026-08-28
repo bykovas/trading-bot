@@ -1,3 +1,11 @@
+## 2026-08-28-surface-the-strategy-in-telegram-and-the-api
+
+- Telegram: the strategy that opened a trade now closes the head line on BOTH posts, at the owner's chosen placement - `... XMR/USD LONG ↗️ · Reversal` on an open, `... LONG uždaryta · Momentum` on a close. `Compose`/`ComposeClose` take an optional `strategy`; the two announce sites pass `position.Strategy`. A null strategy (spot, legacy) leaves the head line exactly as before - no trailing separator.
+- API: the trading book is exposed to the UI as a new field named **`tradeStrategy`** (JSON), values `"Momentum" | "Reversal" | null`. Deliberately NOT `strategy` - the API already carries `strategyVersion`, which means the code/change-set version, and the two must not be confused. Null reads as Momentum (spot and legacy rows).
+  - Added to `PortfolioPositionDto` (open positions) and `DashboardTradeDto` (the dashboard's trade list). Both readers are ordinal-mapped, so `strategy` is appended at the END of each SELECT and read at the new highest ordinal, and the field is appended at the END of each record - the existing ordinal reads are untouched.
+  - NOT added to the cycle-actions drill-down DTO (nested record with mixed positional/named reads); it can follow later if the UI needs the strategy on that view too.
+- No behaviour change: this only carries the already-recorded `Strategy` tag out to the two reader surfaces.
+
 ## 2026-08-28-the-reversal-book
 
 - Second, independent strategy per the owner's spec: **Reversal** fades a sharp fast move - a strong rise makes a SHORT candidate, a strong fall a LONG. It is a separate book, not a condition bolted onto the momentum scorer: none of the momentum confirmations (EMA gap, fresh tape/ribbon, range guards, follow-through, the experiment gate, the BTC direction gates) apply to it, because waiting for confirmation after a sharp move means entering after the snap-back it exists to catch.

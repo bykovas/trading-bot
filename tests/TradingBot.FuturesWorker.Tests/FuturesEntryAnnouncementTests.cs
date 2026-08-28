@@ -148,6 +148,42 @@ public sealed class FuturesEntryAnnouncementTests
             Byko, "BYKO", "ETH/USD", "LONG", 15m, 150m, 10m, 100m, 101m, 1m, TimeSpan.FromMinutes(5), "SELL_STOP_LOSS"));
     }
 
+    // The strategy that opened the trade closes the head line, on both posts, so which
+    // book a trade belongs to is never mixed in the channel.
+    [Fact]
+    public void The_strategy_closes_the_open_head_line()
+    {
+        var text = FuturesEntryAnnouncement.Compose(
+            Byko, "BYKO", "ARB/USD", "LONG", 0.103285m, 15m, 150m, 10m, "Breakout",
+            0.10742m, 0.10122m, 4m, 2m, 0.85m, 1.66m, null, "Reversal");
+
+        Assert.Equal(Byko + "\U0001F4B2 BYKO · ARB/USD <b>LONG</b> ↗️ · Reversal", text.Split('\n')[0]);
+    }
+
+    [Fact]
+    public void The_strategy_closes_the_close_head_line()
+    {
+        var text = FuturesEntryAnnouncement.ComposeClose(
+            Luko, "LUKO", "XLM/USD", "LONG", 15m, 150m, 10m,
+            0.3812m, 0.3976m, 6.45m, new TimeSpan(2, 14, 30), "SELL_TRAILING_STOP", "Momentum");
+
+        Assert.Equal(Luko + "\U0001F4B0\U0001F929 LUKO · XLM/USD <b>LONG</b> uždaryta · Momentum", text.Split('\n')[0]);
+    }
+
+    // No strategy given (spot, legacy, or a caller that does not track it): the head
+    // line ends exactly as before, with no trailing separator.
+    [Fact]
+    public void A_missing_strategy_leaves_the_head_line_unchanged()
+    {
+        var open = EthShort("ShortReclaim");
+        var close = FuturesEntryAnnouncement.ComposeClose(
+            Byko, "BYKO", "XMR/USD", "LONG", 15m, 150m, 10m,
+            424.11m, 421.98m, -17.76m, TimeSpan.FromHours(3), "EXCHANGE_CLOSE");
+
+        Assert.EndsWith("<b>SHORT</b> ↘️", open.Split('\n')[0]);
+        Assert.EndsWith("uždaryta", close.Split('\n')[0]);
+    }
+
     private static string WithDetails() =>
         FuturesEntryAnnouncement.Compose(
             Luko, "LUKO", "ETH/USD", "SHORT", EthPrice, 15m, 150m, 10m, "ShortReclaim",

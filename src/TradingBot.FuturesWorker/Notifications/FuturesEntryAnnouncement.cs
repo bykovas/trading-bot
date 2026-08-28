@@ -55,14 +55,23 @@ internal static class FuturesEntryAnnouncement
         decimal stopLossPercent,
         decimal? btc24hChangePct,
         decimal? pair24hChangePct,
-        EntrySignalDetails? details = null)
+        EntrySignalDetails? details = null,
+        string? strategy = null)
     {
         var isLong = side.Equals("LONG", StringComparison.OrdinalIgnoreCase);
         var text = new StringBuilder();
 
+        // The strategy that opened it - Momentum or Reversal - closes the head line, so
+        // which book a trade belongs to is visible at a glance and never mixed.
         text.Append(Head(emoji, OpenMark)).Append(label).Append(" · ").Append(pair)
             .Append(' ').Append(Bold(isLong ? "LONG" : "SHORT")).Append(' ')
-            .Append(isLong ? ArrowLong : ArrowShort).Append('\n');
+            .Append(isLong ? ArrowLong : ArrowShort);
+        if (!string.IsNullOrWhiteSpace(strategy))
+        {
+            text.Append(" · ").Append(strategy);
+        }
+
+        text.Append('\n');
 
         // The working capital, the fill price and both exits as one plain detail block;
         // only the reader's own stake is emphasised. On a short the target percentage is
@@ -121,12 +130,19 @@ internal static class FuturesEntryAnnouncement
         decimal exitPrice,
         decimal pnlUsd,
         TimeSpan held,
-        string reasonCode)
+        string reasonCode,
+        string? strategy = null)
     {
         var text = new StringBuilder();
         text.Append(Head(emoji, CloseMark + (pnlUsd > 0m ? OutcomeProfit : OutcomeLoss)))
             .Append(label).Append(" · ").Append(pair).Append(' ')
-            .Append(Bold(side.ToUpperInvariant())).Append(" uždaryta\n");
+            .Append(Bold(side.ToUpperInvariant())).Append(" uždaryta");
+        if (!string.IsNullOrWhiteSpace(strategy))
+        {
+            text.Append(" · ").Append(strategy);
+        }
+
+        text.Append('\n');
 
         var pct = marginUsd > 0m ? pnlUsd / marginUsd * 100m : 0m;
         text.Append(pnlUsd > 0m ? "Uždirbau " : "Praradau ")

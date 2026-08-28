@@ -710,7 +710,10 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             -- True when the position turned up on the exchange while the worker was
             -- already watching, which makes it someone else's rather than merely
             -- unattributed. False for one adopted at the first sync after a restart.
-            adopted_while_running
+            adopted_while_running,
+            -- Which trading book opened it: Momentum or Reversal. Null = Momentum
+            -- (spot and legacy rows). Appended last so the ordinal read above is stable.
+            strategy
         from portfolio_position_state position
         where (@bot_instance_id is null or position.bot_instance_id = @bot_instance_id)
         -- Newest first. Ordering by market value put the biggest position on top,
@@ -774,7 +777,8 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             reader.IsDBNull(25) ? null : reader.GetString(25),
             reader.IsDBNull(26) ? null : reader.GetString(26),
             !reader.IsDBNull(27) && reader.GetBoolean(27),
-            !reader.IsDBNull(28) && reader.GetBoolean(28)));
+            !reader.IsDBNull(28) && reader.GetBoolean(28),
+            reader.IsDBNull(29) ? null : reader.GetString(29)));
     }
 
     return positions;
@@ -2759,7 +2763,8 @@ static async Task<DashboardTodayDto> ReadTodayTrades(
             action.fill_source,
             decision.exploratory,
             case when action.side = 'SHORT' then decision.short_score_threshold
-                 else decision.long_score_threshold end as score_threshold
+                 else decision.long_score_threshold end as score_threshold,
+            action.strategy
         from traded action
         join today_cycles cycle on cycle.cycle_id = action.cycle_id
         join dry_run_decision_facts decision
@@ -2821,7 +2826,8 @@ static async Task<DashboardTodayDto> ReadTodayTrades(
                 reader.IsDBNull(23) ? null : reader.GetDecimal(23),
                 ReadNullableString(reader, 24),
                 !reader.IsDBNull(25) && reader.GetBoolean(25),
-                reader.IsDBNull(26) ? null : reader.GetDecimal(26))));
+                reader.IsDBNull(26) ? null : reader.GetDecimal(26),
+                ReadNullableString(reader, 27))));
         }
     }
 
@@ -3004,7 +3010,10 @@ internal sealed record PortfolioPositionDto(
     // True when the position appeared on the exchange under a running worker's nose:
     // it did not order it, so a person did. A position adopted at the first sync after
     // a restart is NOT this - there the bot cannot tell its own lost record apart.
-    bool AdoptedWhileRunning);
+    bool AdoptedWhileRunning,
+    // Which trading book opened it: "Momentum" or "Reversal". Null = Momentum (spot
+    // and legacy rows, which predate the Reversal book).
+    string? TradeStrategy);
 
 internal sealed record PageRequest(int Limit, int Offset)
 {
@@ -3940,7 +3949,9 @@ internal sealed record DashboardTradeDto(
     decimal? EmaGapPercent,
     string? FillSource,
     bool Exploratory,
-    decimal? ScoreThreshold);
+    decimal? ScoreThreshold,
+    // Which trading book: "Momentum" or "Reversal". Null = Momentum (legacy/spot).
+    string? TradeStrategy);
 
 internal sealed record DashboardRatesDto(
     decimal BykoUsd,

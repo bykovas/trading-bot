@@ -1051,7 +1051,8 @@ internal sealed class FuturesDecisionWorker(
                 exit,
                 pnl,
                 held,
-                reasonCode),
+                reasonCode,
+                position.Strategy),
             cancellationToken);
     }
 
@@ -1102,7 +1103,8 @@ internal sealed class FuturesDecisionWorker(
             config.TpSl.StopLossPercent,
             btc24hChangePct,
             pair24hChangePct,
-            details);
+            details,
+            opened?.Strategy);
 
         await _telegram.SendAsync(text, cancellationToken);
     }
