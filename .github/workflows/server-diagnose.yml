@@ -10,6 +10,21 @@ jobs:
   why-idle:
     runs-on: self-hosted
     steps:
+      - name: Same three pairs, both bots, this morning
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.bot_instance_id, d.pair, d.utc, d.desired_position, round(d.short_score::numeric,2) as short_s, d.risk_approved, left(r.reason,95) as reason from dry_run_decision_facts d left join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.pair in ('AAVE/USD','ADA/USD','KAS/USD') and d.utc between '2026-08-28 03:28' and '2026-08-28 03:36' order by d.pair, d.utc, d.bot_instance_id limit 40"
+
+      - name: What BYKO refused this morning, grouped
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select left(r.reason,105) as reason, count(*) from dry_run_decision_facts d join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.utc >= '2026-08-28 00:00' group by 1 order by 2 desc limit 12"
+
+      - name: Opens per instance since midnight
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select c.bot_instance_id, count(*) filter (where a.action in ('WOULD_OPEN_LONG','WOULD_OPEN_SHORT','WOULD_BUY')) as opened, count(*) filter (where a.action in ('WOULD_SELL','WOULD_CLOSE')) as closed from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where c.utc >= '2026-08-28 00:00' group by 1"
+
       - name: The two NVDAX closes side by side
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
