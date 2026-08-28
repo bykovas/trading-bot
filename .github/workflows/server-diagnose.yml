@@ -10,6 +10,16 @@ jobs:
   why-idle:
     runs-on: self-hosted
     steps:
+      - name: The MSTRX entry and what the gates saw
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.utc, round(d.price::numeric,3) as price, round(d.score::numeric,2) as score, round(d.rsi::numeric,1) as rsi, round(d.bullish_ema_gap_percent::numeric,3) as ema_gap, round(d.spread_percent::numeric,3) as spread, d.desired_position, left(coalesce(r.reason,'-'),80) as reason from dry_run_decision_facts d left join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.pair='MSTRX/USD' and d.utc between '2026-08-28 00:00' and '2026-08-28 00:30' order by d.utc limit 20"
+
+      - name: Freshness and range context on that entry
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select d.utc, round(f.entry_freshness_position_in_24h_range_pct::numeric,1) as range_pos_24h, round(f.entry_distance_from_local_high_pct::numeric,3) as dist_local_high, round(f.live_price_vs_signal_close_pct::numeric,3) as drift, f.entry_freshness_has_fresh_breakout as breakout, l.zone, l.anti_chase_applied, round(l.close_percentile::numeric,1) as close_pctile from dry_run_decision_facts d join dry_run_entry_freshness f on f.cycle_id=d.cycle_id and f.decision_index=d.decision_index left join dry_run_long_range_diagnostics l on l.cycle_id=d.cycle_id and l.decision_index=d.decision_index where d.bot_instance_id='futures-live' and d.pair='MSTRX/USD' and d.utc between '2026-08-28 00:00' and '2026-08-28 00:30' order by d.utc limit 20"
+
       - name: Shorts since 2026-08-24, both bots
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
