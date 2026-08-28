@@ -113,6 +113,27 @@ internal static class FuturesLongRangeGuard
                 $"long blocked: rebound from 24h low {rebound:0.###}% < required {thresholds.MinReboundFrom24hLowPct:0.###}% (entry {entryPrice:0.######}, 24h low {absoluteLow:0.######})");
         }
 
+        // TODO (measured 2026-08-28, left as-is deliberately): this condition is inverted
+        // from what its name suggests. It blocks the top of the range ONLY WHILE the tape
+        // is rising, so an impulse that has just run out of breath - the tape flat at the
+        // high - passes, and a live one is refused. MSTRX/USD on 2026-08-28 went through
+        // exactly there: blocked at 00:16 and 00:18 while the tape rose, admitted at 00:20
+        // at the same 139.31 once it stopped, at 100% of the range after a two-day climb.
+        //
+        // Both obvious repairs were measured over 2026-07-08..08-21 (28,549 walked entries)
+        // and NEITHER is an improvement, which is why the code stays wrong on purpose:
+        //   * blocking the top unconditionally costs 260 USD - entries at exactly 100% of
+        //     the range return +0.063%/trade, and 90-100% carries +3,700 of the +3,705 the
+        //     whole strategy makes. The losing zone is the MIDDLE, 50-80% at -0.101%.
+        //   * entries at the top are not even a distinct population: median -0.67% against
+        //     -0.64% elsewhere, 7.1% reach +4% against 7.5%, 37.9% stop out against 37.2%.
+        // Within the top the only losing slice is coins up 2-10% over the prior day; both
+        // the quiet ones and the genuinely running ones (>10%) pay.
+        //
+        // So the fix is not a threshold. If this is ever revisited, the question worth
+        // asking is why the guard reads a two-hour horizon at all: every extension test
+        // here measures against the fast EMA, so a coin that doubled over two days but has
+        // been flat for two hours reads as unextended. That is the real blind spot.
         if (zone == "UPPER" && freshness.HasFreshUpwardTape && !freshness.HasFreshBreakout)
         {
             return Blocked(UpperRangeFreshTapeNotEnough,

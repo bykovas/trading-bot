@@ -1,3 +1,12 @@
+## 2026-08-28-the-upper-range-guard-is-inverted-and-stays-that-way
+
+- `FuturesLongRangeGuard` blocks the top of the range ONLY WHILE the tape is rising, which is backwards from what the name says: an impulse that has just run out of breath passes, a live one is refused. MSTRX/USD went through exactly there this morning - refused at 00:16 and 00:18 while the tape rose, admitted at 00:20 at the same 139.31, at 100% of the range after a two-day climb from ~95.
+- Measured before touching it, 2026-07-08..08-21, 28,549 walked entries with the arm's own exits. Both obvious repairs lose money, so the condition is left inverted and carries a TODO saying why:
+  - Blocking the top unconditionally costs 260 USD over the window. Entries at exactly 100% of the range return +0.063%/trade, and the 90-100% band carries +3,700 of the +3,705 the whole strategy makes. The losing zone is the MIDDLE: 50-80% at -0.101%/trade.
+  - Top-of-range entries are not a distinct population at all: median -0.67% against -0.64% elsewhere, 7.1% reach +4% against 7.5%, 37.9% stop out against 37.2%. Three measures out of three agree.
+- Inside the top the only losing slice is coins up 2-10% over the prior day (-0.04 to -0.05%/trade). Quiet ones (<2%) return +0.339% and genuinely running ones (>10%) +0.272%. MSTRX was +11.7% over the prior day - the profitable slice, and simply a losing trade within it.
+- The blind spot worth a future look is not the threshold: every extension test in this guard measures against the FAST EMA, a two-hour horizon, so a coin that doubled over two days but has been flat for two hours reads as unextended. Nothing in the entry path sees the daily scale.
+
 ## 2026-08-27-a-stop-caught-by-the-slow-loop-now-reaches-the-channel
 
 - The two-minute decision cycle closed positions on a TP/SL trigger without announcing them. The fast exit checker, which runs every ~11 seconds, announced from the day it was added. Whether a close reached Telegram therefore came down to which loop happened to see the trigger first, and nothing in the channel said a post was missing.
