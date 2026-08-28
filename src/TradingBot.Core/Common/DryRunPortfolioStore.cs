@@ -256,7 +256,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                    -- Appended at the END on purpose: this SELECT is read by ordinal, so a
                    -- column inserted next to its sibling would silently shift every field
                    -- after it.
-                   peak_pnl_at_utc
+                   peak_pnl_at_utc,
+                   strategy
             from portfolio_position_state
             where bot_instance_id = @bot_instance_id
             order by position_index
@@ -311,7 +312,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     EntryChannel = GetNullableString(reader, 39),
                     FlippedEntry = !reader.IsDBNull(40) && reader.GetBoolean(40),
                     AdoptedWhileRunning = !reader.IsDBNull(41) && reader.GetBoolean(41),
-                    PeakPnlAtUtc = GetNullableDateTimeOffset(reader, 42)
+                    PeakPnlAtUtc = GetNullableDateTimeOffset(reader, 42),
+                    Strategy = GetNullableString(reader, 43)
                 });
             }
         }
@@ -740,6 +742,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 sl_order_state text,
                 origin text,
                 entry_channel text,
+                strategy text,
                 flipped_entry boolean not null default false,
                 adopted_while_running boolean not null default false,
                 primary key (bot_instance_id, position_index)
@@ -757,6 +760,9 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             -- above never adds it to them.
             alter table portfolio_position_state
                 add column if not exists peak_pnl_at_utc timestamptz;
+
+            alter table portfolio_position_state
+                add column if not exists strategy text;
 
             alter table portfolio_state_summary
                 add column if not exists cash_quote_value numeric,
@@ -951,6 +957,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 leverage numeric,
                 exit_trigger_source text,
                 entry_channel text,
+                strategy text,
                 exchange_order_id text,
                 exchange_fill_timestamp timestamptz,
                 requested_margin_eur numeric,
@@ -971,6 +978,10 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 primary key (cycle_id, decision_index),
                 foreign key (cycle_id, decision_index) references dry_run_decision_facts (cycle_id, decision_index) on delete cascade
             );
+
+            -- Live tables predate this column; create-if-not-exists never adds it.
+            alter table dry_run_actions
+                add column if not exists strategy text;
 
             create index if not exists ix_dry_run_actions_action_pair on dry_run_actions (action, pair);
             create index if not exists ix_dry_run_actions_exchange_order on dry_run_actions (exchange_order_id);
@@ -1452,6 +1463,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     sl_order_state,
                     origin,
                     entry_channel,
+                    strategy,
                     flipped_entry,
                     adopted_while_running)
                 values (
@@ -1499,6 +1511,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     @sl_order_state,
                     @origin,
                     @entry_channel,
+                    @strategy,
                     @flipped_entry,
                     @adopted_while_running)
                 """,
@@ -1548,6 +1561,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             Add(command, "sl_order_state", NpgsqlDbType.Text, position.SlOrderState);
             Add(command, "origin", NpgsqlDbType.Text, position.Origin);
             Add(command, "entry_channel", NpgsqlDbType.Text, position.EntryChannel);
+            Add(command, "strategy", NpgsqlDbType.Text, position.Strategy);
             Add(command, "flipped_entry", NpgsqlDbType.Boolean, position.FlippedEntry);
             Add(command, "adopted_while_running", NpgsqlDbType.Boolean, position.AdoptedWhileRunning);
             command.ExecuteNonQuery();
@@ -1942,6 +1956,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 leverage,
                 exit_trigger_source,
                 entry_channel,
+                strategy,
                 exchange_order_id,
                 exchange_fill_timestamp,
                 requested_margin_eur,
@@ -2004,6 +2019,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 @leverage,
                 @exit_trigger_source,
                 @entry_channel,
+                @strategy,
                 @exchange_order_id,
                 @exchange_fill_timestamp,
                 @requested_margin_eur,
@@ -2068,6 +2084,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
         Add(command, "leverage", NpgsqlDbType.Numeric, action.Leverage);
         Add(command, "exit_trigger_source", NpgsqlDbType.Text, action.ExitTriggerSource);
         Add(command, "entry_channel", NpgsqlDbType.Text, action.EntryChannel);
+        Add(command, "strategy", NpgsqlDbType.Text, action.Strategy);
         Add(command, "exchange_order_id", NpgsqlDbType.Text, action.ExchangeOrderId);
         Add(command, "exchange_fill_timestamp", NpgsqlDbType.TimestampTz, Utc(action.ExchangeFillTimestamp));
         Add(command, "requested_margin_eur", NpgsqlDbType.Numeric, action.RequestedMarginEur);

@@ -100,6 +100,13 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.Null(lukas["Futures"]?["DisabledLongEntryChannels"]);
         Assert.Null(lukas["Shorts"]?["MaxBtc24hRisePercentForShort"]);
 
+        // The Reversal book runs on the arm only, since 2026-08-28: the section is
+        // pinned PRESENT and enabled on the arm and pinned ABSENT on the control,
+        // whose binder default is disabled. A section appearing on the control is an
+        // experiment leak, not a tidy-up.
+        Assert.True(primary["Reversal"]?["Enabled"]?.GetValue<bool>());
+        Assert.Null(lukas["Reversal"]);
+
         // Both announce since 2026-08-24, each under its own label - the label is what
         // keeps two voices in one channel from reading as one bot contradicting itself.
         Assert.True(lukas["Telegram"]?["Enabled"]?.GetValue<bool>());
@@ -199,6 +206,9 @@ public sealed class FuturesInstanceConfigurationTests
         var normalizedLukas = lukas.DeepClone().AsObject();
         normalizedLukas["BotInstance"] = primary["BotInstance"]?.DeepClone();
         normalizedLukas["EntryMirror"] = primary["EntryMirror"]?.DeepClone();
+        // Whole-section experiment knob, asserted above; normalized here so the
+        // remainder of the two profiles must still match key for key.
+        normalizedLukas["Reversal"] = primary["Reversal"]?.DeepClone();
         foreach (var (section, key) in mayDiffer)
         {
             if (primary[section]?[key] is not null)

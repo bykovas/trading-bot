@@ -34,6 +34,7 @@ internal sealed class FuturesBotConfiguration
     public FuturesExitOptions Exits { get; set; } = new();
     public FuturesRegimeOptions Regime { get; set; } = new();
     public FuturesShortOptions Shorts { get; set; } = new();
+    public FuturesReversalOptions Reversal { get; set; } = new();
     public FuturesRiskOptions Risk { get; set; } = new();
     public FuturesExecutionPolicyOptions ExecutionPolicy { get; set; } = new();
     public FuturesEntryMirrorOptions EntryMirror { get; set; } = new();
@@ -425,6 +426,22 @@ internal sealed class FuturesBotConfiguration
         }
         Shorts.MinPullbackFrom24hHighPct = Math.Max(0m, Shorts.MinPullbackFrom24hHighPct);
         Shorts.RequiredFallingSnapshotCount = Math.Max(1, Shorts.RequiredFallingSnapshotCount);
+        if (Reversal.TriggerWindowMinutes <= 0)
+        {
+            Console.WriteLine($"config-validation: Reversal.TriggerWindowMinutes={Reversal.TriggerWindowMinutes} must be positive; reset to 15.");
+            Reversal.TriggerWindowMinutes = 15;
+        }
+        if (Reversal.MinMovePercent <= 0m)
+        {
+            Console.WriteLine($"config-validation: Reversal.MinMovePercent={Reversal.MinMovePercent} must be positive; reset to 3.");
+            Reversal.MinMovePercent = 3m;
+        }
+        Reversal.MaxMovePercent = Math.Max(0m, Reversal.MaxMovePercent);
+        if (Reversal.MaxMovePercent > 0m && Reversal.MaxMovePercent <= Reversal.MinMovePercent)
+        {
+            Console.WriteLine($"config-validation: Reversal.MaxMovePercent={Reversal.MaxMovePercent} is not above MinMovePercent={Reversal.MinMovePercent}; cap disabled.");
+            Reversal.MaxMovePercent = 0m;
+        }
         // Risk-based sizing: TargetRiskUsd is the USD stop-distance budget per entry.
         // Default 1.00 USD = 1% of ~100 USD virtual equity per position. Worked example
         // (leverage 10x, stop floor 0.75%): notional = 1.00 / 0.0075 ≈ 133 USD, margin
@@ -980,6 +997,37 @@ internal sealed class FuturesShortOptions
     public bool RequireFreshTapeForHighRangeShort { get; set; } = true;
 }
 
+
+// The Reversal strategy: an event-based fade of a sharp fast move, the exact opposite
+// of the Momentum book. A strong fast RISE makes a SHORT candidate, a strong fast FALL
+// makes a LONG candidate. Deliberately minimal - the event IS the entry: none of the
+// momentum confirmations (EMA gap, fresh tape, range guards, the experiment gate) apply
+// here, because waiting for confirmation after a sharp move means entering after the
+// snap-back this strategy exists to catch. Money protections still apply in full: the
+// spread ceiling, portfolio guards (slots, cooldowns, blackout, correlation caps) and
+// the whole margin/funding/volume/depth risk layer.
+//
+// Thresholds live here, not in code, so they can be changed without a recompile. The
+// defaults come from the 45-day onset study of 2026-08-28: the sharpest measured
+// snap-back followed moves of about 3% inside 15 minutes.
+internal sealed class FuturesReversalOptions
+{
+    // Off by default: the control account must not grow a second book by upgrading.
+    public bool Enabled { get; set; }
+
+    // How far back the move is measured, in minutes. Rounded down to whole candles of
+    // the working timeframe (15m candles -> 15 means the last closed bar).
+    public int TriggerWindowMinutes { get; set; } = 15;
+
+    // The move size, in percent over the window, that makes the event fire. The sign
+    // picks the side: at or above +MinMovePercent -> SHORT, at or below -MinMovePercent
+    // -> LONG.
+    public decimal MinMovePercent { get; set; } = 3m;
+
+    // Optional sanity ceiling: a move beyond this is treated as news, a delisting or a
+    // broken market rather than an overreaction, and is NOT faded. 0 disables the cap.
+    public decimal MaxMovePercent { get; set; } = 15m;
+}
 internal sealed class FuturesRiskOptions
 {
     private decimal _targetRiskUsd = 1m;

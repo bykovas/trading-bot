@@ -295,6 +295,7 @@ internal sealed class FuturesVirtualPortfolio(
         // Carry the opening channel onto the close so realized PnL is attributable
         // to Continuation / Breakout / DipBounce without a separate open-close join.
         action.EntryChannel = position.EntryChannel;
+        action.Strategy = position.Strategy;
         FillLedger(action, before, state);
         return new FuturesFillResult(action, PositionOpened: false, PositionClosed: true);
     }

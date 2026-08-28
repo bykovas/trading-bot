@@ -456,6 +456,24 @@ internal sealed class FuturesDecisionWorker(
                     }
                 }
 
+                // The Reversal book: only consulted when the Momentum book wants
+                // nothing on this pair, so Momentum keeps absolute priority and its
+                // path below is untouched. The event is the entry - none of the
+                // momentum confirmations apply - and the branch that executes it
+                // carries its own, deliberately shorter gate chain.
+                FuturesReversalSignal? reversal = null;
+                if (desired == FuturesDesiredExposure.Flat && config.Reversal.Enabled)
+                {
+                    var probe = FuturesReversalStrategy.Evaluate(
+                        marketState.Candles, config.Trading.TimeframeMinutes, config.Reversal);
+                    if (probe.Fires)
+                    {
+                        reversal = probe;
+                        desired = probe.Desired;
+                        Console.WriteLine($"REVERSAL_EVENT pair={pair} {probe.Reason}");
+                    }
+                }
+
                 if (desired == FuturesDesiredExposure.Flat)
                 {
                     riskReasons = new[] { ExplainNoEntry(signal) };
@@ -472,6 +490,87 @@ internal sealed class FuturesDecisionWorker(
                     await _telegram.SendAlertAsync(
                         $"nėra laisvų slotų (visi {config.Futures.MaxPositions} užimti) — praleidžiu {pair} ir kitus signalus",
                         cancellationToken);
+                }
+                else if (reversal is { Fires: true })
+                {
+                    // The Reversal gate chain, whole and short: spread ceiling, the
+                    // portfolio guards every entry obeys (pending orders, blackout,
+                    // cooldowns, correlation caps), then the full money risk layer with
+                    // the momentum-direction gates bypassed - BTC regime and the short
+                    // score are Momentum's opinion of Momentum's own entries, and this
+                    // book exists precisely because that opinion inverts after a sharp
+                    // move. Sizing, margin, funding, volume, depth, liquidation and the
+                    // concurrent-risk cap all still apply unchanged.
+                    entryPlan = BuildEntryPlan(state, marketState, desired, signal, btcRegime, utc);
+                    var reversalSpreadPct = SpreadPercentOf(marketState);
+                    var reversalGate = reversalSpreadPct is { } rs && config.Strategy.MaxEntrySpreadPercent > 0m && rs > config.Strategy.MaxEntrySpreadPercent
+                        ? new RiskEvaluation(false, new[] { $"reversal blocked: spread {rs:0.###}% exceeds {config.Strategy.MaxEntrySpreadPercent:0.###}%" })
+                        : EvaluatePortfolioEntryGuards(
+                            state,
+                            pair,
+                            desired,
+                            utc,
+                            entryPlan.SizedNotionalEur > 0m ? entryPlan.SizedNotionalEur : entryPlan.RequestedNotionalEur);
+                    var reversalEvaluation = reversalGate.Approved
+                        ? riskManager.EvaluateEntry(BuildReversalRiskInputs(state, marketState, desired, entryPlan))
+                        : reversalGate;
+                    riskReasons = reversalEvaluation.Reasons
+                        .Select(reason => $"reversal: {reason}")
+                        .ToArray();
+                    riskApproved = reversalEvaluation.Approved;
+                    if (!reversalEvaluation.Approved)
+                    {
+                        desired = FuturesDesiredExposure.Flat;
+                    }
+                    else
+                    {
+                        fill = await ApplyOrExecuteLiveAsync(
+                            state, pair, desired, markPrice,
+                            entryPlan.SizedNotionalEur > 0m ? entryPlan.SizedNotionalEur : entryPlan.RequestedNotionalEur,
+                            entryPlan.EffectiveLeverage > 0m ? entryPlan.EffectiveLeverage : config.Futures.DefaultLeverage,
+                            reduceOnly: false,
+                            reason: reversal.Reason,
+                            exitTriggerSource: null,
+                            instrument: marketState.Instrument,
+                            entryPlan: entryPlan,
+                            cancellationToken,
+                            signalPrice: marketState.LastPrice,
+                            flippedEntry: false);
+                        fill.Action.EntryChannel = TradeStrategies.Reversal;
+                        fill.Action.Strategy = TradeStrategies.Reversal;
+                        AttachEntryPlanDiagnostics(fill.Action, entryPlan);
+
+                        if (fill.PositionOpened)
+                        {
+                            var openedPosition = state.Positions.FirstOrDefault(position => position.Pair == pair);
+                            if (openedPosition is not null)
+                            {
+                                openedPosition.EntryChannel = TradeStrategies.Reversal;
+                                openedPosition.Strategy = TradeStrategies.Reversal;
+                                fill.Action.StopDistancePct = openedPosition.StopDistancePct;
+                                fill.Action.TakeProfitDistancePct = openedPosition.TakeProfitDistancePct;
+                            }
+
+                            newEntriesThisCycle++;
+                            await AnnounceEntryAsync(
+                                marketState.Instrument.Pair,
+                                desired,
+                                fill,
+                                TradeStrategies.Reversal,
+                                openedPosition,
+                                btcRegime.Change24hPct,
+                                null,
+                                new EntrySignalDetails(
+                                    signal.Score,
+                                    signal.Contributions,
+                                    reversalSpreadPct,
+                                    null,
+                                    null,
+                                    null,
+                                    false),
+                                cancellationToken);
+                        }
+                    }
                 }
                 else
                 {
@@ -659,6 +758,7 @@ internal sealed class FuturesDecisionWorker(
 
                         var entryChannel = ClassifyEntryChannel(dipBounce, freshness, longRange, shortEntry);
                         fill.Action.EntryChannel = entryChannel;
+                        fill.Action.Strategy = TradeStrategies.Momentum;
                         if (dipBounce)
                         {
                             fill.Action.DipBounceMinScoreApplied = config.Dip.MinScore;
@@ -672,6 +772,7 @@ internal sealed class FuturesDecisionWorker(
                             if (openedPosition is not null)
                             {
                                 openedPosition.EntryChannel = entryChannel;
+                                openedPosition.Strategy = TradeStrategies.Momentum;
                                 openedPosition.FlippedEntry = flipApplied;
                                 fill.Action.StopDistancePct = openedPosition.StopDistancePct;
                                 fill.Action.TakeProfitDistancePct = openedPosition.TakeProfitDistancePct;
@@ -3265,6 +3366,38 @@ internal sealed class FuturesDecisionWorker(
             StopSource: size.StopSource,
             NotionalCapReason: size.NotionalCapReason);
     }
+    // Risk inputs for a Reversal entry: identical money protections, with the two
+    // momentum-DIRECTION gates held open. BtcAllowsLongs and the short score/regime
+    // gate encode Momentum's belief that one should trade WITH the market; the
+    // Reversal book trades against a sharp move by definition, so consulting them
+    // would veto every entry the strategy exists to make. Everything that guards
+    // money rather than direction - ATR, stop cap, funding, volume, depth, margin,
+    // leverage, liquidation distance, the concurrent-risk cap - runs unchanged.
+    private FuturesEntryRiskInputs BuildReversalRiskInputs(
+        PortfolioState state,
+        InstrumentMarketState marketState,
+        FuturesDesiredExposure desired,
+        FuturesEntryPlan plan) =>
+        new(
+            state,
+            desired,
+            marketState.Quote?.MarkPrice ?? marketState.LastPrice,
+            plan.SizedNotionalEur > 0m ? plan.SizedNotionalEur : plan.RequestedNotionalEur,
+            plan.FilledNotionalEur,
+            plan.EffectiveLeverage > 0m ? plan.EffectiveLeverage : config.Futures.DefaultLeverage,
+            portfolio.UsedMarginEur(state),
+            marketState.Quote?.FundingRatePercent,
+            plan.AtrPct > 0m ? plan.AtrPct : null,
+            plan.StopDistancePct > 0m ? plan.StopDistancePct : null,
+            plan.TakeProfitDistancePct > 0m ? plan.TakeProfitDistancePct : null,
+            marketState.Quote?.VolumeToday,
+            ExitDepthEur(marketState, desired),
+            plan.OpenRiskEur,
+            BtcAllowsLongs: true,
+            BtcRegimeState: "reversal: BTC regime not consulted",
+            ShortAllowed: true,
+            ShortBlockReason: null);
+
     private FuturesEntryRiskInputs BuildRiskInputs(
         PortfolioState state,
         InstrumentMarketState marketState,

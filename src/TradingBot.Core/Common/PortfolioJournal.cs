@@ -173,6 +173,14 @@ public sealed class PortfolioPosition
     // action so realized-PnL-per-channel is queryable in SQL.
     public string? EntryChannel { get; set; }
 
+    // Which STRATEGY opened this position: Momentum (the original scorer path) or
+    // Reversal (the event-based fade of a sharp move). Orthogonal to EntryChannel -
+    // the channel says which momentum pattern fired, the strategy says which trading
+    // idea the position belongs to. Null on legacy positions and spot rows, which are
+    // all Momentum by construction. Carried to the close action so P&L is queryable
+    // per strategy x side without mixing the two books.
+    public string? Strategy { get; set; }
+
     // Futures flipped-logic experiment: true when this position was opened with the
     // side inverted from the approved thesis (a LONG signal executed as SHORT). The
     // held-position reversal exit inverts for such positions — the signal that
@@ -231,9 +239,18 @@ public sealed class PortfolioPosition
         SlOrderState = SlOrderState,
         Origin = Origin,
         EntryChannel = EntryChannel,
+        Strategy = Strategy,
         FlippedEntry = FlippedEntry,
         AdoptedWhileRunning = AdoptedWhileRunning
     };
+}
+
+// The two trading books a futures position can belong to. Spot and legacy rows carry
+// null, which readers treat as Momentum - the only book that existed before 2026-08-28.
+public static class TradeStrategies
+{
+    public const string Momentum = "Momentum";
+    public const string Reversal = "Reversal";
 }
 
 public static class PositionOrigins
@@ -444,6 +461,13 @@ public sealed class DryRunAction
     // Standard / Continuation / Breakout / DipBounce. Null on non-position rows and
     // on spot rows. Enables per-channel win-rate / avg-PnL comparison in SQL.
     public string? EntryChannel { get; set; }
+
+    // Which strategy this row belongs to: Momentum or Reversal. Set on futures opens
+    // and carried to the matching close, so Momentum LONG / Momentum SHORT /
+    // Reversal LONG / Reversal SHORT are four separable books in SQL. Null on spot
+    // rows, non-position rows and rows written before the column existed - all of
+    // which are the Momentum book.
+    public string? Strategy { get; set; }
 
     // The relaxed Dip.MinScore threshold that admitted a DipBounce entry (null on
     // every other channel). Recorded alongside the actual score so a bad dip entry's
