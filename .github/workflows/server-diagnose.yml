@@ -8,7 +8,7 @@ jobs:
       - name: NVDAX only the real events - open and close
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select to_char(c.utc,'MM-DD HH24:MI:SS') as utc, a.action, round(a.entry_price::numeric,4) as entry, round(a.fill_price::numeric,4) as fill, round(((a.entry_price-a.fill_price)/a.entry_price*100)::numeric,3) as pnl_pct, coalesce(a.exit_reason_code,'-') as code from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.pair='NVDAX/USD' and c.bot_instance_id='futures-live' and a.action in ('WOULD_OPEN_SHORT','WOULD_CLOSE','WOULD_SELL','WOULD_BUY') order by c.utc"
+            "select to_char(c.utc,'MM-DD HH24:MI:SS') as utc, a.action, round(a.entry_price::numeric,4) as entry, round(a.fill_price::numeric,4) as fill, round((case when a.entry_price>0 then (a.entry_price-a.fill_price)/a.entry_price*100 else 0 end)::numeric,3) as pnl_pct, coalesce(a.exit_reason_code,'-') as code from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.pair='NVDAX/USD' and c.bot_instance_id='futures-live' and a.action in ('WOULD_OPEN_SHORT','WOULD_CLOSE','WOULD_SELL','WOULD_BUY') order by c.utc"
 
       - name: Peak profit and how the trail was armed
         run: |
