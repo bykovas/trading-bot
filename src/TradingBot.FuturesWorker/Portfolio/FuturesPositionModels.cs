@@ -51,7 +51,10 @@ internal sealed record BtcRegimeState(
     decimal? RecentChangePct = null,
     // Closed-candle return over the latest complete 24h window. This is separate
     // from RecentChangePct, which intentionally follows the shorter momentum lookback.
-    decimal? Change24hPct = null);
+    decimal? Change24hPct = null,
+    // Closed-candle return over the latest complete 4h window, for the "momentum shorts
+    // only while BTC is actually falling" gate. Null when the regime could not be read.
+    decimal? Change4hPct = null);
 
 internal static class FuturesMath
 {

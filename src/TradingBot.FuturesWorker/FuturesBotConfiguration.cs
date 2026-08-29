@@ -959,6 +959,12 @@ internal sealed class FuturesShortOptions
     // shorting into a rising BTC averaged -0.245%/trade on held-out 2026 data.
     public decimal? MaxBtc24hRisePercentForShort { get; set; }
 
+    // Momentum shorts require BTC to have fallen at least this many percent over the last
+    // four hours; anything else (flat, slow drift, or rising) blocks them. 0 = off, which
+    // is what the control runs. A hard gate above the score override, and never applied to
+    // the Reversal book, which fades a sharp rise on purpose. Owner's rule, 2026-08-29.
+    public decimal RequireBtc4hDropPercent { get; set; }
+
     public decimal MaxChaseDrawdownPct { get; set; } = 3.0m;
     public decimal MinShortScore { get; set; } = 0.90m;
 

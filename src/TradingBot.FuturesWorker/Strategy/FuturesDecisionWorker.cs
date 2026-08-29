@@ -2730,6 +2730,16 @@ internal sealed class FuturesDecisionWorker(
                 RoundTripCostEstimatePct = existing?.RoundTripCostEstimatePct,
                 ExpectedFundingPct = existing?.ExpectedFundingPct,
                 AtrPct = existing?.AtrPct,
+                // The bot's own bookkeeping that Kraken cannot tell us, carried across the
+                // rebuild this reconcile does every cycle. Dropping them reset the peak to
+                // the current tick each cycle (so max-hold's 6h clock never saw a real
+                // peak), lost the MAX_HOLD_TRAIL marker (so a six-hour release closed with
+                // the profit-trail wording), and blanked the strategy tag (so the channel
+                // post lost its "· Momentum"). None of these survive a null.
+                ExitMode = existing?.ExitMode,
+                PeakPnlPercent = existing?.PeakPnlPercent,
+                PeakPnlAtUtc = existing?.PeakPnlAtUtc,
+                Strategy = existing?.Strategy,
                 StopDistancePct = tpSl.StopDistancePct,
                 TakeProfitDistancePct = tpSl.TakeProfitDistancePct
             };
@@ -3867,15 +3877,21 @@ internal sealed class FuturesDecisionWorker(
         var btc24hChangePct = FuturesFlipRegimeGate.CalculateClosedCandle24hChangePct(
             btc.Candles,
             config.Trading.TimeframeMinutes);
+        var btc4hChangePct = FuturesFlipRegimeGate.CalculateClosedCandleChangePct(
+            btc.Candles,
+            config.Trading.TimeframeMinutes,
+            4 * 60);
         var btc24hText = btc24hChangePct?.ToString("0.###") ?? "n/a";
+        var btc4hText = btc4hChangePct?.ToString("0.###") ?? "n/a";
 
         return new BtcRegimeState(
             allowsLongs,
             allowsShortRegime,
             !allowsLongs,
-            $"close={close:0.####} ma{config.Regime.BtcTrendMa}={ma:0.####} slope={slope:0.####} drawdown{config.Regime.BtcCrashLookback}={drawdown:0.###}% btcChange{btcLookback}={btcRecentChangePct:0.###}% btc24h={btc24hText}% allowsLongs={allowsLongs} allowsShorts={allowsShortRegime}",
+            $"close={close:0.####} ma{config.Regime.BtcTrendMa}={ma:0.####} slope={slope:0.####} drawdown{config.Regime.BtcCrashLookback}={drawdown:0.###}% btcChange{btcLookback}={btcRecentChangePct:0.###}% btc4h={btc4hText}% btc24h={btc24hText}% allowsLongs={allowsLongs} allowsShorts={allowsShortRegime}",
             btcRecentChangePct,
-            btc24hChangePct);
+            btc24hChangePct,
+            btc4hChangePct);
     }
 
     private (bool Allowed, string? Reason) EvaluateShortGate(FuturesDesiredExposure desired, TechnicalSignal signal, BtcRegimeState btcRegime)
@@ -3893,6 +3909,24 @@ internal sealed class FuturesDecisionWorker(
         if (signal.ShortScore < config.Shorts.MinShortScore)
         {
             return (false, $"short score {signal.ShortScore:0.##} below {config.Shorts.MinShortScore:0.##}");
+        }
+
+        // Momentum shorts only when BTC is demonstrably falling over the last four hours.
+        // A hard requirement, above the score override: a flat, slow, or rising BTC is
+        // exactly the tape where fading a fall pays nothing, so a high score cannot buy
+        // in. When BTC cannot be read the drop is unconfirmed, and unconfirmed means no.
+        // The Reversal book never reaches here - it fades a sharp RISE and skips this gate.
+        if (config.Shorts.RequireBtc4hDropPercent > 0m)
+        {
+            if (btcRegime.Change4hPct is not { } btc4h)
+            {
+                return (false, "BTC 4h change unavailable; momentum shorts require a confirmed BTC fall");
+            }
+
+            if (btc4h > -config.Shorts.RequireBtc4hDropPercent)
+            {
+                return (false, $"BTC 4h {btc4h:0.###}% is not falling at least {config.Shorts.RequireBtc4hDropPercent:0.###}%; momentum shorts blocked");
+            }
         }
 
         if (!btcRegime.AllowsShorts)

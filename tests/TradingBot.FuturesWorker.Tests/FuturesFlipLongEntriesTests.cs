@@ -130,6 +130,26 @@ public sealed class FuturesFlipLongEntriesTests
         Assert.Null(FuturesFlipRegimeGate.CalculateClosedCandle24hChangePct(candles.Take(95).ToList(), 15));
     }
 
+    // The 4h short-gate window is 16 bars of 15m; a fall shows as a negative change and
+    // too few bars returns null (the drop cannot be confirmed).
+    [Fact]
+    public void Closed_candle_change_reads_a_four_hour_window()
+    {
+        // 20 bars flat at 100, the last one closing at 99.4 -> the 16-bar (4h) window
+        // opens at 100 and closes at 99.4, a -0.6% fall.
+        var candles = Enumerable.Range(0, 20)
+            .Select(index => new Candle(
+                DateTimeOffset.UnixEpoch.AddMinutes(index * 15),
+                Open: 100m, High: 100m, Low: 99m,
+                Close: index == 19 ? 99.4m : 100m,
+                Volume: 1m, TradeCount: 1))
+            .ToList();
+
+        Assert.Equal(-0.6m, FuturesFlipRegimeGate.CalculateClosedCandleChangePct(candles, 15, 4 * 60));
+        Assert.Null(FuturesFlipRegimeGate.CalculateClosedCandleChangePct(candles.Take(15).ToList(), 15, 4 * 60));
+        Assert.Null(FuturesFlipRegimeGate.CalculateClosedCandleChangePct(candles, 0, 4 * 60));
+    }
+
     [Fact]
     public void Invalid_flip_regime_thresholds_reset_to_safe_defaults()
     {

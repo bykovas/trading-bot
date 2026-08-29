@@ -2635,10 +2635,21 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
               ? now * (1 + trailingPct / 100)
               : now * (1 - trailingPct / 100))
           : null;
+        const distanceText = Number.isFinite(trailingPct) ? ` ${percent(trailingPct, 2)} atstumu` : "";
+        const atText = floor ? ` — šiuo metu ties ${price(floor)}` : "";
+        // A trail armed by the six-hour rule is a slot being freed near breakeven, not a
+        // profit being locked. The worker stamps ExitMode = MAX_HOLD_TRAIL, so the page
+        // can say what actually happened instead of claiming a peak the price never hit.
+        if (String(position.exitMode || "").toUpperCase() === "MAX_HOLD_TRAIL") {
+          return opening
+            + " Šešias valandas pozicija taip ir neišjudėjo į pelną, todėl vietoj tikslo ir stop-loss"
+            + ` uždėjau slenkantį stopą${distanceText}${atText}, kad išstumčiau ją apie nulį ir atlaisvinčiau vietą.`
+            + " Tai ne pelno fiksavimas, o užstrigusios pozicijos išleidimas.";
+        }
         return opening
           + " Pozicija nuėjo pakankamai toli, todėl tikslą ir stop-loss pakeičiau slenkančiu stopu"
-          + (Number.isFinite(trailingPct) ? ` ${percent(trailingPct, 2)} atstumu` : "")
-          + (floor ? ` — šiuo metu ties ${price(floor)}` : "")
+          + distanceText
+          + atText
           + ". Viršutinės ribos nebeliko: kol kaina kyla, kyla ir stopas.";
       }
 
@@ -2940,8 +2951,8 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
 
         return `<div class="bc-bar-box">
               <div class="bc-bar-ends">${isLong
-                ? `<span>Įėjimas ${esc(price(entry))}</span><span>${esc(priceWithMoney(position, ceiling))}</span>`
-                : `<span>${esc(priceWithMoney(position, ceiling))}</span><span>Įėjimas ${esc(price(entry))}</span>`}</div>
+                ? `<span>Įėjimas ${esc(price(entry))}</span><span>${esc(price(ceiling))} <span class="bc-t-soft">(skalės riba −${SCALE}%)</span></span>`
+                : `<span>${esc(price(ceiling))} <span class="bc-t-soft">(skalės riba −${SCALE}%)</span></span><span>Įėjimas ${esc(price(entry))}</span>`}</div>
               <div class="bc-bar-top">
                 <span class="bc-ts-l${ts.cls}" style="${ts.style}">TS ${esc(priceWithMoney(position, stopPrice))}</span>
               </div>

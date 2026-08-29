@@ -154,6 +154,7 @@ public sealed class FuturesInstanceConfigurationTests
             // The experiment arm's own knobs; absent on the control by design.
             ("Futures", "DisabledLongEntryChannels"),
             ("Shorts", "MaxBtc24hRisePercentForShort"),
+            ("Shorts", "RequireBtc4hDropPercent"),
             // The whole exit triple diverges since 2026-08-28 at the owner's direction:
             // the arm runs 3.5/1.75/0.5 (activation/stop/trail) against the control's
             // 4/2/0.75 for the next comparison.

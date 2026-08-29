@@ -58,14 +58,23 @@ internal static class FuturesFlipRegimeGate
 
     public static decimal? CalculateClosedCandle24hChangePct(
         IReadOnlyList<Candle> candles,
-        int timeframeMinutes)
+        int timeframeMinutes) =>
+        CalculateClosedCandleChangePct(candles, timeframeMinutes, 24 * 60);
+
+    // The closed-candle return over the most recent `windowMinutes` of price: the open of
+    // the oldest bar in the window against the close of the newest. Used for the 24h
+    // regime read and for the 4h "is BTC actually falling" short gate.
+    public static decimal? CalculateClosedCandleChangePct(
+        IReadOnlyList<Candle> candles,
+        int timeframeMinutes,
+        int windowMinutes)
     {
-        if (timeframeMinutes <= 0)
+        if (timeframeMinutes <= 0 || windowMinutes <= 0)
         {
             return null;
         }
 
-        var requiredBars = (int)decimal.Ceiling(24m * 60m / timeframeMinutes);
+        var requiredBars = (int)decimal.Ceiling((decimal)windowMinutes / timeframeMinutes);
         if (requiredBars < 1 || candles.Count < requiredBars)
         {
             return null;
