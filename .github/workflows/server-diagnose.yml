@@ -1,26 +1,8 @@
 name: server-diagnose
-on:
-  workflow_dispatch:
+on: { workflow_dispatch: {} }
 jobs:
-  portfolio-sync:
+  containers:
     runs-on: self-hosted
     steps:
-      - name: What the bot stores as the portfolio value, both bots
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select bot_instance_id as bot, round(cash_eur::numeric,2) as cash_collateral, round(positions_value_eur::numeric,2) as positions_val, round(total_value_eur::numeric,2) as total_val, open_positions as pos, round(external_pnl_eur::numeric,2) as external_pnl, to_char(updated_at,'MM-DD HH24:MI:SS') as updated from portfolio_state_summary where bot_instance_id in ('futures-live','futures-lukas-live','spot-live') order by 1"
-
-      - name: Sum of open-position unrealized PnL and notional, both bots
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with latest as (select bot_instance_id, max(updated_at) as u from portfolio_position_state group by 1) select p.bot_instance_id as bot, count(*) as positions, round(sum(p.entry_notional_eur)::numeric,2) as notional_sum, round(sum(p.initial_margin_eur)::numeric,2) as margin_sum, round(sum(p.unrealized_pnl_eur)::numeric,2) as unrealized_sum, round(sum(p.market_value_eur)::numeric,2) as market_value_sum from portfolio_position_state p join latest l on l.bot_instance_id=p.bot_instance_id and l.u=p.updated_at where p.bot_instance_id in ('futures-live','futures-lukas-live') group by 1"
-
-      - name: How fresh is the portfolio - last update vs now
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select bot_instance_id as bot, to_char(updated_at,'MM-DD HH24:MI:SS') as updated, round(extract(epoch from (now()-updated_at))/60,1) as minutes_ago from portfolio_state_summary where bot_instance_id in ('futures-live','futures-lukas-live') order by 1"
-
-      - name: Any spot holdings on these accounts that Kraken would add to portfolio value
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with latest as (select bot_instance_id, max(updated_at) as u from portfolio_position_state group by 1) select p.bot_instance_id as bot, p.pair, p.side, round(p.market_value_eur::numeric,2) as mkt_val from portfolio_position_state p join latest l on l.bot_instance_id=p.bot_instance_id and l.u=p.updated_at where p.bot_instance_id like 'spot%' order by 1,2 limit 20"
+      - name: All trading-bot containers and status
+        run: docker ps -a --filter "name=trading-bot" --format 'table {{.Names}}\t{{.Status}}' | sort
