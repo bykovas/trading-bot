@@ -2,19 +2,25 @@ name: server-diagnose
 on:
   workflow_dispatch:
 jobs:
-  nvdax:
+  portfolio-sync:
     runs-on: self-hosted
     steps:
-      - name: NVDAX only the real events - open and close
+      - name: What the bot stores as the portfolio value, both bots
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select to_char(c.utc,'MM-DD HH24:MI:SS') as utc, a.action, round(a.entry_price::numeric,4) as entry, round(a.fill_price::numeric,4) as fill, round((case when a.entry_price>0 then (a.entry_price-a.fill_price)/a.entry_price*100 else 0 end)::numeric,3) as pnl_pct, coalesce(a.exit_reason_code,'-') as code from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.pair='NVDAX/USD' and c.bot_instance_id='futures-live' and a.action in ('WOULD_OPEN_SHORT','WOULD_CLOSE','WOULD_SELL','WOULD_BUY') order by c.utc"
+            "select bot_instance_id as bot, round(cash_eur::numeric,2) as cash_collateral, round(positions_value_eur::numeric,2) as positions_val, round(total_value_eur::numeric,2) as total_val, open_positions as pos, round(external_pnl_eur::numeric,2) as external_pnl, to_char(updated_at,'MM-DD HH24:MI:SS') as updated from portfolio_state_summary where bot_instance_id in ('futures-live','futures-lukas-live','spot-live') order by 1"
 
-      - name: Peak profit and how the trail was armed
+      - name: Sum of open-position unrealized PnL and notional, both bots
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select round(entry_price::numeric,4) as entry, round(peak_pnl_percent::numeric,2) as peak_pct, to_char(peak_pnl_at_utc,'HH24:MI') as peak_at, trailing_stop_state, round(trailing_stop_percent::numeric,3) as trail_pct, to_char(trailing_activated_at_utc,'MM-DD HH24:MI') as trail_armed_at, to_char(opened_at_utc,'MM-DD HH24:MI') as opened from portfolio_position_state where pair='NVDAX/USD' and bot_instance_id='futures-live' order by updated_at desc limit 2" || true
+            "with latest as (select bot_instance_id, max(updated_at) as u from portfolio_position_state group by 1) select p.bot_instance_id as bot, count(*) as positions, round(sum(p.entry_notional_eur)::numeric,2) as notional_sum, round(sum(p.initial_margin_eur)::numeric,2) as margin_sum, round(sum(p.unrealized_pnl_eur)::numeric,2) as unrealized_sum, round(sum(p.market_value_eur)::numeric,2) as market_value_sum from portfolio_position_state p join latest l on l.bot_instance_id=p.bot_instance_id and l.u=p.updated_at where p.bot_instance_id in ('futures-live','futures-lukas-live') group by 1"
 
-      - name: The exact trail-arm log line for NVDAX
+      - name: How fresh is the portfolio - last update vs now
         run: |
-          docker logs trading-bot-futures-worker-live 2>&1 | grep -iE "NVDAX" | grep -iE "trailing-arm|trailing-spread|max hold|maxhold|max-hold|MAX_HOLD" | tail -20 || true
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select bot_instance_id as bot, to_char(updated_at,'MM-DD HH24:MI:SS') as updated, round(extract(epoch from (now()-updated_at))/60,1) as minutes_ago from portfolio_state_summary where bot_instance_id in ('futures-live','futures-lukas-live') order by 1"
+
+      - name: Any spot holdings on these accounts that Kraken would add to portfolio value
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "with latest as (select bot_instance_id, max(updated_at) as u from portfolio_position_state group by 1) select p.bot_instance_id as bot, p.pair, p.side, round(p.market_value_eur::numeric,2) as mkt_val from portfolio_position_state p join latest l on l.bot_instance_id=p.bot_instance_id and l.u=p.updated_at where p.bot_instance_id like 'spot%' order by 1,2 limit 20"
