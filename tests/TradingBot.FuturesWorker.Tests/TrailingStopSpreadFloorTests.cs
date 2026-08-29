@@ -15,15 +15,28 @@ public sealed class TrailingStopSpreadFloorTests
     };
 
     // The real MSTRX book: bid 129.78 / ask 130.00 is a 0.169% spread, so a 0.25% trail
-    // is widened to 2 x 0.169 = 0.339%.
+    // is widened to 2 x 0.169 = 0.3387%, then rounded UP to 0.34% - Kraken rejects a
+    // deviation with more than two decimal places.
     [Fact]
-    public void A_trail_narrower_than_twice_the_spread_is_widened()
+    public void A_trail_narrower_than_twice_the_spread_is_widened_and_rounded()
     {
         var spread = (130.00m - 129.78m) / ((130.00m + 129.78m) / 2m) * 100m;
         var effective = Options().EffectiveTrailingStopPercent(0.25m, spread);
 
-        Assert.True(effective > 0.25m);
-        Assert.Equal(2m * spread, effective, 6);
+        Assert.Equal(0.34m, effective);
+        Assert.True(effective >= 2m * spread);
+    }
+
+    // Whatever the arithmetic, the value sent to the exchange never has more than two
+    // decimal places - the HTTP 400 that fired the alert on 2026-08-29.
+    [Fact]
+    public void The_result_never_exceeds_two_decimal_places()
+    {
+        foreach (var spread in new[] { 0.169374m, 0.3m, 0.4211m, 0.5555m, 0.71m, 1.001m })
+        {
+            var effective = Options().EffectiveTrailingStopPercent(0.25m, spread);
+            Assert.Equal(effective, decimal.Round(effective, 2));
+        }
     }
 
     // A tight book leaves the configured distance exactly as it is - the floor is a

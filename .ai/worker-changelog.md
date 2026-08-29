@@ -1,3 +1,9 @@
+## 2026-08-29-round-the-spread-floored-trail-to-two-decimals
+
+- The spread-floor shipped yesterday produced a distance Kraken rejects: `2 x spread` on a 0.17% book is 0.3387%, and Kraken Futures answers `HTTP 400 ... trailing stop max deviation may only be defined up to 2 decimal places`. The throttled 🚨 alert caught it in the channel (`klaida cikle: ...`) - the alerting worked; the arithmetic did not.
+- `EffectiveTrailingStopPercent` now rounds its result UP to two decimal places (`Math.Ceiling(raw * 100) / 100`), so the sent value is always accepted and never drops back under the spread floor. 0.3387% -> 0.34%. Configured round values (0.25 / 0.5 / 0.75) are unchanged.
+- Worth noting for later: the reject threw out of `SendTrailingStopOrderAsync` and was only caught at the cycle level, so a bad trailing order aborted the rest of that cycle rather than just failing the one arm. This fix removes the trigger; making arm failures non-fatal to the cycle is a separate, larger change and was NOT done here.
+
 ## 2026-08-29-tell-a-max-hold-release-apart-from-a-profit-trail
 
 - Found in the channel: `NVDAX/USD SHORT uždaryta ... Uždirbau +0,08 $ ... why: kaina nuėjo į pelną ir atsitraukė nuo viršūnės`. The +0.08 $ was real and correct - the position never reached +3%, drifted near zero for six hours, and the max-hold rule armed its 0.5% trail (log: `distancePct=0.5`), which then closed it at breakeven. The bug was the WORDING: the six-hour release and a profit-taking trail both fire the same exchange trailing order, so both closed with `EXCHANGE_TRAILING_STOP` and the same "went into profit and pulled back from the peak" sentence - claiming a peak the price never reached.

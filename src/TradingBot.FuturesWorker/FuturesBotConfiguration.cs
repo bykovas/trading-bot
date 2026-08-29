@@ -1091,14 +1091,19 @@ internal sealed class TpSlOptions
     // reading we do not trust would be worse than not widening at all.
     public decimal EffectiveTrailingStopPercent(decimal configured, decimal? spreadPercent)
     {
-        if (TrailingStopMinSpreadMultiple <= 0m || spreadPercent is not { } spread || spread <= 0m)
+        var raw = configured;
+        if (TrailingStopMinSpreadMultiple > 0m && spreadPercent is { } spread && spread > 0m)
         {
-            return configured;
+            var floor = spread * TrailingStopMinSpreadMultiple;
+            var cap = StopLossPercent > 0m ? StopLossPercent : configured;
+            raw = Math.Min(Math.Max(configured, floor), Math.Max(configured, cap));
         }
 
-        var floor = spread * TrailingStopMinSpreadMultiple;
-        var cap = StopLossPercent > 0m ? StopLossPercent : configured;
-        return Math.Min(Math.Max(configured, floor), Math.Max(configured, cap));
+        // Kraken Futures rejects a trailing deviation with more than two decimal places
+        // ("may only be defined up to 2 decimal places", HTTP 400), and 2x a raw spread
+        // is rarely that round - 0.17% spread gives 0.3387%. Round UP to two places so
+        // the sent value is always accepted and never falls back under the spread floor.
+        return Math.Ceiling(raw * 100m) / 100m;
     }
 
     // Flipped LONG-to-SHORT entries use a separately calibrated profit handoff.
