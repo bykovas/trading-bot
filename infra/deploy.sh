@@ -8,8 +8,6 @@ COMPOSE_FILE="${DEPLOY_DIR}/docker-compose.prod.yml"
 TRAEFIK_DYNAMIC_FILE="${TRAEFIK_DYNAMIC_DIR}/trading-bot.yml"
 API_DIR="${DEPLOY_DIR}/api"
 API_ENV_FILE="${API_DIR}/.env"
-WEB_DIR="${DEPLOY_DIR}/web"
-WEB_ENV_FILE="${WEB_DIR}/.env"
 FUTURES_DIR="${DEPLOY_DIR}/futures"
 FUTURES_LIVE_DIR="${FUTURES_DIR}/live"
 FUTURES_LUKAS_LIVE_DIR="${FUTURES_DIR}/lukas-live"
@@ -64,7 +62,6 @@ mkdir -p \
   "${DEPLOY_DIR}" \
   "${TRAEFIK_DYNAMIC_DIR}" \
   "${API_DIR}" \
-  "${WEB_DIR}" \
   "${FUTURES_LIVE_DIR}/data" \
   "${FUTURES_LIVE_DIR}/logs" \
   "${FUTURES_LUKAS_LIVE_DIR}/data" \
@@ -155,60 +152,10 @@ umask 077
   fi
 } > "${API_ENV_FILE}"
 
-echo "Writing web environment to ${WEB_ENV_FILE}"
-{
-  printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
-  printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
-  printf 'ASPNETCORE_PATHBASE=/web\n'
-} > "${WEB_ENV_FILE}"
-
 echo "Writing database environment to ${DATABASE_ENV_FILE}"
 {
   printf 'POSTGRES_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
 } > "${DATABASE_ENV_FILE}"
-
-if [ -f "${LIVE_ENV_FILE}" ]; then
-  echo "Keeping existing live worker environment at ${LIVE_ENV_FILE}"
-  # One-time upgrade of the operator-owned file to the market-prefixed
-  # instance-id scheme; without this the live worker keeps writing rows
-  # under the retired 'live' id.
-  if grep -q '^TRADINGBOT_BOT_INSTANCE_ID=live$' "${LIVE_ENV_FILE}"; then
-    echo "Upgrading live worker instance id: live -> spot-live"
-    sed -i 's/^TRADINGBOT_BOT_INSTANCE_ID=live$/TRADINGBOT_BOT_INSTANCE_ID=spot-live/' "${LIVE_ENV_FILE}"
-  fi
-else
-  echo "Creating live worker environment at ${LIVE_ENV_FILE}"
-  {
-    printf 'TRADINGBOT_BOT_INSTANCE_ID=spot-live\n'
-    printf 'TRADINGBOT_BOT_INSTANCE_NAME=Live spot worker\n'
-    printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
-    printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
-    printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
-    printf 'TRADINGBOT_MARKET_DATA_MODE=database\n'
-    printf 'TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true\n'
-    printf 'TRADINGBOT_KRAKEN_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_API_KEY:-}"
-    printf 'TRADINGBOT_KRAKEN_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_API_SECRET:-}"
-    printf 'TRADINGBOT_OPENAI_API_KEY=%s\n' "${TRADINGBOT_OPENAI_API_KEY:-}"
-    printf 'TRADINGBOT_LIVE_TRADING_ENABLED=%s\n' "${LIVE_TRADING_FLAG}"
-    printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
-  } > "${LIVE_ENV_FILE}"
-fi
-
-echo "Writing virtual worker environment to ${VIRTUAL_ENV_FILE}"
-{
-  printf 'TRADINGBOT_BOT_INSTANCE_ID=spot-virtual\n'
-  printf 'TRADINGBOT_BOT_INSTANCE_NAME=Virtual spot worker\n'
-  printf 'TRADINGBOT_DB_PASSWORD=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
-  printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
-  printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
-  printf 'TRADINGBOT_MARKET_DATA_MODE=database\n'
-  printf 'TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true\n'
-  printf 'TRADINGBOT_KRAKEN_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_API_KEY:-}"
-  printf 'TRADINGBOT_KRAKEN_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_API_SECRET:-}"
-  printf 'TRADINGBOT_OPENAI_API_KEY=%s\n' "${TRADINGBOT_OPENAI_API_KEY:-}"
-  printf 'TRADINGBOT_LIVE_TRADING_ENABLED=false\n'
-  printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
-} > "${VIRTUAL_ENV_FILE}"
 
 # Futures live execution is separately gated from spot and remains off unless
 # TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED is explicitly true in the PROD env.
