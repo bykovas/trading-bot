@@ -85,16 +85,15 @@ public sealed class FuturesInstanceConfigurationTests
             lukas["Strategy"]?["MaxEntrySpreadPercent"]?.GetValue<decimal>(),
             primary["Strategy"]?["MaxEntrySpreadPercent"]?.GetValue<decimal>());
         // The whole exit triple diverges again since 2026-08-28, at the owner's
-        // direction: the arm runs 3/1.5/0.25 (activation/stop/trail) against the
-        // control's 4/2/0.75. Measured on 45 days before shipping - per coin-day it
-        // beats the old exits on both sides without crossing zero; the owner chose it
-        // while the entry work continues. All three pinned so a drift is a decision.
-        Assert.Equal(3m, primary["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
-        Assert.Equal(1.5m, primary["TpSl"]?["StopLossPercent"]?.GetValue<decimal>());
-        Assert.Equal(0.25m, primary["TpSl"]?["TrailingStopPercent"]?.GetValue<decimal>());
+        // direction: the arm runs 3.5/1.75/0.5 (activation/stop/trail) against the
+        // control's 4/2/0.75 for the next comparison. All three are pinned so any
+        // further drift remains an explicit decision.
+        Assert.Equal(3.5m, primary["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
+        Assert.Equal(1.75m, primary["TpSl"]?["StopLossPercent"]?.GetValue<decimal>());
+        Assert.Equal(0.5m, primary["TpSl"]?["TrailingStopPercent"]?.GetValue<decimal>());
         Assert.Equal(4m, lukas["TpSl"]?["TakeProfitPercent"]?.GetValue<decimal>());
         Assert.Equal(2m, lukas["TpSl"]?["StopLossPercent"]?.GetValue<decimal>());
-        // The arm floors its 0.25% trail at twice the live spread, because at that
+        // The arm floors its 0.5% trail at twice the live spread, because at that
         // distance the bid-ask bounce closes the position instead of the reversal.
         // The control has no such floor - its 0.75% trail is far clear of the book.
         Assert.Equal(2m, primary["TpSl"]?["TrailingStopMinSpreadMultiple"]?.GetValue<decimal>());
@@ -156,9 +155,8 @@ public sealed class FuturesInstanceConfigurationTests
             ("Futures", "DisabledLongEntryChannels"),
             ("Shorts", "MaxBtc24hRisePercentForShort"),
             // The whole exit triple diverges since 2026-08-28 at the owner's direction:
-            // the arm runs 3/1.5/0.25 (activation/stop/trail) against the control's
-            // 4/2/0.75. Measured on 45 days per coin-day before shipping - better than
-            // the old exits on both sides, without crossing zero.
+            // the arm runs 3.5/1.75/0.5 (activation/stop/trail) against the control's
+            // 4/2/0.75 for the next comparison.
             ("TpSl", "TakeProfitPercent"),
             ("TpSl", "StopLossPercent"),
             ("TpSl", "TrailingStopPercent"),
