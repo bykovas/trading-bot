@@ -5,16 +5,16 @@ jobs:
   nvdax:
     runs-on: self-hosted
     steps:
-      - name: NVDAX lifecycle - open, max-hold arm, close
+      - name: NVDAX only the real events - open and close
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select c.bot_instance_id as bot, to_char(c.utc,'MM-DD HH24:MI:SS') as utc, a.action, a.side, round(a.entry_price::numeric,4) as entry, round(a.fill_price::numeric,4) as fill, coalesce(a.exit_reason_code,'-') as code, left(coalesce(a.reason,'-'),105) as reason from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.pair='NVDAX/USD' and c.bot_instance_id='futures-live' and c.utc >= '2026-08-28 20:00' order by c.utc"
+            "select to_char(c.utc,'MM-DD HH24:MI:SS') as utc, a.action, round(a.entry_price::numeric,4) as entry, round(a.fill_price::numeric,4) as fill, round(((a.entry_price-a.fill_price)/a.entry_price*100)::numeric,3) as pnl_pct, coalesce(a.exit_reason_code,'-') as code from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.pair='NVDAX/USD' and c.bot_instance_id='futures-live' and a.action in ('WOULD_OPEN_SHORT','WOULD_CLOSE','WOULD_SELL','WOULD_BUY') order by c.utc"
 
-      - name: What the worker logged about the NVDAX trail and max-hold
-        run: |
-          docker logs trading-bot-futures-worker-live --since 2026-08-28T20:00:00Z 2>&1 | grep -iE "NVDAX" | grep -iE "trail|arm|max.?hold|maxhold|tpsl|protect|hold" | tail -30 || true
-
-      - name: Peak profit this position reached vs where it closed
+      - name: Peak profit and how the trail was armed
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select bot_instance_id as bot, pair, side, round(entry_price::numeric,4) as entry, round(peak_pnl_percent::numeric,2) as peak_pct, to_char(peak_pnl_at_utc,'MM-DD HH24:MI') as peak_at, trailing_stop_state, round(trailing_stop_percent::numeric,3) as trail_pct, to_char(trailing_activated_at_utc,'MM-DD HH24:MI') as trail_armed_at, to_char(opened_at_utc,'MM-DD HH24:MI') as opened from portfolio_position_state where pair='NVDAX/USD' and bot_instance_id='futures-live' order by updated_at desc limit 3" || true
+            "select round(entry_price::numeric,4) as entry, round(peak_pnl_percent::numeric,2) as peak_pct, to_char(peak_pnl_at_utc,'HH24:MI') as peak_at, trailing_stop_state, round(trailing_stop_percent::numeric,3) as trail_pct, to_char(trailing_activated_at_utc,'MM-DD HH24:MI') as trail_armed_at, to_char(opened_at_utc,'MM-DD HH24:MI') as opened from portfolio_position_state where pair='NVDAX/USD' and bot_instance_id='futures-live' order by updated_at desc limit 2" || true
+
+      - name: The exact trail-arm log line for NVDAX
+        run: |
+          docker logs trading-bot-futures-worker-live 2>&1 | grep -iE "NVDAX" | grep -iE "trailing-arm|trailing-spread|max hold|maxhold|max-hold|MAX_HOLD" | tail -20 || true
