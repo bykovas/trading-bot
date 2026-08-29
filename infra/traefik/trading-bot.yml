@@ -38,15 +38,6 @@ http:
         certResolver: letsencrypt
       service: trading-bot
 
-    trading-bot-web-https:
-      rule: "(Host(`blynai.eu`) || Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`)) && PathPrefix(`/web`)"
-      entryPoints:
-        - websecure
-      priority: 1100
-      tls:
-        certResolver: letsencrypt
-      service: trading-bot-web
-
     trading-bot-api-https:
       rule: "(Host(`blynai.eu`) || Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`)) && PathPrefix(`/api`)"
       entryPoints:
@@ -119,8 +110,3 @@ http:
       loadBalancer:
         servers:
           - url: "http://trading-bot-api:8080"
-
-    trading-bot-web:
-      loadBalancer:
-        servers:
-          - url: "http://trading-bot-web:8080"

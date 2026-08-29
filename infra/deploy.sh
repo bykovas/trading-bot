@@ -6,18 +6,10 @@ TRAEFIK_DYNAMIC_DIR="/opt/traefik/dynamic"
 PROJECT_NAME="trading-bot"
 COMPOSE_FILE="${DEPLOY_DIR}/docker-compose.prod.yml"
 TRAEFIK_DYNAMIC_FILE="${TRAEFIK_DYNAMIC_DIR}/trading-bot.yml"
-WORKER_APPSETTINGS_SOURCE="src/TradingBot.SpotWorker/appsettings.json"
 API_DIR="${DEPLOY_DIR}/api"
 API_ENV_FILE="${API_DIR}/.env"
 WEB_DIR="${DEPLOY_DIR}/web"
 WEB_ENV_FILE="${WEB_DIR}/.env"
-SPOT_DIR="${DEPLOY_DIR}/spot"
-LIVE_DIR="${SPOT_DIR}/live"
-VIRTUAL_DIR="${SPOT_DIR}/virtual"
-LIVE_APPSETTINGS="${LIVE_DIR}/appsettings.json"
-VIRTUAL_APPSETTINGS="${VIRTUAL_DIR}/appsettings.json"
-LIVE_ENV_FILE="${LIVE_DIR}/.env"
-VIRTUAL_ENV_FILE="${VIRTUAL_DIR}/.env"
 FUTURES_DIR="${DEPLOY_DIR}/futures"
 FUTURES_LIVE_DIR="${FUTURES_DIR}/live"
 FUTURES_LUKAS_LIVE_DIR="${FUTURES_DIR}/lukas-live"
@@ -42,8 +34,6 @@ OG_CACHE_DIR="${DEPLOY_DIR}/og-cache"
 
 : "${UI_IMAGE_NAME:?UI_IMAGE_NAME is required}"
 : "${API_IMAGE_NAME:?API_IMAGE_NAME is required}"
-: "${WEB_IMAGE_NAME:?WEB_IMAGE_NAME is required}"
-: "${SPOT_WORKER_IMAGE_NAME:?SPOT_WORKER_IMAGE_NAME is required}"
 : "${FUTURES_WORKER_IMAGE_NAME:?FUTURES_WORKER_IMAGE_NAME is required}"
 : "${MARKET_DATA_WORKER_IMAGE_NAME:?MARKET_DATA_WORKER_IMAGE_NAME is required}"
 : "${OG_IMAGE_NAME:?OG_IMAGE_NAME is required}"
@@ -56,8 +46,6 @@ OG_CACHE_DIR="${DEPLOY_DIR}/og-cache"
 
 UI_IMAGE_TAG="${UI_IMAGE_TAG:-latest}"
 API_IMAGE_TAG="${API_IMAGE_TAG:-${UI_IMAGE_TAG}}"
-WEB_IMAGE_TAG="${WEB_IMAGE_TAG:-${UI_IMAGE_TAG}}"
-SPOT_WORKER_IMAGE_TAG="${SPOT_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 FUTURES_WORKER_IMAGE_TAG="${FUTURES_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 MARKET_DATA_WORKER_IMAGE_TAG="${MARKET_DATA_WORKER_IMAGE_TAG:-${UI_IMAGE_TAG}}"
 OG_IMAGE_TAG="${OG_IMAGE_TAG:-${UI_IMAGE_TAG}}"
@@ -67,10 +55,6 @@ POSTGRES_BIND_HOST="${POSTGRES_BIND_HOST:-127.0.0.1}"
 echo "Deploying stack '${PROJECT_NAME}' to ${DEPLOY_DIR}"
 echo "  ui     = ${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
 echo "  api    = ${API_IMAGE_NAME}:${API_IMAGE_TAG}"
-echo "  web    = ${WEB_IMAGE_NAME}:${WEB_IMAGE_TAG}"
-echo "  worker = ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}"
-echo "  live   = trading-bot-spot-worker-live"
-echo "  virtual= trading-bot-spot-worker-virtual"
 echo "  futures= ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG}"
 echo "  lukas  = trading-bot-lukas-futures-worker-live"
 echo "  market-data= ${MARKET_DATA_WORKER_IMAGE_NAME}:${MARKET_DATA_WORKER_IMAGE_TAG}"
@@ -81,10 +65,6 @@ mkdir -p \
   "${TRAEFIK_DYNAMIC_DIR}" \
   "${API_DIR}" \
   "${WEB_DIR}" \
-  "${LIVE_DIR}/data" \
-  "${LIVE_DIR}/logs" \
-  "${VIRTUAL_DIR}/data" \
-  "${VIRTUAL_DIR}/logs" \
   "${FUTURES_LIVE_DIR}/data" \
   "${FUTURES_LIVE_DIR}/logs" \
   "${FUTURES_LUKAS_LIVE_DIR}/data" \
@@ -117,11 +97,6 @@ install_config() {
   rm -f "${dest}"
   cp "${src}" "${dest}"
 }
-
-echo "Updating live worker appsettings from repository config (identical to virtual)"
-install_config "${WORKER_APPSETTINGS_SOURCE}" "${LIVE_APPSETTINGS}"
-echo "Updating virtual worker appsettings from repository config"
-install_config "${WORKER_APPSETTINGS_SOURCE}" "${VIRTUAL_APPSETTINGS}"
 
 echo "Updating futures live appsettings from repository config (mirror follower in live mode)"
 install_config "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_LIVE_APPSETTINGS}"
@@ -331,10 +306,6 @@ export UI_IMAGE_NAME
 export UI_IMAGE_TAG
 export API_IMAGE_NAME
 export API_IMAGE_TAG
-export WEB_IMAGE_NAME
-export WEB_IMAGE_TAG
-export SPOT_WORKER_IMAGE_NAME
-export SPOT_WORKER_IMAGE_TAG
 export FUTURES_WORKER_IMAGE_NAME
 export FUTURES_WORKER_IMAGE_TAG
 export MARKET_DATA_WORKER_IMAGE_NAME
@@ -413,8 +384,6 @@ fi
 # removed explicitly - the same way the Lukas worker is when his flag is off.
 # Without this they would keep running on the previous image forever.
 for PAPER_WORKER in \
-  trading-bot-spot-worker-live \
-  trading-bot-spot-worker-virtual \
   trading-bot-futures-worker-virtual; do
   docker rm -f "${PAPER_WORKER}" >/dev/null 2>&1 || true
 done
@@ -432,11 +401,6 @@ docker compose \
 run_healthcheck_with_retries "trading-bot-ui container" 30 2 \
   docker run --rm --network container:trading-bot-ui busybox:1.36 \
     wget -q -O /dev/null http://127.0.0.1/
-
-# Web health: MVC preview must answer inside the compose network.
-run_healthcheck_with_retries "trading-bot-web container" 30 2 \
-  docker run --rm --network container:trading-bot-ui busybox:1.36 \
-    wget -q -O /dev/null http://trading-bot-web:8080/web/
 
 # API health: read-only HTTP API must answer inside the compose network.
 run_healthcheck_with_retries "trading-bot-api container" 30 2 \

@@ -13,8 +13,6 @@ permissions:
 env:
   UI_IMAGE_NAME: ghcr.io/bykovas/trading-bot-ui
   API_IMAGE_NAME: ghcr.io/bykovas/trading-bot-api
-  WEB_IMAGE_NAME: ghcr.io/bykovas/trading-bot-web
-  SPOT_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-spot-worker
   FUTURES_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-futures-worker
   MARKET_DATA_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-market-data-worker
   OG_IMAGE_NAME: ghcr.io/bykovas/trading-bot-og
@@ -49,8 +47,6 @@ jobs:
           {
             echo "UI_IMAGE_TAG=$(tag_for Dockerfile nginx public "$CI")"
             echo "API_IMAGE_TAG=$(tag_for src/TradingBot.Api src/TradingBot.Core "$CI")"
-            echo "WEB_IMAGE_TAG=$(tag_for src/TradingBot.Web "$CI")"
-            echo "SPOT_WORKER_IMAGE_TAG=$(tag_for src/TradingBot.SpotWorker src/TradingBot.Core "$CI")"
             echo "FUTURES_WORKER_IMAGE_TAG=$(tag_for src/TradingBot.FuturesWorker src/TradingBot.Core "$CI")"
             echo "MARKET_DATA_WORKER_IMAGE_TAG=$(tag_for src/TradingBot.MarketDataWorker src/TradingBot.Core "$CI")"
             # equity-day.js is in both lists on purpose: it is one file shared by the
@@ -90,29 +86,6 @@ jobs:
             .
           docker push "${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
           docker push "${UI_IMAGE_NAME}:latest"
-
-      - name: Build spot worker image
-        run: |
-          if docker manifest inspect "${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}" >/dev/null 2>&1; then
-            echo "Spot worker unchanged since ${SPOT_WORKER_IMAGE_TAG}; reusing the published image."
-            exit 0
-          fi
-          WORKER_BUILD_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          WORKER_STRATEGY_VERSION="$(git ls-files src/TradingBot.Core src/TradingBot.SpotWorker | sort | xargs sha256sum | sha256sum | cut -d ' ' -f1)"
-          WORKER_CHANGE_SET="$(awk '/^## / {print $2; exit}' .ai/worker-changelog.md)"
-          docker build \
-            --file src/TradingBot.SpotWorker/Dockerfile \
-            --build-arg "TRADINGBOT_WORKER_VERSION=${SPOT_WORKER_IMAGE_TAG}" \
-            --build-arg "TRADINGBOT_WORKER_COMMIT=${SPOT_WORKER_IMAGE_TAG}" \
-            --build-arg "TRADINGBOT_WORKER_BUILD_UTC=${WORKER_BUILD_UTC}" \
-            --build-arg "TRADINGBOT_WORKER_IMAGE_TAG=${SPOT_WORKER_IMAGE_TAG}" \
-            --build-arg "TRADINGBOT_WORKER_STRATEGY_VERSION=${WORKER_STRATEGY_VERSION}" \
-            --build-arg "TRADINGBOT_WORKER_CHANGE_SET=${WORKER_CHANGE_SET}" \
-            --tag "${SPOT_WORKER_IMAGE_NAME}:latest" \
-            --tag "${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}" \
-            .
-          docker push "${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG}"
-          docker push "${SPOT_WORKER_IMAGE_NAME}:latest"
 
       - name: Build futures worker image
         run: |
@@ -165,20 +138,6 @@ jobs:
           docker push "${API_IMAGE_NAME}:${API_IMAGE_TAG}"
           docker push "${API_IMAGE_NAME}:latest"
 
-      - name: Build web image
-        run: |
-          if docker manifest inspect "${WEB_IMAGE_NAME}:${WEB_IMAGE_TAG}" >/dev/null 2>&1; then
-            echo "web unchanged since ${WEB_IMAGE_TAG}; reusing the published image."
-            exit 0
-          fi
-          docker build \
-            --file src/TradingBot.Web/Dockerfile \
-            --tag "${WEB_IMAGE_NAME}:latest" \
-            --tag "${WEB_IMAGE_NAME}:${WEB_IMAGE_TAG}" \
-            .
-          docker push "${WEB_IMAGE_NAME}:${WEB_IMAGE_TAG}"
-          docker push "${WEB_IMAGE_NAME}:latest"
-
       - name: Build og image
         run: |
           if docker manifest inspect "${OG_IMAGE_NAME}:${OG_IMAGE_TAG}" >/dev/null 2>&1; then
@@ -204,7 +163,6 @@ jobs:
             infra/image-tags.env
             infra/docker-compose.prod.yml
             infra/traefik/trading-bot.yml
-            src/TradingBot.SpotWorker/appsettings.json
             src/TradingBot.FuturesWorker/appsettings.json
             src/TradingBot.FuturesWorker/appsettings.lukas.json
             src/TradingBot.MarketDataWorker/appsettings.json
@@ -219,8 +177,6 @@ jobs:
     env:
       UI_IMAGE_NAME: ghcr.io/bykovas/trading-bot-ui
       API_IMAGE_NAME: ghcr.io/bykovas/trading-bot-api
-      WEB_IMAGE_NAME: ghcr.io/bykovas/trading-bot-web
-      SPOT_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-spot-worker
       FUTURES_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-futures-worker
       MARKET_DATA_WORKER_IMAGE_NAME: ghcr.io/bykovas/trading-bot-market-data-worker
       OG_IMAGE_NAME: ghcr.io/bykovas/trading-bot-og

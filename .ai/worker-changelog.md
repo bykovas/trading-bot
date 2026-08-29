@@ -1356,3 +1356,6 @@
 - Added automatic worker build metadata for persisted cycle records.
 - Added CI enforcement that worker logic changes must update this changelog.
 - No trading strategy behavior change.
+## 2026-08-29-archive-spot-worker
+
+- `TradingBot.SpotWorker` and `TradingBot.SpotWorker.Tests` were moved to `src/archive/` and excluded from the active solution, CI image build, deployment compose, and runtime cleanup. The spot worker was frozen and did not trade in production.

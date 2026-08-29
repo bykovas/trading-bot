@@ -27,22 +27,6 @@ services:
     networks:
       - default
 
-
-  web:
-    container_name: trading-bot-web
-    image: ${WEB_IMAGE_NAME}:${WEB_IMAGE_TAG:-latest}
-    restart: unless-stopped
-    environment:
-      ASPNETCORE_PATHBASE: /web
-    env_file:
-      - /opt/trading-bot/web/.env
-    depends_on:
-      db-ready:
-        condition: service_completed_successfully
-    networks:
-      - default
-      - traefik
-
   api:
     container_name: trading-bot-api
     image: ${API_IMAGE_NAME}:${API_IMAGE_TAG:-latest}
@@ -55,50 +39,6 @@ services:
     networks:
       - default
       - traefik
-
-  spot-worker-live:
-    container_name: trading-bot-spot-worker-live
-    image: ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG:-latest}
-    restart: unless-stopped
-    # Paper only: this worker has never placed a real order (exchange_order_id is null
-    # across every action it ever recorded) and live trading is off for it. It still
-    # polled Kraken and wrote its own copy of every snapshot, which on one IP competed
-    # with the two workers that do handle money. Behind a profile nothing enables, so
-    # it stays defined but does not run.
-    profiles:
-      - paper
-    env_file:
-      - /opt/trading-bot/spot/live/.env
-    depends_on:
-      db-ready:
-        condition: service_completed_successfully
-    # Runtime config, secrets, data, and logs are instance-specific.
-    volumes:
-      - /opt/trading-bot/spot/live/appsettings.json:/app/appsettings.json:ro
-      - /opt/trading-bot/spot/live/data:/app/data
-      - /opt/trading-bot/spot/live/logs:/app/logs
-
-  spot-worker-virtual:
-    container_name: trading-bot-spot-worker-virtual
-    image: ${SPOT_WORKER_IMAGE_NAME}:${SPOT_WORKER_IMAGE_TAG:-latest}
-    restart: unless-stopped
-    # Paper only: this worker has never placed a real order (exchange_order_id is null
-    # across every action it ever recorded) and live trading is off for it. It still
-    # polled Kraken and wrote its own copy of every snapshot, which on one IP competed
-    # with the two workers that do handle money. Behind a profile nothing enables, so
-    # it stays defined but does not run.
-    profiles:
-      - paper
-    env_file:
-      - /opt/trading-bot/spot/virtual/.env
-    depends_on:
-      db-ready:
-        condition: service_completed_successfully
-    # Virtual worker is forced non-live by /opt/trading-bot/spot/virtual/.env.
-    volumes:
-      - /opt/trading-bot/spot/virtual/appsettings.json:/app/appsettings.json:ro
-      - /opt/trading-bot/spot/virtual/data:/app/data
-      - /opt/trading-bot/spot/virtual/logs:/app/logs
 
   futures-worker-live:
     container_name: trading-bot-futures-worker-live

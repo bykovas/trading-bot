@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\TradingBot.SpotWorker\TradingBot.SpotWorker.csproj" />
+    <ProjectReference Include="..\TradingBot.SpotWorker\TradingBot.SpotWorker.csproj" />
   </ItemGroup>
 
   <ItemGroup>
