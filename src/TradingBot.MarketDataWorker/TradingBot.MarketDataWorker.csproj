@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TradingBot.Core\TradingBot.Core.csproj" />
+    <PackageReference Include="Sentry" Version="6.9.0" />
   </ItemGroup>
 
 </Project>

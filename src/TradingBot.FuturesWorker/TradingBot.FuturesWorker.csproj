@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="8.0.6" />
+    <PackageReference Include="Sentry" Version="6.9.0" />
   </ItemGroup>
 
 </Project>

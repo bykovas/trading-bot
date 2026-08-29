@@ -1,5 +1,6 @@
 ﻿using TradingBot.MarketDataWorker;
 
+using var sentry = SentryReliability.Initialize();
 var config = MarketDataWorkerConfiguration.Load();
 
 using var cancellation = new CancellationTokenSource();

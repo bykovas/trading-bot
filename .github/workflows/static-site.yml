@@ -203,6 +203,7 @@ jobs:
       # public endpoints the API already rotates through. deploy.sh builds the
       # URL from the bare key.
       DRPC_API_KEY: ${{ secrets.DRPC_API_KEY }}
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
     steps:
       - name: Download deploy bundle

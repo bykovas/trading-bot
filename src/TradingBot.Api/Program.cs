@@ -3,10 +3,24 @@ using System.Text;
 using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
+using Sentry;
+using TradingBot.Api;
 using TradingBot.Core.Common;
 using TradingBot.Core.Risk;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.WebHost.UseSentry(options =>
+{
+    options.Dsn = builder.Configuration["Sentry:Dsn"]
+        ?? Environment.GetEnvironmentVariable("SENTRY_DSN");
+    options.Environment = builder.Environment.EnvironmentName;
+    options.AutoSessionTracking = false;
+    options.AutoRegisterTracing = false;
+    options.EnableLogs = false;
+    options.EnableMetrics = false;
+    options.DefaultTags["service"] = "api";
+});
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -14,6 +28,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 
 var app = builder.Build();
+SentrySdk.ConfigureScope(scope => scope.SetTag("service", "api"));
+var publicStatsFailureGate = new SentryFailureGate();
 
 app.MapGet("/api/health", () => Results.Ok(new
 {
@@ -75,6 +91,7 @@ app.MapGet("/api/public-stats", async (CancellationToken cancellationToken) =>
     try
     {
         var stats = await ReadPublicStats(connectionString, liveSince, now, cancellationToken);
+        publicStatsFailureGate.Recovered();
         return Results.Ok(stats);
     }
     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -86,6 +103,7 @@ app.MapGet("/api/public-stats", async (CancellationToken cancellationToken) =>
         // No partial JSON: the page prefers em-dashes to half a truth, and a 503 is
         // what makes it fall back to the other journal rather than render zeros.
         Console.WriteLine($"public-stats FAILED: {ex.GetType().Name}: {ex.Message}");
+        publicStatsFailureGate.Report("public-stats", ex);
         return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     }
 });

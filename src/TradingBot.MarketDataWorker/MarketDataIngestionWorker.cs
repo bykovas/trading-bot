@@ -12,6 +12,7 @@ internal sealed class MarketDataIngestionWorker(
     IClock? clock = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
+    private readonly SentryFailureGate _cycleFailureGate = new();
     private DateTimeOffset _nextCandleRefreshUtc = DateTimeOffset.MinValue;
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -54,6 +55,8 @@ internal sealed class MarketDataIngestionWorker(
 
                     _nextCandleRefreshUtc = utc.AddSeconds(config.Ingestion.CandleIntervalSeconds);
                 }
+
+                _cycleFailureGate.Recovered();
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -62,6 +65,7 @@ internal sealed class MarketDataIngestionWorker(
             catch (Exception ex)
             {
                 Console.WriteLine($"market-data-worker cycle FAILED: {ex.Message}");
+                _cycleFailureGate.Report("ingestion-cycle", ex);
             }
 
             if (config.Worker.RunOnce)

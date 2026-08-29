@@ -150,6 +150,7 @@ umask 077
   elif [[ -n "${DRPC_API_KEY:-}" ]]; then
     printf 'TRADINGBOT_BASE_RPC_URL=https://lb.drpc.live/base/%s\n' "${DRPC_API_KEY}"
   fi
+  printf 'SENTRY_DSN=%s\n' "${SENTRY_DSN:-}"
 } > "${API_ENV_FILE}"
 
 echo "Writing database environment to ${DATABASE_ENV_FILE}"
@@ -177,6 +178,9 @@ if [ -f "${FUTURES_LIVE_ENV_FILE}" ]; then
   if ! grep -q '^TRADINGBOT_TELEGRAM_BOT_TOKEN=' "${FUTURES_LIVE_ENV_FILE}"; then
     printf 'TRADINGBOT_TELEGRAM_BOT_TOKEN=%s\n' "${TRADINGBOT_TELEGRAM_BOT_TOKEN:-}" >> "${FUTURES_LIVE_ENV_FILE}"
   fi
+  if ! grep -q '^SENTRY_DSN=' "${FUTURES_LIVE_ENV_FILE}"; then
+    printf 'SENTRY_DSN=%s\n' "${SENTRY_DSN:-}" >> "${FUTURES_LIVE_ENV_FILE}"
+  fi
 else
   echo "Creating futures live environment at ${FUTURES_LIVE_ENV_FILE}"
   {
@@ -190,6 +194,7 @@ else
     printf 'TRADINGBOT_KRAKEN_FUTURES_API_KEY=%s\n' "${TRADINGBOT_KRAKEN_FUTURES_API_KEY:-}"
     printf 'TRADINGBOT_KRAKEN_FUTURES_API_SECRET=%s\n' "${TRADINGBOT_KRAKEN_FUTURES_API_SECRET:-}"
     printf 'TRADINGBOT_TELEGRAM_BOT_TOKEN=%s\n' "${TRADINGBOT_TELEGRAM_BOT_TOKEN:-}"
+    printf 'SENTRY_DSN=%s\n' "${SENTRY_DSN:-}"
     printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
   } > "${FUTURES_LIVE_ENV_FILE}"
 fi
@@ -211,6 +216,7 @@ echo "Writing Lukas futures live environment to ${FUTURES_LUKAS_LIVE_ENV_FILE}"
   # Only this worker announces entries, so only this worker gets the token. The chat id
   # is not here: it is not a credential and lives in appsettings, in the open.
   printf 'TRADINGBOT_TELEGRAM_BOT_TOKEN=%s\n' "${TRADINGBOT_TELEGRAM_BOT_TOKEN:-}"
+  printf 'SENTRY_DSN=%s\n' "${SENTRY_DSN:-}"
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${FUTURES_LUKAS_LIVE_ENV_FILE}"
 
@@ -223,6 +229,7 @@ echo "Writing futures virtual environment to ${FUTURES_VIRTUAL_ENV_FILE}"
   printf 'TRADINGBOT_MARKET_DATA_MODE=database\n'
   printf 'TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true\n'
   printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=false\n'
+  printf 'SENTRY_DSN=%s\n' "${SENTRY_DSN:-}"
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${FUTURES_VIRTUAL_ENV_FILE}"
 
@@ -230,6 +237,7 @@ echo "Writing market data worker environment to ${MARKET_DATA_ENV_FILE}"
 {
   printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  printf 'SENTRY_DSN=%s\n' "${SENTRY_DSN:-}"
   # Spot is frozen: nothing trades it since the paper workers were retired, and its
   # sweep was the slowest thing the collector did - 71 pairs of candles against a
   # shared per-IP rate budget that the futures workers need. Existing spot rows stay

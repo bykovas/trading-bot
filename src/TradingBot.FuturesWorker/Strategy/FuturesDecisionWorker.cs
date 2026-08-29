@@ -25,6 +25,8 @@ internal sealed class FuturesDecisionWorker(
     private readonly IUniverseProvider _universeProvider = universeProvider ?? new ConfiguredUniverseProvider(config.CandidateUniverse);
     private readonly IFuturesEntryMirrorStore _entryMirrorStore = entryMirrorStore ?? new NullFuturesEntryMirrorStore();
     private readonly WorkerBuildInfo _buildInfo = WorkerBuildInfo.FromEnvironment();
+    private readonly SentryFailureGate _cycleFailureGate = new("futures-worker", config.BotInstance.Id);
+    private readonly SentryFailureGate _fastExitFailureGate = new("futures-worker", config.BotInstance.Id);
     private readonly IReadOnlyDictionary<string, string> _pairToCorrelationGroup =
         CorrelationRiskResolver.BuildPairToGroup(config.CorrelationRisk);
     // Rolling per-pair light snapshot history feeding the anti-lag price-action
@@ -84,6 +86,7 @@ internal sealed class FuturesDecisionWorker(
             try
             {
                 await RunCycleAsync(cancellationToken);
+                _cycleFailureGate.Recovered();
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -92,6 +95,7 @@ internal sealed class FuturesDecisionWorker(
             catch (Exception ex)
             {
                 Console.WriteLine($"futures cycle FAILED: {ex.Message}");
+                _cycleFailureGate.Report("cycle", ex);
                 // Any error the cycle did not handle - a broken exchange call, a data
                 // read that threw - reaches the channel as one throttled 🚨 rather than
                 // only the server log, so a stuck bot is visible without watching it.
@@ -141,6 +145,7 @@ internal sealed class FuturesDecisionWorker(
             try
             {
                 await RunFastExitCheckAsync(cancellationToken);
+                _fastExitFailureGate.Recovered();
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -149,6 +154,7 @@ internal sealed class FuturesDecisionWorker(
             catch (Exception ex)
             {
                 Console.WriteLine($"futures fast-exit-check FAILED: {ex.Message}");
+                _fastExitFailureGate.Report("fast-exit-check", ex);
             }
         }
     }

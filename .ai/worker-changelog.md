@@ -1,3 +1,8 @@
+## 2026-08-29-sentry-technical-reliability-monitoring
+
+- Added opt-in Sentry reporting to the active API, futures worker, and market-data worker. Events are tagged by service and futures instance, while routine trading, market, retry, tracing, profiling, metrics, and Sentry log noise remain disabled.
+- Handled cycle and public-stats failures are reported only after three consecutive failures of the same operation and exception type. The SDK also covers unhandled process and ASP.NET request exceptions. `SENTRY_DSN` is runtime-only, and TradingBot.Core does not initialize Sentry.
+
 ## 2026-08-29-round-the-spread-floored-trail-to-two-decimals
 
 - The spread-floor shipped yesterday produced a distance Kraken rejects: `2 x spread` on a 0.17% book is 0.3387%, and Kraken Futures answers `HTTP 400 ... trailing stop max deviation may only be defined up to 2 decimal places`. The throttled 🚨 alert caught it in the channel (`klaida cikle: ...`) - the alerting worked; the arithmetic did not.

@@ -1,6 +1,8 @@
 using TradingBot.FuturesWorker;
 
+using var sentry = SentryReliability.Initialize(Environment.GetEnvironmentVariable("TRADINGBOT_BOT_INSTANCE_ID"));
 var config = FuturesBotConfiguration.Load();
+SentryReliability.SetInstance(config.BotInstance.Id);
 using var logging = FileLogging.Configure(config.Logging.Directory);
 
 using var cancellation = new CancellationTokenSource();
