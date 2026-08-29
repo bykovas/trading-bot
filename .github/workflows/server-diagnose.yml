@@ -1,30 +1,20 @@
-# One-off server diagnostics, runnable only by hand (workflow_dispatch) and only by
-# someone with write access. The repo is PUBLIC: these steps print pairs, scores and
-# rejection text - the class of fact the dashboard already publishes - never credentials.
 name: server-diagnose
-
 on:
   workflow_dispatch:
-
 jobs:
-  mstrx-trail:
+  nvdax:
     runs-on: self-hosted
     steps:
-      - name: The MSTRX position as the bot holds it right now
+      - name: NVDAX lifecycle - open, max-hold arm, close
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with latest as (select bot_instance_id, max(updated_at) as u from portfolio_position_state group by 1) select p.bot_instance_id as bot, p.pair, p.side, round(p.entry_price::numeric,4) as entry, round(p.last_price::numeric,4) as last, round(p.unrealized_pnl_percent::numeric,2) as pnl_pct, round(p.peak_pnl_percent::numeric,2) as peak_pct, p.trailing_stop_state as trail_state, round(p.trailing_stop_percent::numeric,3) as trail_pct, round(p.stop_loss_price::numeric,4) as sl_px, round(p.take_profit_price::numeric,4) as tp_px, round(p.exchange_stop_loss_price::numeric,4) as exch_sl, p.tp_order_state, p.sl_order_state, coalesce(p.strategy,'Momentum') as book from portfolio_position_state p join latest l on l.bot_instance_id=p.bot_instance_id and l.u=p.updated_at where p.pair='MSTRX/USD'"
+            "select c.bot_instance_id as bot, to_char(c.utc,'MM-DD HH24:MI:SS') as utc, a.action, a.side, round(a.entry_price::numeric,4) as entry, round(a.fill_price::numeric,4) as fill, coalesce(a.exit_reason_code,'-') as code, left(coalesce(a.reason,'-'),105) as reason from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.pair='NVDAX/USD' and c.bot_instance_id='futures-live' and c.utc >= '2026-08-28 20:00' order by c.utc"
 
-      - name: What the worker logged about the MSTRX trailing stop
+      - name: What the worker logged about the NVDAX trail and max-hold
         run: |
-          docker logs trading-bot-futures-worker-live --since 2026-08-28T12:40:00Z 2>&1 | grep -iE "MSTRX" | grep -iE "trail|tpsl|arm|protect|cancel|stop" | tail -30 || true
+          docker logs trading-bot-futures-worker-live --since 2026-08-28T20:00:00Z 2>&1 | grep -iE "NVDAX" | grep -iE "trail|arm|max.?hold|maxhold|tpsl|protect|hold" | tail -30 || true
 
-      - name: The live spread on MSTRX and the trail distance in money
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select to_char(utc,'HH24:MI:SS') as utc, round(bid::numeric,4) as bid, round(ask::numeric,4) as ask, round(((ask-bid)/((ask+bid)/2)*100)::numeric,3) as spread_pct, round(last_price::numeric,4) as last from market_snapshots where pair='MSTRX/USD' and utc >= '2026-08-28 17:30' order by utc desc limit 12" || true
-
-      - name: Every MSTRX action the bot took today
+      - name: Peak profit this position reached vs where it closed
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select c.bot_instance_id as bot, to_char(c.utc,'HH24:MI:SS') as utc, a.action, a.side, round(a.entry_price::numeric,4) as entry, round(a.fill_price::numeric,4) as fill, coalesce(a.exit_reason_code,'-') as code, left(coalesce(a.reason,'-'),95) as reason from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.pair='MSTRX/USD' and c.utc >= '2026-08-28 12:00' order by c.utc"
+            "select bot_instance_id as bot, pair, side, round(entry_price::numeric,4) as entry, round(peak_pnl_percent::numeric,2) as peak_pct, to_char(peak_pnl_at_utc,'MM-DD HH24:MI') as peak_at, trailing_stop_state, round(trailing_stop_percent::numeric,3) as trail_pct, to_char(trailing_activated_at_utc,'MM-DD HH24:MI') as trail_armed_at, to_char(opened_at_utc,'MM-DD HH24:MI') as opened from portfolio_position_state where pair='NVDAX/USD' and bot_instance_id='futures-live' order by updated_at desc limit 3" || true
