@@ -1,3 +1,7 @@
+## 2026-08-29-byko-balanced-exits
+
+- Tuned the BYKO futures profile only for the next comparison: `TpSl.TakeProfitPercent` 3 -> 3.5, `StopLossPercent` 1.5 -> 1.75, and `TrailingStopPercent` 0.25 -> 0.5. Position sizing, leverage, Lukas control settings, and `Exits.MaxHoldTrailingStopPercent` remain unchanged.
+
 ## 2026-08-29-sentry-technical-reliability-monitoring
 
 - Added opt-in Sentry reporting to the active API, futures worker, and market-data worker. Events are tagged by service and futures instance, while routine trading, market, retry, tracing, profiling, metrics, and Sentry log noise remain disabled.
