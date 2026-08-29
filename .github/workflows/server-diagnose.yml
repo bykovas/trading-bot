@@ -1,14 +1,14 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  price-range:
+  price-hist:
     runs-on: self-hosted
     steps:
-      - name: Actual price low since entry - did the short really go deep in profit
+      - name: Min/max price the bot saw for HBAR and DOGE today (from decision facts)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select pair, count(*) as bars_1m, round(min(low)::numeric,5) as lowest_low, round(max(high)::numeric,5) as highest_high, round(min(low)::numeric,5) as best_for_short, to_char(min(open_time),'HH24:MI') as from_t, to_char(max(open_time),'HH24:MI') as to_t from market_candles where pair in ('HBAR/USD','DOGE/USD') and timeframe_minutes=1 and open_time >= '2026-08-29 06:40' group by pair"
-      - name: For a 150 notional short - best unrealized profit HBAR (entry 0.07512) and DOGE (0.08444)
+            "select d.pair, count(*) as cycles, round(min(d.price)::numeric,5) as min_price, round(max(d.price)::numeric,5) as max_price, to_char(min(d.utc),'HH24:MI') as from_t, to_char(max(d.utc),'HH24:MI') as to_t from dry_run_decision_facts d where d.bot_instance_id='futures-live' and d.pair in ('HBAR/USD','DOGE/USD') and d.utc >= '2026-08-29 06:00' group by d.pair"
+      - name: DOGE price minute-by-minute around the low (find the deep-profit window)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with e as (select 'HBAR/USD' as pair, 0.07512::numeric as entry union all select 'DOGE/USD', 0.08444) select e.pair, e.entry, round(min(m.low)::numeric,5) as lowest, round(((e.entry-min(m.low))/e.entry*100)::numeric,2) as best_move_pct, round(((e.entry-min(m.low))/e.entry*100 * 149.9 / 100)::numeric,2) as best_profit_usd from e join market_candles m on m.pair=e.pair and m.timeframe_minutes=1 and m.open_time >= '2026-08-29 06:40' group by e.pair, e.entry"
+            "select to_char(d.utc,'HH24:MI') as utc, round(d.price::numeric,5) as price, d.desired_position, coalesce(left(r.reason,55),'-') as reason from dry_run_decision_facts d left join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.pair='DOGE/USD' and d.utc >= '2026-08-29 10:10' and extract(minute from d.utc) in (0,15,30,45) order by d.utc limit 40"
