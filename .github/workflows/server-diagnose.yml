@@ -1,22 +1,14 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  trail-log:
+  price-range:
     runs-on: self-hosted
     steps:
-      - name: Every trailing-arm / spread / rollback log line for DOGE and HBAR today
-        run: |
-          docker logs trading-bot-futures-worker-live 2>&1 | grep -iE "PF_DOGEUSD|PF_HBARUSD" | grep -iE "trailing-arm|trailing-spread|trailing-rollback|external-trailing|maxhold-trail" | tail -60 || echo "no trail log lines"
-      - name: Worker restarts today
-        run: |
-          docker inspect trading-bot-futures-worker-live --format 'startedAt={{.State.StartedAt}} restarts={{.RestartCount}}'
-          echo "--- container created/started history in log (bootstrap lines) ---"
-          docker logs trading-bot-futures-worker-live 2>&1 | grep -iE "starting|bootstrap|hydrat|worker started|BlynAI|version" | tail -15 || true
-      - name: How HBAR closed
+      - name: Actual price low since entry - did the short really go deep in profit
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select to_char(c.utc,'HH24:MI:SS') as utc, a.action, round(a.entry_price::numeric,5) as entry, round(a.fill_price::numeric,5) as fill, round((case when a.entry_price>0 then (a.entry_price-a.fill_price)/a.entry_price*100 else 0 end)::numeric,2) as pnl_pct, coalesce(a.exit_reason_code,'-') as code from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.pair='HBAR/USD' and c.bot_instance_id='futures-live' and c.utc >= '2026-08-29 09:00' and a.action in ('WOULD_OPEN_SHORT','WOULD_CLOSE','WOULD_SELL') order by c.utc"
-      - name: DOGE decision facts around each arm - did trailing reset
+            "select pair, count(*) as bars_1m, round(min(low)::numeric,5) as lowest_low, round(max(high)::numeric,5) as highest_high, round(min(low)::numeric,5) as best_for_short, to_char(min(open_time),'HH24:MI') as from_t, to_char(max(open_time),'HH24:MI') as to_t from market_candles where pair in ('HBAR/USD','DOGE/USD') and timeframe_minutes=1 and open_time >= '2026-08-29 06:40' group by pair"
+      - name: For a 150 notional short - best unrealized profit HBAR (entry 0.07512) and DOGE (0.08444)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select bot_instance_id, pair, round(entry_price::numeric,5) as entry, round(peak_pnl_percent::numeric,2) as peak, to_char(peak_pnl_at_utc,'HH24:MI:SS') as peak_at, to_char(trailing_activated_at_utc,'HH24:MI:SS') as armed_at, to_char(updated_at,'HH24:MI:SS') as updated from portfolio_position_state where pair='DOGE/USD' and bot_instance_id='futures-live'"
+            "with e as (select 'HBAR/USD' as pair, 0.07512::numeric as entry union all select 'DOGE/USD', 0.08444) select e.pair, e.entry, round(min(m.low)::numeric,5) as lowest, round(((e.entry-min(m.low))/e.entry*100)::numeric,2) as best_move_pct, round(((e.entry-min(m.low))/e.entry*100 * 149.9 / 100)::numeric,2) as best_profit_usd from e join market_candles m on m.pair=e.pair and m.timeframe_minutes=1 and m.open_time >= '2026-08-29 06:40' group by e.pair, e.entry"
