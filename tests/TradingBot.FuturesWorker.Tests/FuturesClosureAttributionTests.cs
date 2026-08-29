@@ -60,6 +60,38 @@ public sealed class FuturesClosureAttributionTests
         Assert.Equal("EXCHANGE_STOP_LOSS", reason);
     }
 
+    // A trail the bot placed decides the close by its order id - and it is a profit
+    // trail unless the max-hold handoff marked it, in which case it is a slot release.
+    [Fact]
+    public void A_trailing_order_close_is_a_profit_trail_by_default()
+    {
+        var position = ShortPosition(entry: 2437.01577236m, stop: 2485.76m, target: 2340.50m);
+        position.TrailingStopOrderId = "trail-order-1";
+
+        var reason = FuturesDecisionWorker.ClosureReason(
+            position,
+            [Fill("trail-order-1", 2430.00m)],
+            2430.00m);
+
+        Assert.Equal("EXCHANGE_TRAILING_STOP", reason);
+    }
+
+    [Fact]
+    public void A_trail_the_max_hold_rule_armed_is_a_release_not_a_profit_exit()
+    {
+        var position = ShortPosition(entry: 2437.01577236m, stop: 2485.76m, target: 2340.50m);
+        position.TrailingStopOrderId = "trail-order-1";
+        // The six-hour handoff stamps this; the close reason keys off it, not the fill.
+        position.ExitMode = FuturesDecisionWorker.MaxHoldTrailExitMode;
+
+        var reason = FuturesDecisionWorker.ClosureReason(
+            position,
+            [Fill("trail-order-1", 2436.90m)],
+            2436.90m);
+
+        Assert.Equal("EXCHANGE_MAX_HOLD_RELEASE", reason);
+    }
+
     [Fact]
     public void Liquidation_outranks_everything()
     {

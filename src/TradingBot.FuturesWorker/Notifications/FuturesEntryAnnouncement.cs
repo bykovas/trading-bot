@@ -107,6 +107,11 @@ internal static class FuturesEntryAnnouncement
         ["EXCHANGE_STOP_LOSS"] = "kaina pasiekė stop-loss",
         ["SELL_TRAILING_STOP"] = "kaina nuėjo į pelną ir atsitraukė nuo viršūnės — trailing stop",
         ["EXCHANGE_TRAILING_STOP"] = "kaina nuėjo į pelną ir atsitraukė nuo viršūnės — trailing stop",
+        // Not a profit-taking exit: six hours passed without the position moving into
+        // real profit, so a slim trailing stop pushed it out near breakeven to free the
+        // slot. Says so plainly, instead of claiming a peak the price never reached.
+        ["SELL_MAX_HOLD_RELEASE"] = "6 valandų pozicija taip ir neišjudėjo į pelną — slankiuoju stopu išstūmiau ją apie nulį, kad atlaisvinčiau vietą",
+        ["EXCHANGE_MAX_HOLD_RELEASE"] = "6 valandų pozicija taip ir neišjudėjo į pelną — slankiuoju stopu išstūmiau ją apie nulį, kad atlaisvinčiau vietą",
         ["SELL_TAKE_PROFIT"] = "pasiektas tikslas biržoje",
         ["EXCHANGE_TAKE_PROFIT"] = "pasiektas tikslas biržoje",
         ["SELL_MAX_HOLD"] = "per 6 valandas pozicija neišjudėjo į pelną — uždariau seną nuostolį",

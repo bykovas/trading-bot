@@ -1608,6 +1608,11 @@ internal sealed class FuturesDecisionWorker(
         }
     }
 
+    // The ExitMode value the max-hold handoff stamps on a position when it arms the
+    // six-hour trail, so a close by that trail can be told apart from a profit-taking
+    // trail even hours later and across a restart.
+    internal const string MaxHoldTrailExitMode = "MAX_HOLD_TRAIL";
+
     // Which protection actually fired. The trailing stop is identified exactly, by its
     // order id, because that one we placed ourselves and stored. Take profit and stop
     // loss are told apart by where the fill landed: their levels sit 4% and 2% from
@@ -1625,7 +1630,13 @@ internal sealed class FuturesDecisionWorker(
         if (!string.IsNullOrWhiteSpace(position.TrailingStopOrderId)
             && closing.Any(fill => fill.OrderId.Equals(position.TrailingStopOrderId, StringComparison.OrdinalIgnoreCase)))
         {
-            return "EXCHANGE_TRAILING_STOP";
+            // A trail armed by the six-hour rule is a slot being freed at whatever P&L
+            // the position drifted to, not a profit-taking exit. Told apart by the
+            // marker the max-hold handoff left on ExitMode, so the channel can say what
+            // actually happened rather than claiming a peak the price never reached.
+            return position.ExitMode?.Equals(MaxHoldTrailExitMode, StringComparison.OrdinalIgnoreCase) == true
+                ? "EXCHANGE_MAX_HOLD_RELEASE"
+                : "EXCHANGE_TRAILING_STOP";
         }
 
         if (Caused(position.StopLossOrderId))
@@ -3205,6 +3216,14 @@ internal sealed class FuturesDecisionWorker(
             return null;
         }
 
+        // Mark HOW this trail was armed. A take-profit handoff arms only after the
+        // position ran into profit; this one arms at whatever P&L the six-hour clock
+        // finds, usually near breakeven. Both fire the same exchange trailing order and
+        // so close with the same reason, which made a max-hold release read in the
+        // channel as "went into profit and pulled back" when it did no such thing. The
+        // marker rides on ExitMode, a persisted field no decision logic reads, so it
+        // survives the hours until the trail actually fires.
+        held.ExitMode = MaxHoldTrailExitMode;
         return result;
     }
 

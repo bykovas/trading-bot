@@ -1,3 +1,10 @@
+## 2026-08-29-tell-a-max-hold-release-apart-from-a-profit-trail
+
+- Found in the channel: `NVDAX/USD SHORT uždaryta ... Uždirbau +0,08 $ ... why: kaina nuėjo į pelną ir atsitraukė nuo viršūnės`. The +0.08 $ was real and correct - the position never reached +3%, drifted near zero for six hours, and the max-hold rule armed its 0.5% trail (log: `distancePct=0.5`), which then closed it at breakeven. The bug was the WORDING: the six-hour release and a profit-taking trail both fire the same exchange trailing order, so both closed with `EXCHANGE_TRAILING_STOP` and the same "went into profit and pulled back from the peak" sentence - claiming a peak the price never reached.
+- The max-hold handoff now stamps `ExitMode = "MAX_HOLD_TRAIL"` on the position when it arms (only after the arm actually succeeds). `ExitMode` is already persisted and no decision logic reads it, so the marker survives the hours until the trail fires and across a restart, with no schema change.
+- `ClosureReason` returns the new code `EXCHANGE_MAX_HOLD_RELEASE` when the trailing order fired AND that marker is set, otherwise `EXCHANGE_TRAILING_STOP` as before. The channel maps both the exchange and the local (`SELL_MAX_HOLD_RELEASE`) code to an honest sentence: six hours passed without real profit, a slim trailing stop pushed the position out near breakeven to free the slot.
+- No behaviour change to trading: the same exit fires at the same moment; only its label and the sentence a reader sees are corrected.
+
 ## 2026-08-28-floor-the-trail-at-twice-the-spread
 
 - Found live on MSTRX/USD: the arm armed a **0.25% trailing stop against a 0.17% spread** (bid 129.78 / ask 130.00) - the trail was 1.5x the book, so the bid-ask bounce would close the position rather than the move reversing. Direction and mechanics were correct (Buy-side trail for a short, TP/SL cancelled on arming, distance exactly as configured); only the distance was economically too tight for that instrument.

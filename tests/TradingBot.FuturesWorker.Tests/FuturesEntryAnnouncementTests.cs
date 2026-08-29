@@ -103,6 +103,20 @@ public sealed class FuturesEntryAnnouncementTests
         Assert.DoesNotContain("pozicijoje dirbo", text);
     }
 
+    // A max-hold release must not read as a profit-taking trail: it closed near
+    // breakeven only because six hours passed, and the honest wording says so.
+    [Fact]
+    public void A_max_hold_release_does_not_claim_a_peak_that_never_happened()
+    {
+        var text = FuturesEntryAnnouncement.ComposeClose(
+            Byko, "BYKO", "NVDAX/USD", "SHORT", 15m, 150m, 10m,
+            218.88m, 218.76m, 0.08m, new TimeSpan(12, 22, 0), "EXCHANGE_MAX_HOLD_RELEASE");
+
+        Assert.Contains("6 valandų", text);
+        Assert.Contains("atlaisvinčiau vietą", text);
+        Assert.DoesNotContain("atsitraukė nuo viršūnės", text);
+    }
+
     // The one close the bot did not make must say so, not claim it as its own.
     [Fact]
     public void A_manual_close_is_attributed_to_the_hand()
