@@ -1,23 +1,22 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  trail-bug:
+  trail-log:
     runs-on: self-hosted
     steps:
-      - name: HBAR and DOGE position state - peak, trail, timing
+      - name: Every trailing-arm / spread / rollback log line for DOGE and HBAR today
+        run: |
+          docker logs trading-bot-futures-worker-live 2>&1 | grep -iE "PF_DOGEUSD|PF_HBARUSD" | grep -iE "trailing-arm|trailing-spread|trailing-rollback|external-trailing|maxhold-trail" | tail -60 || echo "no trail log lines"
+      - name: Worker restarts today
+        run: |
+          docker inspect trading-bot-futures-worker-live --format 'startedAt={{.State.StartedAt}} restarts={{.RestartCount}}'
+          echo "--- container created/started history in log (bootstrap lines) ---"
+          docker logs trading-bot-futures-worker-live 2>&1 | grep -iE "starting|bootstrap|hydrat|worker started|BlynAI|version" | tail -15 || true
+      - name: How HBAR closed
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with latest as (select bot_instance_id, pair, max(updated_at) as u from portfolio_position_state group by 1,2) select p.pair, round(p.entry_price::numeric,5) as entry, round(p.last_price::numeric,5) as last, round(p.unrealized_pnl_percent::numeric,2) as pnl_pct, round(p.peak_pnl_percent::numeric,2) as peak_pct, to_char(p.peak_pnl_at_utc,'HH24:MI') as peak_at, p.trailing_stop_state as ts_state, round(p.trailing_stop_percent::numeric,3) as ts_pct, to_char(p.trailing_activated_at_utc,'HH24:MI:SS') as ts_armed, coalesce(p.trailing_stop_order_id,'-') as ts_order, coalesce(p.exit_mode,'-') as exit_mode from portfolio_position_state p join latest l on l.bot_instance_id=p.bot_instance_id and l.pair=p.pair and l.u=p.updated_at where p.bot_instance_id='futures-live' and p.pair in ('HBAR/USD','DOGE/USD')"
-
-      - name: How many times the trail was armed for these pairs today (re-arm check)
-        run: |
-          docker logs trading-bot-futures-worker-live 2>&1 | grep -iE "PF_HBARUSD|PF_DOGEUSD" | grep -iE "trailing-arm|trailing-spread|trailing-rollback" | tail -40 || true
-
-      - name: Peak the bot actually recorded vs where it is now
+            "select to_char(c.utc,'HH24:MI:SS') as utc, a.action, round(a.entry_price::numeric,5) as entry, round(a.fill_price::numeric,5) as fill, round((case when a.entry_price>0 then (a.entry_price-a.fill_price)/a.entry_price*100 else 0 end)::numeric,2) as pnl_pct, coalesce(a.exit_reason_code,'-') as code from dry_run_actions a join dry_run_cycle_facts c on c.cycle_id=a.cycle_id where a.pair='HBAR/USD' and c.bot_instance_id='futures-live' and c.utc >= '2026-08-29 09:00' and a.action in ('WOULD_OPEN_SHORT','WOULD_CLOSE','WOULD_SELL') order by c.utc"
+      - name: DOGE decision facts around each arm - did trailing reset
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with latest as (select bot_instance_id, pair, max(updated_at) as u from portfolio_position_state group by 1,2) select p.pair, p.side, round(p.entry_price::numeric,5) as entry, round(p.peak_pnl_percent::numeric,2) as peak_pct, round((p.entry_price*(1-p.peak_pnl_percent/100))::numeric,5) as implied_peak_price_if_short, round(p.last_price::numeric,5) as last from portfolio_position_state p join latest l on l.bot_instance_id=p.bot_instance_id and l.pair=p.pair and l.u=p.updated_at where p.bot_instance_id='futures-live' and p.pair in ('HBAR/USD','DOGE/USD')"
-
-      - name: Open orders the bot thinks it holds for these pairs
-        run: |
-          docker logs trading-bot-futures-worker-live --since 2026-08-29T13:00:00Z 2>&1 | grep -iE "PF_HBARUSD|PF_DOGEUSD" | grep -iE "trailing|tpsl|protect|open order|SendTrailing|external-trailing|maxhold" | tail -30 || true
+            "select bot_instance_id, pair, round(entry_price::numeric,5) as entry, round(peak_pnl_percent::numeric,2) as peak, to_char(peak_pnl_at_utc,'HH24:MI:SS') as peak_at, to_char(trailing_activated_at_utc,'HH24:MI:SS') as armed_at, to_char(updated_at,'HH24:MI:SS') as updated from portfolio_position_state where pair='DOGE/USD' and bot_instance_id='futures-live'"
