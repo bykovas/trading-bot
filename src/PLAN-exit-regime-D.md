@@ -38,7 +38,7 @@ by `AtrTrailingRegimeEnabled` (see sizer task) — do NOT add a separate flag.
       with XML-doc comments. Clamp in `Normalize()` (TrailingActivationRMultiple 0..10,
       TrailingAtrMultiple 0..10). Add env `SetIfPresent` lines if the file has them for siblings.
       Commit. Hash: (this commit)
-- [ ] **2. Sizer (`FuturesPositionSizer.cs`, lines ~30-112).** When `AtrTrailingRegimeEnabled`:
+- [x] **2. Sizer (`FuturesPositionSizer.cs`, lines ~30-112).** When `AtrTrailingRegimeEnabled`:
       stop uses `StopAtrMult`×ATR floored by `MinStopDistancePct` (not by StopLossPercent), capped
       by `StopDistanceCapPct`; and the TAKE-PROFIT distance must be set so NO fixed TP is placed —
       simplest: set `takeProfitDistancePct` to a sentinel the caller treats as "no TP" (e.g. very
@@ -96,3 +96,5 @@ by `AtrTrailingRegimeEnabled` (see sizer task) — do NOT add a separate flag.
 - (fill in as you go)
 
 - Task 1 done: AtrTrailingRegimeEnabled + TrailingActivationRMultiple + TrailingAtrMultiple added to FuturesExitOptions, clamped in Normalize. Build green.
+
+- Task 2 done: stop already ATR-based via config (no code change) - verified by new sizer test (1.25xATR floored 0.3, cap flag). Fixed TP suppressed under regime in FuturesVirtualPortfolio (TakeProfitPrice/Distance/ExchangeTakeProfitPrice null when AtrTrailingRegimeEnabled), which also stops the live TP order (placed only when ExchangeTakeProfitPrice>0). SL untouched.

@@ -34,6 +34,28 @@ public sealed class FuturesPositionSizerAndCostModelTests
         return config;
     }
 
+    // Exit regime D stop: StopAtrMult 1.25 x ATR, floored by MinStopDistancePct 0.3, capped 3.
+    [Fact]
+    public void Regime_d_stop_is_1_25x_atr_floored_at_the_small_floor()
+    {
+        var config = BaseConfig();
+        config.Exits.AtrTrailingRegimeEnabled = true;
+        config.Exits.StopAtrMult = 1.25m;
+        config.Exits.MinStopDistancePct = 0.3m;
+        config.Exits.StopDistanceCapPct = 3m;
+        config.Exits.TrailingActivationRMultiple = 1m;
+        config.Exits.TrailingAtrMultiple = 1.5m;
+        InvokeNormalize(config);
+        var costs = FuturesExecutionCostModel.Estimate(config, FuturesDesiredExposure.Long, 0m);
+
+        // ATR 0.44% -> 1.25x = 0.55% (above the 0.3 floor).
+        Assert.Equal(0.55m, FuturesPositionSizer.Size(config, atrPct: 0.44m, costs, leverage: 10m).StopDistancePct);
+        // ATR 0.10% -> 0.125% is below the floor, so floored up to 0.3%.
+        Assert.Equal(0.3m, FuturesPositionSizer.Size(config, atrPct: 0.10m, costs, leverage: 10m).StopDistancePct);
+        // ATR 3% -> 3.75% exceeds the 3% cap, flagged (entry would be blocked).
+        Assert.True(FuturesPositionSizer.Size(config, atrPct: 3.0m, costs, leverage: 10m).StopExceedsMaxAllowed);
+    }
+
     [Fact]
     public void Cost_model_is_taker_fok_round_trip_for_live_and_virtual()
     {
