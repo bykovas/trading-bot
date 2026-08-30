@@ -279,6 +279,11 @@ internal sealed class FuturesDecisionWorker(
                 // has to happen before tpSl.Evaluate looks at their state.
                 var armedTrail = await TryArmMaxHoldTrailAsync(held, marketState.Instrument, utc, cancellationToken);
 
+                // Exit regime D: arm the ATR trail once the trade is +R in profit (there is
+                // no fixed take-profit to hand off from). Same place as max-hold so the trail
+                // is in before tpSl.Evaluate reads the protective orders.
+                var armedRegimeTrail = await TryArmRegimeTrailAsync(held, marketState.Instrument, markPrice, cancellationToken);
+
                 // TP/SL first: hard exits outrank the strategy's held desire.
                 var trigger = tpSl.Evaluate(held, markPrice, marketState.LastPrice, marketState.Quote?.Bid, marketState.Quote?.Ask);
                 if (trigger is not null)
@@ -3197,6 +3202,66 @@ internal sealed class FuturesDecisionWorker(
     // MaxHoldTrailingStopPercent closes it, and until then it runs - so one still
     // climbing keeps climbing and one that has stopped leaves on its first wobble.
     // Returns the log line when it armed, null when there was nothing to do.
+    // Exit regime D's trail: no fixed take-profit exists to hand off from, so the trail is
+    // armed here the moment the trade reaches TrailingActivationRMultiple x R of profit
+    // (R = the stop distance). The distance is TrailingAtrMultiple x ATR, set on the position
+    // so ActivateTrailingStopAsync uses it and still floors it at the spread and rounds to 2dp.
+    // This is a real profit trail, so it keeps the ordinary EXCHANGE_TRAILING_STOP close code.
+    internal static decimal ProfitPercentInDirection(PortfolioPosition held, decimal markPrice)
+    {
+        if (held.EntryPrice <= 0m || markPrice <= 0m)
+        {
+            return 0m;
+        }
+
+        var move = (markPrice - held.EntryPrice) / held.EntryPrice * 100m;
+        return held.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase) ? -move : move;
+    }
+
+    private async Task<string?> TryArmRegimeTrailAsync(
+        PortfolioPosition held,
+        InstrumentOptions instrument,
+        decimal markPrice,
+        CancellationToken cancellationToken)
+    {
+        if (!config.Exits.AtrTrailingRegimeEnabled
+            || config.Exits.TrailingActivationRMultiple <= 0m
+            || !config.Futures.LiveTradingEnabled
+            || IsExternalFuturesPosition(held)
+            || held.StopDistancePct is not { } stopDist || stopDist <= 0m
+            || held.AtrPct is not { } atr || atr <= 0m
+            || held.TrailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return null;
+        }
+
+        var activationPct = config.Exits.TrailingActivationRMultiple * stopDist;
+        if (ProfitPercentInDirection(held, markPrice) < activationPct)
+        {
+            return null;
+        }
+
+        var trailDistance = config.Exits.TrailingAtrMultiple > 0m
+            ? config.Exits.TrailingAtrMultiple * atr
+            : config.TpSl.WorkingTrailingStopPercent(held.FlippedEntry);
+        var previous = held.TrailingStopPercent;
+        held.TrailingStopPercent = trailDistance;
+        var result = await ActivateTrailingStopAsync(
+            held,
+            instrument,
+            cancellationToken,
+            $"regime trail: +{activationPct:0.###}% ({config.Exits.TrailingActivationRMultiple:0.##}R) reached, {config.Exits.TrailingAtrMultiple:0.##}xATR");
+
+        if (held.TrailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) != true)
+        {
+            held.TrailingStopPercent = previous;
+            Console.WriteLine($"futures-regime-trail: symbol={instrument.KrakenPair} NOT armed: {result}");
+            return null;
+        }
+
+        return result;
+    }
+
     private async Task<string?> TryArmMaxHoldTrailAsync(
         PortfolioPosition held,
         InstrumentOptions instrument,

@@ -48,7 +48,7 @@ by `AtrTrailingRegimeEnabled` (see sizer task) — do NOT add a separate flag.
       `FuturesVirtualPortfolio` open path) and skip it. Keep SL untouched (still needed).
       Add unit tests in `FuturesPositionSizerTests` (or a new file): stop = 1.25×ATR at various
       ATR, floored at 0.3, capped at cap; TP suppressed when regime on. Commit. Hash: ____
-- [ ] **3. Trailing arm (`FuturesDecisionWorker.cs`).**
+- [x] **3. Trailing arm (`FuturesDecisionWorker.cs`).**
       (a) Activation: the trail is armed from the TAKE_PROFIT handoff (~line 1947, in the fast/slow
       TpSl trigger path) and from `TryActivateExternalTrailingStopAsync`. When regime on, arm when
       unrealized profit ≥ `TrailingActivationRMultiple` × `position.StopDistancePct` instead of at
@@ -58,7 +58,7 @@ by `AtrTrailingRegimeEnabled` (see sizer task) — do NOT add a separate flag.
       must become `TrailingAtrMultiple`×ATR% when regime on (ATR from the position/plan —
       `position.AtrPct`), then still passed through `EffectiveTrailingStopPercent(...)`.
       Add unit tests for the distance calc (ATR mult → percent, floored/rounded). Commit. Hash: ____
-- [ ] **4. Exit-reason logging.** New closure codes so the journal/TG can name the D exits:
+- [x] **4. Exit-reason logging.** New closure codes so the journal/TG can name the D exits:
       in `ClosureReason` (~1618) the trailing-stop close already returns EXCHANGE_TRAILING_STOP /
       EXCHANGE_MAX_HOLD_RELEASE. Under regime, an armed-at-1R ATR trail that fires should read as a
       profit trail (keep EXCHANGE_TRAILING_STOP) — but LOG the regime + the numbers
@@ -98,3 +98,5 @@ by `AtrTrailingRegimeEnabled` (see sizer task) — do NOT add a separate flag.
 - Task 1 done: AtrTrailingRegimeEnabled + TrailingActivationRMultiple + TrailingAtrMultiple added to FuturesExitOptions, clamped in Normalize. Build green.
 
 - Task 2 done: stop already ATR-based via config (no code change) - verified by new sizer test (1.25xATR floored 0.3, cap flag). Fixed TP suppressed under regime in FuturesVirtualPortfolio (TakeProfitPrice/Distance/ExchangeTakeProfitPrice null when AtrTrailingRegimeEnabled), which also stops the live TP order (placed only when ExchangeTakeProfitPrice>0). SL untouched.
+
+- Task 3+4 done: TryArmRegimeTrailAsync arms the trail at +TrailingActivationRMultiple x StopDistancePct, distance = TrailingAtrMultiple x AtrPct (set on the position, run through EffectiveTrailingStopPercent). Called right after the max-hold arm. Keeps EXCHANGE_TRAILING_STOP close code; the arm reason string logs '+X% (NR) reached, MxATR', and a NOT-armed line is 'futures-regime-trail'. Tests: ProfitPercentInDirection sign, ATR-scaled distance + spread floor. Inert until slice 5.

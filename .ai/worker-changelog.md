@@ -1,3 +1,7 @@
+## 2026-08-30-exit-regime-d-atr-trail-arm
+
+- Exit regime D slice 3+4/7 (still inert until the switch flips in slice 5). `TryArmRegimeTrailAsync` arms the trailing stop the moment a live, bot-owned position reaches `TrailingActivationRMultiple` x its stop distance (R) of profit measured in the trade's direction; the trail distance is `TrailingAtrMultiple` x AtrPct, written to the position so ActivateTrailingStopAsync uses it and still floors it at 2x spread and rounds to 2dp. Called right after the max-hold arm, before tpSl.Evaluate. Because it is a genuine profit trail it keeps the ordinary EXCHANGE_TRAILING_STOP close code; the arm logs `regime trail: +X% (NR) reached, MxATR`, a failed arm logs `futures-regime-trail: ... NOT armed`. Tests pin ProfitPercentInDirection (signed by side) and the ATR-scaled-then-spread-floored distance.
+
 ## 2026-08-30-exit-regime-d-no-fixed-tp
 
 - Exit regime D slice 2/7 (still inert - AtrTrailingRegimeEnabled off everywhere until slice 5). The stop is already ATR-scaled by config (StopAtrMult x ATR floored by MinStopDistancePct), so no sizer stop code changed; a new sizer test pins the D values (1.25x ATR, floor 0.3, cap flag at 3%). When the regime is on, no fixed take-profit is placed: FuturesVirtualPortfolio nulls TakeProfitPrice/TakeProfitDistancePct/ExchangeTakeProfitPrice, which also prevents the live path arming a TP order (it only arms when ExchangeTakeProfitPrice > 0). Stop-loss is untouched; the risk gate still sees the plan's TP distance so entries are not blocked.
