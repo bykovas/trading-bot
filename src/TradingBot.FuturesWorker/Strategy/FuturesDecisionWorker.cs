@@ -2866,6 +2866,26 @@ internal sealed class FuturesDecisionWorker(
         var closeSide = CloseSide(remote.Side);
         var triggerSource = config.TpSl.TriggerSource;
         var result = tpSl;
+
+        // Exit regime D runs no fixed take-profit. A TP order still on the book from before the
+        // regime would keep closing the position at the old target, so cancel it once and drop it
+        // from the state. New regime entries never reach here with a TP (ExchangeTakeProfitPrice is
+        // null), so this only ever clears a legacy order.
+        if (config.Exits.AtrTrailingRegimeEnabled && existingTakeProfit is not null)
+        {
+            var cancel = await broker.CancelOrderAsync(existingTakeProfit.OrderId, cancellationToken);
+            if (cancel.Accepted)
+            {
+                Console.WriteLine($"futures-regime-tp-cancel: symbol={instrument.KrakenPair} orderId={existingTakeProfit.OrderId} cleared (no fixed TP under regime D)");
+                result = result with { TpOrderState = null, TakeProfitOrderId = null, ExchangeTakeProfitPrice = null, TakeProfitPrice = null };
+                existingTakeProfit = null;
+            }
+            else
+            {
+                Console.WriteLine($"futures-regime-tp-cancel: FAILED symbol={instrument.KrakenPair} orderId={existingTakeProfit.OrderId} reason={cancel.Error ?? cancel.Status}");
+            }
+        }
+
         if (existingStopLoss is null && tpSl.ExchangeStopLossPrice is > 0m)
         {
             var stopPrice = RoundTriggerPrice(tpSl.ExchangeStopLossPrice.Value, remote.Side, isTakeProfit: false, instrument.PriceDecimals);
@@ -2924,8 +2944,15 @@ internal sealed class FuturesDecisionWorker(
         FuturesOpenOrder? existingTrailingStop)
     {
         var isFlippedEntry = existing?.FlippedEntry == true;
-        var stopDistancePct = config.TpSl.StopLossPercent;
-        var takeProfitDistancePct = config.TpSl.WorkingTakeProfitPercent(isFlippedEntry);
+        // Exit regime D: keep the ATR stop the position was opened with (carried as StopDistancePct)
+        // and NEVER a fixed take-profit. Without this the sync loop rebuilds both from the legacy
+        // fixed percents every cycle and silently undoes the regime - re-arming a 1.75% stop and a
+        // 3.5% TP on a position the open path had deliberately given neither.
+        var regimeD = config.Exits.AtrTrailingRegimeEnabled;
+        var stopDistancePct = regimeD && existing?.StopDistancePct is > 0m
+            ? existing.StopDistancePct.Value
+            : config.TpSl.StopLossPercent;
+        var takeProfitDistancePct = regimeD ? 0m : config.TpSl.WorkingTakeProfitPercent(isFlippedEntry);
         var configuredTrailingStopPercent = config.TpSl.WorkingTrailingStopPercent(isFlippedEntry);
         var trailingStopState = existingTrailingStop is not null
             ? "EXCHANGE_OPEN"
@@ -2949,7 +2976,9 @@ internal sealed class FuturesDecisionWorker(
         var stopLossOrderId = existingStopLoss?.OrderId ?? existing?.StopLossOrderId;
         var takeProfitOrderId = existingTakeProfit?.OrderId ?? existing?.TakeProfitOrderId;
 
-        if (!config.TpSl.Enabled || entryPrice <= 0m || stopDistancePct <= 0m || takeProfitDistancePct <= 0m)
+        // Under regime D takeProfitDistancePct is 0 by design (no fixed TP); that must NOT abort the
+        // stop-loss rebuild, so it is excluded from the bail-out. The stop still needs a distance.
+        if (!config.TpSl.Enabled || entryPrice <= 0m || stopDistancePct <= 0m || (!regimeD && takeProfitDistancePct <= 0m))
         {
             return new ImportedTpSlState(
                 existing?.TpOrderState,
@@ -3003,19 +3032,24 @@ internal sealed class FuturesDecisionWorker(
                 ? existing.ExchangeTakeProfitPrice.Value
                 : ExchangeProtectionPrice(entryPrice, side, isTakeProfit: true, takeProfitDistancePct);
 
+        // Regime D: no fixed take-profit exists on the position, so every TP field is forced null
+        // regardless of any stale exchange order. A stray TP order left from before the regime is
+        // cancelled in EnsureExchangeProtectionOrdersAsync, not resurrected here.
         return new ImportedTpSlState(
-            trailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true
-                ? "CANCELLED"
-                : existingTakeProfit is not null ? "EXCHANGE_OPEN" : existing?.TpOrderState ?? "SIMULATED_OPEN",
+            regimeD
+                ? null
+                : trailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true
+                    ? "CANCELLED"
+                    : existingTakeProfit is not null ? "EXCHANGE_OPEN" : existing?.TpOrderState ?? "SIMULATED_OPEN",
             trailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true
                 ? "CANCELLED"
                 : existingStopLoss is not null ? "EXCHANGE_OPEN" : existing?.SlOrderState ?? "SIMULATED_OPEN",
             decimal.Round(stopLossPrice, 8),
-            decimal.Round(takeProfitPrice, 8),
+            regimeD ? null : decimal.Round(takeProfitPrice, 8),
             effectiveStopDistancePct,
-            effectiveTakeProfitDistancePct,
+            regimeD ? null : effectiveTakeProfitDistancePct,
             decimal.Round(exchangeStopLossPrice, 8),
-            decimal.Round(exchangeTakeProfitPrice, 8),
+            regimeD ? null : decimal.Round(exchangeTakeProfitPrice, 8),
             config.TpSl.ExchangeProtectionMultiplierPercent,
             trailingStopState,
             trailingStopPercent,

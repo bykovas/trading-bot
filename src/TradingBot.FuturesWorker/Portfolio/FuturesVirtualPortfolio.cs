@@ -146,7 +146,13 @@ internal sealed class FuturesVirtualPortfolio(
 
         var liquidationPrice = FuturesMath.EstimateLiquidationPrice(side, fillPrice, leverage, config.Margin.MaintenanceMarginRatePercent);
         var tpDistancePct = config.TpSl.WorkingTakeProfitPercent(flippedEntry);
-        var slDistancePct = config.TpSl.StopLossPercent;
+        // Exit regime D places the SIZER'S ATR stop (StopAtrMult x ATR, floored), not the legacy
+        // fixed StopLossPercent. Putting the tested distance on the position here is what makes the
+        // exchange stop, the +1R trail activation and the ATR trail all measure against the same R.
+        // Off the regime, or when the plan carries no stop, the legacy fixed stop stands unchanged.
+        var regimeD = config.Exits.AtrTrailingRegimeEnabled;
+        var planStopPct = entryPlan?.StopDistancePct ?? 0m;
+        var slDistancePct = regimeD && planStopPct > 0m ? planStopPct : config.TpSl.StopLossPercent;
         var trailingStopPercent = config.TpSl.WorkingTrailingStopPercent(flippedEntry);
         var protectionMultiplier = Math.Max(0m, config.TpSl.ExchangeProtectionMultiplierPercent) / 100m;
         var exchangeTpDistancePct = tpDistancePct * protectionMultiplier;
@@ -187,6 +193,10 @@ internal sealed class FuturesVirtualPortfolio(
             Origin = PositionOrigins.Bot,
             FlippedEntry = flippedEntry,
             EntryAtr = entryPlan?.AtrPct,
+            // The regime trail reads AtrPct (not EntryAtr) to size its 1.5x ATR distance, so it
+            // must be set at open or the trail can never arm. Held from entry on purpose: the
+            // tested trail measures the move against the ATR the trade was opened with.
+            AtrPct = entryPlan?.AtrPct,
             RoundTripCostEstimatePct = entryPlan?.RoundTripCostEstimatePct,
             TpOrderState = config.TpSl.Enabled ? "SIMULATED_OPEN" : null,
             SlOrderState = config.TpSl.Enabled ? "SIMULATED_OPEN" : null

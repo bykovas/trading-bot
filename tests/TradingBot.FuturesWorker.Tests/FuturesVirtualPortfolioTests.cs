@@ -343,4 +343,65 @@ public sealed class FuturesVirtualPortfolioTests
         Assert.Equal(5m, FuturesMath.LiquidationDistancePercent(100m, longLiquidation));
         Assert.Equal(5m, FuturesMath.LiquidationDistancePercent(100m, shortLiquidation));
     }
+
+    // A plan carrying an ATR stop of stopPct% and an ATR reading of atrPct%.
+    private static FuturesEntryPlan Plan(decimal atrPct, decimal stopPct) => new(
+        RequestedNotionalEur: 20m,
+        FilledNotionalEur: 20m,
+        AtrPct: atrPct,
+        StopDistancePct: stopPct,
+        TakeProfitDistancePct: stopPct * 2m,
+        RoundTripCostEstimatePct: 0m,
+        ExpectedFundingPct: 0m,
+        QueueAheadEur: 0m,
+        MakerFillRate: 1m,
+        TimeToFillMs: 0,
+        RepegCount: 0,
+        OpenRiskEur: 0m,
+        FundingState: "-",
+        BtcRegimeState: "-",
+        ShortAllowed: "-");
+
+    // Exit regime D: the placed stop is the plan's ATR stop, and NO fixed take-profit is set.
+    // This is the exact example from the spec: entry 100, plan stop 0.6% -> SL 99.40, no TP,
+    // and the +1R trail activation therefore sits at 100.60 (measured against the 0.6% stop,
+    // not the legacy 1.75%/2%). AtrPct is carried so the trail can size its 1.5x ATR distance.
+    [Fact]
+    public void Regime_d_entry_uses_the_atr_stop_and_places_no_fixed_take_profit()
+    {
+        var config = Config();
+        config.Exits.AtrTrailingRegimeEnabled = true;
+        var portfolio = new FuturesVirtualPortfolio(config, new NullStore());
+        var state = portfolio.Load();
+
+        var fill = portfolio.Apply(state, "XBT/EUR", FuturesDesiredExposure.Long, 100m, 20m, 2m, entryPlan: Plan(atrPct: 0.5m, stopPct: 0.6m));
+
+        var position = Assert.Single(state.Positions);
+        Assert.Equal(99.40m, position.StopLossPrice);        // plan's 0.6% ATR stop, not config 2%
+        Assert.Equal(0.6m, position.StopDistancePct);
+        Assert.Null(position.TakeProfitPrice);               // no fixed take-profit
+        Assert.Null(position.TakeProfitDistancePct);
+        Assert.Null(position.ExchangeTakeProfitPrice);
+        Assert.Equal(0.5m, position.AtrPct);                 // ATR carried for the trail
+
+        // +1R activation uses the real stop distance: 100 * (1 + 1.0 * 0.6%) = 100.60.
+        var activationPrice = position.EntryPrice * (1m + 1.0m * position.StopDistancePct!.Value / 100m);
+        Assert.Equal(100.60m, activationPrice);
+    }
+
+    // Regime OFF (the control and every legacy instance): the fixed StopLossPercent / TakeProfitPercent
+    // still stand, and the plan's ATR stop is ignored - so nothing about non-D behaviour moves.
+    [Fact]
+    public void Legacy_entry_keeps_fixed_tp_sl_and_ignores_the_atr_plan_stop()
+    {
+        var (portfolio, state) = Setup();   // AtrTrailingRegimeEnabled defaults to false
+
+        var fill = portfolio.Apply(state, "XBT/EUR", FuturesDesiredExposure.Long, 100m, 20m, 2m, entryPlan: Plan(atrPct: 0.5m, stopPct: 0.6m));
+
+        var position = Assert.Single(state.Positions);
+        Assert.Equal(98m, position.StopLossPrice);           // config 2%, not the plan's 0.6%
+        Assert.Equal(2m, position.StopDistancePct);
+        Assert.Equal(103m, position.TakeProfitPrice);        // fixed TP still present
+        Assert.Equal(106m, position.ExchangeTakeProfitPrice);
+    }
 }
