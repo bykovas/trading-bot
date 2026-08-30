@@ -16,7 +16,7 @@ public sealed class FuturesInstanceConfigurationTests
         var primary = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.json"));
         var lukas = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.lukas.json"));
 
-        AssertSlotsAreFunded(primary, expectedSlots: 12);
+        AssertSlotsAreFunded(primary, expectedSlots: 6);
         AssertSlotsAreFunded(lukas, expectedSlots: 3);
     }
 
@@ -98,7 +98,11 @@ public sealed class FuturesInstanceConfigurationTests
         // The control has no such floor - its 0.75% trail is far clear of the book.
         Assert.Equal(2m, primary["TpSl"]?["TrailingStopMinSpreadMultiple"]?.GetValue<decimal>());
         Assert.Null(lukas["TpSl"]?["TrailingStopMinSpreadMultiple"]);
-        Assert.False(primary["Exits"]?["SignalReversalExitEnabled"]?.GetValue<bool>());
+        // The arm now runs the LUKO-style exit: hold until the entry signal fades,
+        // and NO max-hold. Measured 2026-08-30 as the best exit on the arm's own
+        // 45-day entries (+0.04%/coin-day, the only policy positive in both halves).
+        Assert.True(primary["Exits"]?["SignalReversalExitEnabled"]?.GetValue<bool>());
+        Assert.Equal(0m, primary["Exits"]?["MaxHoldTrailingStopPercent"]?.GetValue<decimal>());
         Assert.Null(lukas["Exits"]?["SignalReversalExitEnabled"]);
         // The control carries neither knob: the experiment must never leak into it.
         Assert.Null(lukas["Futures"]?["DisabledLongEntryChannels"]);
@@ -205,7 +209,9 @@ public sealed class FuturesInstanceConfigurationTests
 
         // Back to the publisher's stake exactly: 15 at 10x on both, 150 of exposure.
         // The 4x afternoon lasted two mirrored entries and cost 24 USD in stop-outs.
-        Assert.Equal(150m, primary["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
+        // The arm carries 20 USD margin at 10x = 200 notional across 6 slots; the
+        // control keeps the publisher stake of 15 at 10x = 150.
+        Assert.Equal(200m, primary["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
         Assert.Equal(150m, lukas["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
 
         var normalizedLukas = lukas.DeepClone().AsObject();
