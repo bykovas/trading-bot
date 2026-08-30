@@ -1,3 +1,8 @@
+## 2026-08-30-reversal-book-switched-off-on-the-arm
+
+- `Reversal.Enabled` false on BYKO (was true). It fired a Reversal LONG - a fade of a sharp drop - on the thin meme coin CHILLGUY/USD that the control never took, and the drop continued toward the stop. That is exactly the unfillable-thin-coin behaviour the 45-day study flagged: the book barely fires, its apparent edge was carried by three symbols, and it lives in illiquid names. Section kept (thresholds intact) but disabled, so re-enabling later is one flag.
+- Does NOT close the already-open CHILLGUY position; it only stops NEW reversal entries. BYKO now trades the same momentum logic as the control, differing by size (6x20), the tested entry filters, and the LUKO-style exits set earlier today.
+
 ## 2026-08-30-arm-resized-to-6x20-and-exits-turned-luko-style
 
 - Config-only, arm (BYKO) appsettings. Position structure -> 6 slots x 20 USD margin x 10x = 200 notional each (control stays 3 x 15 x 10 = 150). MaxPositions 6, TargetMarginUsd/MaxMarginPerPositionUsd 20, MaxNotionalUsd 200, MaxTotalNotionalUsd 1200, CorrelationRisk 2 positions / 400 USD per group. TargetRiskUsd raised 4.5 -> 6 so the concurrent-risk cap (kept = TargetRiskUsd x slots = 36) covers the real worst case (200 x 3% stop x 6); the sizer still clamps every position to 200, so nothing about the actual size changes.

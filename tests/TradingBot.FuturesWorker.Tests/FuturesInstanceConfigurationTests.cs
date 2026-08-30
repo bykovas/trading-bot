@@ -112,7 +112,11 @@ public sealed class FuturesInstanceConfigurationTests
         // pinned PRESENT and enabled on the arm and pinned ABSENT on the control,
         // whose binder default is disabled. A section appearing on the control is an
         // experiment leak, not a tidy-up.
-        Assert.True(primary["Reversal"]?["Enabled"]?.GetValue<bool>());
+        // Reversal switched OFF on the arm 2026-08-30: it fired a long fade of a
+        // sharp drop on the thin meme coin CHILLGUY that LUKO never touched, which
+        // is exactly the unfillable-tail behaviour the 45-day study flagged. The
+        // section stays present (thresholds intact) but disabled.
+        Assert.False(primary["Reversal"]?["Enabled"]?.GetValue<bool>());
         Assert.Null(lukas["Reversal"]);
 
         // Both announce since 2026-08-24, each under its own label - the label is what
