@@ -1,22 +1,14 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  luko-real-days:
+  luko-equity:
     runs-on: self-hosted
     steps:
-      - name: LUKO - top 12 realized days (end-of-day daily_realized)
+      - name: LUKO daily equity (last portfolio value per day) + cycles
         run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with e as (select date(updated_at) d, (array_agg(daily_realized_pnl_eur order by updated_at desc))[1] r from portfolio_state_summary where bot_instance_id='futures-lukas-live' and daily_realized_pnl_eur is not null group by date(updated_at)) select d, round(r::numeric,2) as realized_usd from e order by r desc nulls last limit 12"
-      - name: LUKO - worst 8 realized days
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F ',' -c \
+            "select date(utc) d, round((array_agg(portfolio_value_after_eur order by utc desc))[1]::numeric,2) eq from dry_run_cycle_facts where bot_instance_id='futures-lukas-live' group by date(utc) order by d"
+      - name: LUKO cash events (deposits/withdrawals that move equity without trading)
         run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with e as (select date(updated_at) d, (array_agg(daily_realized_pnl_eur order by updated_at desc))[1] r from portfolio_state_summary where bot_instance_id='futures-lukas-live' and daily_realized_pnl_eur is not null group by date(updated_at)) select d, round(r::numeric,2) as realized_usd from e order by r asc nulls last limit 8"
-      - name: LUKO - overall realized day distribution
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with e as (select date(updated_at) d, (array_agg(daily_realized_pnl_eur order by updated_at desc))[1] r from portfolio_state_summary where bot_instance_id='futures-lukas-live' and daily_realized_pnl_eur is not null group by date(updated_at)) select count(*) days, round(sum(r)::numeric,2) total, round(avg(r)::numeric,2) avg_day, sum((r>0)::int) green, sum((r<0)::int) red, round(max(r)::numeric,2) best, round(min(r)::numeric,2) worst from e"
-      - name: BYKO - same top 8, for comparison
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "with e as (select date(updated_at) d, (array_agg(daily_realized_pnl_eur order by updated_at desc))[1] r from portfolio_state_summary where bot_instance_id='futures-live' and daily_realized_pnl_eur is not null group by date(updated_at)) select d, round(r::numeric,2) as realized_usd from e order by r desc nulls last limit 8"
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F ',' -c \
+            "select date(occurred_at_utc) d, round(sum(amount_eur)::numeric,2) cash_move from portfolio_cash_events where bot_instance_id='futures-lukas-live' group by date(occurred_at_utc) order by d" 2>&1 | head -40 || echo "no cash_events table/cols"
