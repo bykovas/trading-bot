@@ -171,7 +171,8 @@ public sealed class FuturesEntryAnnouncementTests
             Byko, "BYKO", "ARB/USD", "LONG", 0.103285m, 15m, 150m, 10m, "Breakout",
             0.10742m, 0.10122m, 4m, 2m, 0.85m, 1.66m, null, "Reversal");
 
-        Assert.Equal(Byko + "\U0001F4B2 BYKO · ARB/USD <b>LONG</b> ↗️ · Reversal", text.Split('\n')[0]);
+        // Reversal also earns the ⚠️ (LUKO has no reversal book), after the 💲 mark.
+        Assert.Equal(Byko + "\U0001F4B2⚠️ BYKO · ARB/USD <b>LONG</b> ↗️ · Reversal", text.Split('\n')[0]);
     }
 
     [Fact]
@@ -196,6 +197,36 @@ public sealed class FuturesEntryAnnouncementTests
 
         Assert.EndsWith("<b>SHORT</b> ↘️", open.Split('\n')[0]);
         Assert.EndsWith("uždaryta", close.Split('\n')[0]);
+    }
+
+    // ⚠️ marks a trade LUKO would not have opened or closed. Today: a Reversal-book entry
+    // (open), or a max-hold release (close). It sits after the emoji head, before the label.
+    [Fact]
+    public void A_reversal_open_is_flagged_as_diverging_from_luko()
+    {
+        var rev = FuturesEntryAnnouncement.Compose(
+            Byko, "BYKO", "ARB/USD", "LONG", 0.1m, 15m, 150m, 10m, "Breakout",
+            0.107m, 0.101m, 4m, 2m, null, null, null, "Reversal");
+        var mom = FuturesEntryAnnouncement.Compose(
+            Byko, "BYKO", "ARB/USD", "LONG", 0.1m, 15m, 150m, 10m, "Breakout",
+            0.107m, 0.101m, 4m, 2m, null, null, null, "Momentum");
+
+        Assert.StartsWith(Byko + "\U0001F4B2⚠️ BYKO ·", rev);
+        Assert.DoesNotContain("⚠️", mom);
+    }
+
+    [Fact]
+    public void A_max_hold_release_close_is_flagged_but_a_normal_close_is_not()
+    {
+        var maxHold = FuturesEntryAnnouncement.ComposeClose(
+            Byko, "BYKO", "OP/USD", "SHORT", 15m, 150m, 10m, 1m, 1m, 0.1m,
+            TimeSpan.FromHours(7), "EXCHANGE_MAX_HOLD_RELEASE", "Momentum");
+        var normal = FuturesEntryAnnouncement.ComposeClose(
+            Byko, "BYKO", "OP/USD", "SHORT", 15m, 150m, 10m, 1m, 1m, 0.1m,
+            TimeSpan.FromHours(7), "SELL_STOP_LOSS", "Momentum");
+
+        Assert.Contains("⚠️", maxHold);
+        Assert.DoesNotContain("⚠️", normal);
     }
 
     private static string WithDetails() =>

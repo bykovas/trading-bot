@@ -2998,7 +2998,13 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const liquidation = Number(position.liquidationDistancePercent);
       const atRisk = Number.isFinite(liquidation) && liquidation < 8;
 
+      // ⚠️ = a trade LUKO would not have opened or closed: a Reversal-book entry, or a
+      // max-hold release. Not the TP/SL differences (those are on every arm trade). Derived
+      // from the strategy tag and the exit mode, so it needs no extra field from the API.
+      const divergesLuko = String(position.tradeStrategy || "").toUpperCase() === "REVERSAL"
+        || String(position.exitMode || "").toUpperCase() === "MAX_HOLD_TRAIL";
       const badges = [
+        divergesLuko ? '<span class="bc-badge bc-badge--warn" title="LUKO to neatidarytų ar neuždarytų taip">⚠️ ne kaip LUKO</span>' : "",
         `<span class="bc-badge bc-badge--${side === "SHORT" ? "red" : "green"}">Atidariau ${esc(side || "—")}</span>`,
         Number.isFinite(leverage) && leverage ? `<span class="bc-badge bc-badge--neutral">${esc(num(leverage, 0))}x</span>` : "",
         Number.isFinite(leverage) && leverage ? '<span class="bc-badge bc-badge--neutral">Futures</span>' : "",
@@ -3072,6 +3078,12 @@ html,body{margin:0;background:var(--bg-void);color:var(--ink)}
       const isExit = isExitAction(trade.action);
       const log = String(trade.log || "");
       const badges = [];
+      // ⚠️ when the trade diverges from LUKO's decision: a Reversal-book entry, or a
+      // max-hold release close. Not the TP/SL parameter differences.
+      const exitCode = String(trade.exitReasonCode || "").toUpperCase();
+      const divergesLuko = String(trade.tradeStrategy || "").toUpperCase() === "REVERSAL"
+        || exitCode === "EXCHANGE_MAX_HOLD_RELEASE" || exitCode === "SELL_MAX_HOLD_RELEASE" || exitCode === "SELL_MAX_HOLD";
+      if (divergesLuko) badges.push('<span class="bc-badge bc-badge--warn" title="LUKO to neatidarytų ar neuždarytų taip">⚠️ ne kaip LUKO</span>');
       if (TRADE_BADGES[trade.action]) badges.push(TRADE_BADGES[trade.action]);
       if (isExit) {
         // Every exit reason the worker can emit gets its own badge, inferred from

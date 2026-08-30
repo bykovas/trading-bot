@@ -63,7 +63,7 @@ internal static class FuturesEntryAnnouncement
 
         // The strategy that opened it - Momentum or Reversal - closes the head line, so
         // which book a trade belongs to is visible at a glance and never mixed.
-        text.Append(Head(emoji, OpenMark)).Append(label).Append(" · ").Append(pair)
+        text.Append(Head(emoji, OpenMark, DivergesFromLuko(strategy))).Append(label).Append(" · ").Append(pair)
             .Append(' ').Append(Bold(isLong ? "LONG" : "SHORT")).Append(' ')
             .Append(isLong ? ArrowLong : ArrowShort);
         if (!string.IsNullOrWhiteSpace(strategy))
@@ -139,7 +139,7 @@ internal static class FuturesEntryAnnouncement
         string? strategy = null)
     {
         var text = new StringBuilder();
-        text.Append(Head(emoji, CloseMark + (pnlUsd > 0m ? OutcomeProfit : OutcomeLoss)))
+        text.Append(Head(emoji, CloseMark + (pnlUsd > 0m ? OutcomeProfit : OutcomeLoss), DivergesFromLuko(strategy, reasonCode)))
             .Append(label).Append(" · ").Append(pair).Append(' ')
             .Append(Bold(side.ToUpperInvariant())).Append(" uždaryta");
         if (!string.IsNullOrWhiteSpace(strategy))
@@ -165,10 +165,27 @@ internal static class FuturesEntryAnnouncement
         return text.ToString();
     }
 
-    // The instance's face, then the mark for what happened, then a space before the label.
-    // An instance without a configured emoji simply starts with the mark, as before.
-    private static string Head(string emoji, string mark) =>
-        string.IsNullOrWhiteSpace(emoji) ? mark + " " : emoji + mark + " ";
+    // ⚠️ marks a trade LUKO would NOT have opened or closed - a decision divergence, not the
+    // TP/SL parameter differences (those differ on every arm trade and would make the flag
+    // meaningless). Today that means a Reversal-book entry (LUKO has no reversal) or a max-hold
+    // release close (LUKO has no max-hold). Both are dormant under the current arm config, so
+    // the flag stays off until such a rule is turned on - forward-looking by design. Derived
+    // from the strategy tag and the close reason, so no new persisted state is needed.
+    internal static bool DivergesFromLuko(string? strategy, string? reasonCode = null) =>
+        (strategy?.Equals("Reversal", StringComparison.OrdinalIgnoreCase) == true)
+        || (reasonCode is not null
+            && (reasonCode.Equals("EXCHANGE_MAX_HOLD_RELEASE", StringComparison.OrdinalIgnoreCase)
+                || reasonCode.Equals("SELL_MAX_HOLD_RELEASE", StringComparison.OrdinalIgnoreCase)
+                || reasonCode.Equals("SELL_MAX_HOLD", StringComparison.OrdinalIgnoreCase)));
+
+    // The instance's face, then the mark for what happened, then a ⚠️ when the trade diverges
+    // from LUKO, then a space before the label. An instance without a configured emoji simply
+    // starts with the mark, as before.
+    private static string Head(string emoji, string mark, bool diverges = false)
+    {
+        var head = string.IsNullOrWhiteSpace(emoji) ? mark : emoji + mark;
+        return diverges ? head + "⚠️ " : head + " ";
+    }
 
     // Telegram gives a bot bold but no colour, so the figures carry the emphasis and the
     // icons carry the verdict. HTML rather than MarkdownV2: the only characters needing an
