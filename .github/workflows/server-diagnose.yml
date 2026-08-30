@@ -1,14 +1,14 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  luko-equity:
+  spread-dist:
     runs-on: self-hosted
     steps:
-      - name: LUKO daily equity (last portfolio value per day) + cycles
+      - name: futures-live spread_percent distribution (for maker-fill model)
         run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F ',' -c \
-            "select date(utc) d, round((array_agg(portfolio_value_after_eur order by utc desc))[1]::numeric,2) eq from dry_run_cycle_facts where bot_instance_id='futures-lukas-live' group by date(utc) order by d"
-      - name: LUKO cash events (deposits/withdrawals that move equity without trading)
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select count(*) n, round(avg(spread_percent)::numeric,4) mean, round((percentile_cont(0.25) within group (order by spread_percent))::numeric,4) p25, round((percentile_cont(0.5) within group (order by spread_percent))::numeric,4) median, round((percentile_cont(0.75) within group (order by spread_percent))::numeric,4) p75, round((percentile_cont(0.9) within group (order by spread_percent))::numeric,4) p90 from dry_run_decision_facts where bot_instance_id='futures-live' and spread_percent is not null and spread_percent>0 and desired_position in ('LONG','SHORT')"
+      - name: spread by side
         run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F ',' -c \
-            "select date(occurred_at_utc) d, round(sum(amount_eur)::numeric,2) cash_move from portfolio_cash_events where bot_instance_id='futures-lukas-live' group by date(occurred_at_utc) order by d" 2>&1 | head -40 || echo "no cash_events table/cols"
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select desired_position, count(*) n, round(avg(spread_percent)::numeric,4) mean, round((percentile_cont(0.5) within group (order by spread_percent))::numeric,4) median from dry_run_decision_facts where bot_instance_id='futures-live' and spread_percent is not null and spread_percent>0 and desired_position in ('LONG','SHORT') group by desired_position"
