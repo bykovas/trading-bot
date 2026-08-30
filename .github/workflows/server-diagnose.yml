@@ -1,18 +1,18 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  lukas-value-basis:
+  why-skipped:
     runs-on: self-hosted
     steps:
-      - name: LUKO - raw Kraken wallets the bot saw (marginBalance vs availableMargin)
-        run: |
-          docker logs --since 20m trading-bot-lukas-futures-worker-live 2>&1 \
-            | grep -E "futures-kraken-wallet|futures cycle done" | tail -20 || echo "no wallet lines in window"
-      - name: LUKO - what the bot booked as cash/total this cycle
-        run: |
-          docker logs --since 20m trading-bot-lukas-futures-worker-live 2>&1 \
-            | grep -E "futures cycle done" | tail -3 || echo "no cycle line"
-      - name: LUKO - open positions (used margin + unrealized)
+      - name: BYKO - ETH/AAVE/BNB decisions, why opened or skipped (last 3h)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select pair, side, round(entry_price::numeric,5) as entry, round(initial_margin_eur::numeric,3) as used_margin, round(unrealized_pnl_eur::numeric,3) as upnl, round(mark_price::numeric,5) as mark from portfolio_position_state where bot_instance_id='futures-lukas-live' order by pair"
+            "select to_char(utc,'HH24:MI') as t, pair, desired_position as want, round(score::numeric,3) as score, round(long_score_threshold::numeric,3) as thr, round(spread_percent::numeric,3) as spread, coalesce(left(entry_rejection_reason,60),'-') as rejection from dry_run_decision_facts where bot_instance_id='futures-live' and pair in ('ETH/USD','AAVE/USD','BNB/USD') and utc >= now() - interval '3 hours' order by pair, utc desc limit 60"
+      - name: BYKO - how many slots are actually filled right now
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select count(*) as open_positions, string_agg(pair, ', ' order by pair) as pairs from portfolio_position_state where bot_instance_id='futures-live'"
+      - name: BYKO - did ETH ever get a non-flat desired in the window?
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select pair, desired_position, count(*) from dry_run_decision_facts where bot_instance_id='futures-live' and pair in ('ETH/USD','AAVE/USD') and utc >= now() - interval '3 hours' group by pair, desired_position order by pair"
