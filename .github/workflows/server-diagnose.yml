@@ -1,14 +1,10 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  price-hist:
+  regime-d-live-positions:
     runs-on: self-hosted
     steps:
-      - name: Min/max price the bot saw for HBAR and DOGE today (from decision facts)
+      - name: futures-live open positions - is the stop the ATR stop and is the TP gone?
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select d.pair, count(*) as cycles, round(min(d.price)::numeric,5) as min_price, round(max(d.price)::numeric,5) as max_price, to_char(min(d.utc),'HH24:MI') as from_t, to_char(max(d.utc),'HH24:MI') as to_t from dry_run_decision_facts d where d.bot_instance_id='futures-live' and d.pair in ('HBAR/USD','DOGE/USD') and d.utc >= '2026-08-29 06:00' group by d.pair"
-      - name: DOGE price minute-by-minute around the low (find the deep-profit window)
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select to_char(d.utc,'HH24:MI') as utc, round(d.price::numeric,5) as price, d.desired_position, coalesce(left(r.reason,55),'-') as reason from dry_run_decision_facts d left join dry_run_decision_risk_reasons r on r.cycle_id=d.cycle_id and r.decision_index=d.decision_index and r.reason_index=0 where d.bot_instance_id='futures-live' and d.pair='DOGE/USD' and d.utc >= '2026-08-29 10:10' and extract(minute from d.utc) in (0,15,30,45) order by d.utc limit 40"
+            "select pair, side, to_char(opened_at_utc,'HH24:MI') as opened, round(entry_price::numeric,5) as entry, round(stop_distance_pct::numeric,3) as stop_pct, round(stop_loss_price::numeric,5) as sl_price, take_profit_price as tp_price, round(atr_pct::numeric,3) as atr_pct, coalesce(trailing_stop_state,'-') as trail, coalesce(tp_order_state,'-') as tp_state from portfolio_position_state where bot_instance_id='futures-live' order by pair"

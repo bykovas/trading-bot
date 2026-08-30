@@ -1110,8 +1110,11 @@ internal sealed class FuturesDecisionWorker(
             entryChannel,
             opened?.TakeProfitPrice,
             opened?.StopLossPrice,
-            config.TpSl.TakeProfitPercent,
-            config.TpSl.StopLossPercent,
+            // The ACTUAL distances the position was opened with, not the fixed config percents.
+            // Under regime D the stop is the ATR stop (e.g. 0.6%, not 1.75%) and there is no TP,
+            // so the post must speak the real number instead of a legacy constant it no longer uses.
+            opened?.TakeProfitDistancePct ?? config.TpSl.TakeProfitPercent,
+            opened?.StopDistancePct ?? config.TpSl.StopLossPercent,
             btc24hChangePct,
             pair24hChangePct,
             details,
