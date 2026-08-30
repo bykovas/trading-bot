@@ -400,6 +400,8 @@ internal sealed class FuturesBotConfiguration
         Filters.MinExitDepthMultiple = Filters.MinExitDepthMultiple <= 0m ? 5m : Filters.MinExitDepthMultiple;
         Filters.MaxExitImpactPct = Filters.MaxExitImpactPct <= 0m ? 0.5m : Filters.MaxExitImpactPct;
         Exits.StopAtrMult = Exits.StopAtrMult <= 0m ? 1m : Exits.StopAtrMult;
+        Exits.TrailingActivationRMultiple = Math.Clamp(Exits.TrailingActivationRMultiple, 0m, 10m);
+        Exits.TrailingAtrMultiple = Math.Clamp(Exits.TrailingAtrMultiple, 0m, 10m);
         Exits.MinStopAtrFloor = Exits.MinStopAtrFloor <= 0m ? 1.5m : Exits.MinStopAtrFloor;
         Exits.TakeProfitAtrMult = Exits.TakeProfitAtrMult <= 0m ? 3m : Exits.TakeProfitAtrMult;
         Exits.MinRewardRiskMultiple = Exits.MinRewardRiskMultiple <= 0m ? 2m : Exits.MinRewardRiskMultiple;
@@ -924,6 +926,24 @@ internal sealed class FuturesExitOptions
     // has stopped leaves on its first wobble.
     public decimal MaxHoldTrailingStopPercent { get; set; }
     public decimal TrailingActivationBufferPct { get; set; } = 0m;
+
+    // Exit regime D (arm only), 2026-08-30. Master switch: false = the exact current exit
+    // logic (instant rollback), true = ATR-scaled trailing with no fixed take-profit.
+    // When on: the stop is StopAtrMult x ATR floored by MinStopDistancePct (NOT the 1.75%
+    // TpSl floor); no fixed TP order is placed; the trail arms at TrailingActivationRMultiple
+    // times the stop distance (R) instead of at the take-profit level; and the trail distance
+    // is TrailingAtrMultiple x ATR (still floored at the spread and rounded to 2dp by
+    // EffectiveTrailingStopPercent). The existing signal-reversal exit is unchanged and stays on.
+    // Measured 45 days, coin-day clustered: +0.077%/coin-day, positive in both halves.
+    public bool AtrTrailingRegimeEnabled { get; set; }
+
+    // Trail activation as a multiple of R (the stop distance). Only used when the regime is on
+    // and > 0; otherwise the trail arms at the working take-profit as before.
+    public decimal TrailingActivationRMultiple { get; set; }
+
+    // Trail distance as a multiple of ATR%. Only used when the regime is on and > 0; otherwise
+    // TrailingStopPercent (fixed %) is used.
+    public decimal TrailingAtrMultiple { get; set; }
 }
 
 internal sealed class FuturesRegimeOptions

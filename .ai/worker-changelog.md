@@ -1,3 +1,7 @@
+## 2026-08-30-exit-regime-d-scaffolding-config
+
+- First slice of exit regime D (arm only; see src/PLAN-exit-regime-D.md). Added three FuturesExitOptions fields: `AtrTrailingRegimeEnabled` (master rollback switch, default false), `TrailingActivationRMultiple`, `TrailingAtrMultiple` (both default 0, clamped 0..10 in Normalize). No behaviour change yet - nothing reads them until the sizer and trailing-arm slices land. Config-only.
+
 ## 2026-08-30-reversal-book-switched-off-on-the-arm
 
 - `Reversal.Enabled` false on BYKO (was true). It fired a Reversal LONG - a fade of a sharp drop - on the thin meme coin CHILLGUY/USD that the control never took, and the drop continued toward the stop. That is exactly the unfillable-thin-coin behaviour the 45-day study flagged: the book barely fires, its apparent edge was carried by three symbols, and it lives in illiquid names. Section kept (thresholds intact) but disabled, so re-enabling later is one flag.
