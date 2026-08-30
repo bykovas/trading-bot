@@ -1,3 +1,9 @@
+## 2026-08-30-exit-regime-d-goes-live-on-the-arm
+
+- Exit regime D slice 5/7: **turned ON for BYKO** (control untouched). BYKO Exits now: AtrTrailingRegimeEnabled true, StopAtrMult 1.25, MinStopDistancePct 0.3, TrailingActivationRMultiple 1.0, TrailingAtrMultiple 1.5; the existing signal-reversal exit stays on and max-hold stays off. So a BYKO entry now stops at 1.25x ATR (floored 0.3, capped 3), places NO fixed take-profit, arms the trail at +1R with a 1.5x ATR distance, and otherwise exits when the entry signal fades. Measured +0.077%/coin-day over 45 days, positive in both halves - the best exit configuration tested, though still near breakeven (no entry edge).
+- The sizer gates StopAtrMult and MinStopDistancePct behind the master switch, so flipping AtrTrailingRegimeEnabled=false is an instant, exact rollback to the legacy 1x-ATR / StopLossPercent-floored stop with a fixed TP. Guard test pins the arm/control divergence.
+- Applies to NEW entries; positions already open keep their exchange TP/SL until the regime trail arms at +1R.
+
 ## 2026-08-30-exit-regime-d-atr-trail-arm
 
 - Exit regime D slice 3+4/7 (still inert until the switch flips in slice 5). `TryArmRegimeTrailAsync` arms the trailing stop the moment a live, bot-owned position reaches `TrailingActivationRMultiple` x its stop distance (R) of profit measured in the trade's direction; the trail distance is `TrailingAtrMultiple` x AtrPct, written to the position so ActivateTrailingStopAsync uses it and still floors it at 2x spread and rounds to 2dp. Called right after the max-hold arm, before tpSl.Evaluate. Because it is a genuine profit trail it keeps the ordinary EXCHANGE_TRAILING_STOP close code; the arm logs `regime trail: +X% (NR) reached, MxATR`, a failed arm logs `futures-regime-trail: ... NOT armed`. Tests pin ProfitPercentInDirection (signed by side) and the ATR-scaled-then-spread-floored distance.

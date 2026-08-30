@@ -30,13 +30,18 @@ internal static class FuturesPositionSizer
         var requestedLeverage = leverage <= 0m ? 1m : leverage;
         leverage = Math.Clamp(requestedLeverage, 1m, config.Futures.MaxLeverage);
 
-        var stopFloorPct = config.Exits.MinStopDistancePct > 0m
+        // The ATR multiplier and the small stop floor apply ONLY under exit regime D, so
+        // flipping AtrTrailingRegimeEnabled off is an instant rollback to the legacy stop
+        // (1x ATR floored at StopLossPercent). Off, the multiplier is a flat 1 and the floor
+        // is StopLossPercent - exactly the current behaviour - whatever the regime fields hold.
+        var regime = config.Exits.AtrTrailingRegimeEnabled;
+        var stopFloorPct = regime && config.Exits.MinStopDistancePct > 0m
             ? config.Exits.MinStopDistancePct
             : (config.TpSl.StopLossPercent > 0m ? config.TpSl.StopLossPercent : 0.75m);
         var stopCapPct = config.Exits.StopDistanceCapPct > 0m
             ? config.Exits.StopDistanceCapPct
             : Math.Max(stopFloorPct * 4m, 3m);
-        var atrMult = config.Exits.StopAtrMult > 0m ? config.Exits.StopAtrMult : 1m;
+        var atrMult = regime && config.Exits.StopAtrMult > 0m ? config.Exits.StopAtrMult : 1m;
 
         decimal stopDistancePct;
         string stopSource;

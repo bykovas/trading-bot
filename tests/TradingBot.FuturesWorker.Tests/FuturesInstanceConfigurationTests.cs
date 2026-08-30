@@ -103,6 +103,12 @@ public sealed class FuturesInstanceConfigurationTests
         // 45-day entries (+0.04%/coin-day, the only policy positive in both halves).
         Assert.True(primary["Exits"]?["SignalReversalExitEnabled"]?.GetValue<bool>());
         Assert.Equal(0m, primary["Exits"]?["MaxHoldTrailingStopPercent"]?.GetValue<decimal>());
+        // Exit regime D is on for the arm and off/absent for the control.
+        Assert.True(primary["Exits"]?["AtrTrailingRegimeEnabled"]?.GetValue<bool>());
+        Assert.Equal(1.25m, primary["Exits"]?["StopAtrMult"]?.GetValue<decimal>());
+        Assert.Equal(1m, primary["Exits"]?["TrailingActivationRMultiple"]?.GetValue<decimal>());
+        Assert.Equal(1.5m, primary["Exits"]?["TrailingAtrMultiple"]?.GetValue<decimal>());
+        Assert.Null(lukas["Exits"]?["AtrTrailingRegimeEnabled"]);
         Assert.Null(lukas["Exits"]?["SignalReversalExitEnabled"]);
         // The control carries neither knob: the experiment must never leak into it.
         Assert.Null(lukas["Futures"]?["DisabledLongEntryChannels"]);
@@ -171,6 +177,13 @@ public sealed class FuturesInstanceConfigurationTests
             ("TpSl", "TrailingStopPercent"),
             ("TpSl", "TrailingStopMinSpreadMultiple"),
             ("Exits", "SignalReversalExitEnabled"),
+            // Exit regime D (arm only, 2026-08-30): ATR-scaled trailing, no fixed TP.
+            // The master switch plus its stop/trail parameters. Rollback = switch false.
+            ("Exits", "AtrTrailingRegimeEnabled"),
+            ("Exits", "TrailingActivationRMultiple"),
+            ("Exits", "TrailingAtrMultiple"),
+            ("Exits", "StopAtrMult"),
+            ("Exits", "MinStopDistancePct"),
             // Max hold judged by whether the position is still leading, not by where the
             // price sits relative to entry. Arm only; the control keeps the old rule, and
             // the knob at zero is what leaves it untouched.

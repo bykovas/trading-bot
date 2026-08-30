@@ -65,7 +65,7 @@ by `AtrTrailingRegimeEnabled` (see sizer task) — do NOT add a separate flag.
       (`futures-trailing-arm` line already logs distancePct; extend it with
       `regime=ATR act=<R> atr=<pct>`). No new close code strictly required; the divergence marker
       (task 6) carries the "not LUKO" signal. Commit. Hash: ____
-- [ ] **5. appsettings + guard test.** BYKO appsettings.json Exits: AtrTrailingRegimeEnabled true,
+- [x] **5. appsettings + guard test.** BYKO appsettings.json Exits: AtrTrailingRegimeEnabled true,
       StopAtrMult 1.25, TrailingActivationRMultiple 1.0, TrailingAtrMultiple 1.5,
       MinStopDistancePct 0.3. Add the four new keys to the guard-test allow-list (`mayDiffer`) and
       any explicit value assertions. LUKO untouched. Commit. Hash: ____
@@ -100,3 +100,5 @@ by `AtrTrailingRegimeEnabled` (see sizer task) — do NOT add a separate flag.
 - Task 2 done: stop already ATR-based via config (no code change) - verified by new sizer test (1.25xATR floored 0.3, cap flag). Fixed TP suppressed under regime in FuturesVirtualPortfolio (TakeProfitPrice/Distance/ExchangeTakeProfitPrice null when AtrTrailingRegimeEnabled), which also stops the live TP order (placed only when ExchangeTakeProfitPrice>0). SL untouched.
 
 - Task 3+4 done: TryArmRegimeTrailAsync arms the trail at +TrailingActivationRMultiple x StopDistancePct, distance = TrailingAtrMultiple x AtrPct (set on the position, run through EffectiveTrailingStopPercent). Called right after the max-hold arm. Keeps EXCHANGE_TRAILING_STOP close code; the arm reason string logs '+X% (NR) reached, MxATR', and a NOT-armed line is 'futures-regime-trail'. Tests: ProfitPercentInDirection sign, ATR-scaled distance + spread floor. Inert until slice 5.
+
+- Task 5 done: sizer now gates StopAtrMult/MinStopDistancePct behind AtrTrailingRegimeEnabled (off = legacy 1xATR floored StopLossPercent = instant rollback). BYKO Exits: AtrTrailingRegimeEnabled true, StopAtrMult 1.25, MinStopDistancePct 0.3, TrailingActivationRMultiple 1.0, TrailingAtrMultiple 1.5. Guard allow-list + value assertions updated. REGIME D IS NOW LIVE on BYKO after this deploy. Remaining: task 6 (LUKO-divergence ⚠️ marker), task 7 (final/delete plan).
