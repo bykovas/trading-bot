@@ -1,3 +1,7 @@
+## 2026-08-31-shorts-back-on-the-arm
+
+- Owner-directed, same day: `Futures.AllowShorts` back to true on futures-live. The morning's ban blocked ~17 short episodes (416 signal-cycles, 0 opened, verified) but the owner chose to let the arm trade its full book again rather than freeze the lever mid-experiment. Guard allow-list entry removed (arm and control agree again). The research verdict on shorts (systematic drag, no rescuing regime) stands in `.ai/strategy-challengers.md` - this revert is a choice, not new evidence.
+
 ## 2026-08-31-shorts-off-on-the-arm
 
 - Owner-directed: `Futures.AllowShorts` false on futures-live (BYKO). The control (futures-lukas-live) keeps shorts ON, so the arm-vs-control delta now also measures the value of dropping shorts. Master flag, gated at every layer (LongShortStrategy never forms a Short desire; MarginRiskManager and FuturesVirtualPortfolio refuse one), so no short can open on the arm regardless of score or gate. Reversal book is already off, so this leaves the arm long-only.

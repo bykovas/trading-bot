@@ -167,10 +167,6 @@ public sealed class FuturesInstanceConfigurationTests
             ("Telegram", "Emoji"),
             // The experiment arm's own knobs; absent on the control by design.
             ("Futures", "DisabledLongEntryChannels"),
-            // Shorts disabled on the arm (2026-08-31, owner-directed): every research cut
-            // shows shorts a systematic drag (-0.15..-0.57 $/200 at every rank/score/regime),
-            // with no robust regime that saves them. The control keeps shorts on.
-            ("Futures", "AllowShorts"),
             ("Shorts", "MaxBtc24hRisePercentForShort"),
             ("Shorts", "RequireBtc4hDropPercent"),
             // The whole exit triple diverges since 2026-08-28 at the owner's direction:
