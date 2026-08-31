@@ -1,3 +1,9 @@
+## 2026-08-31-shorts-off-on-the-arm
+
+- Owner-directed: `Futures.AllowShorts` false on futures-live (BYKO). The control (futures-lukas-live) keeps shorts ON, so the arm-vs-control delta now also measures the value of dropping shorts. Master flag, gated at every layer (LongShortStrategy never forms a Short desire; MarginRiskManager and FuturesVirtualPortfolio refuse one), so no short can open on the arm regardless of score or gate. Reversal book is already off, so this leaves the arm long-only.
+- Why: every research cut this session shows shorts a systematic drag with no robust regime that rescues them - entry-rank expectancy negative at every rank (-0.08 to -0.57 $/200), every score bucket negative, and the point-in-time BTC buckets never make shorts pay out-of-sample. Dropping them removes a persistent loss rather than chasing a rare edge.
+- Guard test: `Futures.AllowShorts` added to the sanctioned arm/control divergence allow-list (control still true). Rollback = set it back to true. No sizing/exit/slot logic touched.
+
 ## 2026-08-30-exit-regime-d-actually-executes-live
 
 - Fix: exit regime D was deployed but INERT on live BYKO. A FET/USD entry opened an hour after the D rollout still carried a fixed 1.75% stop and a 3.5% take-profit - exactly the pre-D behaviour - because the live execution paths never used the tested D exits. Three defects, all fixed so live BYKO now runs the D that was backtested (+0.077%/coin-day). No parameters changed; strategy, control (LUKO) and non-regime behaviour are untouched.
