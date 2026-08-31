@@ -1,18 +1,18 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  short-verify:
+  blocked-shorts-now:
     runs-on: self-hosted
     steps:
-      - name: the 56 SHORT desires - their rejection reasons
+      - name: short signals >= threshold blocked since shorts-off deploy (05:25 UTC)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select coalesce(entry_rejection_reason,'(none)') reason, count(*) from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-31 05:25' and desired_position='SHORT' group by 1 order by 2 desc"
-      - name: risk reasons text for those decisions (expect AllowShorts refusal)
+            "select count(*) blocked_signals, count(distinct pair) pairs, to_char(max(utc),'HH24:MI') latest from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-31 05:25' and short_score is not null and short_score >= coalesce(short_score_threshold,0.8) and desired_position='FLAT'"
+      - name: distinct short episodes (pair x hour) and top pairs
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select left(r.reason,70) reason, count(*) from dry_run_decision_facts f join dry_run_decision_risk_reasons r on r.cycle_id=f.cycle_id and r.decision_index=f.decision_index where f.bot_instance_id='futures-live' and f.utc >= '2026-08-31 05:25' and f.desired_position='SHORT' group by 1 order by 2 desc limit 8"
-      - name: any actual SHORT position opened since deploy (must be 0)
+            "select pair, count(*) n, round(max(short_score)::numeric,2) best from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-31 05:25' and short_score is not null and short_score >= coalesce(short_score_threshold,0.8) and desired_position='FLAT' group by pair order by n desc limit 10"
+      - name: shorts actually open now (must be 0)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select count(*) short_positions_now from portfolio_position_state where bot_instance_id='futures-live' and side='SHORT'"
+            "select count(*) shorts_open from portfolio_position_state where bot_instance_id='futures-live' and side='SHORT'"
