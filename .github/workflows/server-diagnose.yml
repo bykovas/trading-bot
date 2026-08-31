@@ -1,22 +1,14 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  byko-drawdown:
+  market-morning:
     runs-on: self-hosted
     steps:
-      - name: BYKO equity last 8h (hourly)
+      - name: BTC price seen by the bot, hourly this morning
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select to_char(date_trunc('hour',utc),'MM-DD HH24:MI') h, round((array_agg(portfolio_value_after_eur order by utc desc))[1]::numeric,2) eq, round((array_agg(cash_after_eur order by utc desc))[1]::numeric,2) cash from dry_run_cycle_facts where bot_instance_id='futures-live' and utc >= now() - interval '8 hours' group by date_trunc('hour',utc) order by h"
-      - name: BYKO current open positions
+            "select to_char(date_trunc('hour',utc),'HH24:MI') h, round((array_agg(price order by utc desc))[1]::numeric,0) btc from dry_run_decision_facts where bot_instance_id='futures-live' and pair in ('XBT/USD','BTC/USD') and utc >= now() - interval '9 hours' group by 1 order by 1"
+      - name: closes today with reasons (action history)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select pair, side, round(entry_price::numeric,5) entry, round(mark_price::numeric,5) mark, round(unrealized_pnl_eur::numeric,2) upnl, round(stop_distance_pct::numeric,3) stop_pct, coalesce(trailing_stop_state,'-') trail, to_char(opened_at_utc,'HH24:MI') opened from portfolio_position_state where bot_instance_id='futures-live' order by opened_at_utc"
-      - name: BYKO recent closes last 6h (from decision facts reduce-only exits)
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select to_char(utc,'HH24:MI') t, pair, desired_position want, coalesce(left(entry_rejection_reason,40),'-') reason from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= now() - interval '6 hours' and desired_position='FLAT' and entry_rejection_reason is null order by utc desc limit 30"
-      - name: BYKO trade counts by hour (activity)
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select to_char(date_trunc('hour',opened_at_utc),'MM-DD HH24') h, count(*) opened from portfolio_position_state where bot_instance_id='futures-live' group by 1 order by 1 desc limit 6"
+            "select to_char(utc,'HH24:MI') t, pair, left(coalesce(reason,''),70) reason from portfolio_action_history_state where bot_instance_id='futures-live' and utc >= now() - interval '7 hours' and (action like '%CLOSE%' or reason ilike '%stop%' or reason ilike '%uzdar%' or action like '%SELL%') order by utc desc limit 20" 2>&1 | head -30 || true
