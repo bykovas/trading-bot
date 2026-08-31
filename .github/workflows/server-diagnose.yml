@@ -1,13 +1,18 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  short-desires-when:
+  short-verify:
     runs-on: self-hosted
     steps:
-      - name: timestamps of SHORT desires after 05:25 (are they pre-restart tail?)
+      - name: the 56 SHORT desires - their rejection reasons
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select to_char(min(utc),'HH24:MI:SS') first, to_char(max(utc),'HH24:MI:SS') last, count(*) n from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-31 05:25' and desired_position='SHORT'"
-      - name: worker restart time (container start)
+            "select coalesce(entry_rejection_reason,'(none)') reason, count(*) from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-31 05:25' and desired_position='SHORT' group by 1 order by 2 desc"
+      - name: risk reasons text for those decisions (expect AllowShorts refusal)
         run: |
-          docker inspect trading-bot-futures-worker-live --format 'started {{.State.StartedAt}}'
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select left(r.reason,70) reason, count(*) from dry_run_decision_facts f join dry_run_decision_risk_reasons r on r.cycle_id=f.cycle_id and r.decision_index=f.decision_index where f.bot_instance_id='futures-live' and f.utc >= '2026-08-31 05:25' and f.desired_position='SHORT' group by 1 order by 2 desc limit 8"
+      - name: any actual SHORT position opened since deploy (must be 0)
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select count(*) short_positions_now from portfolio_position_state where bot_instance_id='futures-live' and side='SHORT'"
