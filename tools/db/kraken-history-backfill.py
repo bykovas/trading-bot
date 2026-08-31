@@ -77,6 +77,20 @@ def copy_cell(value: Any) -> str:
     return text.replace("\\", "\\\\").replace("\t", r"\t").replace("\n", r"\n")
 
 
+def sql_type(column: str) -> str:
+    if column in ("venue", "pair"):
+        return "text"
+    if column in ("utc", "open_time"):
+        return "timestamptz"
+    if column == "timeframe_minutes":
+        return "integer"
+    return "numeric"
+
+
+def stage_select(columns: list[str]) -> str:
+    return ", ".join(f"{name}::{sql_type(name)}" for name in columns)
+
+
 def normalize_pair(symbol: str, pair: str | None = None) -> str:
     if pair and "/" in pair:
         return pair
@@ -227,14 +241,14 @@ class Database:
         sql = f"""
 begin;
 create temp table stage (
-    {", ".join(f"{name} text" for name in columns)}
+    {", ".join(f"{name} {sql_type(name)}" for name in columns)}
 ) on commit drop;
 \\copy stage from stdin
 {payload}
 \\.
 with inserted as (
     insert into {table} ({col_sql})
-    select {col_sql} from stage
+    select {stage_select(columns)} from stage
     on conflict do nothing
     returning 1
 )
@@ -253,7 +267,7 @@ commit;
 
         payload = "\n".join("\t".join(copy_cell(value) for value in row) for row in rows)
         col_sql = ", ".join(columns)
-        stage_cols = ", ".join(f"{name} text" for name in columns)
+        stage_cols = ", ".join(f"{name} {sql_type(name)}" for name in columns)
         conn = self._psycopg.connect(**self._connect_kwargs)
         try:
             with conn:
@@ -269,7 +283,7 @@ commit;
                         f"""
                         with inserted as (
                             insert into {table} ({col_sql})
-                            select {col_sql} from stage
+                            select {stage_select(columns)} from stage
                             on conflict do nothing
                             returning 1
                         )
@@ -461,12 +475,11 @@ def load_candles(database: Database, sleep_s: float, limit: int) -> dict[str, An
     return {
         "before": before,
         "after": after,
-        "inserted": after - before,
-        "fetched_inserted_reported": inserted,
+        "inserted": inserted,
         "processed": processed,
         "pairs": len(tails),
         "errors": errors,
-        "first_mass_run": before == 0 and after > 0,
+        "first_mass_run": before == 0 and inserted > 0,
     }
 
 
@@ -688,7 +701,12 @@ def main() -> int:
     print("REPORT_JSON_BEGIN")
     print(json.dumps(report, indent=2))
     print("REPORT_JSON_END")
-    return 0
+    fatal = (
+        (not args.skip_funding and (funding.get("processed") or 0) == 0 and (funding.get("errors") or []))
+        or (not args.skip_candles and (candles.get("processed") or 0) == 0 and (candles.get("errors") or []))
+        or (not args.skip_depth and (depth.get("processed") or 0) == 0 and (depth.get("errors") or []))
+    )
+    return 2 if fatal else 0
 
 
 if __name__ == "__main__":
