@@ -1,30 +1,22 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  replay-coverage:
+  final-check:
     runs-on: self-hosted
     steps:
-      - name: market_candles coverage over the window
+      - name: does dry_run_decision_facts store funding / depth / atr point-in-time
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select timeframe_minutes tf, min(open_time) min_t, max(open_time) max_t, count(distinct date(open_time)) days, count(distinct pair) pairs, count(*) rows from market_candles group by 1 order by 1"
-      - name: market_candles inside 2026-07-08..2026-08-21 (15m)
+            "select column_name from information_schema.columns where table_name='dry_run_decision_facts' and (column_name ilike '%fund%' or column_name ilike '%depth%' or column_name ilike '%atr%' or column_name ilike '%liquid%' or column_name ilike '%spread%' or column_name ilike '%score%') order by 1"
+      - name: candle gaps for a top pair (15m cadence completeness in window)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select count(*) rows, count(distinct pair) pairs, count(distinct date(open_time)) days, min(open_time) min_t, max(open_time) max_t from market_candles where timeframe_minutes=15 and open_time >= '2026-07-08' and open_time < '2026-08-22'"
-      - name: market_snapshots (quote time series) coverage
+            "with c as (select open_time, lag(open_time) over (order by open_time) p from market_candles where pair='ETH/USD' and timeframe_minutes=15 and open_time>='2026-07-08' and open_time<'2026-08-22') select count(*) intervals, count(*) filter (where open_time-p > interval '15 min') gaps_gt15m, count(*) filter (where open_time-p > interval '1 hour') gaps_gt1h from c where p is not null"
+      - name: market_snapshots cadence (median seconds between snapshots per pair)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select min(utc) min_t, max(utc) max_t, count(distinct date(utc)) days, count(distinct pair) pairs, count(*) rows from market_snapshots where bot_instance_id='futures-live'"
-      - name: market_snapshots cadence + coverage inside window
+            "with s as (select utc, lag(utc) over (order by utc) p from market_snapshots where bot_instance_id='futures-live' and pair='ETH/USD' and utc>='2026-08-20' and utc<'2026-08-21') select count(*) n, round(avg(extract(epoch from utc-p))::numeric,0) mean_sec, round((percentile_cont(0.5) within group (order by extract(epoch from utc-p)))::numeric,0) median_sec from s where p is not null"
+      - name: how many pairs in candles vs current universe size
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select count(*) rows, count(distinct date(utc)) days, count(distinct pair) pairs, min(utc) min_t, max(utc) max_t from market_snapshots where bot_instance_id='futures-live' and utc >= '2026-07-08' and utc < '2026-08-22'"
-      - name: are quotes/orderbooks latest-only or time series (row counts)
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select 'market_quotes' t, count(*) rows, count(distinct pair) pairs from market_quotes union all select 'market_orderbooks', count(*), count(distinct pair) from market_orderbooks"
-      - name: decision facts history span (current-config decisions)
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select min(utc) min_t, max(utc) max_t, count(distinct date(utc)) days from dry_run_decision_facts where bot_instance_id='futures-live'"
+            "select count(distinct pair) pairs_with_candles_in_window from market_candles where timeframe_minutes=15 and open_time>='2026-08-01' and open_time<'2026-08-22'"
