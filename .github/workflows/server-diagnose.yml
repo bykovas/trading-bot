@@ -1,18 +1,13 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  blocked-shorts:
+  short-desires-when:
     runs-on: self-hosted
     steps:
-      - name: shorts that would have passed the score gate since the shorts-off deploy
+      - name: timestamps of SHORT desires after 05:25 (are they pre-restart tail?)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select count(*) as blocked_short_signals, count(distinct pair) as pairs, count(distinct date_trunc('hour',utc)) as hours from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-31 05:25' and short_score is not null and short_score >= coalesce(short_score_threshold,0.8) and desired_position='FLAT'"
-      - name: breakdown by pair (top 12)
+            "select to_char(min(utc),'HH24:MI:SS') first, to_char(max(utc),'HH24:MI:SS') last, count(*) n from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-31 05:25' and desired_position='SHORT'"
+      - name: worker restart time (container start)
         run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select pair, count(*) n, round(max(short_score)::numeric,2) best_score, min(to_char(utc,'HH24:MI')) first_t, max(to_char(utc,'HH24:MI')) last_t from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-31 05:25' and short_score is not null and short_score >= coalesce(short_score_threshold,0.8) and desired_position='FLAT' group by pair order by n desc limit 12"
-      - name: sanity - any SHORT desired since deploy (must be zero)
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select count(*) as short_desires_after_deploy from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-31 05:25' and desired_position='SHORT'"
+          docker inspect trading-bot-futures-worker-live --format 'started {{.State.StartedAt}}'
