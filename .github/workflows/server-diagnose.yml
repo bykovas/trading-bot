@@ -1,18 +1,22 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  blocked-shorts-now:
+  live-funnel:
     runs-on: self-hosted
     steps:
-      - name: short signals >= threshold blocked since shorts-off deploy (05:25 UTC)
+      - name: cycle cadence + candidate volume per day (futures-live, last 3 days)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select count(*) blocked_signals, count(distinct pair) pairs, to_char(max(utc),'HH24:MI') latest from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-31 05:25' and short_score is not null and short_score >= coalesce(short_score_threshold,0.8) and desired_position='FLAT'"
-      - name: distinct short episodes (pair x hour) and top pairs
+            "select date(utc) d, count(distinct cycle_id) cycles, count(*) candidate_rows, count(distinct pair) pairs, round(count(*)::numeric/nullif(count(distinct cycle_id),0),1) cand_per_cycle from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-29' group by 1 order by 1"
+      - name: 2026-08-30 funnel by desired_position
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select pair, count(*) n, round(max(short_score)::numeric,2) best from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-31 05:25' and short_score is not null and short_score >= coalesce(short_score_threshold,0.8) and desired_position='FLAT' group by pair order by n desc limit 10"
-      - name: shorts actually open now (must be 0)
+            "select desired_position, count(*) n from dry_run_decision_facts where bot_instance_id='futures-live' and date(utc)='2026-08-30' group by 1 order by 2 desc"
+      - name: 2026-08-30 reject-reason histogram (the funnel stages)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select count(*) shorts_open from portfolio_position_state where bot_instance_id='futures-live' and side='SHORT'"
+            "select coalesce(entry_rejection_reason,'(entered/none)') reason, count(*) n from dry_run_decision_facts where bot_instance_id='futures-live' and date(utc)='2026-08-30' group by 1 order by 2 desc limit 25"
+      - name: 2026-08-30 actual opens that day
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select count(*) opens from portfolio_position_state where bot_instance_id='futures-live' and date(opened_at_utc)='2026-08-30'" 2>&1 || true
