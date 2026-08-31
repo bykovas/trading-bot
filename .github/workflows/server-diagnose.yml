@@ -1,14 +1,22 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  spread-dist:
+  byko-drawdown:
     runs-on: self-hosted
     steps:
-      - name: futures-live spread_percent distribution (for maker-fill model)
+      - name: BYKO equity last 8h (hourly)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select count(*) n, round(avg(spread_percent)::numeric,4) mean, round((percentile_cont(0.25) within group (order by spread_percent))::numeric,4) p25, round((percentile_cont(0.5) within group (order by spread_percent))::numeric,4) median, round((percentile_cont(0.75) within group (order by spread_percent))::numeric,4) p75, round((percentile_cont(0.9) within group (order by spread_percent))::numeric,4) p90 from dry_run_decision_facts where bot_instance_id='futures-live' and spread_percent is not null and spread_percent>0 and desired_position in ('LONG','SHORT')"
-      - name: spread by side
+            "select to_char(date_trunc('hour',utc),'MM-DD HH24:MI') h, round((array_agg(portfolio_value_after_eur order by utc desc))[1]::numeric,2) eq, round((array_agg(cash_after_eur order by utc desc))[1]::numeric,2) cash from dry_run_cycle_facts where bot_instance_id='futures-live' and utc >= now() - interval '8 hours' group by date_trunc('hour',utc) order by h"
+      - name: BYKO current open positions
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select desired_position, count(*) n, round(avg(spread_percent)::numeric,4) mean, round((percentile_cont(0.5) within group (order by spread_percent))::numeric,4) median from dry_run_decision_facts where bot_instance_id='futures-live' and spread_percent is not null and spread_percent>0 and desired_position in ('LONG','SHORT') group by desired_position"
+            "select pair, side, round(entry_price::numeric,5) entry, round(mark_price::numeric,5) mark, round(unrealized_pnl_eur::numeric,2) upnl, round(stop_distance_pct::numeric,3) stop_pct, coalesce(trailing_stop_state,'-') trail, to_char(opened_at_utc,'HH24:MI') opened from portfolio_position_state where bot_instance_id='futures-live' order by opened_at_utc"
+      - name: BYKO recent closes last 6h (from decision facts reduce-only exits)
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select to_char(utc,'HH24:MI') t, pair, desired_position want, coalesce(left(entry_rejection_reason,40),'-') reason from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= now() - interval '6 hours' and desired_position='FLAT' and entry_rejection_reason is null order by utc desc limit 30"
+      - name: BYKO trade counts by hour (activity)
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
+            "select to_char(date_trunc('hour',opened_at_utc),'MM-DD HH24') h, count(*) opened from portfolio_position_state where bot_instance_id='futures-live' group by 1 order by 1 desc limit 6"
