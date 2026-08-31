@@ -1,22 +1,22 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  live-funnel:
+  live-entries:
     runs-on: self-hosted
     steps:
-      - name: cycle cadence + candidate volume per day (futures-live, last 3 days)
+      - name: distinct fresh LONG entries on 2026-08-30 (transitions not->LONG per pair)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select date(utc) d, count(distinct cycle_id) cycles, count(*) candidate_rows, count(distinct pair) pairs, round(count(*)::numeric/nullif(count(distinct cycle_id),0),1) cand_per_cycle from dry_run_decision_facts where bot_instance_id='futures-live' and utc >= '2026-08-29' group by 1 order by 1"
-      - name: 2026-08-30 funnel by desired_position
+            "with s as (select pair, utc, desired_position, lag(desired_position) over (partition by pair order by utc) prev from dry_run_decision_facts where bot_instance_id='futures-live' and date(utc)='2026-08-30') select count(*) fresh_long_entries from s where desired_position='LONG' and (prev is distinct from 'LONG')"
+      - name: same but only rows that actually filled (FillSource REAL if present)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select desired_position, count(*) n from dry_run_decision_facts where bot_instance_id='futures-live' and date(utc)='2026-08-30' group by 1 order by 2 desc"
-      - name: 2026-08-30 reject-reason histogram (the funnel stages)
+            "select column_name from information_schema.columns where table_name='dry_run_decision_facts' and column_name in ('fill_source','action','filled','fill_known','average_fill_price')" 2>&1 | head
+      - name: opens per day from action history (if table has open events)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select coalesce(entry_rejection_reason,'(entered/none)') reason, count(*) n from dry_run_decision_facts where bot_instance_id='futures-live' and date(utc)='2026-08-30' group by 1 order by 2 desc limit 25"
-      - name: 2026-08-30 actual opens that day
+            "select date(utc) d, count(*) n from portfolio_action_history_state where bot_instance_id='futures-live' and action ilike '%OPEN%' and utc >= '2026-08-29' group by 1 order by 1" 2>&1 | head || true
+      - name: distinct LONG-entry pairs 08-30 with times (sample)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -c \
-            "select count(*) opens from portfolio_position_state where bot_instance_id='futures-live' and date(opened_at_utc)='2026-08-30'" 2>&1 || true
+            "with s as (select pair, utc, desired_position, lag(desired_position) over (partition by pair order by utc) prev from dry_run_decision_facts where bot_instance_id='futures-live' and date(utc)='2026-08-30') select to_char(utc,'HH24:MI') t, pair from s where desired_position='LONG' and (prev is distinct from 'LONG') order by utc limit 40"
