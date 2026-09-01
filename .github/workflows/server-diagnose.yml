@@ -1,18 +1,14 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  pol-gap:
+  luko-same-window:
     runs-on: self-hosted
     steps:
-      - name: POL decisions on BOTH bots 18:05-18:30
+      - name: LUKO all closes same window
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(c.utc,'HH24:MI:SS') t, c.bot_instance_id bot, f.desired_position want, round(f.score::numeric,3) score, round(f.long_score_threshold::numeric,3) thr, round(f.spread_percent::numeric,3) spread, coalesce(f.entry_rejection_reason,'(none)') rej from dry_run_decision_facts f join dry_run_cycles c on c.cycle_id=f.cycle_id where f.pair='POL/USD' and c.utc >= '2026-08-31 18:05' and c.utc <= '2026-08-31 18:30' order by c.utc, c.bot_instance_id"
-      - name: BYKO risk-reason text for POL in that window
+            "select to_char(c.utc,'MM-DD HH24:MI:SS') t, a.pair, a.side, a.exit_reason_code code, round(a.entry_price::numeric,8) entry, round(a.fill_price::numeric,8) fill, round(coalesce(a.filled_notional_eur,150)::numeric,2) notional from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-lukas-live' and c.utc >= '2026-08-30 10:43' and a.exit_reason_code is not null and a.exit_reason_code<>'' order by c.utc"
+      - name: LUKO close-code histogram
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(c.utc,'HH24:MI:SS') t, left(r.reason,110) reason from dry_run_decision_facts f join dry_run_cycles c on c.cycle_id=f.cycle_id join dry_run_decision_risk_reasons r on r.cycle_id=f.cycle_id and r.decision_index=f.decision_index where f.pair='POL/USD' and c.bot_instance_id='futures-live' and c.utc >= '2026-08-31 18:05' and c.utc <= '2026-08-31 18:26' order by c.utc, r.reason_index"
-      - name: BYKO open slots at 18:15
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(c.utc,'HH24:MI:SS') t, count(*) filter (where f.desired_position<>'FLAT') nonflat from dry_run_decision_facts f join dry_run_cycles c on c.cycle_id=f.cycle_id where c.bot_instance_id='futures-live' and c.utc >= '2026-08-31 18:10' and c.utc <= '2026-08-31 18:26' group by 1 order by 1"
+            "select a.exit_reason_code, a.side, count(*) from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-lukas-live' and c.utc >= '2026-08-30 10:43' and a.exit_reason_code is not null and a.exit_reason_code<>'' group by 1,2 order by 3 desc"
