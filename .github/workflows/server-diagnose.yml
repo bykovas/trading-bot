@@ -1,18 +1,18 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  check:
+  armvscontrol:
     runs-on: self-hosted
     steps:
-      - name: open positions now
+      - name: closes per day per bot (count + realized from prices)
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select pair, side, round(entry_price::numeric,6) entry, round(mark_price::numeric,6) mark, round(unrealized_pnl_eur::numeric,2) upnl, round(stop_distance_pct::numeric,3) stop_pct, coalesce(trailing_stop_state,'-') trail, to_char(opened_at_utc,'HH24:MI') opened from portfolio_position_state where bot_instance_id='futures-live' order by opened_at_utc"
-      - name: fills since 07:30 UTC
+            "select date(c.utc) d, c.bot_instance_id bot, count(*) closes, sum(case when a.exit_reason_code='SELL_STOP_LOSS' then 1 else 0 end) stops, round(sum(case when a.side='LONG' then (a.fill_price/a.entry_price-1)*100 else -(a.fill_price/a.entry_price-1)*100 end)::numeric,2) sum_pct from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.utc>='2026-08-31' and a.exit_reason_code is not null and a.exit_reason_code<>'' and a.entry_price>0 group by 1,2 order by 1,2"
+      - name: opens per day per bot
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(c.utc,'HH24:MI:SS') t, a.pair, a.side, coalesce(a.exit_reason_code,'OPEN') code, round(a.entry_price::numeric,6) entry, round(a.fill_price::numeric,6) fill, round(a.stop_distance_pct::numeric,3) stop_pct from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc >= '2026-09-01 07:30' and a.fill_source is not null and a.fill_source<>'' order by c.utc"
-      - name: equity last 5h
+            "select date(c.utc) d, c.bot_instance_id bot, count(*) opens from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.utc>='2026-08-31' and a.action like '%OPEN%' and a.fill_source='REAL' group by 1,2 order by 1,2"
+      - name: equity both bots hourly today
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(date_trunc('hour',utc),'HH24:MI') h, round((array_agg(portfolio_value_after_eur order by utc desc))[1]::numeric,2) eq from dry_run_cycle_facts where bot_instance_id='futures-live' and utc >= now()-interval '5 hours' group by 1 order by 1"
+            "select to_char(date_trunc('hour',utc),'MM-DD HH24:MI') h, bot_instance_id bot, round((array_agg(portfolio_value_after_eur order by utc desc))[1]::numeric,2) eq from dry_run_cycle_facts where utc >= '2026-08-31 00:00' and bot_instance_id in ('futures-live','futures-lukas-live') group by 1,2 order by 1,2"
