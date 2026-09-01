@@ -1,14 +1,14 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  d-audit-full:
+  d-closes:
     runs-on: self-hosted
     steps:
-      - name: ALL BYKO real fills since D fix through now
+      - name: ALL closes since D fix, any fill_source
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(c.utc,'MM-DD HH24:MI:SS') t, a.pair, a.side, coalesce(a.exit_reason_code,'OPEN') code, round(a.entry_price::numeric,8) entry, round(a.fill_price::numeric,8) fill, round(a.quantity::numeric,4) qty, round(a.atr_pct::numeric,4) atr, round(a.stop_distance_pct::numeric,4) stop_pct, round((a.portfolio_value_after_eur-a.portfolio_value_before_eur)::numeric,4) dpv from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc >= '2026-08-30 10:43' and a.fill_source='REAL' and a.reduce_only is not null order by c.utc"
-      - name: LUKO POL and HOODX for comparison
+            "select to_char(c.utc,'MM-DD HH24:MI:SS') t, a.pair, a.side, a.exit_reason_code code, round(a.entry_price::numeric,8) entry, round(a.fill_price::numeric,8) fill, round(a.atr_pct::numeric,4) atr, round(a.stop_distance_pct::numeric,4) stop_pct, coalesce(a.fill_source,'-') src, coalesce(a.exit_trigger_source,'-') trig from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc >= '2026-08-30 10:43' and a.exit_reason_code is not null and a.exit_reason_code <> '' order by c.utc"
+      - name: close-code histogram
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(c.utc,'MM-DD HH24:MI:SS') t, c.bot_instance_id bot, a.pair, a.side, coalesce(a.exit_reason_code,'OPEN') code, round(a.entry_price::numeric,8) entry, round(a.fill_price::numeric,8) fill, round(a.stop_distance_pct::numeric,4) stop_pct from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where a.pair in ('POL/USD','HOODX/USD') and c.utc >= '2026-08-30 10:43' and a.fill_source='REAL' order by c.utc"
+            "select a.exit_reason_code code, a.side, count(*) n from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc >= '2026-08-30 10:43' and a.exit_reason_code is not null and a.exit_reason_code<>'' group by 1,2 order by 3 desc"
