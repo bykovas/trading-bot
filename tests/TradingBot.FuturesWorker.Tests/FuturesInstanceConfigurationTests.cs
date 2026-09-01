@@ -16,7 +16,7 @@ public sealed class FuturesInstanceConfigurationTests
         var primary = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.json"));
         var lukas = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.lukas.json"));
 
-        AssertSlotsAreFunded(primary, expectedSlots: 6);
+        AssertSlotsAreFunded(primary, expectedSlots: 3);
         AssertSlotsAreFunded(lukas, expectedSlots: 3);
     }
 
@@ -230,11 +230,13 @@ public sealed class FuturesInstanceConfigurationTests
                 profile["Risk"]!["MaxConcurrentOpenRiskUsd"]!.GetValue<decimal>());
         }
 
-        // Back to the publisher's stake exactly: 15 at 10x on both, 150 of exposure.
-        // The 4x afternoon lasted two mirrored entries and cost 24 USD in stop-outs.
-        // The arm carries 20 USD margin at 10x = 200 notional across 6 slots; the
-        // control keeps the publisher stake of 15 at 10x = 150.
-        Assert.Equal(200m, primary["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
+        // The arm resized 2026-09-01: 30 USD margin at 10x = 300 notional across 3 slots
+        // (was 20 at 10x = 200 across 6). Owner-directed after two days where the arm lost
+        // to the control on turnover, not on per-trade quality: 42 entries against the
+        // control's 9 over the same window, the arm better per close (-0.48% vs -0.67%)
+        // but ~12 USD of the ~35 USD gap was pure execution cost. Half the slots, one
+        // position per correlation group. The control keeps the publisher stake, 15 at 10x.
+        Assert.Equal(300m, primary["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
         Assert.Equal(150m, lukas["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
 
         var normalizedLukas = lukas.DeepClone().AsObject();
