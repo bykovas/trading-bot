@@ -1,22 +1,18 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  now:
+  hourcheck:
     runs-on: self-hosted
     steps:
-      - name: open positions right now
+      - name: open positions now
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select pair, side, round(entry_price::numeric,6) entry, round(mark_price::numeric,6) mark, round(unrealized_pnl_eur::numeric,2) upnl, round(stop_distance_pct::numeric,3) stop_pct, round(atr_pct::numeric,3) atr, to_char(opened_at_utc,'HH24:MI') opened from portfolio_position_state where bot_instance_id='futures-live' order by opened_at_utc"
-      - name: last 3h of BYKO fills
+            "select pair, side, round(entry_price::numeric,6) entry, round(mark_price::numeric,6) mark, round(unrealized_pnl_eur::numeric,2) upnl, round(stop_distance_pct::numeric,3) stop_pct, to_char(opened_at_utc,'HH24:MI') opened from portfolio_position_state where bot_instance_id='futures-live' order by opened_at_utc"
+      - name: fills since 06:00 UTC
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(c.utc,'HH24:MI:SS') t, a.pair, a.side, coalesce(a.exit_reason_code,'OPEN') code, round(a.entry_price::numeric,6) entry, round(a.fill_price::numeric,6) fill, round(a.atr_pct::numeric,3) atr, round(a.stop_distance_pct::numeric,3) stop_pct from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc >= now()-interval '3 hours' and a.fill_source is not null and a.fill_source<>'' order by c.utc"
-      - name: BTC hourly this morning
+            "select to_char(c.utc,'HH24:MI:SS') t, a.pair, a.side, coalesce(a.exit_reason_code,'OPEN') code, round(a.entry_price::numeric,6) entry, round(a.fill_price::numeric,6) fill, round(a.atr_pct::numeric,3) atr, round(a.stop_distance_pct::numeric,3) stop_pct from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc >= '2026-09-01 06:00' and a.fill_source is not null and a.fill_source<>'' order by c.utc"
+      - name: equity last 4h
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(date_trunc('hour',utc),'HH24:MI') h, round((array_agg(price order by utc desc))[1]::numeric,0) btc from dry_run_decision_facts where bot_instance_id='futures-live' and pair='XBT/USD' and utc >= now()-interval '8 hours' group by 1 order by 1"
-      - name: equity now
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(date_trunc('hour',utc),'HH24:MI') h, round((array_agg(portfolio_value_after_eur order by utc desc))[1]::numeric,2) eq from dry_run_cycle_facts where bot_instance_id='futures-live' and utc >= now()-interval '8 hours' group by 1 order by 1"
+            "select to_char(date_trunc('hour',utc),'HH24:MI') h, round((array_agg(portfolio_value_after_eur order by utc desc))[1]::numeric,2) eq from dry_run_cycle_facts where bot_instance_id='futures-live' and utc >= now()-interval '4 hours' group by 1 order by 1"
