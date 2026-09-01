@@ -167,6 +167,12 @@ public sealed class FuturesInstanceConfigurationTests
             ("Telegram", "Emoji"),
             // The experiment arm's own knobs; absent on the control by design.
             ("Futures", "DisabledLongEntryChannels"),
+            // Night entry blackout switched OFF on the arm (2026-09-01, owner-directed).
+            // Its stated rationale was thin overnight liquidity; measured spread by hour over
+            // the D window contradicts it - 01-04 UTC carry the NARROWEST median spreads of the
+            // day (0.17-0.20%) and lower p95 than the 07-11 and 19-21 UTC peaks. The 5 candidates
+            // it blocked would have been net +$2.43. The control keeps the blackout.
+            ("ExecutionPolicy", "EntryBlackoutMinutes"),
             ("Shorts", "MaxBtc24hRisePercentForShort"),
             ("Shorts", "RequireBtc4hDropPercent"),
             // The whole exit triple diverges since 2026-08-28 at the owner's direction:
