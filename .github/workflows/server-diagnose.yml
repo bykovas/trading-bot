@@ -1,22 +1,22 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  gate-rejects:
+  now:
     runs-on: self-hosted
     steps:
-      - name: STOP-LOSS cooldown rejects
+      - name: open positions right now
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(c.utc,'MM-DD HH24:MI:SS') t, f.pair, round(f.score::numeric,3) sc, round(coalesce(f.short_score,0)::numeric,3) ss, round(f.long_score_threshold::numeric,3) thr, round(f.spread_percent::numeric,4) spr, left(r.reason,60) reason from dry_run_decision_facts f join dry_run_cycles c on c.cycle_id=f.cycle_id join dry_run_decision_risk_reasons r on r.cycle_id=f.cycle_id and r.decision_index=f.decision_index where c.bot_instance_id='futures-live' and c.utc>='2026-08-30 10:43' and r.reason like '%stop-loss cooldown active%' order by c.utc"
-      - name: CLOSE (30m) cooldown rejects
+            "select pair, side, round(entry_price::numeric,6) entry, round(mark_price::numeric,6) mark, round(unrealized_pnl_eur::numeric,2) upnl, round(stop_distance_pct::numeric,3) stop_pct, round(atr_pct::numeric,3) atr, to_char(opened_at_utc,'HH24:MI') opened from portfolio_position_state where bot_instance_id='futures-live' order by opened_at_utc"
+      - name: last 3h of BYKO fills
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(c.utc,'MM-DD HH24:MI:SS') t, f.pair, round(f.score::numeric,3) sc, round(coalesce(f.short_score,0)::numeric,3) ss, round(f.spread_percent::numeric,4) spr, left(r.reason,60) reason from dry_run_decision_facts f join dry_run_cycles c on c.cycle_id=f.cycle_id join dry_run_decision_risk_reasons r on r.cycle_id=f.cycle_id and r.decision_index=f.decision_index where c.bot_instance_id='futures-live' and c.utc>='2026-08-30 10:43' and r.reason like '%cooldown after close active%' order by c.utc"
-      - name: BLACKOUT rejects
+            "select to_char(c.utc,'HH24:MI:SS') t, a.pair, a.side, coalesce(a.exit_reason_code,'OPEN') code, round(a.entry_price::numeric,6) entry, round(a.fill_price::numeric,6) fill, round(a.atr_pct::numeric,3) atr, round(a.stop_distance_pct::numeric,3) stop_pct from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-live' and c.utc >= now()-interval '3 hours' and a.fill_source is not null and a.fill_source<>'' order by c.utc"
+      - name: BTC hourly this morning
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(c.utc,'MM-DD HH24:MI:SS') t, f.pair, round(f.score::numeric,3) sc, round(coalesce(f.short_score,0)::numeric,3) ss, round(f.long_score_threshold::numeric,3) thr, round(f.spread_percent::numeric,4) spr from dry_run_decision_facts f join dry_run_cycles c on c.cycle_id=f.cycle_id join dry_run_decision_risk_reasons r on r.cycle_id=f.cycle_id and r.decision_index=f.decision_index where c.bot_instance_id='futures-live' and c.utc>='2026-08-30 10:43' and r.reason like '%entry blackout active%' order by c.utc"
-      - name: spread by hour-of-day (liquidity check for blackout)
+            "select to_char(date_trunc('hour',utc),'HH24:MI') h, round((array_agg(price order by utc desc))[1]::numeric,0) btc from dry_run_decision_facts where bot_instance_id='futures-live' and pair='XBT/USD' and utc >= now()-interval '8 hours' group by 1 order by 1"
+      - name: equity now
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select extract(hour from c.utc)::int h, count(*) n, round(avg(f.spread_percent)::numeric,4) mean, round((percentile_cont(0.5) within group (order by f.spread_percent))::numeric,4) med, round((percentile_cont(0.9) within group (order by f.spread_percent))::numeric,4) p90, round((percentile_cont(0.95) within group (order by f.spread_percent))::numeric,4) p95 from dry_run_decision_facts f join dry_run_cycles c on c.cycle_id=f.cycle_id where c.bot_instance_id='futures-live' and c.utc>='2026-08-30 10:43' and f.spread_percent>0 group by 1 order by 1"
+            "select to_char(date_trunc('hour',utc),'HH24:MI') h, round((array_agg(portfolio_value_after_eur order by utc desc))[1]::numeric,2) eq from dry_run_cycle_facts where bot_instance_id='futures-live' and utc >= now()-interval '8 hours' group by 1 order by 1"
