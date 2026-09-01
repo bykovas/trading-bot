@@ -1,17 +1,18 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  stop-byko:
+  verify:
     runs-on: self-hosted
     steps:
-      - name: open positions BEFORE stopping
+      - name: worker status + effective limits from its own log
+        run: |
+          docker ps -a --filter name=trading-bot-futures-worker-live --format '{{.Names}}  {{.Status}}'
+          echo "--- limits line ---"
+          docker logs --since 15m trading-bot-futures-worker-live 2>&1 | grep -E "futures limits|POSITION_SIZING" | tail -5
+      - name: deployed appsettings on the host
+        run: |
+          grep -E '"MaxPositions"|"TargetMarginUsd"|"MaxNotionalUsd"|"MaxTotalNotionalUsd"|"MaxOpenPositionsPerGroup"' /opt/trading-bot/futures/live/appsettings.json
+      - name: open positions
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select pair, side, round(entry_price::numeric,6) entry, round(mark_price::numeric,6) mark, round(unrealized_pnl_eur::numeric,2) upnl, coalesce(sl_order_state,'-') sl, round(exchange_stop_loss_price::numeric,6) exch_stop from portfolio_position_state where bot_instance_id='futures-live' order by opened_at_utc"
-      - name: STOP the BYKO worker (control untouched)
-        run: |
-          docker stop trading-bot-futures-worker-live
-          echo "--- status ---"
-          docker ps -a --filter name=trading-bot-futures-worker-live --format '{{.Names}}  {{.Status}}'
-          echo "--- control must still be running ---"
-          docker ps --filter name=trading-bot-lukas-futures-worker-live --format '{{.Names}}  {{.Status}}'
+            "select pair, side, round(entry_price::numeric,6) entry, round(unrealized_pnl_eur::numeric,2) upnl, round(entry_notional_eur::numeric,2) notional from portfolio_position_state where bot_instance_id='futures-live' order by opened_at_utc"
