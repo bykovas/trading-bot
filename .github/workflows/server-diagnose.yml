@@ -1,18 +1,17 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  armvscontrol:
+  stop-byko:
     runs-on: self-hosted
     steps:
-      - name: closes per day per bot (count + realized from prices)
+      - name: open positions BEFORE stopping
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select date(c.utc) d, c.bot_instance_id bot, count(*) closes, sum(case when a.exit_reason_code='SELL_STOP_LOSS' then 1 else 0 end) stops, round(sum(case when a.side='LONG' then (a.fill_price/a.entry_price-1)*100 else -(a.fill_price/a.entry_price-1)*100 end)::numeric,2) sum_pct from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.utc>='2026-08-31' and a.exit_reason_code is not null and a.exit_reason_code<>'' and a.entry_price>0 group by 1,2 order by 1,2"
-      - name: opens per day per bot
+            "select pair, side, round(entry_price::numeric,6) entry, round(mark_price::numeric,6) mark, round(unrealized_pnl_eur::numeric,2) upnl, coalesce(sl_order_state,'-') sl, round(exchange_stop_loss_price::numeric,6) exch_stop from portfolio_position_state where bot_instance_id='futures-live' order by opened_at_utc"
+      - name: STOP the BYKO worker (control untouched)
         run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select date(c.utc) d, c.bot_instance_id bot, count(*) opens from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.utc>='2026-08-31' and a.action like '%OPEN%' and a.fill_source='REAL' group by 1,2 order by 1,2"
-      - name: equity both bots hourly today
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(date_trunc('hour',utc),'MM-DD HH24:MI') h, bot_instance_id bot, round((array_agg(portfolio_value_after_eur order by utc desc))[1]::numeric,2) eq from dry_run_cycle_facts where utc >= '2026-08-31 00:00' and bot_instance_id in ('futures-live','futures-lukas-live') group by 1,2 order by 1,2"
+          docker stop trading-bot-futures-worker-live
+          echo "--- status ---"
+          docker ps -a --filter name=trading-bot-futures-worker-live --format '{{.Names}}  {{.Status}}'
+          echo "--- control must still be running ---"
+          docker ps --filter name=trading-bot-lukas-futures-worker-live --format '{{.Names}}  {{.Status}}'
