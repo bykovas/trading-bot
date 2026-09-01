@@ -1,14 +1,22 @@
 name: server-diagnose
 on: { workflow_dispatch: {} }
 jobs:
-  luko-same-window:
+  gate-rejects:
     runs-on: self-hosted
     steps:
-      - name: LUKO all closes same window
+      - name: STOP-LOSS cooldown rejects
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select to_char(c.utc,'MM-DD HH24:MI:SS') t, a.pair, a.side, a.exit_reason_code code, round(a.entry_price::numeric,8) entry, round(a.fill_price::numeric,8) fill, round(coalesce(a.filled_notional_eur,150)::numeric,2) notional from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-lukas-live' and c.utc >= '2026-08-30 10:43' and a.exit_reason_code is not null and a.exit_reason_code<>'' order by c.utc"
-      - name: LUKO close-code histogram
+            "select to_char(c.utc,'MM-DD HH24:MI:SS') t, f.pair, round(f.score::numeric,3) sc, round(coalesce(f.short_score,0)::numeric,3) ss, round(f.long_score_threshold::numeric,3) thr, round(f.spread_percent::numeric,4) spr, left(r.reason,60) reason from dry_run_decision_facts f join dry_run_cycles c on c.cycle_id=f.cycle_id join dry_run_decision_risk_reasons r on r.cycle_id=f.cycle_id and r.decision_index=f.decision_index where c.bot_instance_id='futures-live' and c.utc>='2026-08-30 10:43' and r.reason like '%stop-loss cooldown active%' order by c.utc"
+      - name: CLOSE (30m) cooldown rejects
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select a.exit_reason_code, a.side, count(*) from dry_run_actions a join dry_run_cycles c on c.cycle_id=a.cycle_id where c.bot_instance_id='futures-lukas-live' and c.utc >= '2026-08-30 10:43' and a.exit_reason_code is not null and a.exit_reason_code<>'' group by 1,2 order by 3 desc"
+            "select to_char(c.utc,'MM-DD HH24:MI:SS') t, f.pair, round(f.score::numeric,3) sc, round(coalesce(f.short_score,0)::numeric,3) ss, round(f.spread_percent::numeric,4) spr, left(r.reason,60) reason from dry_run_decision_facts f join dry_run_cycles c on c.cycle_id=f.cycle_id join dry_run_decision_risk_reasons r on r.cycle_id=f.cycle_id and r.decision_index=f.decision_index where c.bot_instance_id='futures-live' and c.utc>='2026-08-30 10:43' and r.reason like '%cooldown after close active%' order by c.utc"
+      - name: BLACKOUT rejects
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
+            "select to_char(c.utc,'MM-DD HH24:MI:SS') t, f.pair, round(f.score::numeric,3) sc, round(coalesce(f.short_score,0)::numeric,3) ss, round(f.long_score_threshold::numeric,3) thr, round(f.spread_percent::numeric,4) spr from dry_run_decision_facts f join dry_run_cycles c on c.cycle_id=f.cycle_id join dry_run_decision_risk_reasons r on r.cycle_id=f.cycle_id and r.decision_index=f.decision_index where c.bot_instance_id='futures-live' and c.utc>='2026-08-30 10:43' and r.reason like '%entry blackout active%' order by c.utc"
+      - name: spread by hour-of-day (liquidity check for blackout)
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
+            "select extract(hour from c.utc)::int h, count(*) n, round(avg(f.spread_percent)::numeric,4) mean, round((percentile_cont(0.5) within group (order by f.spread_percent))::numeric,4) med, round((percentile_cont(0.9) within group (order by f.spread_percent))::numeric,4) p90, round((percentile_cont(0.95) within group (order by f.spread_percent))::numeric,4) p95 from dry_run_decision_facts f join dry_run_cycles c on c.cycle_id=f.cycle_id where c.bot_instance_id='futures-live' and c.utc>='2026-08-30 10:43' and f.spread_percent>0 group by 1 order by 1"
