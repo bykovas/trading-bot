@@ -4,15 +4,11 @@ jobs:
   verify:
     runs-on: self-hosted
     steps:
-      - name: cycle facts columns
+      - name: equity today both
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select string_agg(column_name,', ') from information_schema.columns where table_name='dry_run_cycle_facts'"
-      - name: equity boundaries
+            "select f.bot_instance_id, date_trunc('hour', c.utc) h, max(f.portfolio_value_after_eur) v from dry_run_cycle_facts f join dry_run_cycles c using (cycle_id) where c.utc >= date_trunc('day', now() at time zone 'utc') - interval '4 hours' and f.bot_instance_id in ('futures-live','futures-lukas-live') group by 1,2 order by 1,2"
+      - name: equity now
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select bot_instance_id, count(*) from dry_run_cycle_facts f join dry_run_cycles c using (cycle_id) where c.utc >= now() - interval '2 days' group by 1"
-      - name: reject codes today
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select f.bot_instance_id, string_agg(distinct r.reason, ' ~ ') from dry_run_decision_risk_reasons r join dry_run_decision_facts f using (cycle_id, decision_index) where f.utc >= now() - interval '3 hours' group by 1"
+            "select distinct on (f.bot_instance_id) f.bot_instance_id, c.utc, f.cash_after_eur, f.positions_value_after_eur, f.portfolio_value_after_eur from dry_run_cycle_facts f join dry_run_cycles c using (cycle_id) where f.bot_instance_id in ('futures-live','futures-lukas-live') order by f.bot_instance_id, c.utc desc"
