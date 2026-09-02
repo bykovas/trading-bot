@@ -4,15 +4,22 @@ jobs:
   verify:
     runs-on: self-hosted
     steps:
-      - name: worker status + effective limits from its own log
-        run: |
-          docker ps -a --filter name=trading-bot-futures-worker-live --format '{{.Names}}  {{.Status}}'
-          echo "--- limits line ---"
-          docker logs --since 15m trading-bot-futures-worker-live 2>&1 | grep -E "futures limits|POSITION_SIZING" | tail -5
-      - name: deployed appsettings on the host
-        run: |
-          grep -E '"MaxPositions"|"TargetMarginUsd"|"MaxNotionalUsd"|"MaxTotalNotionalUsd"|"MaxOpenPositionsPerGroup"' /opt/trading-bot/futures/live/appsettings.json
-      - name: open positions
+      - name: today fills both instances
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select pair, side, round(entry_price::numeric,6) entry, round(unrealized_pnl_eur::numeric,2) upnl, round(entry_notional_eur::numeric,2) notional from portfolio_position_state where bot_instance_id='futures-live' order by opened_at_utc"
+            "select f.bot_instance_id, f.utc, a.pair, a.action, a.side, a.exit_reason_code, a.entry_price, a.fill_price, a.filled_notional_eur, a.net_notional_eur, a.fee_eur, a.atr_pct, a.stop_distance_pct, a.take_profit_distance_pct, a.leverage, a.quantity, a.fill_source, a.exit_trigger_source from dry_run_actions a join dry_run_decision_facts f using (cycle_id, decision_index) where f.utc >= date_trunc('day', now() at time zone 'utc') and a.action in ('BUY','SELL') order by f.bot_instance_id, f.utc"
+      - name: open positions both
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
+            "select bot_instance_id, pair, side, opened_at_utc, entry_price, last_price, quantity, entry_notional_eur, unrealized_pnl_eur, unrealized_pnl_percent, peak_pnl_percent, atr_pct, stop_distance_pct, take_profit_distance_pct, stop_loss_price, take_profit_price, trailing_stop_state, trailing_stop_percent, sl_order_state, tp_order_state, exit_mode, leverage, updated_at from portfolio_position_state order by bot_instance_id, opened_at_utc"
+      - name: equity today
+        run: |
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
+            "select bot_instance_id, min(utc) t0, max(utc) t1, count(*) n from dry_run_cycles where utc >= date_trunc('day', now() at time zone 'utc') group by 1"
+          echo "--- equity series ---"
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
+            "select distinct on (c.bot_instance_id, w) c.bot_instance_id, w, c.utc, cf.portfolio_value_eur from (select cycle_id, bot_instance_id, utc, date_trunc('hour', utc) w from dry_run_cycles where utc >= date_trunc('day', now() at time zone 'utc') - interval '1 day') c join dry_run_cycle_facts cf using (cycle_id) order by c.bot_instance_id, w, c.utc"
+      - name: worker status
+        run: |
+          docker ps -a --filter name=trading-bot-futures --format '{{.Names}}  {{.Status}}'
+          date -u
