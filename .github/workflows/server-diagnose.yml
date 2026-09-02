@@ -4,23 +4,15 @@ jobs:
   verify:
     runs-on: self-hosted
     steps:
-      - name: action codes
+      - name: cycle facts columns
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select f.bot_instance_id, a.action, count(*) from dry_run_actions a join dry_run_decision_facts f using (cycle_id, decision_index) where f.utc >= now() - interval '3 days' group by 1,2 order by 1,3 desc"
-      - name: recent fills 48h
+            "select string_agg(column_name,', ') from information_schema.columns where table_name='dry_run_cycle_facts'"
+      - name: equity boundaries
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select f.bot_instance_id, f.utc, a.pair, a.action, a.side, a.exit_reason_code, a.entry_price, a.fill_price, a.filled_notional_eur, a.fee_eur, a.atr_pct, a.stop_distance_pct, a.take_profit_distance_pct, a.quantity, a.fill_source, a.exit_trigger_source from dry_run_actions a join dry_run_decision_facts f using (cycle_id, decision_index) where f.utc >= now() - interval '48 hours' and a.fill_price > 0 order by f.utc"
-      - name: byko reject reasons today
+            "select bot_instance_id, count(*) from dry_run_cycle_facts f join dry_run_cycles c using (cycle_id) where c.utc >= now() - interval '2 days' group by 1"
+      - name: reject codes today
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select f.bot_instance_id, r.reason_code, count(*) from dry_run_decision_risk_reasons r join dry_run_decision_facts f using (cycle_id, decision_index) where f.utc >= date_trunc('day', now() at time zone 'utc') group by 1,2 order by 1,3 desc"
-      - name: equity 48h hourly
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select column_name from information_schema.columns where table_name='dry_run_cycle_facts'"
-      - name: worker status
-        run: |
-          docker ps -a --filter name=trading-bot-futures --format '{{.Names}}  {{.Status}}'
-          date -u
+            "select f.bot_instance_id, string_agg(distinct r.reason, ' ~ ') from dry_run_decision_risk_reasons r join dry_run_decision_facts f using (cycle_id, decision_index) where f.utc >= now() - interval '3 hours' group by 1"
