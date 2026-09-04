@@ -4,11 +4,36 @@ jobs:
   verify:
     runs-on: self-hosted
     steps:
-      - name: equity today both
+      - name: containers
+        run: |
+          date -u
+          docker ps -a --format '{{.Names}}\t{{.Status}}\t{{.RunningFor}}'
+      - name: byko log tail
+        run: |
+          echo "===== futures-live LAST 120 LINES ====="
+          docker logs --tail 120 trading-bot-futures-worker-live 2>&1 || true
+      - name: byko errors 24h
+        run: |
+          echo "===== futures-live ERROR-ISH LAST 24h ====="
+          docker logs --since 24h trading-bot-futures-worker-live 2>&1 | grep -iE "error|exception|fail|unhandled|refus|timeout|denied|401|403|429|5[0-9][0-9] |fatal|crash|stopping|restart" | tail -80 || true
+      - name: byko error histogram
+        run: |
+          docker logs --since 24h trading-bot-futures-worker-live 2>&1 | grep -oiE "error|exception|timeout|unauthorized|forbidden|rate.?limit|nonce|insufficient|margin" | sort | uniq -c | sort -rn | head -20 || true
+      - name: luko log tail
+        run: |
+          echo "===== futures-lukas-live LAST 40 LINES ====="
+          docker logs --tail 40 trading-bot-futures-worker-live-lukas 2>&1 || docker logs --tail 40 trading-bot-futures-worker-lukas-live 2>&1 || true
+      - name: db activity
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select f.bot_instance_id, date_trunc('hour', c.utc) h, max(f.portfolio_value_after_eur) v from dry_run_cycle_facts f join dry_run_cycles c using (cycle_id) where c.utc >= date_trunc('day', now() at time zone 'utc') - interval '4 hours' and f.bot_instance_id in ('futures-live','futures-lukas-live') group by 1,2 order by 1,2"
-      - name: equity now
+            "select bot_instance_id, max(utc) last_cycle, count(*) filter (where utc >= now() - interval '2 hours') cycles_2h from dry_run_cycles where utc >= now() - interval '3 days' group by 1"
+          echo "--- last fills 3d ---"
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
+            "select f.bot_instance_id, f.utc, a.pair, a.action, a.exit_reason_code from dry_run_actions a join dry_run_decision_facts f using (cycle_id, decision_index) where f.utc >= now() - interval '3 days' and a.fill_price > 0 order by f.utc desc limit 25"
+          echo "--- open positions ---"
+          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
+            "select bot_instance_id, pair, side, opened_at_utc, unrealized_pnl_eur, sl_order_state from portfolio_position_state where bot_instance_id like 'futures-l%' order by 1,4"
+      - name: reject mix last 2h
         run: |
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select distinct on (f.bot_instance_id) f.bot_instance_id, c.utc, f.cash_after_eur, f.positions_value_after_eur, f.portfolio_value_after_eur from dry_run_cycle_facts f join dry_run_cycles c using (cycle_id) where f.bot_instance_id in ('futures-live','futures-lukas-live') order by f.bot_instance_id, c.utc desc"
+            "select f.bot_instance_id, r.reason, count(*) from dry_run_decision_risk_reasons r join dry_run_decision_facts f using (cycle_id, decision_index) where f.utc >= now() - interval '2 hours' group by 1,2 order by 1,3 desc limit 30"
