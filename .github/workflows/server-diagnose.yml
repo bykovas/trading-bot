@@ -24,7 +24,3 @@ jobs:
           echo "--- entries per day last 5d ---"
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
             "select f.bot_instance_id, date(f.utc) d, count(*) filter (where a.action like 'WOULD_OPEN%') opens, count(*) filter (where a.action='WOULD_CLOSE') closes from dry_run_actions a join dry_run_decision_facts f using (cycle_id, decision_index) where f.utc >= now() - interval '5 days' and a.fill_price > 0 group by 1,2 order by 2 desc,1"
-      - name: market data freshness
-        run: |
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select venue, count(*) pairs, max(captured_at) newest, min(captured_at) oldest from market_quotes group by 1"
