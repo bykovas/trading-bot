@@ -1,3 +1,7 @@
+## 2026-09-07-arm-leverage-reduced-to-one
+
+- Owner-directed futures-live (BYKO) exposure reduction only: `Futures.MaxLeverage` and `DefaultLeverage` 10x -> 1x while keeping 30 USD collateral per position and three slots. The linked notional caps move from 300/900 USD to 30/90 USD, and the matching 3%-of-notional risk budgets move from 9/27 USD to 0.9/2.7 USD. New positions therefore use 30 USD at 1x instead of 30 USD at 10x. Lukas remains unchanged at 15 USD margin, 10x leverage, and 150 USD notional. Entry selection, exits, cooldowns, and all other strategy behavior are unchanged.
+
 ## 2026-09-01-arm-resized-to-three-slots
 
 - Owner-directed resize of futures-live (BYKO): `MaxPositions` 6 -> 3, `TargetMarginUsd` and `MaxMarginPerPositionUsd` 20 -> 30, `MaxNotionalUsd` 200 -> 300, `MaxTotalNotionalUsd` 1200 -> 900, `Risk.TargetRiskUsd` 6 -> 9 and `MaxConcurrentOpenRiskUsd` 36 -> 27 (both scaled 1.5x with the stake so the invariants hold), and `CorrelationRisk.MaxOpenPositionsPerGroup` 2 -> 1. Committed margin drops from 120 to 90 USD, which now fits under the 80% utilisation ceiling at the current ~119 USD equity; it did not before. `MaxExposureUsdPerGroup` stays 400 - with one position per group the count gate binds first, and an exact 300 would risk blocking a fill that rounds to 300.02.
