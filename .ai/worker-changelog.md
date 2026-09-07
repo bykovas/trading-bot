@@ -1,3 +1,8 @@
+## 2026-09-07-arm-position-size-reduced-to-ten
+
+- Owner-directed futures-live (BYKO) sizing reduction only: `TargetMarginUsd` and `MaxMarginPerPositionUsd` move from 30 to 10 USD, `MaxNotionalUsd` from 30 to 10 USD, and the three-slot `MaxTotalNotionalUsd` from 90 to 30 USD. Leverage stays 1x, so each new position uses 10 USD of collateral and carries 10 USD notional.
+- Not changed: Lukas configuration, BYKO slot count, entry selection, exits, scoring, risk thresholds, correlation rules, execution, reconciliation, and currently open positions. Existing positions retain their exchange size; the new cap applies to entries opened after deployment.
+
 ## 2026-09-07-arm-entry-confirmation-tightened
 
 - Owner-directed live experiment on futures-live (BYKO) only; futures-lukas-live remains the unchanged control. The arm now waits for four price observations with all three steps moving in the entry direction (`FreshTapeSnapshotCount` 3 -> 4, `FreshTapeMinPositiveSteps` 2 -> 3), requires a breakout to remain above its level for three observations (`BreakoutHoldSnapshotCount` 2 -> 3), and requires three of four low-range LONG confirmations (`LowRangeMinConfirmations` 2 -> 3). The mirrored SHORT diagnostic/fallback count moves from two to three falling steps (`RequiredFallingSnapshotCount` 2 -> 3).

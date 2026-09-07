@@ -64,7 +64,7 @@ public sealed class FuturesInstanceConfigurationTests
         var publisherInverts = lukas["EntryMirror"]?["InvertSide"]?.GetValue<bool>();
         var followerInverts = primary["EntryMirror"]?["InvertSide"]?.GetValue<bool>();
         Assert.Equal(publisherInverts, followerInverts);
-        // Same direction again: futures-live repeats lukas. The arm now uses 30 USD
+        // Same direction again: futures-live repeats lukas. The arm now uses 10 USD
         // at 1x while the control keeps 15 USD at 10x.
         Assert.False(followerInverts);
 
@@ -240,14 +240,14 @@ public sealed class FuturesInstanceConfigurationTests
                 profile["Risk"]!["MaxConcurrentOpenRiskUsd"]!.GetValue<decimal>());
         }
 
-        // The arm resized 2026-09-07: 30 USD margin at 1x = 30 notional across 3 slots,
+        // The arm resized 2026-09-07: 10 USD margin at 1x = 10 notional across 3 slots,
         // reducing its previous 10x exposure without changing collateral or slot count.
         // The preceding 2026-09-01 resize was owner-directed after two days where the arm lost
         // to the control on turnover, not on per-trade quality: 42 entries against the
         // control's 9 over the same window, the arm better per close (-0.48% vs -0.67%)
         // but ~12 USD of the ~35 USD gap was pure execution cost. Half the slots, one
         // position per correlation group. The control keeps the publisher stake, 15 at 10x.
-        Assert.Equal(30m, primary["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
+        Assert.Equal(10m, primary["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
         Assert.Equal(150m, lukas["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
 
         var normalizedLukas = lukas.DeepClone().AsObject();
