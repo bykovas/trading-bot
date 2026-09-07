@@ -560,14 +560,14 @@ static async Task<List<PublicStatsInstanceDto>> ReadPublicStatsInstances(
     return instances;
 }
 
-// Every per-pair decision row ever written, across all instances: one row per pair per
-// cycle in dry_run_decision_facts. That table is what the dry_run_decisions view - and
-// therefore /api/decisions - reads from, so this counts exactly the records the site
-// calls "irasytu sprendimu". Cycles, actions and diagnostics live in their own tables
-// and are deliberately NOT counted.
+// The worker persists the number of per-pair decisions with every cycle. Summing that
+// compact table avoids a parallel full scan of the multi-gigabyte decision facts table
+// whenever the public cache refreshes.
 static async Task<long> ReadDecisionsTotal(NpgsqlConnection connection, CancellationToken cancellationToken)
 {
-    await using var command = new NpgsqlCommand("select count(*) from dry_run_decision_facts", connection);
+    await using var command = new NpgsqlCommand(
+        "select coalesce(sum(decisions_count), 0) from dry_run_cycle_facts",
+        connection);
     command.CommandTimeout = PublicStatsDefaults.QueryTimeoutSeconds;
     return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
 }
@@ -2086,6 +2086,34 @@ static async Task EnsureDailyEquityTable(NpgsqlConnection connection, Cancellati
 // Positions outlive days, so this walks the whole action history in order and
 // carries the open set across midnight rather than resetting it.
 static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>> ReadDailyTradingLoad(
+    NpgsqlConnection connection,
+    string? botInstanceId,
+    string timeZoneId,
+    CancellationToken cancellationToken)
+{
+    var key = $"{botInstanceId}\n{timeZoneId}";
+    var now = DateTimeOffset.UtcNow;
+
+    await DailyTradingLoadCache.Gate.WaitAsync(cancellationToken);
+    try
+    {
+        if (DailyTradingLoadCache.Values.TryGetValue(key, out var cached)
+            && now - cached.Utc < DashboardDefaults.TradingLoadCacheFor)
+        {
+            return cached.Value;
+        }
+
+        var value = await LoadDailyTradingLoad(connection, botInstanceId, timeZoneId, cancellationToken);
+        DailyTradingLoadCache.Values[key] = (now, value);
+        return value;
+    }
+    finally
+    {
+        DailyTradingLoadCache.Gate.Release();
+    }
+}
+
+static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>> LoadDailyTradingLoad(
     NpgsqlConnection connection,
     string? botInstanceId,
     string timeZoneId,
@@ -3763,9 +3791,16 @@ internal static class DashboardSchema
     public static volatile bool Ready;
 }
 
+internal static class DailyTradingLoadCache
+{
+    public static readonly SemaphoreSlim Gate = new(1, 1);
+    public static readonly Dictionary<string, (DateTimeOffset Utc, Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)> Value)> Values = new();
+}
+
 internal static class DashboardDefaults
 {
     public const int EquityWindowDays = 30;
+    public static readonly TimeSpan TradingLoadCacheFor = TimeSpan.FromMinutes(5);
 
     // Nothing on the page reads earlier than this. The chart is trimmed to it in the
     // browser, but max drawdown arrives as one finished number, so it was still being
