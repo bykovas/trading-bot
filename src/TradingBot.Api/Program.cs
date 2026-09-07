@@ -120,7 +120,6 @@ app.MapGet("/api/bot-status", async (string? botInstanceId, CancellationToken ca
     {
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
-        await EnsureCycleMetadataColumns(connection, cancellationToken);
 
         var status = await ReadBotStatus(connection, Clean(botInstanceId), cancellationToken);
         return Results.Ok(status);
@@ -265,7 +264,6 @@ app.MapGet("/api/cycles", async (
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
-    await EnsureCycleMetadataColumns(connection, cancellationToken);
 
     var items = await ReadRawCycles(connection, page, filters, cancellationToken);
     return Results.Ok(new PageResponse<CycleRawDto>(
@@ -285,7 +283,6 @@ app.MapGet("/api/cycles/{cycleId}", async (string cycleId, CancellationToken can
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
-    await EnsureCycleMetadataColumns(connection, cancellationToken);
 
     var cycle = await ReadCycleDetail(connection, cycleId, cancellationToken);
     return cycle is null ? Results.NotFound() : Results.Ok(cycle);
@@ -304,7 +301,6 @@ app.MapGet("/api/trade-cycles", async (int? limit, int? offset, string? botInsta
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
-    await EnsureCycleMetadataColumns(connection, cancellationToken);
 
     var items = await ReadTradeCycles(connection, window.UtcStart, Clean(botInstanceId), latestMeta == true, page, cancellationToken);
     return Results.Ok(new TradeCyclesResponse(
@@ -327,7 +323,6 @@ app.MapGet("/api/decisions", async (string? cycleId, string? botInstanceId, bool
     var page = PageRequest.Create(limit, offset);
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
-    await EnsureCycleMetadataColumns(connection, cancellationToken);
 
     var items = await ReadDecisions(connection, Clean(cycleId), Clean(botInstanceId), latestMeta == true, page, cancellationToken);
     return Results.Ok(new PageResponse<DecisionSummaryDto>(
@@ -348,7 +343,6 @@ app.MapGet("/api/entry-diagnostics", async (string? cycleId, string? botInstance
     var page = PageRequest.Create(limit, offset);
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
-    await EnsureCycleMetadataColumns(connection, cancellationToken);
 
     var items = await ReadEntryDiagnostics(connection, Clean(cycleId), Clean(botInstanceId), latestMeta == true, page, cancellationToken);
     return Results.Ok(new PageResponse<CycleEntryDiagnosticsDto>(
@@ -376,7 +370,6 @@ app.MapGet("/api/market-snapshots", async (
     var page = PageRequest.Create(limit, offset);
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
-    await EnsureCycleMetadataColumns(connection, cancellationToken);
 
     var items = await ReadMarketSnapshots(connection, Clean(cycleId), Clean(pair), Clean(botInstanceId), latestMeta == true, page, cancellationToken);
     return Results.Ok(new PageResponse<MarketSnapshotDto>(
@@ -428,7 +421,6 @@ app.MapGet("/api/simulate", async (
     {
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
-        await EnsureCycleMetadataColumns(connection, cancellationToken);
 
         var result = await RunSimulation(connection, sim, cancellationToken);
         return Results.Ok(result);
@@ -597,8 +589,6 @@ static TradeWindow LocalYesterdayStartUtc()
 
 static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
 {
-    await EnsurePortfolioSummaryDisplayColumns(connection, cancellationToken);
-
     // Positions value / total value are marked to LAST price (exchange parity) rather
     // than the worker's conservative liquidation value (bid - slippage - fee), so the
     // dashboard reconciles with what Kraken shows. Spot positions are valued at
@@ -671,18 +661,6 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
         reader.IsDBNull(9) ? 0m : reader.GetDecimal(9),
         reader.IsDBNull(10) ? 0m : reader.GetDecimal(10),
         reader.IsDBNull(11) ? 0m : reader.GetDecimal(11));
-}
-
-static async Task EnsurePortfolioSummaryDisplayColumns(NpgsqlConnection connection, CancellationToken cancellationToken)
-{
-    await using var command = new NpgsqlCommand(
-        """
-        alter table portfolio_state_summary
-            add column if not exists cash_quote_value numeric,
-            add column if not exists cash_quote_currency text
-        """,
-        connection);
-    await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
 static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
@@ -917,52 +895,6 @@ static async Task<IReadOnlyList<CycleRawDto>> ReadRawCycles(
     await reader.DisposeAsync();
     await HydrateCycleRecords(connection, cycles, cancellationToken);
     return cycles;
-}
-
-static async Task EnsureCycleMetadataColumns(NpgsqlConnection connection, CancellationToken cancellationToken)
-{
-    await using var command = new NpgsqlCommand(
-        """
-        alter table dry_run_cycles
-            add column if not exists bot_instance_id text not null default 'default',
-            add column if not exists worker_version text,
-            add column if not exists worker_commit text,
-            add column if not exists worker_build_utc text,
-            add column if not exists worker_image_tag text,
-            add column if not exists strategy_version text,
-            add column if not exists change_set text;
-
-        alter table portfolio_state
-            add column if not exists bot_instance_id text not null default 'default';
-
-        alter table market_snapshots
-            add column if not exists bot_instance_id text not null default 'default';
-
-        create index if not exists ix_dry_run_cycles_bot_instance_utc on dry_run_cycles (bot_instance_id, utc desc);
-        create index if not exists ix_dry_run_cycles_bot_instance_utc_cycle on dry_run_cycles (bot_instance_id, utc desc, cycle_id desc);
-        create index if not exists ix_market_snapshots_bot_instance_utc on market_snapshots (bot_instance_id, utc desc);
-        create index if not exists ix_market_snapshots_bot_pair_utc on market_snapshots (bot_instance_id, pair, utc desc, cycle_id desc);
-        create index if not exists ix_market_snapshots_cycle_pair on market_snapshots (cycle_id, pair);
-        create index if not exists ix_dry_run_cycles_worker_commit on dry_run_cycles (worker_commit, utc desc);
-        create index if not exists ix_dry_run_cycles_strategy_version on dry_run_cycles (strategy_version, utc desc);
-        create index if not exists ix_dry_run_cycles_change_set on dry_run_cycles (change_set, utc desc);
-        create index if not exists ix_dry_run_cycle_facts_bot_utc on dry_run_cycle_facts (bot_instance_id, utc desc, cycle_id desc);
-        create index if not exists ix_dry_run_cycle_facts_strategy_utc on dry_run_cycle_facts (strategy_version, utc desc, cycle_id desc);
-        create index if not exists ix_dry_run_cycle_facts_bot_meta_utc on dry_run_cycle_facts (bot_instance_id, strategy_version, change_set, utc desc, cycle_id desc);
-        create index if not exists ix_dry_run_cycle_active_pairs_cycle_pair on dry_run_cycle_active_pairs (cycle_id, pair_index);
-        create index if not exists ix_dry_run_decision_facts_bot_utc on dry_run_decision_facts (bot_instance_id, utc desc);
-        create index if not exists ix_dry_run_decision_facts_pair on dry_run_decision_facts (bot_instance_id, pair, utc desc);
-        create index if not exists ix_dry_run_decision_facts_cycle_pair on dry_run_decision_facts (cycle_id, pair);
-        create index if not exists ix_dry_run_decision_facts_bot_cycle on dry_run_decision_facts (bot_instance_id, cycle_id);
-        create index if not exists ix_dry_run_actions_action_cycle on dry_run_actions (action, cycle_id);
-        create index if not exists ix_dry_run_excluded_pairs_cycle_pair on dry_run_excluded_pairs (cycle_id, pair);
-
-        drop view if exists dry_run_cycle_records;
-        alter table portfolio_state drop column if exists state_json;
-        alter table dry_run_cycles drop column if exists record_json;
-        """,
-        connection);
-    await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
 static async Task<CycleDetailDto?> ReadCycleDetail(
@@ -2274,6 +2206,31 @@ static async Task EnsureCashEventsTable(NpgsqlConnection connection, Cancellatio
     await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
+static async Task EnsureDashboardSchema(NpgsqlConnection connection, CancellationToken cancellationToken)
+{
+    if (DashboardSchema.Ready)
+    {
+        return;
+    }
+
+    await DashboardSchema.Gate.WaitAsync(cancellationToken);
+    try
+    {
+        if (DashboardSchema.Ready)
+        {
+            return;
+        }
+
+        await EnsureDailyEquityTable(connection, cancellationToken);
+        await EnsureCashEventsTable(connection, cancellationToken);
+        DashboardSchema.Ready = true;
+    }
+    finally
+    {
+        DashboardSchema.Gate.Release();
+    }
+}
+
 // Net money movement per local day. Several movements in one day collapse to one
 // figure on the chart — the individual entries stay in portfolio_cash_events.
 //
@@ -2580,15 +2537,7 @@ static async Task<DashboardEquityDto> ReadEquityDays(
             timeZoneId, todayLocal, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null, 0m, 0m);
     }
 
-    // "create table if not exists" is cheap but not free: it is a DDL round trip on
-    // every poll, against a database five workers are writing to continuously. Once
-    // per process is enough — the tables cannot vanish underneath us.
-    if (!DashboardSchema.Ready)
-    {
-        await EnsureDailyEquityTable(connection, cancellationToken);
-        await EnsureCashEventsTable(connection, cancellationToken);
-        DashboardSchema.Ready = true;
-    }
+    await EnsureDashboardSchema(connection, cancellationToken);
 
     await BackfillDailyEquity(connection, botInstanceId, timeZoneId, cancellationToken);
     var (movements, beforeWindow) = await ReadDailyCashMovement(connection, botInstanceId, timeZoneId, cancellationToken);
@@ -3810,8 +3759,7 @@ internal static class DrawdownCache
 
 internal static class DashboardSchema
 {
-    // Set once the dashboard's own tables have been declared in this process.
-    // A racing second request just repeats an idempotent statement.
+    public static readonly SemaphoreSlim Gate = new(1, 1);
     public static volatile bool Ready;
 }
 
