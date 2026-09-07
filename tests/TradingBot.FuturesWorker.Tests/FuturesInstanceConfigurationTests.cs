@@ -69,13 +69,18 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.False(followerInverts);
 
         // Both trade their own signals since 2026-08-24. lukas is the unmodified control;
-        // futures-live is the experiment arm and carries the two held-out-validated
-        // subtractions plus the tighter spread gate.
+        // futures-live is the experiment arm and carries explicit entry subtractions
+        // and stronger snapshot confirmation while Lukas remains the control.
         Assert.True(primary["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
         Assert.True(lukas["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
         Assert.Equal(
-            new[] { "Continuation", "Reclaim" },
+            new[] { "Continuation", "Reclaim", "Standard" },
             primary["Futures"]?["DisabledLongEntryChannels"]?.AsArray().Select(node => node?.GetValue<string>()).ToArray());
+        Assert.Equal(4, primary["Freshness"]?["FreshTapeSnapshotCount"]?.GetValue<int>());
+        Assert.Equal(3, primary["Freshness"]?["FreshTapeMinPositiveSteps"]?.GetValue<int>());
+        Assert.Equal(3, primary["Freshness"]?["BreakoutHoldSnapshotCount"]?.GetValue<int>());
+        Assert.Equal(3, primary["Freshness"]?["LowRangeMinConfirmations"]?.GetValue<int>());
+        Assert.Equal(3, primary["Shorts"]?["RequiredFallingSnapshotCount"]?.GetValue<int>());
         Assert.Equal(0m, primary["Shorts"]?["MaxBtc24hRisePercentForShort"]?.GetValue<decimal>());
         // The spread ceiling is back to the control's 0.25 after a day at 0.08 showed
         // it was cutting four fifths of the universe: the median decision carries a
@@ -167,6 +172,10 @@ public sealed class FuturesInstanceConfigurationTests
             ("Telegram", "Emoji"),
             // The experiment arm's own knobs; absent on the control by design.
             ("Futures", "DisabledLongEntryChannels"),
+            ("Freshness", "FreshTapeSnapshotCount"),
+            ("Freshness", "FreshTapeMinPositiveSteps"),
+            ("Freshness", "BreakoutHoldSnapshotCount"),
+            ("Freshness", "LowRangeMinConfirmations"),
             // Night entry blackout switched OFF on the arm (2026-09-01, owner-directed).
             // Its stated rationale was thin overnight liquidity; measured spread by hour over
             // the D window contradicts it - 01-04 UTC carry the NARROWEST median spreads of the
@@ -175,6 +184,7 @@ public sealed class FuturesInstanceConfigurationTests
             ("ExecutionPolicy", "EntryBlackoutMinutes"),
             ("Shorts", "MaxBtc24hRisePercentForShort"),
             ("Shorts", "RequireBtc4hDropPercent"),
+            ("Shorts", "RequiredFallingSnapshotCount"),
             // The whole exit triple diverges since 2026-08-28 at the owner's direction:
             // the arm runs 3.5/1.75/0.5 (activation/stop/trail) against the control's
             // 4/2/0.75 for the next comparison.
