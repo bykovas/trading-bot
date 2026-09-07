@@ -1,0 +1,46 @@
+name: kraken-history-backfill
+
+# Public Kraken Futures history into the live trading database.
+# Runs on the VPS self-hosted runner (docker exec trading-bot-db) because
+# Postgres is bound to the WireGuard address and is not reachable from cloud agents.
+# Schedule only fires after this workflow is on the default branch.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "32 * * * *"
+  push:
+    branches:
+      - main
+      - "cursor/kraken-*"
+    paths:
+      - "tools/db/kraken-history-backfill.py"
+      - ".github/workflows/kraken-history-backfill.yml"
+
+concurrency:
+  group: kraken-history-backfill
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    runs-on: self-hosted
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Backfill Kraken funding, candles, depth
+        run: |
+          python3 -u tools/db/kraken-history-backfill.py \
+            --docker-container trading-bot-db \
+            | tee kraken-history-report.txt
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kraken-history-report
+          path: kraken-history-report.txt
+          retention-days: 7
