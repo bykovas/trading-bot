@@ -9,7 +9,10 @@ internal sealed class FuturesBotConfiguration
     // before it, and the margin-utilisation ceiling binds before those. Raised from ten
     // when the arm went to twelve slots - the guard is meant to catch a stray zero, not
     // to hold a policy the config is entitled to set.
-    private const int MaxPositionsCeiling = 20;
+    internal const int MaxPositionsCeiling = 20;
+    internal const decimal MaxLeverageCeiling = 10m;
+
+    private FuturesRuntimeLimits? _runtimeLimits;
 
     public BotInstanceOptions BotInstance { get; set; } = new();
     public WorkerOptions Worker { get; set; } = new();
@@ -48,6 +51,12 @@ internal sealed class FuturesBotConfiguration
     public MarketDataConsumerOptions MarketDataConsumer { get; set; } = new() { Venue = MarketDataVenue.Futures };
     public UniverseDiscoveryOptions UniverseDiscovery { get; set; } = new();
     public List<InstrumentOptions> CandidateUniverse { get; set; } = new();
+
+    internal FuturesRuntimeLimits RuntimeLimits =>
+        Volatile.Read(ref _runtimeLimits) ?? FuturesRuntimeLimits.FromConfiguration(this);
+
+    internal void SetRuntimeLimits(FuturesRuntimeLimits limits) =>
+        Volatile.Write(ref _runtimeLimits, limits);
 
     public static FuturesBotConfiguration Load()
     {
@@ -189,7 +198,7 @@ internal sealed class FuturesBotConfiguration
         // risk envelope. The hard leverage ceiling is 10x — a value above that is a
         // typo, not an intent; the per-symbol margin preference set on Kraken and the
         // liquidation-distance gate still apply on top of this cap.
-        Futures.MaxLeverage = Math.Clamp(Futures.MaxLeverage <= 0m ? 10m : Futures.MaxLeverage, 1m, 10m);
+        Futures.MaxLeverage = Math.Clamp(Futures.MaxLeverage <= 0m ? MaxLeverageCeiling : Futures.MaxLeverage, 1m, MaxLeverageCeiling);
         Futures.DefaultLeverage = Math.Clamp(Futures.DefaultLeverage <= 0m ? 1m : Futures.DefaultLeverage, 1m, Futures.MaxLeverage);
         // The slot count is a per-instance decision - the control runs 3, the experiment
         // arm 5 - so this ceiling only exists to catch a typo, not to overrule the file.

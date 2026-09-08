@@ -6,6 +6,7 @@ internal sealed class MarginRiskManager(FuturesBotConfiguration config)
 {
     public RiskEvaluation EvaluateEntry(FuturesEntryRiskInputs input)
     {
+        var limits = config.RuntimeLimits;
         var reasons = new List<string>();
         if (input.Desired == FuturesDesiredExposure.Flat)
         {
@@ -96,15 +97,15 @@ internal sealed class MarginRiskManager(FuturesBotConfiguration config)
             return new RiskEvaluation(false, reasons);
         }
 
-        if (input.Leverage > config.Futures.MaxLeverage)
+        if (input.Leverage > limits.MaxLeverage)
         {
-            reasons.Add($"leverage {input.Leverage:0.#}x exceeds cap {config.Futures.MaxLeverage:0.#}x");
+            reasons.Add($"leverage {input.Leverage:0.#}x exceeds cap {limits.MaxLeverage:0.#}x");
             return new RiskEvaluation(false, reasons);
         }
 
-        if (input.State.Positions.Count >= config.Futures.MaxPositions)
+        if (input.State.Positions.Count >= limits.MaxOpenPositions)
         {
-            reasons.Add($"max futures positions {config.Futures.MaxPositions} reached");
+            reasons.Add($"max futures positions {limits.MaxOpenPositions} reached");
             return new RiskEvaluation(false, reasons);
         }
 
@@ -130,26 +131,26 @@ internal sealed class MarginRiskManager(FuturesBotConfiguration config)
         var equity = input.State.TotalValueEur;
 
         // Independent cap: max notional for a single position (gap/slippage backstop).
-        if (config.Futures.MaxNotionalUsd > 0m && input.FilledNotionalEur > config.Futures.MaxNotionalUsd)
+        if (limits.MaxNotionalUsd > 0m && input.FilledNotionalEur > limits.MaxNotionalUsd)
         {
-            reasons.Add($"MAX_NOTIONAL_PER_POSITION: notional USD {input.FilledNotionalEur:0.####} exceeds cap USD {config.Futures.MaxNotionalUsd:0.####}");
+            reasons.Add($"MAX_NOTIONAL_PER_POSITION: notional USD {input.FilledNotionalEur:0.####} exceeds cap USD {limits.MaxNotionalUsd:0.####}");
             return new RiskEvaluation(false, reasons);
         }
 
         // Independent cap: max initial margin committed by a single position.
-        if (config.Futures.MaxMarginPerPositionUsd > 0m && initialMargin > config.Futures.MaxMarginPerPositionUsd)
+        if (limits.MaxMarginPerPositionUsd > 0m && initialMargin > limits.MaxMarginPerPositionUsd)
         {
-            reasons.Add($"MAX_MARGIN_PER_POSITION: margin USD {initialMargin:0.####} exceeds cap USD {config.Futures.MaxMarginPerPositionUsd:0.####}");
+            reasons.Add($"MAX_MARGIN_PER_POSITION: margin USD {initialMargin:0.####} exceeds cap USD {limits.MaxMarginPerPositionUsd:0.####}");
             return new RiskEvaluation(false, reasons);
         }
 
         // Independent cap: max aggregate notional across all open positions.
-        if (config.Futures.MaxTotalNotionalUsd > 0m)
+        if (limits.MaxTotalNotionalUsd > 0m)
         {
             var totalNotionalAfter = input.State.Positions.Sum(position => position.EntryNotionalEur) + input.FilledNotionalEur;
-            if (totalNotionalAfter > config.Futures.MaxTotalNotionalUsd)
+            if (totalNotionalAfter > limits.MaxTotalNotionalUsd)
             {
-                reasons.Add($"MAX_TOTAL_NOTIONAL: aggregate notional USD {totalNotionalAfter:0.####} exceeds cap USD {config.Futures.MaxTotalNotionalUsd:0.####}");
+                reasons.Add($"MAX_TOTAL_NOTIONAL: aggregate notional USD {totalNotionalAfter:0.####} exceeds cap USD {limits.MaxTotalNotionalUsd:0.####}");
                 return new RiskEvaluation(false, reasons);
             }
         }
@@ -163,19 +164,19 @@ internal sealed class MarginRiskManager(FuturesBotConfiguration config)
         }
 
         var utilizationAfter = equity <= 0m ? 100m : (input.UsedMarginEur + initialMargin) / equity * 100m;
-        if (utilizationAfter > config.Margin.MaxAccountMarginUtilizationPercent)
+        if (utilizationAfter > limits.MaxAccountMarginUtilizationPercent)
         {
-            reasons.Add($"margin utilization {utilizationAfter:0.##}% would exceed cap {config.Margin.MaxAccountMarginUtilizationPercent:0.##}%");
+            reasons.Add($"margin utilization {utilizationAfter:0.##}% would exceed cap {limits.MaxAccountMarginUtilizationPercent:0.##}%");
             return new RiskEvaluation(false, reasons);
         }
 
         // Concurrent open-risk cap = pure stop-distance heat summed across positions
         // (= TargetRiskUsd * MaxPositions by default). Execution/slippage cost is bounded
         // by the notional caps above and reported per trade, not double-counted here.
-        if (config.Risk.MaxConcurrentOpenRiskUsd > 0m
-            && input.ProjectedOpenRiskEur > config.Risk.MaxConcurrentOpenRiskUsd)
+        if (limits.MaxConcurrentOpenRiskUsd > 0m
+            && input.ProjectedOpenRiskEur > limits.MaxConcurrentOpenRiskUsd)
         {
-            reasons.Add($"open risk USD {input.ProjectedOpenRiskEur:0.####} exceeds cap USD {config.Risk.MaxConcurrentOpenRiskUsd:0.####}");
+            reasons.Add($"open risk USD {input.ProjectedOpenRiskEur:0.####} exceeds cap USD {limits.MaxConcurrentOpenRiskUsd:0.####}");
             return new RiskEvaluation(false, reasons);
         }
 

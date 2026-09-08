@@ -123,7 +123,7 @@ internal sealed class FuturesVirtualPortfolio(
             notionalEur = entryPlan.FilledNotionalEur;
         }
 
-        leverage = Math.Clamp(leverage <= 0m ? 1m : leverage, 1m, config.Futures.MaxLeverage);
+        leverage = Math.Clamp(leverage <= 0m ? 1m : leverage, 1m, config.RuntimeLimits.MaxLeverage);
         var fillPrice = markPrice;
         // Futures notional, collateral, prices, fees, and PnL all use USD. Generic
         // persistence properties retain their legacy *Eur names for compatibility.

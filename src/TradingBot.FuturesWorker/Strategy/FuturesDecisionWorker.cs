@@ -17,13 +17,16 @@ internal sealed class FuturesDecisionWorker(
     IClock? clock = null,
     IUniverseProvider? universeProvider = null,
     IFuturesEntryMirrorStore? entryMirrorStore = null,
-    ITelegramNotifier? telegramNotifier = null)
+    ITelegramNotifier? telegramNotifier = null,
+    FuturesRuntimeLimitProvider? runtimeLimitProvider = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly ITelegramNotifier _telegram = telegramNotifier
         ?? (config.Telegram.IsConfigured ? new TelegramNotifier(config.Telegram) : new NullTelegramNotifier());
     private readonly IUniverseProvider _universeProvider = universeProvider ?? new ConfiguredUniverseProvider(config.CandidateUniverse);
     private readonly IFuturesEntryMirrorStore _entryMirrorStore = entryMirrorStore ?? new NullFuturesEntryMirrorStore();
+    private readonly FuturesRuntimeLimitProvider _runtimeLimitProvider = runtimeLimitProvider
+        ?? new FuturesRuntimeLimitProvider(config, new NullBotConfigOverrideStore());
     private readonly WorkerBuildInfo _buildInfo = WorkerBuildInfo.FromEnvironment();
     private readonly SentryFailureGate _cycleFailureGate = new("futures-worker", config.BotInstance.Id);
     private readonly SentryFailureGate _fastExitFailureGate = new("futures-worker", config.BotInstance.Id);
@@ -70,7 +73,8 @@ internal sealed class FuturesDecisionWorker(
         {
             Console.WriteLine("!!! FUTURES LIVE TRADING ENABLED: approved decisions will place REAL Kraken Futures market orders !!!");
         }
-        Console.WriteLine($"futures limits: leverage<= {config.Futures.MaxLeverage:0.#}x, positions<= {config.Futures.MaxPositions}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flipLongEntries={config.Futures.FlipLongEntries}, ownSignalEntries={(config.Futures.OwnSignalEntriesEnabled ? "on" : "off (mirror only)")}, mirrorRole={MirrorRole}");
+        await _runtimeLimitProvider.RefreshAsync(cancellationToken);
+        Console.WriteLine($"futures limits: {config.RuntimeLimits.Describe()}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flipLongEntries={config.Futures.FlipLongEntries}, ownSignalEntries={(config.Futures.OwnSignalEntriesEnabled ? "on" : "off (mirror only)")}, mirrorRole={MirrorRole}");
         Console.WriteLine($"futures exit checks: fastExit={config.Futures.FastExitCheckSeconds}s fullCycle={config.Worker.LoopIntervalSeconds}s aligned={config.Worker.AlignCyclesToClock}");
         HydratePriceHistory();
 
@@ -170,6 +174,7 @@ internal sealed class FuturesDecisionWorker(
 
     public async Task RunCycleAsync(CancellationToken cancellationToken)
     {
+        await _runtimeLimitProvider.RefreshAsync(cancellationToken);
         var utc = _clock.UtcNow;
         var cycleId = $"{config.BotInstance.Id}-{utc:yyyyMMddHHmmss}";
         Console.WriteLine($"futures cycle={cycleId} utc={utc:O}");
@@ -406,7 +411,7 @@ internal sealed class FuturesDecisionWorker(
                         FuturesDesiredExposure.Flat,
                         markPrice,
                         0m,
-                        config.Futures.DefaultLeverage,
+                        config.RuntimeLimits.Leverage,
                         reason: $"mirror follower: independent entry disabled; waiting for {config.EntryMirror.FollowSourceBotInstanceId}");
                     fill.Action.HoldReasonCode = "MIRROR_FOLLOWER_WAITING";
                     riskReasons = new[] { "independent entry disabled for mirror follower" };
@@ -420,7 +425,7 @@ internal sealed class FuturesDecisionWorker(
                 LongRangeResult? longRange = null;
                 ShortEntryResult? shortEntry = null;
                 var dipBounce = false;
-                var remainingSlots = Math.Max(0, config.Futures.MaxPositions - state.Positions.Count);
+                var remainingSlots = Math.Max(0, config.RuntimeLimits.MaxOpenPositions - state.Positions.Count);
 
                 // Dip-bounce channel: a LONG candidate whose score sits just below the
                 // firm bar is still admitted when price is near its 24h low AND a
@@ -493,13 +498,13 @@ internal sealed class FuturesDecisionWorker(
                 else if (newEntriesThisCycle >= remainingSlots)
                 {
                     desired = FuturesDesiredExposure.Flat;
-                    riskReasons = new[] { $"entry skipped: futures position slots exhausted ({config.Futures.MaxPositions} max)" };
+                    riskReasons = new[] { $"entry skipped: futures position slots exhausted ({config.RuntimeLimits.MaxOpenPositions} max)" };
                     riskApproved = false;
                     // A real candidate cleared every gate and found no free slot: the book
                     // is full and signals are going by. The notifier throttles this to once
                     // per window, so the tight per-candidate loop pays nothing after the first.
                     await _telegram.SendAlertAsync(
-                        $"nėra laisvų slotų (visi {config.Futures.MaxPositions} užimti) — praleidžiu {pair} ir kitus signalus",
+                        $"nėra laisvų slotų (visi {config.RuntimeLimits.MaxOpenPositions} užimti) — praleidžiu {pair} ir kitus signalus",
                         cancellationToken);
                 }
                 else if (reversal is { Fires: true })
@@ -538,7 +543,7 @@ internal sealed class FuturesDecisionWorker(
                         fill = await ApplyOrExecuteLiveAsync(
                             state, pair, desired, markPrice,
                             entryPlan.SizedNotionalEur > 0m ? entryPlan.SizedNotionalEur : entryPlan.RequestedNotionalEur,
-                            entryPlan.EffectiveLeverage > 0m ? entryPlan.EffectiveLeverage : config.Futures.DefaultLeverage,
+                            entryPlan.EffectiveLeverage > 0m ? entryPlan.EffectiveLeverage : config.RuntimeLimits.Leverage,
                             reduceOnly: false,
                             reason: reversal.Reason,
                             exitTriggerSource: null,
@@ -722,7 +727,7 @@ internal sealed class FuturesDecisionWorker(
                         fill = await ApplyOrExecuteLiveAsync(
                             state, pair, executedDesired, markPrice,
                             entryPlan.SizedNotionalEur > 0m ? entryPlan.SizedNotionalEur : entryPlan.RequestedNotionalEur,
-                            entryPlan.EffectiveLeverage > 0m ? entryPlan.EffectiveLeverage : config.Futures.DefaultLeverage,
+                            entryPlan.EffectiveLeverage > 0m ? entryPlan.EffectiveLeverage : config.RuntimeLimits.Leverage,
                             reduceOnly: false,
                             reason: string.Empty,
                             exitTriggerSource: null,
@@ -831,8 +836,8 @@ internal sealed class FuturesDecisionWorker(
 
                 fill = await ApplyOrExecuteLiveAsync(
                     state, pair, desired, markPrice,
-                    entryPlan?.SizedNotionalEur > 0m ? entryPlan.SizedNotionalEur : config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage),
-                    entryPlan?.EffectiveLeverage > 0m ? entryPlan.EffectiveLeverage : config.Futures.DefaultLeverage,
+                    entryPlan?.SizedNotionalEur > 0m ? entryPlan.SizedNotionalEur : config.RuntimeLimits.PositionNotionalUsd,
+                    entryPlan?.EffectiveLeverage > 0m ? entryPlan.EffectiveLeverage : config.RuntimeLimits.Leverage,
                     reduceOnly: false,
                     reason: string.Empty,
                     exitTriggerSource: null,
@@ -904,6 +909,7 @@ internal sealed class FuturesDecisionWorker(
 
     public async Task RunFastExitCheckAsync(CancellationToken cancellationToken)
     {
+        await _runtimeLimitProvider.RefreshAsync(cancellationToken);
         var utc = _clock.UtcNow;
         var state = portfolio.Load();
         if (state.Positions.Count == 0 && !config.Futures.LiveTradingEnabled)
@@ -1095,7 +1101,7 @@ internal sealed class FuturesDecisionWorker(
         var notional = opened?.EntryNotionalEur
             ?? fill.Action.FilledNotionalEur
             ?? fill.Action.GrossNotionalEur;
-        var announceLeverage = opened?.Leverage ?? fill.Action.EffectiveLeverage ?? config.Futures.DefaultLeverage;
+        var announceLeverage = opened?.Leverage ?? fill.Action.EffectiveLeverage ?? config.RuntimeLimits.Leverage;
         var margin = opened?.InitialMarginEur
             ?? (announceLeverage > 0m ? notional / announceLeverage : notional);
         var text = FuturesEntryAnnouncement.Compose(
@@ -1159,7 +1165,7 @@ internal sealed class FuturesDecisionWorker(
             ?? fill.Action.FillPrice;
         var leverage = fill.Action.EffectiveLeverage
             ?? fill.Action.Leverage
-            ?? config.Futures.DefaultLeverage;
+            ?? config.RuntimeLimits.Leverage;
 
         if (notional <= 0m || fillPrice <= 0m)
         {
@@ -1296,10 +1302,7 @@ internal sealed class FuturesDecisionWorker(
             var desired = command.TargetSide.Equals("SHORT", StringComparison.OrdinalIgnoreCase)
                 ? FuturesDesiredExposure.Short
                 : FuturesDesiredExposure.Long;
-            var mirrorLeverage = Math.Clamp(
-                config.Futures.DefaultLeverage <= 0m ? 1m : config.Futures.DefaultLeverage,
-                1m,
-                config.Futures.MaxLeverage);
+            var mirrorLeverage = config.RuntimeLimits.Leverage;
             var mirrorCosts = FuturesExecutionCostModel.Estimate(config, desired, null);
             // Sized without ATR on purpose. The fast-exit path claims commands with no
             // candles loaded, and a size that depended on which path picked a command
@@ -1321,7 +1324,7 @@ internal sealed class FuturesDecisionWorker(
                 continue;
             }
 
-            var capacityReason = MirrorCapacityBlockReason(state, mirrorNotional, mirrorLeverage);
+            var capacityReason = MirrorCapacityBlockReason(state, command.Pair, mirrorNotional, mirrorLeverage);
             if (capacityReason is not null)
             {
                 await _entryMirrorStore.MarkFailedAsync(command.Id, capacityReason, cancellationToken);
@@ -1422,32 +1425,34 @@ internal sealed class FuturesDecisionWorker(
 
     private string? MirrorCapacityBlockReason(
         PortfolioState state,
+        string pair,
         decimal targetNotionalUsd,
         decimal leverage)
     {
-        leverage = Math.Clamp(leverage, 1m, config.Futures.MaxLeverage);
+        var limits = config.RuntimeLimits;
+        leverage = Math.Clamp(leverage, 1m, limits.MaxLeverage);
         var requiredMargin = targetNotionalUsd / leverage;
         var entryFee = FuturesExecutionCostModel.FeeEur(targetNotionalUsd, config.Fees.TakerPct);
-        if (state.Positions.Count >= config.Futures.MaxPositions)
+        if (state.Positions.Count >= limits.MaxOpenPositions)
         {
-            return $"mirror capacity blocked: {config.Futures.MaxPositions} position slots already used";
+            return $"mirror capacity blocked: {limits.MaxOpenPositions} position slots already used";
         }
         if (targetNotionalUsd <= 0m)
         {
             return "mirror capacity blocked: target notional is not positive";
         }
-        if (config.Futures.MaxNotionalUsd > 0m && targetNotionalUsd > config.Futures.MaxNotionalUsd)
+        if (limits.MaxNotionalUsd > 0m && targetNotionalUsd > limits.MaxNotionalUsd)
         {
-            return $"mirror capacity blocked: USD {targetNotionalUsd:0.####} exceeds per-position cap USD {config.Futures.MaxNotionalUsd:0.####}";
+            return $"mirror capacity blocked: USD {targetNotionalUsd:0.####} exceeds per-position cap USD {limits.MaxNotionalUsd:0.####}";
         }
-        if (config.Futures.MaxMarginPerPositionUsd > 0m && requiredMargin > config.Futures.MaxMarginPerPositionUsd)
+        if (limits.MaxMarginPerPositionUsd > 0m && requiredMargin > limits.MaxMarginPerPositionUsd)
         {
-            return $"mirror capacity blocked: margin USD {requiredMargin:0.####} exceeds per-position cap USD {config.Futures.MaxMarginPerPositionUsd:0.####}";
+            return $"mirror capacity blocked: margin USD {requiredMargin:0.####} exceeds per-position cap USD {limits.MaxMarginPerPositionUsd:0.####}";
         }
         var totalNotional = state.Positions.Sum(position => position.EntryNotionalEur) + targetNotionalUsd;
-        if (config.Futures.MaxTotalNotionalUsd > 0m && totalNotional > config.Futures.MaxTotalNotionalUsd)
+        if (limits.MaxTotalNotionalUsd > 0m && totalNotional > limits.MaxTotalNotionalUsd)
         {
-            return $"mirror capacity blocked: aggregate notional USD {totalNotional:0.####} exceeds cap USD {config.Futures.MaxTotalNotionalUsd:0.####}";
+            return $"mirror capacity blocked: aggregate notional USD {totalNotional:0.####} exceeds cap USD {limits.MaxTotalNotionalUsd:0.####}";
         }
         if (state.CashEur < requiredMargin + entryFee)
         {
@@ -1457,9 +1462,26 @@ internal sealed class FuturesDecisionWorker(
         var projectedUtilization = equity <= 0m
             ? 100m
             : (portfolio.UsedMarginEur(state) + requiredMargin) / equity * 100m;
-        if (projectedUtilization > config.Margin.MaxAccountMarginUtilizationPercent)
+        if (projectedUtilization > limits.MaxAccountMarginUtilizationPercent)
         {
-            return $"mirror capacity blocked: projected margin utilization {projectedUtilization:0.##}% exceeds {config.Margin.MaxAccountMarginUtilizationPercent:0.##}%";
+            return $"mirror capacity blocked: projected margin utilization {projectedUtilization:0.##}% exceeds {limits.MaxAccountMarginUtilizationPercent:0.##}%";
+        }
+
+        var group = CorrelationRiskResolver.ResolveGroup(_pairToCorrelationGroup, pair);
+        var groupPositions = state.Positions
+            .Where(position => CorrelationRiskResolver.ResolveGroup(_pairToCorrelationGroup, position.Pair)
+                .Equals(group, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (groupPositions.Count >= limits.MaxOpenPositionsPerGroup)
+        {
+            return $"mirror capacity blocked: correlation group {group} position cap {limits.MaxOpenPositionsPerGroup} reached";
+        }
+
+        var groupExposure = groupPositions.Sum(position => position.EntryNotionalEur);
+        if (limits.MaxExposureUsdPerGroup > 0m
+            && groupExposure + targetNotionalUsd > limits.MaxExposureUsdPerGroup)
+        {
+            return $"mirror capacity blocked: correlation group {group} exposure USD {groupExposure + targetNotionalUsd:0.####} exceeds cap USD {limits.MaxExposureUsdPerGroup:0.####}";
         }
 
         return null;
@@ -2362,7 +2384,7 @@ internal sealed class FuturesDecisionWorker(
         // field. Set it (clamped to MaxLeverage) BEFORE the entry and refuse to
         // open if it cannot be set — otherwise the position inherits the exchange
         // default (10x+) and posts a fraction of the intended margin.
-        var entryLeverage = Math.Clamp(leverage, 1m, config.Futures.MaxLeverage);
+        var entryLeverage = Math.Clamp(leverage, 1m, config.RuntimeLimits.MaxLeverage);
         if (!await broker.SetLeveragePreferenceAsync(instrument.KrakenPair, entryLeverage, cancellationToken))
         {
             var leverageReason = $"live futures entry skipped: could not set {entryLeverage:0.#}x leverage preference for {instrument.KrakenPair}; refusing to open at exchange-default leverage";
@@ -2674,16 +2696,17 @@ internal sealed class FuturesDecisionWorker(
             var mark = remote.MarkPrice > 0m
                 ? remote.MarkPrice
                 : markByPair.GetValueOrDefault(instrument.Pair, remote.EntryPrice);
+            var existing = state.Positions.FirstOrDefault(position => position.Pair.Equals(instrument.Pair, StringComparison.OrdinalIgnoreCase));
             // MaxLeverage is an entry cap, not a historical truth filter. A position that
             // already exists on Kraken must be booked with the exchange-reported leverage;
             // otherwise lowering the new-entry cap corrupts synced margin/value math.
+            var existingLeverage = existing?.Leverage ?? 0m;
             var leverage = remote.Leverage <= 0m
-                ? Math.Clamp(config.Futures.DefaultLeverage, 1m, config.Futures.MaxLeverage)
+                ? existingLeverage > 0m ? existingLeverage : config.RuntimeLimits.Leverage
                 : Math.Max(1m, remote.Leverage);
             var notional = remote.EntryPrice * remote.Size;
             var initialMargin = leverage <= 0m ? notional : notional / leverage;
             var pnl = FuturesMath.UnrealizedPnlEur(remote.Side, remote.EntryPrice, mark, remote.Size);
-            var existing = state.Positions.FirstOrDefault(position => position.Pair.Equals(instrument.Pair, StringComparison.OrdinalIgnoreCase));
             var protectionOrders = FindProtectionOrders(openOrders, remote.Symbol, remote.Side);
             var tpSl = ImportedTpSl(existing, remote.Side, remote.EntryPrice, protectionOrders.StopLossOrder, protectionOrders.TakeProfitOrder, protectionOrders.TrailingStopOrder);
             tpSl = await EnsureExchangeProtectionOrdersAsync(
@@ -3459,20 +3482,21 @@ internal sealed class FuturesDecisionWorker(
             .Where(position => CorrelationRiskResolver.ResolveGroup(_pairToCorrelationGroup, position.Pair)
                 .Equals(group, StringComparison.OrdinalIgnoreCase))
             .ToList();
-        if (config.CorrelationRisk.MaxOpenPositionsPerGroup > 0
-            && groupPositions.Count >= config.CorrelationRisk.MaxOpenPositionsPerGroup)
+        var limits = config.RuntimeLimits;
+        if (limits.MaxOpenPositionsPerGroup > 0
+            && groupPositions.Count >= limits.MaxOpenPositionsPerGroup)
         {
-            return new RiskEvaluation(false, new[] { $"correlation group {group} position cap {config.CorrelationRisk.MaxOpenPositionsPerGroup} reached" });
+            return new RiskEvaluation(false, new[] { $"correlation group {group} position cap {limits.MaxOpenPositionsPerGroup} reached" });
         }
 
         var groupExposure = groupPositions.Sum(position => position.EntryNotionalEur);
         var incrementalNotional = sizedNotionalEur > 0m
             ? sizedNotionalEur
-            : config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage);
-        if (config.CorrelationRisk.MaxExposureUsdPerGroup > 0m
-            && groupExposure + incrementalNotional > config.CorrelationRisk.MaxExposureUsdPerGroup)
+            : limits.PositionNotionalUsd;
+        if (limits.MaxExposureUsdPerGroup > 0m
+            && groupExposure + incrementalNotional > limits.MaxExposureUsdPerGroup)
         {
-            return new RiskEvaluation(false, new[] { $"correlation group {group} exposure USD {groupExposure + incrementalNotional:0.####} exceeds cap USD {config.CorrelationRisk.MaxExposureUsdPerGroup:0.####}" });
+            return new RiskEvaluation(false, new[] { $"correlation group {group} exposure USD {groupExposure + incrementalNotional:0.####} exceeds cap USD {limits.MaxExposureUsdPerGroup:0.####}" });
         }
 
         return new RiskEvaluation(true, new[] { $"portfolio entry guards passed for group {group}" });
@@ -3503,7 +3527,7 @@ internal sealed class FuturesDecisionWorker(
         var atr = AtrIndicator.CalculateLatestClosedAtr(marketState.Candles, 14);
         var atrPct = atr is > 0m && markPrice > 0m ? atr.Value / markPrice * 100m : 0m;
         var costs = FuturesExecutionCostModel.Estimate(config, desired, marketState.Quote?.FundingRatePercent);
-        var leverage = config.Futures.DefaultLeverage;
+        var leverage = config.RuntimeLimits.Leverage;
         var size = FuturesPositionSizer.Size(config, atrPct, costs, leverage);
         size = FuturesPositionSizer.FitToAvailableCollateral(size, config, state, portfolio.UsedMarginEur(state), costs);
         var queueAhead = QueueAheadEur(marketState, desired);
@@ -3556,7 +3580,7 @@ internal sealed class FuturesDecisionWorker(
             marketState.Quote?.MarkPrice ?? marketState.LastPrice,
             plan.SizedNotionalEur > 0m ? plan.SizedNotionalEur : plan.RequestedNotionalEur,
             plan.FilledNotionalEur,
-            plan.EffectiveLeverage > 0m ? plan.EffectiveLeverage : config.Futures.DefaultLeverage,
+            plan.EffectiveLeverage > 0m ? plan.EffectiveLeverage : config.RuntimeLimits.Leverage,
             portfolio.UsedMarginEur(state),
             marketState.Quote?.FundingRatePercent,
             plan.AtrPct > 0m ? plan.AtrPct : null,
@@ -3595,7 +3619,7 @@ internal sealed class FuturesDecisionWorker(
             marketState.Quote?.MarkPrice ?? marketState.LastPrice,
             plan.SizedNotionalEur > 0m ? plan.SizedNotionalEur : plan.RequestedNotionalEur,
             plan.FilledNotionalEur,
-            plan.EffectiveLeverage > 0m ? plan.EffectiveLeverage : config.Futures.DefaultLeverage,
+            plan.EffectiveLeverage > 0m ? plan.EffectiveLeverage : config.RuntimeLimits.Leverage,
             portfolio.UsedMarginEur(state),
             marketState.Quote?.FundingRatePercent,
             plan.AtrPct > 0m ? plan.AtrPct : null,
@@ -3908,7 +3932,7 @@ internal sealed class FuturesDecisionWorker(
     {
         if (position.StopLossPrice is null or <= 0m || position.EntryPrice <= 0m || position.Quantity <= 0m)
         {
-            return config.Risk.MaxConcurrentOpenRiskUsd + 1m;
+            return config.RuntimeLimits.MaxConcurrentOpenRiskUsd + 1m;
         }
 
         var markPrice = position.LastPrice > 0m ? position.LastPrice : position.EntryPrice;
@@ -4333,10 +4357,10 @@ internal sealed class FuturesDecisionWorker(
                 ? 0m
                 : decimal.Round(entryDecisions.Count(decision => (decision.DryRunAction.MakerFillRate ?? 0m) > 0m) / (decimal)entryDecisions.Count, 4),
             PairsPassedVolume: fullStates.Count(state => (state.Quote?.VolumeToday ?? 0m) >= config.Filters.MinQuoteVolume24h),
-            PairsPassedDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage) * config.Filters.MinExitDepthMultiple),
+            PairsPassedDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.RuntimeLimits.PositionNotionalUsd * config.Filters.MinExitDepthMultiple),
             OpenRiskEur: stateOpenRisk(decisions),
             BtcRegimeState: btcRegime.Description,
-            PairsPassedExitDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.Futures.DerivedNotionalUsd(config.Futures.DefaultLeverage) * config.Filters.MinExitDepthMultiple),
+            PairsPassedExitDepth: fullStates.Count(state => ExitDepthEur(state, FuturesDesiredExposure.Long) >= config.RuntimeLimits.PositionNotionalUsd * config.Filters.MinExitDepthMultiple),
             FundingState: string.Join("; ", decisions.Select(decision => decision.DryRunAction.FundingState).Where(value => !string.IsNullOrWhiteSpace(value)).Take(3)));
     }
 

@@ -28,7 +28,8 @@ internal static class FuturesPositionSizer
         decimal leverage)
     {
         var requestedLeverage = leverage <= 0m ? 1m : leverage;
-        leverage = Math.Clamp(requestedLeverage, 1m, config.Futures.MaxLeverage);
+        var limits = config.RuntimeLimits;
+        leverage = Math.Clamp(requestedLeverage, 1m, limits.MaxLeverage);
 
         // The ATR multiplier and the small stop floor apply ONLY under exit regime D, so
         // flipping AtrTrailingRegimeEnabled off is an instant rollback to the legacy stop
@@ -65,23 +66,27 @@ internal static class FuturesPositionSizer
             stopSource = "ATR_EXCEEDS_MAX";
         }
 
-        var targetRiskUsd = config.Risk.TargetRiskUsd > 0m
-            ? config.Risk.TargetRiskUsd
-            : stopFloorPct / 100m * config.Futures.DerivedNotionalUsd(leverage);
+        var targetRiskUsd = limits.FixedSizingEnabled
+            ? limits.PositionNotionalUsd * stopDistancePct / 100m
+            : config.Risk.TargetRiskUsd > 0m
+                ? config.Risk.TargetRiskUsd
+                : stopFloorPct / 100m * limits.PositionNotionalUsd;
 
         // Risk budget drives notional. Leverage only converts notional → margin.
-        var rawNotional = stopDistancePct <= 0m
-            ? 0m
-            : targetRiskUsd / (stopDistancePct / 100m);
+        var rawNotional = limits.FixedSizingEnabled
+            ? limits.PositionNotionalUsd
+            : stopDistancePct <= 0m
+                ? 0m
+                : targetRiskUsd / (stopDistancePct / 100m);
 
-        var maxNotional = config.Futures.MaxNotionalUsd > 0m
-            ? config.Futures.MaxNotionalUsd
-            : config.Futures.DerivedNotionalUsd(config.Futures.MaxLeverage);
+        var maxNotional = limits.MaxNotionalUsd > 0m
+            ? limits.MaxNotionalUsd
+            : limits.PositionMarginUsd * limits.MaxLeverage;
         // Per-position margin CAP → notional ceiling. Prefer the explicit
         // MaxMarginPerPositionUsd; fall back to TargetMarginUsd when unset.
-        var marginCapUsd = config.Futures.MaxMarginPerPositionUsd > 0m
-            ? config.Futures.MaxMarginPerPositionUsd
-            : config.Futures.TargetMarginUsd;
+        var marginCapUsd = limits.MaxMarginPerPositionUsd > 0m
+            ? limits.MaxMarginPerPositionUsd
+            : limits.PositionMarginUsd;
         var maxNotionalFromMargin = marginCapUsd > 0m ? marginCapUsd * leverage : maxNotional;
         var notionalCap = Math.Min(maxNotional, maxNotionalFromMargin);
 
@@ -146,7 +151,7 @@ internal static class FuturesPositionSizer
 
         var equity = state.TotalValueEur;
         var maxUsedMargin = equity > 0m
-            ? equity * config.Margin.MaxAccountMarginUtilizationPercent / 100m
+            ? equity * config.RuntimeLimits.MaxAccountMarginUtilizationPercent / 100m
             : 0m;
         var remainingUtilizationMargin = Math.Max(0m, maxUsedMargin - usedMarginEur);
 

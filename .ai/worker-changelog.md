@@ -1,3 +1,10 @@
+## 2026-09-08-runtime-database-sizing-overrides
+
+- Added per-instance hot futures limits in the new `bot_config_overrides` table. The supported keys are `position_margin_usd`, `leverage`, `max_open_positions`, and `max_open_positions_per_group`; workers refresh them before every full cycle and fast exit check, so an insert, update, or delete takes effect without a deploy or container restart.
+- An empty per-instance override set preserves the normalized `appsettings` behavior exactly. Partial profiles fall back to `appsettings` for omitted keys; invalid and unknown values are ignored with explicit worker warnings, and a transient database read failure retains the last valid effective profile.
+- A database margin or leverage override uses exact fixed sizing (`margin * leverage`) instead of the static risk-target sizing path. Related per-position, total-notional, correlation-exposure, open-risk, and utilization caps are derived or bypassed so stale file values cannot silently make the requested profile unreachable; actual free collateral, exchange leverage rules, liquidity/depth, entry guards, stop protection, and exit behavior remain enforced.
+- The same effective limits now cover independent and mirrored entries, including total slots and correlation-group slots. No `appsettings` values, signal/scoring logic, TP/SL, trailing behavior, execution, reconciliation, or currently open positions were changed.
+
 ## 2026-09-07-arm-position-size-reduced-to-ten
 
 - Owner-directed futures-live (BYKO) sizing reduction only: `TargetMarginUsd` and `MaxMarginPerPositionUsd` move from 30 to 10 USD, `MaxNotionalUsd` from 30 to 10 USD, and the three-slot `MaxTotalNotionalUsd` from 90 to 30 USD. Leverage stays 1x, so each new position uses 10 USD of collateral and carries 10 USD notional.
