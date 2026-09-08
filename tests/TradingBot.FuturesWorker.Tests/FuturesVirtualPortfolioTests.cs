@@ -106,6 +106,31 @@ public sealed class FuturesVirtualPortfolioTests
     }
 
     [Fact]
+    public void Open_and_close_actions_keep_position_context_and_their_own_fills()
+    {
+        var (portfolio, state) = Setup();
+
+        var opened = portfolio.Apply(state, "XBT/USD", FuturesDesiredExposure.Long, 100m, 20m, 2m);
+        var closed = portfolio.Apply(state, "XBT/USD", FuturesDesiredExposure.Flat, 101m, 20m, 2m);
+
+        Assert.Equal(98m, opened.Action.EntryStopLossPrice);
+        Assert.Equal(103m, opened.Action.EntryTakeProfitPrice);
+        Assert.Equal(96m, opened.Action.EntryExchangeStopLossPrice);
+        Assert.Equal(106m, opened.Action.EntryExchangeTakeProfitPrice);
+        Assert.Equal(PositionOrigins.Bot, opened.Action.PositionOrigin);
+        var openFill = Assert.Single(opened.Action.Fills);
+        Assert.Equal(100m, openFill.Price);
+        Assert.Equal(opened.Action.Quantity, openFill.Quantity);
+        Assert.Equal("MODELED_PORTFOLIO", openFill.Source);
+
+        var closeFill = Assert.Single(closed.Action.Fills);
+        Assert.Equal(101m, closeFill.Price);
+        Assert.Equal(closed.Action.Quantity, closeFill.Quantity);
+        Assert.Equal("MODELED_PORTFOLIO", closeFill.Source);
+        Assert.NotNull(closeFill.RealizedPnlEur);
+    }
+
+    [Fact]
     public void Flipped_entry_uses_calibrated_profit_handoff_without_changing_size_or_stop()
     {
         var config = Config();

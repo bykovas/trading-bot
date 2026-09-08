@@ -1599,6 +1599,7 @@ internal sealed class FuturesDecisionWorker(
                 ExitTriggerSource = "exchange",
                 ExchangeOrderId = last.OrderId,
                 ExchangeFillTimestamp = last.FillTime,
+                Fills = ToJournalFills(group_),
                 PortfolioValueBeforeEur = 0m,
                 PortfolioValueAfterEur = realized
             };
@@ -1831,6 +1832,8 @@ internal sealed class FuturesDecisionWorker(
                 ExchangeOrderId = last.OrderId,
                 ExchangeFillTimestamp = last.FillTime,
                 EntryChannel = position.EntryChannel,
+                Strategy = position.Strategy,
+                Fills = ToJournalFills(closing),
                 // What the day's realised figure is actually built from: the dashboard
                 // takes a trade's result as the difference between these two, not from
                 // the reason text. Leaving them at zero, as this did, reported a +3.59
@@ -2328,6 +2331,7 @@ internal sealed class FuturesDecisionWorker(
             var fill = portfolio.Apply(state, pair, desired, markPrice, targetNotionalEur, leverage, reduceOnly: true, reason, exitTriggerSource, entryPlan);
             fill.Action.FillSource = "REAL";
             fill.Action.Reason = $"live Kraken Futures order accepted id={close.OrderId ?? "-"} status={close.Status}; {fill.Action.Reason}";
+            StampAcceptedOrderFill(fill.Action, close, "EXCHANGE_ORDER_ACCEPTED_MODELED");
             return fill;
         }
 
@@ -2465,6 +2469,7 @@ internal sealed class FuturesDecisionWorker(
         opened.Action.FillSource = "REAL";
         opened.Action.Reason = $"live Kraken Futures FOK accepted id={order.OrderId ?? "-"} status={order.Status}; {opened.Action.Reason}";
         AttachExecutionDiagnostics(opened.Action, referencePrice, preSubmit, limitPrice, size, order, fillDetails);
+        ReplaceWithOrderResultFill(opened.Action, order, fillDetails);
         if (state.Positions.FirstOrDefault(position => position.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase)) is { } openedPosition)
         {
             var remote = new FuturesOpenPosition(
@@ -3849,6 +3854,63 @@ internal sealed class FuturesDecisionWorker(
         action.EntryDeviationFromSignalPct = PercentDiff(fill.AveragePrice, signalPrice);
         action.EntryDeviationFromAskPct = PercentDiff(fill.AveragePrice, preSubmit.Ask);
     }
+
+    private static void StampAcceptedOrderFill(
+        DryRunAction action,
+        FuturesOrderResult order,
+        string source)
+    {
+        if (action.Fills.Count == 0)
+        {
+            action.Fills.Add(new DryRunActionFill
+            {
+                Price = action.FillPrice,
+                Quantity = action.Quantity,
+                FeeEur = action.FeeEur,
+                Source = source
+            });
+        }
+
+        foreach (var fill in action.Fills)
+        {
+            fill.OrderId = order.OrderId;
+            fill.Source = source;
+        }
+    }
+
+    private static void ReplaceWithOrderResultFill(
+        DryRunAction action,
+        FuturesOrderResult order,
+        FuturesOrderFill fill)
+    {
+        action.Fills.Clear();
+        action.Fills.Add(new DryRunActionFill
+        {
+            OrderId = order.OrderId,
+            OccurredAtUtc = fill.TimestampUtc,
+            Price = fill.AveragePrice,
+            Quantity = fill.Quantity,
+            FeeEur = fill.Fee,
+            Source = "EXCHANGE_ORDER_RESULT"
+        });
+
+        if (fill.Fee.HasValue)
+        {
+            action.FeeEur = fill.Fee.Value;
+        }
+    }
+
+    private static List<DryRunActionFill> ToJournalFills(IEnumerable<FuturesFill> fills) =>
+        fills.Select(fill => new DryRunActionFill
+        {
+            FillId = fill.FillId,
+            OrderId = fill.OrderId,
+            OccurredAtUtc = fill.FillTime,
+            Price = fill.Price,
+            Quantity = fill.Size,
+            RealizedPnlEur = fill.RealizedPnl,
+            Source = "EXCHANGE_FILLS"
+        }).ToList();
 
     private static decimal? PercentDiff(decimal value, decimal reference) =>
         reference <= 0m ? null : decimal.Round((value - reference) / reference * 100m, 6);

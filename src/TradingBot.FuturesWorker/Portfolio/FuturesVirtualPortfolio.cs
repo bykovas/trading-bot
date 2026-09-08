@@ -161,7 +161,8 @@ internal sealed class FuturesVirtualPortfolio(
         var slDistance = fillPrice * slDistancePct / 100m;
         var exchangeTpDistance = fillPrice * exchangeTpDistancePct / 100m;
         var exchangeSlDistance = fillPrice * exchangeSlDistancePct / 100m;
-        state.Positions.Add(new PortfolioPosition
+        var openedAtUtc = _clock.UtcNow;
+        var openedPosition = new PortfolioPosition
         {
             Pair = pair,
             Side = side,
@@ -171,8 +172,8 @@ internal sealed class FuturesVirtualPortfolio(
             LastPrice = markPrice,
             MarkPrice = markPrice,
             MarketValueEur = initialMargin,
-            OpenedAtUtc = _clock.UtcNow,
-            LastActionAtUtc = _clock.UtcNow,
+            OpenedAtUtc = openedAtUtc,
+            LastActionAtUtc = openedAtUtc,
             Leverage = leverage,
             InitialMarginEur = initialMargin,
             LiquidationPrice = liquidationPrice,
@@ -200,7 +201,8 @@ internal sealed class FuturesVirtualPortfolio(
             RoundTripCostEstimatePct = entryPlan?.RoundTripCostEstimatePct,
             TpOrderState = config.TpSl.Enabled ? "SIMULATED_OPEN" : null,
             SlOrderState = config.TpSl.Enabled ? "SIMULATED_OPEN" : null
-        });
+        };
+        state.Positions.Add(openedPosition);
 
         var action = BaseAction(pair, side == "SHORT" ? "WOULD_OPEN_SHORT" : "WOULD_OPEN_LONG",
             string.IsNullOrEmpty(reason)
@@ -231,6 +233,19 @@ internal sealed class FuturesVirtualPortfolio(
         action.ProjectedStopLossEur = entryPlan?.ProjectedStopLossEur;
         action.StopSource = entryPlan?.StopSource;
         action.NotionalCapReason = entryPlan?.NotionalCapReason;
+        action.EntryStopLossPrice = openedPosition.StopLossPrice;
+        action.EntryTakeProfitPrice = openedPosition.TakeProfitPrice;
+        action.EntryExchangeStopLossPrice = openedPosition.ExchangeStopLossPrice;
+        action.EntryExchangeTakeProfitPrice = openedPosition.ExchangeTakeProfitPrice;
+        action.PositionOrigin = openedPosition.Origin;
+        action.Fills.Add(new DryRunActionFill
+        {
+            OccurredAtUtc = openedAtUtc,
+            Price = fillPrice,
+            Quantity = quantity,
+            FeeEur = fee,
+            Source = "MODELED_PORTFOLIO"
+        });
         Console.WriteLine(
             $"POSITION_SIZING pair={pair} side={side} targetRiskUsd={entryPlan?.TargetRiskEur:0.####} stopPct={slDistancePct:0.###} sizedNotionalUsd={notionalEur:0.####} leverage={leverage:0.#}x requiredMarginUsd={initialMargin:0.####} quantity={quantity:0.########} fill={fillPrice:0.####} costModel={action.ExecutionCostModel}");
         if (entryPlan is not null)
@@ -310,6 +325,15 @@ internal sealed class FuturesVirtualPortfolio(
         // to Continuation / Breakout / DipBounce without a separate open-close join.
         action.EntryChannel = position.EntryChannel;
         action.Strategy = position.Strategy;
+        action.Fills.Add(new DryRunActionFill
+        {
+            OccurredAtUtc = _clock.UtcNow,
+            Price = fillPrice,
+            Quantity = position.Quantity,
+            FeeEur = fee,
+            RealizedPnlEur = pnl,
+            Source = "MODELED_PORTFOLIO"
+        });
         FillLedger(action, before, state);
         return new FuturesFillResult(action, PositionOpened: false, PositionClosed: true);
     }

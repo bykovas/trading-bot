@@ -234,6 +234,69 @@ app.MapGet("/api/dashboard", async (string? botInstanceId, CancellationToken can
     }
 });
 
+// A durable position history, assembled from the same normalized action ledger that
+// supplies dashboard.today.trades. The endpoint is deliberately read-only: workers
+// remain the only writers of trading facts.
+app.MapGet("/api/closed-positions", async (
+    string? botInstanceId,
+    DateTimeOffset? from,
+    DateTimeOffset? to,
+    int? limit,
+    string? cursor,
+    CancellationToken cancellationToken) =>
+{
+    var connectionString = GetConnectionString(builder.Configuration);
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return Results.Problem("TRADINGBOT_DATABASE_CONNECTION_STRING is not configured.");
+    }
+
+    if (from.HasValue && to.HasValue && from > to)
+    {
+        return Results.BadRequest(new { error = "from must not be after to" });
+    }
+
+    if (!TryParseClosedPositionCursor(cursor, out var pageCursor))
+    {
+        return Results.BadRequest(new { error = "cursor is invalid" });
+    }
+
+    var pageSize = Math.Clamp(limit ?? 50, 1, 100);
+    var bot = Clean(botInstanceId);
+
+    try
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var page = await ReadClosedPositions(
+            connection, bot, from, to, pageSize, pageCursor, cancellationToken);
+        return Results.Ok(new ClosedPositionsResponse(
+            DateTimeOffset.UtcNow,
+            bot,
+            from,
+            to,
+            pageSize,
+            page.NextCursor,
+            page.Items,
+            null));
+    }
+    catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.UndefinedTable
+        or PostgresErrorCodes.UndefinedObject
+        or PostgresErrorCodes.UndefinedColumn)
+    {
+        return Results.Ok(new ClosedPositionsResponse(
+            DateTimeOffset.UtcNow,
+            bot,
+            from,
+            to,
+            pageSize,
+            null,
+            Array.Empty<ClosedPositionDto>(),
+            "closed-position history is not initialized yet; wait for a worker cycle to persist the journal schema"));
+    }
+});
+
 app.MapGet("/api/cycles", async (
     int? limit,
     int? offset,
@@ -2848,6 +2911,406 @@ static async Task<DashboardTodayDto> ReadTodayTrades(
         trades.Where(trade => trade.RealizedPnlEur.HasValue).Sum(trade => trade.RealizedPnlEur!.Value));
 }
 
+static async Task<ClosedPositionPage> ReadClosedPositions(
+    NpgsqlConnection connection,
+    string? botInstanceId,
+    DateTimeOffset? from,
+    DateTimeOffset? to,
+    int limit,
+    ClosedPositionCursor? cursor,
+    CancellationToken cancellationToken)
+{
+    await using var command = new NpgsqlCommand(
+        """
+        with closes as materialized (
+            select
+                close_action.cycle_id as close_cycle_id,
+                close_action.decision_index as close_decision_index,
+                close_fact.bot_instance_id,
+                coalesce(close_action.exchange_fill_timestamp, close_fact.utc) as closed_at_utc,
+                close_action.pair,
+                close_action.action as close_action,
+                close_action.side as close_side,
+                close_action.fill_price as close_fill_price,
+                close_action.quantity as close_quantity,
+                close_action.reason as close_log,
+                close_action.exit_reason_code,
+                close_action.exit_trigger_source,
+                close_action.fee_eur as close_fee,
+                close_action.portfolio_value_before_eur,
+                close_action.portfolio_value_after_eur
+            from dry_run_actions close_action
+            join dry_run_cycle_facts close_fact on close_fact.cycle_id = close_action.cycle_id
+            where close_action.action in ('WOULD_CLOSE', 'WOULD_SELL')
+              and (@bot_instance_id is null or close_fact.bot_instance_id = @bot_instance_id)
+              and (@from_utc is null or coalesce(close_action.exchange_fill_timestamp, close_fact.utc) >= @from_utc)
+              and (@to_utc is null or coalesce(close_action.exchange_fill_timestamp, close_fact.utc) <= @to_utc)
+        ),
+        paged_closes as materialized (
+            select *
+            from closes
+            where @cursor_closed_at is null
+               or (closed_at_utc, close_cycle_id, close_decision_index)
+                    < (@cursor_closed_at, @cursor_cycle_id, @cursor_decision_index)
+            order by closed_at_utc desc, close_cycle_id desc, close_decision_index desc
+            limit @take
+        )
+        select
+            close.close_cycle_id,
+            close.close_decision_index,
+            close.bot_instance_id,
+            close.closed_at_utc,
+            close.pair,
+            close.close_action,
+            close.close_side,
+            close.close_fill_price,
+            close.close_quantity,
+            close.close_log,
+            close.exit_reason_code,
+            close.exit_trigger_source,
+            close.close_fee,
+            close.portfolio_value_before_eur,
+            close.portfolio_value_after_eur,
+            entry.cycle_id as entry_cycle_id,
+            entry.decision_index as entry_decision_index,
+            entry.opened_at_utc,
+            entry.action as entry_action,
+            entry.side as entry_side,
+            entry.leverage as entry_leverage,
+            entry.entry_price,
+            entry.fill_price as entry_fill_price,
+            entry.quantity as entry_quantity,
+            entry.gross_notional_eur as entry_notional,
+            entry.entry_channel,
+            entry.position_origin,
+            entry.strategy,
+            entry.score,
+            entry.score_threshold,
+            entry.spread_percent,
+            entry.price_action_direction,
+            entry.price_action_trend_percent,
+            entry.bullish_ema_gap_percent,
+            entry.atr_pct,
+            entry.entry_stop_loss_price,
+            entry.entry_take_profit_price,
+            entry.entry_exchange_stop_loss_price,
+            entry.entry_exchange_take_profit_price,
+            entry.fee_eur as entry_fee,
+            entry.exchange_order_id as entry_exchange_order_id,
+            entry.fill_source as entry_fill_source
+        from paged_closes close
+        left join lateral (
+            select
+                action.cycle_id,
+                action.decision_index,
+                coalesce(action.exchange_fill_timestamp, fact.utc) as opened_at_utc,
+                action.action,
+                action.side,
+                action.leverage,
+                action.entry_price,
+                action.fill_price,
+                action.quantity,
+                action.gross_notional_eur,
+                action.entry_channel,
+                action.position_origin,
+                action.strategy,
+                decision.score,
+                case when action.side = 'SHORT' then decision.short_score_threshold
+                     else decision.long_score_threshold end as score_threshold,
+                decision.spread_percent,
+                decision.price_action_direction,
+                decision.price_action_trend_percent,
+                decision.bullish_ema_gap_percent,
+                action.atr_pct,
+                action.entry_stop_loss_price,
+                action.entry_take_profit_price,
+                action.entry_exchange_stop_loss_price,
+                action.entry_exchange_take_profit_price,
+                action.fee_eur,
+                action.exchange_order_id,
+                action.fill_source
+            from dry_run_actions action
+            join dry_run_cycle_facts fact on fact.cycle_id = action.cycle_id
+            join dry_run_decision_facts decision
+                on decision.cycle_id = action.cycle_id and decision.decision_index = action.decision_index
+            where fact.bot_instance_id = close.bot_instance_id
+              and action.pair = close.pair
+              and action.action in ('WOULD_BUY', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT')
+              and (coalesce(action.exchange_fill_timestamp, fact.utc), action.cycle_id, action.decision_index)
+                    < (close.closed_at_utc, close.close_cycle_id, close.close_decision_index)
+            order by coalesce(action.exchange_fill_timestamp, fact.utc) desc, action.cycle_id desc, action.decision_index desc
+            limit 1
+        ) entry on true
+        order by close.closed_at_utc desc, close.close_cycle_id desc, close.close_decision_index desc
+        """,
+        connection);
+    command.Parameters.Add("bot_instance_id", NpgsqlDbType.Text).Value = (object?)botInstanceId ?? DBNull.Value;
+    command.Parameters.Add("from_utc", NpgsqlDbType.TimestampTz).Value = (object?)from ?? DBNull.Value;
+    command.Parameters.Add("to_utc", NpgsqlDbType.TimestampTz).Value = (object?)to ?? DBNull.Value;
+    command.Parameters.Add("cursor_closed_at", NpgsqlDbType.TimestampTz).Value =
+        (object?)cursor?.ClosedAtUtc ?? DBNull.Value;
+    command.Parameters.Add("cursor_cycle_id", NpgsqlDbType.Text).Value = (object?)cursor?.CycleId ?? DBNull.Value;
+    command.Parameters.Add("cursor_decision_index", NpgsqlDbType.Integer).Value =
+        (object?)cursor?.DecisionIndex ?? DBNull.Value;
+    command.Parameters.AddWithValue("take", limit + 1);
+
+    var drafts = new List<ClosedPositionDraft>();
+    await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+    {
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            drafts.Add(new ClosedPositionDraft(
+                new DecisionKey(reader.GetString(0), reader.GetInt32(1)),
+                reader.GetString(2),
+                DateTime.SpecifyKind(reader.GetDateTime(3), DateTimeKind.Utc),
+                reader.GetString(4),
+                reader.GetString(5),
+                ReadNullableString(reader, 6),
+                reader.GetDecimal(7),
+                reader.GetDecimal(8),
+                reader.GetString(9),
+                ReadNullableString(reader, 10),
+                ReadNullableString(reader, 11),
+                reader.GetDecimal(12),
+                reader.GetDecimal(13),
+                reader.GetDecimal(14),
+                reader.IsDBNull(15) ? null : new ClosedPositionEntryDraft(
+                    new DecisionKey(reader.GetString(15), reader.GetInt32(16)),
+                    DateTime.SpecifyKind(reader.GetDateTime(17), DateTimeKind.Utc),
+                    reader.GetString(18),
+                    ReadNullableString(reader, 19),
+                    reader.IsDBNull(20) ? null : reader.GetDecimal(20),
+                    reader.GetDecimal(21),
+                    reader.GetDecimal(22),
+                    reader.GetDecimal(23),
+                    reader.GetDecimal(24),
+                    ReadNullableString(reader, 25),
+                    ReadNullableString(reader, 26),
+                    ReadNullableString(reader, 27),
+                    reader.GetDecimal(28),
+                    reader.IsDBNull(29) ? null : reader.GetDecimal(29),
+                    reader.GetDecimal(30),
+                    ReadNullableString(reader, 31),
+                    reader.IsDBNull(32) ? null : reader.GetDecimal(32),
+                    reader.IsDBNull(33) ? null : reader.GetDecimal(33),
+                    reader.IsDBNull(34) ? null : reader.GetDecimal(34),
+                    reader.IsDBNull(35) ? null : reader.GetDecimal(35),
+                    reader.IsDBNull(36) ? null : reader.GetDecimal(36),
+                    reader.IsDBNull(37) ? null : reader.GetDecimal(37),
+                    reader.IsDBNull(38) ? null : reader.GetDecimal(38),
+                    reader.GetDecimal(39),
+                    ReadNullableString(reader, 40),
+                    ReadNullableString(reader, 41))));
+        }
+    }
+
+    var pageDrafts = drafts.Take(limit).ToList();
+    var entryKeys = pageDrafts.Where(draft => draft.Entry is not null).Select(draft => draft.Entry!.Key).ToList();
+    var actionKeys = pageDrafts.Select(draft => draft.CloseKey).Concat(entryKeys).Distinct().ToList();
+    var signals = await ReadSignalContributions(connection, entryKeys, cancellationToken);
+    var riskReasons = await ReadRiskReasons(connection, entryKeys, cancellationToken);
+    var fills = await ReadActionFills(connection, actionKeys, cancellationToken);
+
+    var items = pageDrafts.Select(draft => ToClosedPositionDto(
+        draft,
+        signals.TryGetValue(draft.Entry?.Key ?? default, out var entrySignals) ? entrySignals : Array.Empty<DashboardSignalDto>(),
+        riskReasons.TryGetValue(draft.Entry?.Key ?? default, out var entryRiskReasons) ? entryRiskReasons : Array.Empty<string>(),
+        fills.TryGetValue(draft.CloseKey, out var exitFills) ? exitFills : Array.Empty<ClosedPositionFillDto>(),
+        draft.Entry is not null && fills.TryGetValue(draft.Entry.Key, out var foundEntryFills)
+            ? foundEntryFills
+            : Array.Empty<ClosedPositionFillDto>()))
+        .ToList();
+
+    var next = drafts.Count > limit && pageDrafts.Count > 0
+        ? EncodeClosedPositionCursor(new ClosedPositionCursor(
+            ToUtcOffset(pageDrafts[^1].ClosedAtUtc), pageDrafts[^1].CloseKey.CycleId, pageDrafts[^1].CloseKey.DecisionIndex))
+        : null;
+    return new ClosedPositionPage(items, next);
+}
+
+static ClosedPositionDto ToClosedPositionDto(
+    ClosedPositionDraft draft,
+    IReadOnlyList<DashboardSignalDto> signals,
+    IReadOnlyList<string> riskReasons,
+    IReadOnlyList<ClosedPositionFillDto> exitFills,
+    IReadOnlyList<ClosedPositionFillDto> entryFills)
+{
+    var entry = draft.Entry;
+    var currency = draft.BotInstanceId.StartsWith("futures-", StringComparison.OrdinalIgnoreCase) ? "USD" : null;
+    var realizedPnl = ParseRealizedAmount(draft.CloseLog) ?? draft.PortfolioValueAfter - draft.PortfolioValueBefore;
+    var realizedPercent = ParseRealizedPercent(draft.CloseLog);
+
+    ClosedPositionEntryDto? entryDto = null;
+    string entryContextStatus;
+    if (entry is null)
+    {
+        entryContextStatus = "UNAVAILABLE_OPENING_FILL_NOT_PERSISTED";
+    }
+    else
+    {
+        // A null take-profit is valid for the ATR trailing regime, so completeness
+        // is about whether the entry action itself was persisted with its own fill.
+        entryContextStatus = entry.Origin is null || entryFills.Count == 0
+            ? "PARTIAL_LEGACY_CONTEXT"
+            : "COMPLETE";
+        entryDto = new ClosedPositionEntryDto(
+            ToUtcOffset(entry.OpenedAtUtc),
+            draft.Pair,
+            entry.Side,
+            entry.Leverage,
+            entry.FillPrice,
+            entry.Notional,
+            entry.EntryChannel,
+            entry.ExchangeOrderId,
+            entry.FillSource,
+            entry.Origin,
+            entry.Strategy,
+            entry.Score,
+            entry.ScoreThreshold,
+            signals,
+            riskReasons,
+            // The action ledger has one normalized contribution stream. "signals"
+            // preserves the dashboard field name; "contributions" exposes the same
+            // exact stored facts rather than inventing a second calculation.
+            signals,
+            entry.SpreadPercent,
+            entry.PriceActionDirection,
+            entry.PriceActionTrendPercent,
+            entry.EmaGapPercent,
+            entry.AtrPct,
+            entry.StopLossPrice,
+            entry.TakeProfitPrice,
+            entry.ExchangeStopLossPrice,
+            entry.ExchangeTakeProfitPrice,
+            entry.Key.CycleId,
+            entryFills);
+    }
+
+    return new ClosedPositionDto(
+        $"{draft.CloseKey.CycleId}:{draft.CloseKey.DecisionIndex}",
+        draft.Pair,
+        entry?.Side ?? draft.CloseSide,
+        entryDto,
+        new ClosedPositionExitDto(
+            ToUtcOffset(draft.ClosedAtUtc),
+            draft.CloseAction,
+            draft.ExitReasonCode,
+            draft.ExitTriggerSource,
+            draft.CloseFillPrice,
+            draft.CloseLog,
+            draft.CloseKey.CycleId,
+            exitFills),
+        new ClosedPositionResultDto(
+            currency,
+            realizedPnl,
+            realizedPercent,
+            entry is null ? null : entry.Fee + draft.CloseFee,
+            // Funding is not persisted per position yet. Null means unavailable,
+            // whereas zero would claim no funding was charged.
+            null,
+            currency == "USD" ? realizedPnl : null),
+        entryContextStatus);
+}
+
+static async Task<Dictionary<DecisionKey, IReadOnlyList<ClosedPositionFillDto>>> ReadActionFills(
+    NpgsqlConnection connection,
+    IReadOnlyList<DecisionKey> keys,
+    CancellationToken cancellationToken)
+{
+    var result = new Dictionary<DecisionKey, IReadOnlyList<ClosedPositionFillDto>>();
+    if (keys.Count == 0)
+    {
+        return result;
+    }
+
+    var wanted = keys.ToHashSet();
+    try
+    {
+        await using var command = new NpgsqlCommand(
+            """
+            select cycle_id, decision_index, fill_index, fill_id, order_id,
+                   occurred_at, price, quantity, fee_eur, realized_pnl_eur, source
+            from dry_run_action_fills
+            where cycle_id = any(@cycle_ids) and decision_index = any(@decision_indexes)
+            order by cycle_id, decision_index, fill_index
+            """,
+            connection);
+        command.Parameters.Add("cycle_ids", NpgsqlDbType.Array | NpgsqlDbType.Text).Value =
+            keys.Select(key => key.CycleId).Distinct().ToArray();
+        command.Parameters.Add("decision_indexes", NpgsqlDbType.Array | NpgsqlDbType.Integer).Value =
+            keys.Select(key => key.DecisionIndex).Distinct().ToArray();
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var key = new DecisionKey(reader.GetString(0), reader.GetInt32(1));
+            if (!wanted.Contains(key))
+            {
+                continue;
+            }
+
+            if (!result.TryGetValue(key, out var list))
+            {
+                list = new List<ClosedPositionFillDto>();
+                result[key] = list;
+            }
+
+            ((List<ClosedPositionFillDto>)list).Add(new ClosedPositionFillDto(
+                reader.GetInt32(2),
+                ReadNullableString(reader, 3),
+                ReadNullableString(reader, 4),
+                reader.IsDBNull(5) ? null : ToUtcOffset(reader.GetDateTime(5)),
+                reader.GetDecimal(6),
+                reader.GetDecimal(7),
+                reader.IsDBNull(8) ? null : reader.GetDecimal(8),
+                reader.IsDBNull(9) ? null : reader.GetDecimal(9),
+                reader.GetString(10)));
+        }
+    }
+    catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn)
+    {
+        // Old journal rows predate the child fill ledger. Returning no fills is more
+        // truthful than recreating executions from their action aggregate.
+    }
+
+    return result;
+}
+
+static DateTimeOffset ToUtcOffset(DateTime value) => new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
+
+static string EncodeClosedPositionCursor(ClosedPositionCursor cursor) =>
+    Convert.ToBase64String(Encoding.UTF8.GetBytes(
+        $"{cursor.ClosedAtUtc:O}|{cursor.CycleId}|{cursor.DecisionIndex.ToString(CultureInfo.InvariantCulture)}"));
+
+static bool TryParseClosedPositionCursor(string? raw, out ClosedPositionCursor? cursor)
+{
+    cursor = null;
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+        return true;
+    }
+
+    try
+    {
+        var parts = Encoding.UTF8.GetString(Convert.FromBase64String(raw)).Split('|');
+        if (parts.Length != 3
+            || string.IsNullOrWhiteSpace(parts[1])
+            || !DateTimeOffset.TryParse(parts[0], CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var closedAt)
+            || !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var decisionIndex))
+        {
+            return false;
+        }
+
+        cursor = new ClosedPositionCursor(closedAt, parts[1], decisionIndex);
+        return true;
+    }
+    catch (FormatException)
+    {
+        return false;
+    }
+}
+
 static bool IsStopLossExit(DashboardTradeDto trade) =>
     (trade.ExitReasonCode?.Contains("STOP", StringComparison.OrdinalIgnoreCase) ?? false)
     || (trade.ExitTriggerSource?.Contains("STOP", StringComparison.OrdinalIgnoreCase) ?? false)
@@ -3818,6 +4281,134 @@ internal static class DashboardDefaults
 }
 
 internal readonly record struct DecisionKey(string CycleId, int DecisionIndex);
+
+internal sealed record ClosedPositionCursor(DateTimeOffset ClosedAtUtc, string CycleId, int DecisionIndex);
+
+internal sealed record ClosedPositionPage(
+    IReadOnlyList<ClosedPositionDto> Items,
+    string? NextCursor);
+
+internal sealed record ClosedPositionDraft(
+    DecisionKey CloseKey,
+    string BotInstanceId,
+    DateTime ClosedAtUtc,
+    string Pair,
+    string CloseAction,
+    string? CloseSide,
+    decimal CloseFillPrice,
+    decimal CloseQuantity,
+    string CloseLog,
+    string? ExitReasonCode,
+    string? ExitTriggerSource,
+    decimal CloseFee,
+    decimal PortfolioValueBefore,
+    decimal PortfolioValueAfter,
+    ClosedPositionEntryDraft? Entry);
+
+internal sealed record ClosedPositionEntryDraft(
+    DecisionKey Key,
+    DateTime OpenedAtUtc,
+    string Action,
+    string? Side,
+    decimal? Leverage,
+    decimal EntryPrice,
+    decimal FillPrice,
+    decimal Quantity,
+    decimal Notional,
+    string? EntryChannel,
+    string? Origin,
+    string? Strategy,
+    decimal Score,
+    decimal? ScoreThreshold,
+    decimal SpreadPercent,
+    string? PriceActionDirection,
+    decimal? PriceActionTrendPercent,
+    decimal? EmaGapPercent,
+    decimal? AtrPct,
+    decimal? StopLossPrice,
+    decimal? TakeProfitPrice,
+    decimal? ExchangeStopLossPrice,
+    decimal? ExchangeTakeProfitPrice,
+    decimal Fee,
+    string? ExchangeOrderId,
+    string? FillSource);
+
+internal sealed record ClosedPositionsResponse(
+    DateTimeOffset Utc,
+    string? BotInstanceId,
+    DateTimeOffset? From,
+    DateTimeOffset? To,
+    int Limit,
+    string? NextCursor,
+    IReadOnlyList<ClosedPositionDto> Items,
+    string? Warning);
+
+internal sealed record ClosedPositionDto(
+    string Id,
+    string Pair,
+    string? Side,
+    ClosedPositionEntryDto? Entry,
+    ClosedPositionExitDto Exit,
+    ClosedPositionResultDto Result,
+    string EntryContextStatus);
+
+internal sealed record ClosedPositionEntryDto(
+    DateTimeOffset OpenedAtUtc,
+    string Pair,
+    string? Side,
+    decimal? Leverage,
+    decimal EntryPrice,
+    decimal Notional,
+    string? EntryChannel,
+    string? ExchangeOrderId,
+    string? FillSource,
+    string? Origin,
+    string? TradeStrategy,
+    decimal Score,
+    decimal? ScoreThreshold,
+    IReadOnlyList<DashboardSignalDto> Signals,
+    IReadOnlyList<string> RiskReasons,
+    IReadOnlyList<DashboardSignalDto> Contributions,
+    decimal SpreadPercent,
+    string? PriceActionDirection,
+    decimal? PriceActionTrendPercent,
+    decimal? EmaGapPercent,
+    decimal? EntryAtr,
+    decimal? StopLossPrice,
+    decimal? TakeProfitPrice,
+    decimal? ExchangeStopLossPrice,
+    decimal? ExchangeTakeProfitPrice,
+    string CycleId,
+    IReadOnlyList<ClosedPositionFillDto> Fills);
+
+internal sealed record ClosedPositionExitDto(
+    DateTimeOffset ClosedAtUtc,
+    string Action,
+    string? ExitReasonCode,
+    string? ExitTriggerSource,
+    decimal FillPrice,
+    string Log,
+    string CycleId,
+    IReadOnlyList<ClosedPositionFillDto> Fills);
+
+internal sealed record ClosedPositionResultDto(
+    string? Currency,
+    decimal? RealizedPnl,
+    decimal? RealizedPnlPercent,
+    decimal? Fees,
+    decimal? Funding,
+    decimal? RealizedPnlUsd);
+
+internal sealed record ClosedPositionFillDto(
+    int FillIndex,
+    string? FillId,
+    string? OrderId,
+    DateTimeOffset? OccurredAtUtc,
+    decimal Price,
+    decimal Quantity,
+    decimal? Fee,
+    decimal? RealizedPnl,
+    string Source);
 
 internal sealed record DashboardResponse(
     DateTimeOffset Utc,

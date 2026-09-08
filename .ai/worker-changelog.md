@@ -1,3 +1,9 @@
+## 2026-09-08-closed-position-history-api
+
+- Added the read-only `GET /api/closed-positions` journal endpoint. It joins each durable close in `dry_run_actions` to its latest prior opening action for the same bot instance and pair, then returns entry context, exit context, result, fills, and a stable `closedAt DESC` cursor. It reads the existing normalized action/decision ledger that already powers `dashboard.today.trades`; no second fill source of truth was introduced.
+- New actions persist the entry-time working and exchange-protection levels, position origin, and individual action fills in `dry_run_action_fills`. Live FOK openings retain their confirmed exchange result; exchange reconciliation/backfill closures retain the individual Kraken fills. Older rows remain visible with null fields or an empty fill list and an explicit `entryContextStatus`, never values reconstructed from later state.
+- Not changed: signal selection, sizing, leverage, risk limits, TP/SL decisions, order submission, reconciliation behavior, current positions, and either live account's configuration. Funding is intentionally returned as null until it is persisted per position; futures results are labeled USD from the futures account rather than converted through an unrelated dashboard rate.
+
 ## 2026-09-08-runtime-database-sizing-overrides
 
 - Added per-instance hot futures limits in the new `bot_config_overrides` table. The supported keys are `position_margin_usd`, `leverage`, `max_open_positions`, and `max_open_positions_per_group`; workers refresh them before every full cycle and fast exit check, so an insert, update, or delete takes effect without a deploy or container restart.

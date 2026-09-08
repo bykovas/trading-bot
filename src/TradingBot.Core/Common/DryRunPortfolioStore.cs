@@ -975,17 +975,46 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 range_basis text,
                 close_percentile numeric,
                 recent_swing_position numeric,
+                entry_stop_loss_price numeric,
+                entry_take_profit_price numeric,
+                entry_exchange_stop_loss_price numeric,
+                entry_exchange_take_profit_price numeric,
+                position_origin text,
                 primary key (cycle_id, decision_index),
                 foreign key (cycle_id, decision_index) references dry_run_decision_facts (cycle_id, decision_index) on delete cascade
             );
 
-            -- Live tables predate this column; create-if-not-exists never adds it.
+            -- Live tables predate these columns; create-if-not-exists never adds them.
             alter table dry_run_actions
-                add column if not exists strategy text;
+                add column if not exists strategy text,
+                add column if not exists entry_stop_loss_price numeric,
+                add column if not exists entry_take_profit_price numeric,
+                add column if not exists entry_exchange_stop_loss_price numeric,
+                add column if not exists entry_exchange_take_profit_price numeric,
+                add column if not exists position_origin text;
 
             create index if not exists ix_dry_run_actions_action_pair on dry_run_actions (action, pair);
             create index if not exists ix_dry_run_actions_exchange_order on dry_run_actions (exchange_order_id);
             create index if not exists ix_dry_run_actions_action_cycle on dry_run_actions (action, cycle_id);
+
+            create table if not exists dry_run_action_fills (
+                cycle_id text not null,
+                decision_index integer not null,
+                fill_index integer not null,
+                fill_id text,
+                order_id text,
+                occurred_at timestamptz,
+                price numeric not null,
+                quantity numeric not null,
+                fee_eur numeric,
+                realized_pnl_eur numeric,
+                source text not null,
+                primary key (cycle_id, decision_index, fill_index),
+                foreign key (cycle_id, decision_index) references dry_run_actions (cycle_id, decision_index) on delete cascade
+            );
+
+            create index if not exists ix_dry_run_action_fills_action
+                on dry_run_action_fills (cycle_id, decision_index, fill_index);
 
             create table if not exists dry_run_entry_freshness (
                 cycle_id text not null,
@@ -1973,7 +2002,12 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 notional_cap_reason,
                 range_basis,
                 close_percentile,
-                recent_swing_position)
+                recent_swing_position,
+                entry_stop_loss_price,
+                entry_take_profit_price,
+                entry_exchange_stop_loss_price,
+                entry_exchange_take_profit_price,
+                position_origin)
             values (
                 @cycle_id,
                 @decision_index,
@@ -2036,7 +2070,12 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 @notional_cap_reason,
                 @range_basis,
                 @close_percentile,
-                @recent_swing_position)
+                @recent_swing_position,
+                @entry_stop_loss_price,
+                @entry_take_profit_price,
+                @entry_exchange_stop_loss_price,
+                @entry_exchange_take_profit_price,
+                @position_origin)
             """,
             connection,
             transaction);
@@ -2102,7 +2141,52 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
         Add(command, "range_basis", NpgsqlDbType.Text, action.RangeBasis);
         Add(command, "close_percentile", NpgsqlDbType.Numeric, action.ClosePercentile);
         Add(command, "recent_swing_position", NpgsqlDbType.Numeric, action.RecentSwingPosition);
+        Add(command, "entry_stop_loss_price", NpgsqlDbType.Numeric, action.EntryStopLossPrice);
+        Add(command, "entry_take_profit_price", NpgsqlDbType.Numeric, action.EntryTakeProfitPrice);
+        Add(command, "entry_exchange_stop_loss_price", NpgsqlDbType.Numeric, action.EntryExchangeStopLossPrice);
+        Add(command, "entry_exchange_take_profit_price", NpgsqlDbType.Numeric, action.EntryExchangeTakeProfitPrice);
+        Add(command, "position_origin", NpgsqlDbType.Text, action.PositionOrigin);
         command.ExecuteNonQuery();
+
+        SaveNormalizedActionFills(connection, transaction, cycleId, decisionIndex, action.Fills);
+    }
+
+    private static void SaveNormalizedActionFills(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string cycleId,
+        int decisionIndex,
+        IReadOnlyList<DryRunActionFill>? fills)
+    {
+        if (fills is null || fills.Count == 0)
+        {
+            return;
+        }
+
+        for (var index = 0; index < fills.Count; index++)
+        {
+            var fill = fills[index];
+            Execute(connection, transaction,
+                """
+                insert into dry_run_action_fills (
+                    cycle_id, decision_index, fill_index, fill_id, order_id,
+                    occurred_at, price, quantity, fee_eur, realized_pnl_eur, source)
+                values (
+                    @cycle_id, @decision_index, @fill_index, @fill_id, @order_id,
+                    @occurred_at, @price, @quantity, @fee_eur, @realized_pnl_eur, @source)
+                """,
+                ("cycle_id", NpgsqlDbType.Text, cycleId),
+                ("decision_index", NpgsqlDbType.Integer, decisionIndex),
+                ("fill_index", NpgsqlDbType.Integer, index),
+                ("fill_id", NpgsqlDbType.Text, fill.FillId),
+                ("order_id", NpgsqlDbType.Text, fill.OrderId),
+                ("occurred_at", NpgsqlDbType.TimestampTz, Utc(fill.OccurredAtUtc)),
+                ("price", NpgsqlDbType.Numeric, fill.Price),
+                ("quantity", NpgsqlDbType.Numeric, fill.Quantity),
+                ("fee_eur", NpgsqlDbType.Numeric, fill.FeeEur),
+                ("realized_pnl_eur", NpgsqlDbType.Numeric, fill.RealizedPnlEur),
+                ("source", NpgsqlDbType.Text, fill.Source));
+        }
     }
 
     private void SaveNormalizedFreshness(

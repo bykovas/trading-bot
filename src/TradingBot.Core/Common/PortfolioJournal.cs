@@ -432,6 +432,20 @@ public sealed class DryRunAction
     public string? ExchangeOrderId { get; set; }
     public DateTimeOffset? ExchangeFillTimestamp { get; set; }
 
+    // The working and exchange-protection levels exactly as the position was opened.
+    // Older journal rows intentionally leave these null: readers must not recreate a
+    // protective order from a later configuration or from a close price.
+    public decimal? EntryStopLossPrice { get; set; }
+    public decimal? EntryTakeProfitPrice { get; set; }
+    public decimal? EntryExchangeStopLossPrice { get; set; }
+    public decimal? EntryExchangeTakeProfitPrice { get; set; }
+    public string? PositionOrigin { get; set; }
+
+    // One logical action may aggregate several exchange executions. New rows retain
+    // those executions individually; legacy actions have an empty collection rather
+    // than invented fills reconstructed from their aggregate fields.
+    public List<DryRunActionFill> Fills { get; set; } = new();
+
     // Margin / risk-based sizing telemetry (futures).
     public decimal? RequestedMarginEur { get; set; }
     public decimal? RequestedLeverage { get; set; }
@@ -477,6 +491,18 @@ public sealed class DryRunAction
     // Spot BUY maker-then-IOC execution telemetry (null on every non-entry row and
     // on futures rows). Kept as a nested object so the flat action shape is unchanged.
     public EntryExecutionDiagnostics? EntryExecution { get; set; }
+}
+
+public sealed class DryRunActionFill
+{
+    public string? FillId { get; set; }
+    public string? OrderId { get; set; }
+    public DateTimeOffset? OccurredAtUtc { get; set; }
+    public decimal Price { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal? FeeEur { get; set; }
+    public decimal? RealizedPnlEur { get; set; }
+    public string Source { get; set; } = string.Empty;
 }
 
 // Full trace of the spot BUY entry attempt: the maker phase, the optional IOC
