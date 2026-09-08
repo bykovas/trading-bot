@@ -201,6 +201,11 @@ app.MapGet("/api/dashboard", async (string? botInstanceId, CancellationToken can
         var summary = await ReadSummary(connection, bot, cancellationToken);
         var positions = await ReadPositions(connection, bot, cancellationToken);
         var entries = await ReadEntryContexts(connection, bot, positions, cancellationToken);
+        positions = positions
+            .Select(position => entries.TryGetValue(position.Pair, out var entry)
+                ? position with { EntryTradeId = entry.TradeId }
+                : position)
+            .ToList();
         var workers = await ReadWorkers(connection, cancellationToken);
         var equity = await ReadEquityDays(connection, bot, DashboardDefaults.EquityWindowDays, cancellationToken);
         var today = await ReadTodayTrades(connection, bot, cancellationToken);
@@ -723,7 +728,8 @@ static async Task<PortfolioSummaryDto?> ReadSummary(NpgsqlConnection connection,
         dailyRealizedPnl,
         reader.IsDBNull(9) ? 0m : reader.GetDecimal(9),
         reader.IsDBNull(10) ? 0m : reader.GetDecimal(10),
-        reader.IsDBNull(11) ? 0m : reader.GetDecimal(11));
+        reader.IsDBNull(11) ? 0m : reader.GetDecimal(11),
+        Math.Max(0, (int)Math.Floor((DateTimeOffset.UtcNow - ToUtcOffset(reader.GetDateTime(0))).TotalSeconds)));
 }
 
 static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConnection connection, string? botInstanceId, CancellationToken cancellationToken)
@@ -1936,7 +1942,8 @@ static async Task<IReadOnlyDictionary<string, DashboardEntryDto>> ReadEntryConte
         result[entry.Pair] = entry with
         {
             Signals = signals.TryGetValue(key, out var contributions) ? contributions : Array.Empty<DashboardSignalDto>(),
-            RiskReasons = riskReasons.TryGetValue(key, out var reasons) ? reasons : Array.Empty<string>()
+            RiskReasons = riskReasons.TryGetValue(key, out var reasons) ? reasons : Array.Empty<string>(),
+            TradeId = TradeIdFor(key)
         };
     }
 
@@ -2625,7 +2632,7 @@ static async Task<DashboardEquityDto> ReadEquityDays(
     {
         // The curve is per account; without one there is nothing meaningful to plot.
         return new DashboardEquityDto(
-            timeZoneId, todayLocal, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null, 0m, 0m);
+            timeZoneId, todayLocal, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null, null, 0m, 0m);
     }
 
     await EnsureDashboardSchema(connection, cancellationToken);
@@ -2728,6 +2735,11 @@ static async Task<DashboardEquityDto> ReadEquityDays(
         .Where(result => result is not null)
         .OrderByDescending(result => result!.MarginPercent ?? result.BotPercent)
         .FirstOrDefault();
+    var worst = closed
+        .Select(Result)
+        .Where(result => result is not null)
+        .OrderBy(result => result!.MarginPercent ?? result.BotPercent)
+        .FirstOrDefault();
 
     // Deposits and withdrawals come from the exchange ledger, which the workers sync
     // into portfolio_cash_events. They are never inferred from cash moving between
@@ -2741,6 +2753,7 @@ static async Task<DashboardEquityDto> ReadEquityDays(
         true,
         yesterday,
         best,
+        worst,
         drawdown,
         await ReadTodayCashMovement(connection, botInstanceId, timeZoneId, cancellationToken));
 }
@@ -2891,12 +2904,37 @@ static async Task<DashboardTodayDto> ReadTodayTrades(
 
     var signals = await ReadSignalContributions(connection, keys, cancellationToken);
     var riskReasons = await ReadRiskReasons(connection, keys, cancellationToken);
+    var closedHistory = await ReadClosedPositions(
+        connection, botInstanceId, utcStart, null, 100, null, cancellationToken);
+    var closedByTradeId = closedHistory.Items.ToDictionary(position => position.Id, StringComparer.Ordinal);
 
     var trades = drafts
-        .Select(draft => draft.Trade with
+        .Select(draft =>
         {
-            Signals = signals.TryGetValue(draft.Key, out var contributions) ? contributions : Array.Empty<DashboardSignalDto>(),
-            RiskReasons = riskReasons.TryGetValue(draft.Key, out var reasons) ? reasons : Array.Empty<string>()
+            var isExit = draft.Trade.Action is "WOULD_CLOSE" or "WOULD_SELL";
+            var closed = isExit && closedByTradeId.TryGetValue(TradeIdFor(draft.Key), out var found)
+                ? found
+                : null;
+            var currentSignals = signals.TryGetValue(draft.Key, out var contributions)
+                ? contributions
+                : Array.Empty<DashboardSignalDto>();
+            return draft.Trade with
+            {
+                Signals = currentSignals,
+                RiskReasons = riskReasons.TryGetValue(draft.Key, out var reasons) ? reasons : Array.Empty<string>(),
+                PositionId = closed?.Entry is { } entry ? PositionIdFor(entry) : null,
+                EntryTradeId = closed?.Entry is { } linkedEntry ? TradeIdForComponents(linkedEntry.CycleId, linkedEntry.DecisionIndex) : null,
+                Entry = closed?.Entry is { } snapshot ? ToDashboardClosedEntrySnapshot(snapshot) : null,
+                OpenedAtUtc = closed?.Entry?.OpenedAtUtc,
+                HoldSeconds = closed?.Entry is { } opening
+                    ? Math.Max(0L, (long)Math.Floor((ToUtcOffset(draft.Trade.Utc) - opening.OpenedAtUtc).TotalSeconds))
+                    : null,
+                ExitPrice = isExit ? draft.Trade.FillPrice : null,
+                ExitFills = isExit ? closed?.Exit.Fills.Count : null,
+                FeesTotalEur = isExit ? closed?.Result.Fees : null,
+                SignalsAtUtc = isExit && currentSignals.Count > 0 ? ToUtcOffset(draft.Trade.Utc) : null,
+                SignalsSource = isExit && currentSignals.Count > 0 ? "WORKER_DECISION" : null
+            };
         })
         .ToList();
 
@@ -2997,7 +3035,9 @@ static async Task<ClosedPositionPage> ReadClosedPositions(
             entry.entry_exchange_take_profit_price,
             entry.fee_eur as entry_fee,
             entry.exchange_order_id as entry_exchange_order_id,
-            entry.fill_source as entry_fill_source
+            entry.fill_source as entry_fill_source,
+            entry.entry_log,
+            entry.exploratory
         from paged_closes close
         left join lateral (
             select
@@ -3028,7 +3068,9 @@ static async Task<ClosedPositionPage> ReadClosedPositions(
                 action.entry_exchange_take_profit_price,
                 action.fee_eur,
                 action.exchange_order_id,
-                action.fill_source
+                action.fill_source,
+                action.reason as entry_log,
+                decision.exploratory
             from dry_run_actions action
             join dry_run_cycle_facts fact on fact.cycle_id = action.cycle_id
             join dry_run_decision_facts decision
@@ -3100,7 +3142,9 @@ static async Task<ClosedPositionPage> ReadClosedPositions(
                     reader.IsDBNull(38) ? null : reader.GetDecimal(38),
                     reader.GetDecimal(39),
                     ReadNullableString(reader, 40),
-                    ReadNullableString(reader, 41))));
+                    ReadNullableString(reader, 41),
+                    reader.GetString(42),
+                    !reader.IsDBNull(43) && reader.GetBoolean(43))));
         }
     }
 
@@ -3159,10 +3203,13 @@ static ClosedPositionDto ToClosedPositionDto(
             entry.Side,
             entry.Leverage,
             entry.FillPrice,
+            entry.Quantity,
             entry.Notional,
             entry.EntryChannel,
             entry.ExchangeOrderId,
             entry.FillSource,
+            entry.Log,
+            entry.Exploratory,
             entry.Origin,
             entry.Strategy,
             entry.Score,
@@ -3183,11 +3230,13 @@ static ClosedPositionDto ToClosedPositionDto(
             entry.ExchangeStopLossPrice,
             entry.ExchangeTakeProfitPrice,
             entry.Key.CycleId,
+            entry.Key.DecisionIndex,
+            TradeIdFor(entry.Key),
             entryFills);
     }
 
     return new ClosedPositionDto(
-        $"{draft.CloseKey.CycleId}:{draft.CloseKey.DecisionIndex}",
+        TradeIdFor(draft.CloseKey),
         draft.Pair,
         entry?.Side ?? draft.CloseSide,
         entryDto,
@@ -3277,6 +3326,34 @@ static async Task<Dictionary<DecisionKey, IReadOnlyList<ClosedPositionFillDto>>>
 }
 
 static DateTimeOffset ToUtcOffset(DateTime value) => new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
+
+static string TradeIdFor(DecisionKey key) => TradeIdForComponents(key.CycleId, key.DecisionIndex);
+
+static string TradeIdForComponents(string cycleId, int decisionIndex) => $"trd_{cycleId}_{decisionIndex}";
+
+static string PositionIdFor(ClosedPositionEntryDto entry) => $"pos_{entry.CycleId}_{entry.DecisionIndex}";
+
+static DashboardClosedEntrySnapshotDto ToDashboardClosedEntrySnapshot(ClosedPositionEntryDto entry) => new(
+    entry.OpenedAtUtc,
+    entry.EntryPrice,
+    entry.Quantity,
+    entry.Notional,
+    entry.Fills.Count > 0 && entry.Fills.All(fill => fill.Fee.HasValue)
+        ? entry.Fills.Sum(fill => fill.Fee!.Value)
+        : null,
+    entry.Score,
+    entry.ScoreThreshold,
+    entry.Exploratory,
+    entry.FillSource,
+    entry.TradeStrategy,
+    entry.Leverage,
+    entry.Side,
+    entry.Signals,
+    entry.SpreadPercent,
+    entry.PriceActionDirection,
+    entry.PriceActionTrendPercent,
+    entry.EmaGapPercent,
+    entry.Log);
 
 static string EncodeClosedPositionCursor(ClosedPositionCursor cursor) =>
     Convert.ToBase64String(Encoding.UTF8.GetBytes(
@@ -3419,7 +3496,8 @@ internal sealed record PortfolioSummaryDto(
     // portfolio would actually realize if liquidated now. PositionsValueEur/
     // TotalValueEur above are the gross market value shown for Kraken parity.
     decimal NetPositionsValueEur,
-    decimal NetTotalValueEur);
+    decimal NetTotalValueEur,
+    int DataAgeSeconds);
 
 internal sealed record PortfolioPositionDto(
     string Pair,
@@ -3471,7 +3549,8 @@ internal sealed record PortfolioPositionDto(
     bool AdoptedWhileRunning,
     // Which trading book opened it: "Momentum" or "Reversal". Null = Momentum (spot
     // and legacy rows, which predate the Reversal book).
-    string? TradeStrategy);
+    string? TradeStrategy,
+    string? EntryTradeId = null);
 
 internal sealed record PageRequest(int Limit, int Offset)
 {
@@ -4331,7 +4410,9 @@ internal sealed record ClosedPositionEntryDraft(
     decimal? ExchangeTakeProfitPrice,
     decimal Fee,
     string? ExchangeOrderId,
-    string? FillSource);
+    string? FillSource,
+    string Log,
+    bool Exploratory);
 
 internal sealed record ClosedPositionsResponse(
     DateTimeOffset Utc,
@@ -4358,10 +4439,13 @@ internal sealed record ClosedPositionEntryDto(
     string? Side,
     decimal? Leverage,
     decimal EntryPrice,
+    decimal Quantity,
     decimal Notional,
     string? EntryChannel,
     string? ExchangeOrderId,
     string? FillSource,
+    string Log,
+    bool Exploratory,
     string? Origin,
     string? TradeStrategy,
     decimal Score,
@@ -4379,6 +4463,8 @@ internal sealed record ClosedPositionEntryDto(
     decimal? ExchangeStopLossPrice,
     decimal? ExchangeTakeProfitPrice,
     string CycleId,
+    int DecisionIndex,
+    string TradeId,
     IReadOnlyList<ClosedPositionFillDto> Fills);
 
 internal sealed record ClosedPositionExitDto(
@@ -4442,7 +4528,8 @@ internal sealed record DashboardEntryDto(
     decimal? EmaGapPercent,
     string? FillSource,
     bool Exploratory,
-    decimal? ScoreThreshold);
+    decimal? ScoreThreshold,
+    string? TradeId = null);
 
 internal sealed record DashboardWorkerDto(
     string BotInstanceId,
@@ -4485,6 +4572,7 @@ internal sealed record DashboardEquityDto(
     bool ManualAdjustmentsTracked,
     DashboardDayResultDto? Yesterday,
     DashboardDayResultDto? BestDay,
+    DashboardDayResultDto? WorstDay,
     decimal MaxDrawdownPercent,
     // Money moved today, while the day is still open. The closed days carry their own
     // figure and the chart splits them into a bot part and a transfer part; without
@@ -4493,7 +4581,7 @@ internal sealed record DashboardEquityDto(
     decimal TodayManualEur)
 {
     public static DashboardEquityDto Empty() =>
-        new("Europe/Vilnius", string.Empty, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null, 0m, 0m);
+        new("Europe/Vilnius", string.Empty, Array.Empty<DashboardEquityDayDto>(), 0m, false, null, null, null, 0m, 0m);
 }
 
 // One day's result with money movement stripped out: Close is where the day would
@@ -4543,7 +4631,44 @@ internal sealed record DashboardTradeDto(
     bool Exploratory,
     decimal? ScoreThreshold,
     // Which trading book: "Momentum" or "Reversal". Null = Momentum (legacy/spot).
-    string? TradeStrategy);
+    string? TradeStrategy,
+    // Stable links are supplied on close rows. They eliminate the dashboard's former
+    // same-day/pair heuristic when a position was opened on an earlier local day.
+    string? PositionId = null,
+    string? EntryTradeId = null,
+    DashboardClosedEntrySnapshotDto? Entry = null,
+    DateTimeOffset? OpenedAtUtc = null,
+    long? HoldSeconds = null,
+    decimal? ExitPrice = null,
+    int? ExitFills = null,
+    decimal? FeesTotalEur = null,
+    DateTimeOffset? SignalsAtUtc = null,
+    string? SignalsSource = null,
+    // These are null for historical rows until they have been observed and persisted
+    // throughout a position's lifetime; the API never estimates them from a close.
+    decimal? MaxFavorablePercent = null,
+    decimal? MaxAdversePercent = null,
+    decimal? TrailingPeakPrice = null);
+
+internal sealed record DashboardClosedEntrySnapshotDto(
+    DateTimeOffset Utc,
+    decimal FillPrice,
+    decimal Quantity,
+    decimal TargetNotionalEur,
+    decimal? FeeEur,
+    decimal Score,
+    decimal? ScoreThreshold,
+    bool Exploratory,
+    string? FillSource,
+    string? TradeStrategy,
+    decimal? Leverage,
+    string? Side,
+    IReadOnlyList<DashboardSignalDto> Signals,
+    decimal SpreadPercent,
+    string? PriceActionDirection,
+    decimal? PriceActionTrendPercent,
+    decimal? EmaGapPercent,
+    string Log);
 
 internal sealed record DashboardRatesDto(
     decimal BykoUsd,
