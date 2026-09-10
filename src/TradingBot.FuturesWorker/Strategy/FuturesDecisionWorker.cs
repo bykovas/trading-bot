@@ -18,6 +18,7 @@ internal sealed class FuturesDecisionWorker(
     IUniverseProvider? universeProvider = null,
     IFuturesEntryMirrorStore? entryMirrorStore = null,
     ITelegramNotifier? telegramNotifier = null,
+    FuturesStrategyProfileProvider? strategyProfileProvider = null,
     FuturesRuntimeLimitProvider? runtimeLimitProvider = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
@@ -25,6 +26,8 @@ internal sealed class FuturesDecisionWorker(
         ?? (config.Telegram.IsConfigured ? new TelegramNotifier(config.Telegram) : new NullTelegramNotifier());
     private readonly IUniverseProvider _universeProvider = universeProvider ?? new ConfiguredUniverseProvider(config.CandidateUniverse);
     private readonly IFuturesEntryMirrorStore _entryMirrorStore = entryMirrorStore ?? new NullFuturesEntryMirrorStore();
+    private readonly FuturesStrategyProfileProvider _strategyProfileProvider = strategyProfileProvider
+        ?? new FuturesStrategyProfileProvider(config, new NullBotStrategyProfileStore());
     private readonly FuturesRuntimeLimitProvider _runtimeLimitProvider = runtimeLimitProvider
         ?? new FuturesRuntimeLimitProvider(config, new NullBotConfigOverrideStore());
     private readonly WorkerBuildInfo _buildInfo = WorkerBuildInfo.FromEnvironment();
@@ -73,6 +76,7 @@ internal sealed class FuturesDecisionWorker(
         {
             Console.WriteLine("!!! FUTURES LIVE TRADING ENABLED: approved decisions will place REAL Kraken Futures market orders !!!");
         }
+        await _strategyProfileProvider.RefreshAsync(cancellationToken);
         await _runtimeLimitProvider.RefreshAsync(cancellationToken);
         Console.WriteLine($"futures limits: {config.RuntimeLimits.Describe()}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flipLongEntries={config.Futures.FlipLongEntries}, ownSignalEntries={(config.Futures.OwnSignalEntriesEnabled ? "on" : "off (mirror only)")}, mirrorRole={MirrorRole}");
         Console.WriteLine($"futures exit checks: fastExit={config.Futures.FastExitCheckSeconds}s fullCycle={config.Worker.LoopIntervalSeconds}s aligned={config.Worker.AlignCyclesToClock}");
@@ -174,6 +178,7 @@ internal sealed class FuturesDecisionWorker(
 
     public async Task RunCycleAsync(CancellationToken cancellationToken)
     {
+        await _strategyProfileProvider.RefreshAsync(cancellationToken);
         await _runtimeLimitProvider.RefreshAsync(cancellationToken);
         var utc = _clock.UtcNow;
         var cycleId = $"{config.BotInstance.Id}-{utc:yyyyMMddHHmmss}";
@@ -909,6 +914,7 @@ internal sealed class FuturesDecisionWorker(
 
     public async Task RunFastExitCheckAsync(CancellationToken cancellationToken)
     {
+        await _strategyProfileProvider.RefreshAsync(cancellationToken);
         await _runtimeLimitProvider.RefreshAsync(cancellationToken);
         var utc = _clock.UtcNow;
         var state = portfolio.Load();

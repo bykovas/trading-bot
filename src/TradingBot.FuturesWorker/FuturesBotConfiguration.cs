@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace TradingBot.FuturesWorker;
 
@@ -181,7 +182,45 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_TELEGRAM_ENABLED", value => config.Telegram.Enabled = ParseBool(value, config.Telegram.Enabled));
     }
 
-    private void Normalize()
+    internal void ApplyStrategyProfile(JsonObject resolvedConfiguration)
+    {
+        var candidate = JsonSerializer.Deserialize<FuturesBotConfiguration>(
+            resolvedConfiguration.ToJsonString(),
+            JsonOptions) ?? throw new InvalidOperationException("Strategy profile could not be deserialized.");
+
+        // The profile is deliberately limited to strategy behavior. Infrastructure,
+        // credentials, live-trading state and account-specific sizing stay outside it.
+        Trading.MaxActiveInstruments = candidate.Trading.MaxActiveInstruments;
+        Trading.StrongMoverMinChangePercent = candidate.Trading.StrongMoverMinChangePercent;
+        Trading.StrongMoverMinDailyVolumeEur = candidate.Trading.StrongMoverMinDailyVolumeEur;
+        Strategy = candidate.Strategy;
+        Funding = candidate.Funding;
+        Entry = candidate.Entry;
+        Freshness = candidate.Freshness;
+        Dip = candidate.Dip;
+        Filters = candidate.Filters;
+        Exits = candidate.Exits;
+        Regime = candidate.Regime;
+        Shorts = candidate.Shorts;
+        Reversal = candidate.Reversal;
+        Risk = candidate.Risk;
+        ExecutionPolicy = candidate.ExecutionPolicy;
+        TpSl = candidate.TpSl;
+        Normalize();
+    }
+
+    internal static JsonObject SerializeForStrategyProfile(FuturesBotConfiguration config) =>
+        JsonNode.Parse(JsonSerializer.Serialize(config, JsonOptions))?.AsObject()
+        ?? throw new InvalidOperationException("Strategy configuration could not be serialized.");
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true
+    };
+
+    internal void Normalize()
     {
         BotInstance.Id = BotInstanceId.Normalize(BotInstance.Id);
         BotInstance.Name = string.IsNullOrWhiteSpace(BotInstance.Name) ? BotInstance.Id : BotInstance.Name.Trim();

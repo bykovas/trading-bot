@@ -31,6 +31,7 @@ Console.WriteLine($"futures persistence: state={store.StateDescription} events={
 
 var portfolio = new FuturesVirtualPortfolio(config, store);
 var entryMirrorStore = CreateEntryMirrorStore(config);
+var strategyProfileProvider = new FuturesStrategyProfileProvider(config, CreateBotStrategyProfileStore(config));
 var runtimeLimitProvider = new FuturesRuntimeLimitProvider(config, CreateBotConfigOverrideStore(config));
 var krakenFuturesBroker = new KrakenFuturesBroker(httpClient, config.Kraken);
 var worker = new FuturesDecisionWorker(
@@ -44,6 +45,7 @@ var worker = new FuturesDecisionWorker(
     krakenFuturesBroker,
     universeProvider: universeProvider,
     entryMirrorStore: entryMirrorStore,
+    strategyProfileProvider: strategyProfileProvider,
     runtimeLimitProvider: runtimeLimitProvider);
 
 await worker.RunAsync(cancellation.Token);
@@ -62,3 +64,8 @@ static IBotConfigOverrideStore CreateBotConfigOverrideStore(FuturesBotConfigurat
     config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
         ? new PostgresBotConfigOverrideStore(config.Database.ConnectionString)
         : new NullBotConfigOverrideStore();
+
+static IBotStrategyProfileStore CreateBotStrategyProfileStore(FuturesBotConfiguration config) =>
+    config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
+        ? new PostgresBotStrategyProfileStore(config.Database.ConnectionString)
+        : new NullBotStrategyProfileStore();

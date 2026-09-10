@@ -1,3 +1,9 @@
+## 2026-09-10-runtime-strategy-profiles
+
+- Added database-backed, versioned strategy profiles. A futures instance reads its active `bot_instance_strategy_profiles` assignment before every full decision cycle; a missing assignment restores the normalized `appsettings` strategy exactly, and a failed profile read or validation retains the last effective strategy.
+- Profile revisions and per-instance overrides are JSON objects, merged atomically over the instance's startup configuration. The hot profile surface covers market selection, scoring, entry/freshness, funding, filters, LONG/SHORT regime rules, exits, risk, execution timing and TP/SL. Existing `bot_config_overrides` remain the final, separate source for position margin, leverage, total slots and group slots.
+- Database profiles cannot replace credentials, live-trading enablement, execution account identity, Kraken/API/database settings, worker scheduling, candle timeframe, market-data wiring, mirror wiring, correlation taxonomy or configured universe. Existing open positions are not resized by a profile change; their exchange orders remain under normal reconciliation; dynamic exit checks use the currently effective strategy profile.
+
 ## 2026-09-08-closed-position-history-api
 
 - Added the read-only `GET /api/closed-positions` journal endpoint. It joins each durable close in `dry_run_actions` to its latest prior opening action for the same bot instance and pair, then returns entry context, exit context, result, fills, and a stable `closedAt DESC` cursor. It reads the existing normalized action/decision ledger that already powers `dashboard.today.trades`; no second fill source of truth was introduced.
