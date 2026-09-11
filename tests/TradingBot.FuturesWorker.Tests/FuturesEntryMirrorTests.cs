@@ -337,6 +337,53 @@ public sealed class FuturesEntryMirrorTests
         Assert.Null(followerStore.CompletedId);
     }
 
+    [Fact]
+    public async Task Zero_margin_pause_leaves_mirror_commands_unclaimed()
+    {
+        var command = new FuturesEntryMirrorCommand(
+            Id: 10,
+            SourceBotInstanceId: "futures-lukas-live",
+            SourceCycleId: "futures-lukas-live-20260911120000",
+            TargetBotInstanceId: "futures-live",
+            Pair: "BOME/USD",
+            KrakenSymbol: "PF_BOMEUSD",
+            SourceSide: "LONG",
+            TargetSide: "SHORT",
+            TargetNotionalUsd: 150m,
+            Leverage: 10m,
+            SourceFillPrice: 2.02m,
+            QuantityDecimals: 8,
+            PriceDecimals: 4,
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            AttemptCount: 1);
+        var followerStore = new StubMirrorStore { Next = command };
+        var followerBroker = new StubBroker();
+        var followerConfig = CreateConfig("futures-live");
+        followerConfig.EntryMirror.FollowSourceBotInstanceId = "futures-lukas-live";
+        followerConfig.SetRuntimeLimits(FuturesRuntimeLimits.Resolve(
+            followerConfig,
+            new Dictionary<string, decimal>
+            {
+                [BotConfigOverrideKeys.PositionMarginUsd] = 0m
+            }).Limits);
+        var followerWorker = CreateWorker(followerConfig, followerBroker, followerStore);
+        var state = new PortfolioState { CashEur = 600m, CashQuoteValue = 600m, CashQuoteCurrency = "USD" };
+        var decisions = new List<DryRunDecisionRecord>();
+
+        await InvokeProcessAsync(
+            followerWorker,
+            state,
+            [new InstrumentOptions { Pair = "BOME/USD", KrakenPair = "PF_BOMEUSD", QuantityDecimals = 8, PriceDecimals = 4 }],
+            decisions);
+
+        Assert.Same(command, followerStore.Next);
+        Assert.Empty(state.Positions);
+        Assert.Empty(decisions);
+        Assert.Equal(0, followerBroker.EntryCalls);
+        Assert.Null(followerStore.FailedId);
+        Assert.Null(followerStore.CompletedId);
+    }
+
     private static async Task InvokePublishAsync(
         FuturesDecisionWorker worker,
         string cycleId,

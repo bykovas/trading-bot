@@ -1479,3 +1479,7 @@
 ## 2026-08-29-archive-spot-worker
 
 - `TradingBot.SpotWorker` and `TradingBot.SpotWorker.Tests` were moved to `src/archive/` and excluded from the active solution, CI image build, deployment compose, and runtime cleanup. The spot worker was frozen and did not trade in production.
+## 2026-09-11-zero-margin-entry-pause
+
+- A database override of `position_margin_usd = 0` now means "pause new entries" for that futures instance. The worker continues market reconciliation and all reduce-only protection/exits for positions already open, but skips own-signal and mirror entries before sizing or order submission; Telegram messages from this worker are suppressed while the pause is active.
+- A zero is valid only in `bot_config_overrides`; zero or negative static configuration still normalizes to its safe configured default. The last effective positive margin remains visible internally during the pause so no zero-sized risk calculations occur. Any positive override (or deleting the override) resumes normal entry behavior on the next refresh.

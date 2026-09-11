@@ -107,6 +107,25 @@ public sealed class FuturesRuntimeLimitsTests
     }
 
     [Fact]
+    public void Zero_margin_override_pauses_new_entries_without_zeroing_the_effective_size()
+    {
+        var config = Configuration();
+        var result = FuturesRuntimeLimits.Resolve(
+            config,
+            new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase)
+            {
+                [BotConfigOverrideKeys.PositionMarginUsd] = 0m
+            });
+
+        Assert.True(result.Limits.HasDatabaseOverrides);
+        Assert.True(result.Limits.NewEntriesPaused);
+        Assert.False(result.Limits.FixedSizingEnabled);
+        Assert.Equal(10m, result.Limits.PositionMarginUsd);
+        Assert.Equal(10m, result.Limits.PositionNotionalUsd);
+        Assert.DoesNotContain(result.Warnings, warning => warning.Contains(BotConfigOverrideKeys.PositionMarginUsd, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Refresh_applies_changes_deletion_and_retains_last_snapshot_on_failure()
     {
         var config = Configuration();

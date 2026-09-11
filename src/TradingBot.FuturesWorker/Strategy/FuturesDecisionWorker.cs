@@ -107,7 +107,10 @@ internal sealed class FuturesDecisionWorker(
                 // Any error the cycle did not handle - a broken exchange call, a data
                 // read that threw - reaches the channel as one throttled 🚨 rather than
                 // only the server log, so a stuck bot is visible without watching it.
-                await _telegram.SendAlertAsync($"klaida cikle: {ex.Message}", cancellationToken);
+                if (!config.RuntimeLimits.NewEntriesPaused)
+                {
+                    await _telegram.SendAlertAsync($"klaida cikle: {ex.Message}", cancellationToken);
+                }
             }
 
             if (config.Worker.RunOnce)
@@ -408,6 +411,13 @@ internal sealed class FuturesDecisionWorker(
             }
             else
             {
+                // A zero database margin is a deliberate pause for NEW exposure. Held
+                // positions pass through the branch above and still receive all exits.
+                if (config.RuntimeLimits.NewEntriesPaused)
+                {
+                    continue;
+                }
+
                 if (IsMirrorFollower)
                 {
                     fill = portfolio.Apply(
@@ -1044,7 +1054,7 @@ internal sealed class FuturesDecisionWorker(
         DateTimeOffset closedAtUtc,
         CancellationToken cancellationToken)
     {
-        if (!config.Telegram.IsConfigured || position.EntryPrice <= 0m)
+        if (config.RuntimeLimits.NewEntriesPaused || !config.Telegram.IsConfigured || position.EntryPrice <= 0m)
         {
             return;
         }
@@ -1093,7 +1103,7 @@ internal sealed class FuturesDecisionWorker(
         EntrySignalDetails details,
         CancellationToken cancellationToken)
     {
-        if (!config.Telegram.IsConfigured || !fill.PositionOpened)
+        if (config.RuntimeLimits.NewEntriesPaused || !config.Telegram.IsConfigured || !fill.PositionOpened)
         {
             return;
         }
@@ -1216,7 +1226,7 @@ internal sealed class FuturesDecisionWorker(
         List<DryRunDecisionRecord> decisions,
         CancellationToken cancellationToken)
     {
-        if (!IsMirrorFollower)
+        if (!IsMirrorFollower || config.RuntimeLimits.NewEntriesPaused)
         {
             return;
         }

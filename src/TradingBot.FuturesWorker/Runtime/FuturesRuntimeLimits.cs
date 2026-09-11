@@ -26,7 +26,8 @@ internal sealed record FuturesRuntimeLimits(
     decimal MaxConcurrentOpenRiskUsd,
     decimal MaxAccountMarginUtilizationPercent,
     bool FixedSizingEnabled,
-    bool HasDatabaseOverrides)
+    bool HasDatabaseOverrides,
+    bool NewEntriesPaused)
 {
     public static FuturesRuntimeLimits FromConfiguration(FuturesBotConfiguration config)
     {
@@ -61,7 +62,8 @@ internal sealed record FuturesRuntimeLimits(
             MaxConcurrentOpenRiskUsd: config.Risk.MaxConcurrentOpenRiskUsd,
             MaxAccountMarginUtilizationPercent: config.Margin.MaxAccountMarginUtilizationPercent,
             FixedSizingEnabled: false,
-            HasDatabaseOverrides: false);
+            HasDatabaseOverrides: false,
+            NewEntriesPaused: false);
     }
 
     public static FuturesRuntimeLimitResolution Resolve(
@@ -74,13 +76,28 @@ internal sealed record FuturesRuntimeLimits(
             .Select(key => $"unknown override '{key}' ignored")
             .ToList();
 
-        var margin = ReadDecimal(
-            overrides,
-            BotConfigOverrideKeys.PositionMarginUsd,
-            fallback.PositionMarginUsd,
-            value => value is > 0m and <= 1_000_000m,
-            warnings,
-            out var marginOverridden);
+        // An explicit database zero is an operator pause command, not an invalid size.
+        // Keep the prior effective sizing intact so a resumed worker has no transient
+        // zero-sized calculations; entry paths observe NewEntriesPaused before sizing.
+        var newEntriesPaused = overrides.TryGetValue(BotConfigOverrideKeys.PositionMarginUsd, out var requestedMargin)
+            && requestedMargin == 0m;
+        bool marginOverridden;
+        decimal margin;
+        if (newEntriesPaused)
+        {
+            margin = fallback.PositionMarginUsd;
+            marginOverridden = false;
+        }
+        else
+        {
+            margin = ReadDecimal(
+                overrides,
+                BotConfigOverrideKeys.PositionMarginUsd,
+                fallback.PositionMarginUsd,
+                value => value is > 0m and <= 1_000_000m,
+                warnings,
+                out marginOverridden);
+        }
         var leverage = ReadDecimal(
             overrides,
             BotConfigOverrideKeys.Leverage,
@@ -112,7 +129,7 @@ internal sealed record FuturesRuntimeLimits(
             groupPositions = maxPositions;
         }
 
-        var hasOverrides = marginOverridden || leverageOverridden || maxPositionsOverridden || groupPositionsOverridden;
+        var hasOverrides = newEntriesPaused || marginOverridden || leverageOverridden || maxPositionsOverridden || groupPositionsOverridden;
         if (!hasOverrides)
         {
             return new FuturesRuntimeLimitResolution(fallback, warnings);
@@ -141,12 +158,13 @@ internal sealed record FuturesRuntimeLimits(
                 // must not make a DB-declared number of fully funded slots unreachable.
                 MaxAccountMarginUtilizationPercent: 100m,
                 FixedSizingEnabled: fixedSizing,
-                HasDatabaseOverrides: true),
+                HasDatabaseOverrides: true,
+                NewEntriesPaused: newEntriesPaused),
             warnings);
     }
 
     public string Describe() =>
-        $"source={(HasDatabaseOverrides ? "database" : "appsettings")} marginUsd={PositionMarginUsd:0.####} leverage={Leverage:0.####}x notionalUsd={PositionNotionalUsd:0.####} positions={MaxOpenPositions} groupPositions={MaxOpenPositionsPerGroup} fixedSizing={FixedSizingEnabled}";
+        $"source={(HasDatabaseOverrides ? "database" : "appsettings")} marginUsd={PositionMarginUsd:0.####} leverage={Leverage:0.####}x notionalUsd={PositionNotionalUsd:0.####} positions={MaxOpenPositions} groupPositions={MaxOpenPositionsPerGroup} fixedSizing={FixedSizingEnabled} newEntriesPaused={NewEntriesPaused}";
 
     private static decimal ReadDecimal(
         IReadOnlyDictionary<string, decimal> overrides,
