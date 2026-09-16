@@ -351,6 +351,10 @@ database_ready_check() {
 }
 
 seed_pukis_instance() {
+  # Stopped for the seed so a cycle in flight cannot write the old balance back
+  # after the reset below; the compose up that follows starts it again.
+  docker stop trading-bot-pukis-futures-worker-live >/dev/null 2>&1 || true
+
   local profile_values
   profile_values="$(python3 - "${FUTURES_PUKIS_APPSETTINGS_SOURCE}" <<'PY'
 import json
@@ -551,6 +555,45 @@ values
     ('futures-pukis-live', 'max_open_positions', 3),
     ('futures-pukis-live', 'max_open_positions_per_group', 1)
 on conflict (bot_instance_id, override_key) do nothing;
+
+-- The worker opened Pukis's ledger from appsettings StartingCashUsd (60), a
+-- placeholder copied from Lukas, and a paused instance never reconciles with
+-- Kraken, so 60 USD was persisted and drawn as a balance nobody has. Until the
+-- first credentials exist the balance is unknown; zero is the value the equity
+-- rollup already skips as "not yet reconciled". Guarded so it can never touch a
+-- Pukis account that has keys or a position.
+do $$
+declare
+    has_keys boolean := false;
+begin
+    if to_regclass('public.bot_instance_api_credentials') is not null then
+        execute 'select exists (select 1 from bot_instance_api_credentials
+                                where bot_instance_id = ''futures-pukis-live'')'
+            into has_keys;
+    end if;
+    if has_keys then
+        return;
+    end if;
+    if exists (select 1 from portfolio_state_summary
+               where bot_instance_id = 'futures-pukis-live' and open_positions > 0) then
+        return;
+    end if;
+
+    update portfolio_state_summary
+    set cash_eur = 0, cash_quote_value = 0, positions_value_eur = 0, total_value_eur = 0
+    where bot_instance_id = 'futures-pukis-live'
+      and (cash_eur <> 0 or total_value_eur <> 0);
+
+    update dry_run_cycle_facts
+    set cash_before_eur = 0, cash_after_eur = 0,
+        positions_value_before_eur = 0, positions_value_after_eur = 0,
+        portfolio_value_before_eur = 0, portfolio_value_after_eur = 0
+    where bot_instance_id = 'futures-pukis-live'
+      and (cash_after_eur <> 0 or portfolio_value_after_eur <> 0
+           or cash_before_eur <> 0 or portfolio_value_before_eur <> 0);
+
+    delete from portfolio_daily_equity where bot_instance_id = 'futures-pukis-live';
+end $$;
 SQL
 }
 
