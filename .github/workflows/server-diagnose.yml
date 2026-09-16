@@ -4,23 +4,24 @@ jobs:
   verify:
     runs-on: self-hosted
     steps:
-      - name: the single error line + restarts
+      - name: trading-bot db - user-like tables and pukis
         run: |
-          echo "=== BYKO exact error/exception lines 36h ==="
-          docker logs --since 36h trading-bot-futures-worker-live 2>&1 | grep -iE "\berror\b|exception|unhandled|fatal|traceback|stack trace|refused|unauthorized|forbidden|nonce|rate limit" | grep -viE "reason=|blocked=|_ERROR_|no futures" | tail -30 || echo "(none)"
-          echo "=== LUKO exact error/exception lines 36h ==="
-          docker logs --since 36h trading-bot-lukas-futures-worker-live 2>&1 | grep -iE "\berror\b|exception|unhandled|fatal|refused|unauthorized|forbidden|nonce|rate limit" | grep -viE "reason=|blocked=|no futures" | tail -30 || echo "(none)"
-          echo "=== restart counts ==="
-          docker inspect -f '{{.Name}} restarts={{.RestartCount}} started={{.State.StartedAt}} exit={{.State.ExitCode}}' trading-bot-futures-worker-live trading-bot-lukas-futures-worker-live trading-bot-market-data-worker
-      - name: order submissions 36h
+          Q() { docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F'|' -c "$1" || true; }
+          Q "select table_name from information_schema.tables where table_schema='public' and (table_name ilike '%user%' or table_name ilike '%credential%' or table_name ilike '%override%' or table_name ilike '%profile%' or table_name ilike '%account%' or table_name ilike '%login%') order by 1"
+          for t in $(docker exec trading-bot-db psql -U tradingbot -d tradingbot -At -c "select table_name from information_schema.tables where table_schema='public' and (table_name ilike '%user%' or table_name ilike '%account%' or table_name ilike '%login%')"); do
+            echo "--- $t (columns) ---"
+            Q "select string_agg(column_name, ', ' order by ordinal_position) from information_schema.columns where table_name='$t'"
+            echo "--- $t rows mentioning pukis ---"
+            Q "select * from \"$t\" t where t::text ilike '%pukis%'" | sed -E 's/(\$2[aby]\$[^|]*|[A-Za-z0-9+\/=]{40,})/<redacted>/g'
+          done
+          echo "--- overrides / profiles per instance ---"
+          Q "select bot_instance_id, override_key, numeric_value from bot_config_overrides order by 1,2"
+          Q "select bot_instance_id, profile_id, profile_revision, is_active from bot_instance_strategy_profiles order by 1"
+          echo "--- credentials table presence (no values) ---"
+          Q "select table_name, string_agg(column_name, ', ') from information_schema.columns where table_name ilike '%credential%' group by 1"
+      - name: cryptosmithx db - pukis
         run: |
-          echo "=== any order attempts / rejections ==="
-          docker logs --since 36h trading-bot-futures-worker-live 2>&1 | grep -iE "futures-order|sendorder|order-submit|placeorder|REJECT_|insufficient|would-not-fill|FOK|cancel" | tail -30 || echo "(none)"
-      - name: btc + equity
-        run: |
-          docker logs --since 30m trading-bot-futures-worker-live 2>&1 | grep -iE "EXPERIMENT_SHORT_BTC_RISING|btc_regime|btc 24h" | tail -3
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select distinct on (f.bot_instance_id) f.bot_instance_id, c.utc, f.portfolio_value_after_eur from dry_run_cycle_facts f join dry_run_cycles c using (cycle_id) where f.bot_instance_id like 'futures-l%' order by f.bot_instance_id, c.utc desc"
-          echo "--- entries per day last 5d ---"
-          docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select f.bot_instance_id, date(f.utc) d, count(*) filter (where a.action like 'WOULD_OPEN%') opens, count(*) filter (where a.action='WOULD_CLOSE') closes from dry_run_actions a join dry_run_decision_facts f using (cycle_id, decision_index) where f.utc >= now() - interval '5 days' and a.fill_price > 0 group by 1,2 order by 2 desc,1"
+          docker exec cryptosmithx-postgres psql -U marketdata -d marketdata -A -F'|' -c "select string_agg(column_name, ', ' order by ordinal_position) from information_schema.columns where table_name='webapp_user'" || true
+          docker exec cryptosmithx-postgres psql -U marketdata -d marketdata -At -c "select count(*) from webapp_user where webapp_user::text ilike '%pukis%'" || true
+      - name: containers
+        run: docker ps --format '{{.Names}}\t{{.Status}}' | grep -i trading-bot
