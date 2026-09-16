@@ -27,6 +27,13 @@ try
         Timeout = TimeSpan.FromSeconds(config.Http.TimeoutSeconds)
     };
 
+    var apiCredentialProvider = new KrakenApiCredentialProvider(
+        config.BotInstance.Id,
+        BotApiCredentialScope.KrakenSpot,
+        config.Kraken,
+        CreateBotApiCredentialStore(config));
+    await apiCredentialProvider.RefreshAsync(cancellation.Token);
+
     var (marketDataSource, universeProvider) = MarketDataSourceFactory.Create(
         httpClient,
         config.Kraken,
@@ -59,7 +66,8 @@ try
         new RiskManager(),
         new DryRunPortfolio(config.DryRun, config.Portfolio, config.ExecutionPolicy, config.PositionExit, config.PositionSizing, portfolioStore, strategy: config.Strategy, correlationRisk: config.CorrelationRisk, fullConfig: config),
         broker,
-        universeProvider: universeProvider);
+        universeProvider: universeProvider,
+        apiCredentialProvider: apiCredentialProvider);
 
     await worker.RunAsync(cancellation.Token);
     return 0;
@@ -90,3 +98,8 @@ static IDryRunPortfolioStore CreatePortfolioStore(BotConfiguration config)
 
     return new FileDryRunPortfolioStore(config.DryRun);
 }
+
+static IBotApiCredentialStore CreateBotApiCredentialStore(BotConfiguration config) =>
+    config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
+        ? new PostgresBotApiCredentialStore(config.Database.ConnectionString)
+        : new NullBotApiCredentialStore();

@@ -1483,3 +1483,8 @@
 
 - A database override of `position_margin_usd = 0` now means "pause new entries" for that futures instance. The worker continues market reconciliation and all reduce-only protection/exits for positions already open, but skips own-signal and mirror entries before sizing or order submission; Telegram messages from this worker are suppressed while the pause is active.
 - A zero is valid only in `bot_config_overrides`; zero or negative static configuration still normalizes to its safe configured default. The last effective positive margin remains visible internally during the pause so no zero-sized risk calculations occur. Any positive override (or deleting the override) resumes normal entry behavior on the next refresh.
+## 2026-09-16-database-api-credentials
+
+- Added clear-text, per-instance Kraken credential storage in `bot_instance_api_credentials`. Its primary key is `(bot_instance_id, api_scope)` and each row contains a complete `api_key`/`api_secret` pair for either `kraken_spot` or `kraken_futures`.
+- Futures and archived Spot workers now prefer the matching database row, refresh it before each decision cycle, and fall back to their startup environment credentials only when no row exists. Credential values are never written to worker logs; failed database reads retain the last effective pair.
+- No credentials were copied into the database by this code change. Existing environment secrets remain the fallback until complete rows are inserted for the relevant bot instances.

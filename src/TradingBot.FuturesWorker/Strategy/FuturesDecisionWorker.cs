@@ -19,7 +19,8 @@ internal sealed class FuturesDecisionWorker(
     IFuturesEntryMirrorStore? entryMirrorStore = null,
     ITelegramNotifier? telegramNotifier = null,
     FuturesStrategyProfileProvider? strategyProfileProvider = null,
-    FuturesRuntimeLimitProvider? runtimeLimitProvider = null)
+    FuturesRuntimeLimitProvider? runtimeLimitProvider = null,
+    KrakenApiCredentialProvider? apiCredentialProvider = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly ITelegramNotifier _telegram = telegramNotifier
@@ -30,6 +31,12 @@ internal sealed class FuturesDecisionWorker(
         ?? new FuturesStrategyProfileProvider(config, new NullBotStrategyProfileStore());
     private readonly FuturesRuntimeLimitProvider _runtimeLimitProvider = runtimeLimitProvider
         ?? new FuturesRuntimeLimitProvider(config, new NullBotConfigOverrideStore());
+    private readonly KrakenApiCredentialProvider _apiCredentialProvider = apiCredentialProvider
+        ?? new KrakenApiCredentialProvider(
+            config.BotInstance.Id,
+            BotApiCredentialScope.KrakenFutures,
+            config.Kraken,
+            new NullBotApiCredentialStore());
     private readonly WorkerBuildInfo _buildInfo = WorkerBuildInfo.FromEnvironment();
     private readonly SentryFailureGate _cycleFailureGate = new("futures-worker", config.BotInstance.Id);
     private readonly SentryFailureGate _fastExitFailureGate = new("futures-worker", config.BotInstance.Id);
@@ -65,6 +72,8 @@ internal sealed class FuturesDecisionWorker(
         {
             throw new InvalidOperationException($"Bot instance '{config.BotInstance.Id}' is live but TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED is not true; refusing to create virtual positions under a live instance id.");
         }
+
+        await _apiCredentialProvider.RefreshAsync(cancellationToken);
 
         if (config.Futures.LiveTradingEnabled && broker?.IsConfigured != true)
         {
@@ -183,6 +192,7 @@ internal sealed class FuturesDecisionWorker(
     {
         await _strategyProfileProvider.RefreshAsync(cancellationToken);
         await _runtimeLimitProvider.RefreshAsync(cancellationToken);
+        await _apiCredentialProvider.RefreshAsync(cancellationToken);
         var utc = _clock.UtcNow;
         var cycleId = $"{config.BotInstance.Id}-{utc:yyyyMMddHHmmss}";
         Console.WriteLine($"futures cycle={cycleId} utc={utc:O}");
@@ -926,6 +936,7 @@ internal sealed class FuturesDecisionWorker(
     {
         await _strategyProfileProvider.RefreshAsync(cancellationToken);
         await _runtimeLimitProvider.RefreshAsync(cancellationToken);
+        await _apiCredentialProvider.RefreshAsync(cancellationToken);
         var utc = _clock.UtcNow;
         var state = portfolio.Load();
         if (state.Positions.Count == 0 && !config.Futures.LiveTradingEnabled)

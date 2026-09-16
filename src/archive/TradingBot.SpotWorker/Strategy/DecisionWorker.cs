@@ -10,10 +10,17 @@ internal sealed class DecisionWorker(
     DryRunPortfolio dryRunPortfolio,
     ISpotBroker? broker,
     WorkerBuildInfo? buildInfo = null,
-    IUniverseProvider? universeProvider = null)
+    IUniverseProvider? universeProvider = null,
+    KrakenApiCredentialProvider? apiCredentialProvider = null)
 {
     private readonly WorkerBuildInfo _buildInfo = buildInfo ?? WorkerBuildInfo.FromEnvironment();
     private readonly IUniverseProvider _universeProvider = universeProvider ?? new ConfiguredUniverseProvider(config.CandidateUniverse);
+    private readonly KrakenApiCredentialProvider _apiCredentialProvider = apiCredentialProvider
+        ?? new KrakenApiCredentialProvider(
+            config.BotInstance.Id,
+            BotApiCredentialScope.KrakenSpot,
+            config.Kraken,
+            new NullBotApiCredentialStore());
 
     // Rolling per-pair history of light ticker snapshots feeding the anti-lag
     // price-action guard. In-memory only: after a restart the guard abstains until
@@ -137,6 +144,7 @@ internal sealed class DecisionWorker(
 
     private async Task RunCycleAsync(CancellationToken cancellationToken)
     {
+        await _apiCredentialProvider.RefreshAsync(cancellationToken);
         var utc = DateTimeOffset.UtcNow;
         var cycleId = $"{config.BotInstance.Id}-{utc:yyyyMMddHHmmss}";
         Console.WriteLine();

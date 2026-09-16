@@ -17,6 +17,13 @@ using var httpClient = new HttpClient
     Timeout = TimeSpan.FromSeconds(config.Http.TimeoutSeconds)
 };
 
+var apiCredentialProvider = new KrakenApiCredentialProvider(
+    config.BotInstance.Id,
+    BotApiCredentialScope.KrakenFutures,
+    config.Kraken,
+    CreateBotApiCredentialStore(config));
+await apiCredentialProvider.RefreshAsync(cancellation.Token);
+
 var (marketDataSource, universeProvider) = MarketDataSourceFactory.Create(
     httpClient,
     config.Kraken,
@@ -46,7 +53,8 @@ var worker = new FuturesDecisionWorker(
     universeProvider: universeProvider,
     entryMirrorStore: entryMirrorStore,
     strategyProfileProvider: strategyProfileProvider,
-    runtimeLimitProvider: runtimeLimitProvider);
+    runtimeLimitProvider: runtimeLimitProvider,
+    apiCredentialProvider: apiCredentialProvider);
 
 await worker.RunAsync(cancellation.Token);
 
@@ -64,6 +72,11 @@ static IBotConfigOverrideStore CreateBotConfigOverrideStore(FuturesBotConfigurat
     config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
         ? new PostgresBotConfigOverrideStore(config.Database.ConnectionString)
         : new NullBotConfigOverrideStore();
+
+static IBotApiCredentialStore CreateBotApiCredentialStore(FuturesBotConfiguration config) =>
+    config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
+        ? new PostgresBotApiCredentialStore(config.Database.ConnectionString)
+        : new NullBotApiCredentialStore();
 
 static IBotStrategyProfileStore CreateBotStrategyProfileStore(FuturesBotConfiguration config) =>
     config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
