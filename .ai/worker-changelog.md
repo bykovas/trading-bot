@@ -1,3 +1,9 @@
+## 2026-09-16-pukis-paused-futures-instance
+
+- Added the independent `futures-pukis-live` Kraken Futures worker. Its baseline configuration is a snapshot of the Lukas control profile; deployment records its web user mapping, a database strategy-profile assignment, and all four runtime sizing overrides. The initial `position_margin_usd` override is explicitly `0`, so the container starts in an operator-controlled pause.
+- A paused live worker now reads database strategy and runtime settings before validating Kraken Futures credentials. With no tracked position it does not reconcile, refresh the dead-man switch, submit an order, or send an alert merely because credentials are absent. Supplying database credentials and changing the database margin to a positive value activates ordinary live trading without a redeploy.
+- Not changed: Lukas and BYKO instances, their credentials, sizing, strategy profile assignments, signals, scoring, entry and exit rules, current positions, and exchange order behaviour. A paused instance that already holds a position still requires a configured broker for reconciliation and exits.
+
 ## 2026-09-10-runtime-strategy-profiles
 
 - Added database-backed, versioned strategy profiles. A futures instance reads its active `bot_instance_strategy_profiles` assignment before every full decision cycle; a missing assignment restores the normalized `appsettings` strategy exactly, and a failed profile read or validation retains the last effective strategy.

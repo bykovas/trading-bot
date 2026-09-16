@@ -268,6 +268,24 @@ public sealed class FuturesInstanceConfigurationTests
     }
 
     [Fact]
+    public void Pukis_profile_is_an_independent_copy_of_the_lukas_baseline()
+    {
+        var root = FindRepositoryRoot();
+        var lukas = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.lukas.json"));
+        var pukis = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.pukis.json"));
+
+        Assert.Equal("futures-pukis-live", pukis["BotInstance"]?["Id"]?.GetValue<string>());
+        Assert.Equal("Pukis live futures worker", pukis["BotInstance"]?["Name"]?.GetValue<string>());
+        Assert.Equal("PUKIS", pukis["Telegram"]?["Label"]?.GetValue<string>());
+
+        var normalizedPukis = pukis.DeepClone().AsObject();
+        normalizedPukis["BotInstance"] = lukas["BotInstance"]?.DeepClone();
+        normalizedPukis["Telegram"] = lukas["Telegram"]?.DeepClone();
+
+        Assert.True(JsonNode.DeepEquals(lukas, normalizedPukis));
+    }
+
+    [Fact]
     public void Lukas_deployment_uses_an_isolated_container_runtime_and_secret_mapping()
     {
         var root = FindRepositoryRoot();
@@ -284,6 +302,13 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.DoesNotContain("TRADINGBOT_FUTURES_FLIP_LONG_ENTRIES", deploy);
         Assert.Contains("secrets.TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY", workflow);
         Assert.Contains("secrets.TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET", workflow);
+
+        Assert.Contains("container_name: trading-bot-pukis-futures-worker-live", compose);
+        Assert.Contains("/opt/trading-bot/futures/pukis-live/.env", compose);
+        Assert.Contains("/opt/trading-bot/futures/pukis-live/appsettings.json", compose);
+        Assert.Contains("TRADINGBOT_BOT_INSTANCE_ID=futures-pukis-live", deploy);
+        Assert.Contains("'futures-pukis-live', 'position_margin_usd', 0", deploy);
+        Assert.Contains("src/TradingBot.FuturesWorker/appsettings.pukis.json", workflow);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using TradingBot.Core.Indicators;
 using Xunit;
 
 namespace TradingBot.FuturesWorker.Tests;
@@ -167,6 +168,41 @@ public sealed class FuturesRuntimeLimitsTests
 
         Assert.Equal("futures-lukas-live", store.LastBotInstanceId);
         Assert.Equal(150m, config.RuntimeLimits.PositionNotionalUsd);
+    }
+
+    [Fact]
+    public async Task Paused_live_instance_starts_without_kraken_credentials()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
+        var config = Configuration();
+        config.BotInstance = new BotInstanceOptions { Id = "futures-pukis-live", Name = "Pukis live futures worker" };
+        config.Futures.LiveTradingEnabled = true;
+        config.Worker.RunOnce = true;
+        config.Kraken = new KrakenOptions { MarketDataMode = "sample" };
+        config.DryRun.OutputDirectory = outputDirectory;
+
+        var limits = new FuturesRuntimeLimitProvider(
+            config,
+            new MutableOverrideStore
+            {
+                Values = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [BotConfigOverrideKeys.PositionMarginUsd] = 0m
+                }
+            });
+        var worker = new FuturesDecisionWorker(
+            config,
+            new SampleMarketDataSource(),
+            new IndicatorEngine(),
+            new LongShortStrategy(config),
+            new MarginRiskManager(config),
+            new FuturesVirtualPortfolio(config, new FileDryRunPortfolioStore(config.DryRun)),
+            new TpSlOrchestrator(config),
+            runtimeLimitProvider: limits);
+
+        await worker.RunAsync(CancellationToken.None);
+
+        Assert.True(config.RuntimeLimits.NewEntriesPaused);
     }
 
     [Fact]

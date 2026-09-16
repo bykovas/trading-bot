@@ -11,14 +11,18 @@ API_ENV_FILE="${API_DIR}/.env"
 FUTURES_DIR="${DEPLOY_DIR}/futures"
 FUTURES_LIVE_DIR="${FUTURES_DIR}/live"
 FUTURES_LUKAS_LIVE_DIR="${FUTURES_DIR}/lukas-live"
+FUTURES_PUKIS_LIVE_DIR="${FUTURES_DIR}/pukis-live"
 FUTURES_VIRTUAL_DIR="${FUTURES_DIR}/virtual"
 FUTURES_APPSETTINGS_SOURCE="src/TradingBot.FuturesWorker/appsettings.json"
 FUTURES_LUKAS_APPSETTINGS_SOURCE="src/TradingBot.FuturesWorker/appsettings.lukas.json"
+FUTURES_PUKIS_APPSETTINGS_SOURCE="src/TradingBot.FuturesWorker/appsettings.pukis.json"
 FUTURES_LIVE_APPSETTINGS="${FUTURES_LIVE_DIR}/appsettings.json"
 FUTURES_LUKAS_LIVE_APPSETTINGS="${FUTURES_LUKAS_LIVE_DIR}/appsettings.json"
+FUTURES_PUKIS_LIVE_APPSETTINGS="${FUTURES_PUKIS_LIVE_DIR}/appsettings.json"
 FUTURES_VIRTUAL_APPSETTINGS="${FUTURES_VIRTUAL_DIR}/appsettings.json"
 FUTURES_LIVE_ENV_FILE="${FUTURES_LIVE_DIR}/.env"
 FUTURES_LUKAS_LIVE_ENV_FILE="${FUTURES_LUKAS_LIVE_DIR}/.env"
+FUTURES_PUKIS_LIVE_ENV_FILE="${FUTURES_PUKIS_LIVE_DIR}/.env"
 FUTURES_VIRTUAL_ENV_FILE="${FUTURES_VIRTUAL_DIR}/.env"
 DATABASE_DIR="${DEPLOY_DIR}/database"
 DATABASE_ENV_DIR="${DEPLOY_DIR}/postgres"
@@ -55,6 +59,7 @@ echo "  ui     = ${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
 echo "  api    = ${API_IMAGE_NAME}:${API_IMAGE_TAG}"
 echo "  futures= ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG}"
 echo "  lukas  = trading-bot-lukas-futures-worker-live"
+echo "  pukis  = trading-bot-pukis-futures-worker-live (paused until configured in the UI)"
 echo "  market-data= ${MARKET_DATA_WORKER_IMAGE_NAME}:${MARKET_DATA_WORKER_IMAGE_TAG}"
 echo "  og     = ${OG_IMAGE_NAME}:${OG_IMAGE_TAG}"
 
@@ -66,6 +71,8 @@ mkdir -p \
   "${FUTURES_LIVE_DIR}/logs" \
   "${FUTURES_LUKAS_LIVE_DIR}/data" \
   "${FUTURES_LUKAS_LIVE_DIR}/logs" \
+  "${FUTURES_PUKIS_LIVE_DIR}/data" \
+  "${FUTURES_PUKIS_LIVE_DIR}/logs" \
   "${FUTURES_VIRTUAL_DIR}/data" \
   "${FUTURES_VIRTUAL_DIR}/logs" \
   "${MARKET_DATA_DIR}/logs" \
@@ -99,6 +106,8 @@ echo "Updating futures live appsettings from repository config (mirror follower 
 install_config "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_LIVE_APPSETTINGS}"
 echo "Updating Lukas futures live appsettings from repository config"
 install_config "${FUTURES_LUKAS_APPSETTINGS_SOURCE}" "${FUTURES_LUKAS_LIVE_APPSETTINGS}"
+echo "Updating Pukis futures live appsettings from repository config"
+install_config "${FUTURES_PUKIS_APPSETTINGS_SOURCE}" "${FUTURES_PUKIS_LIVE_APPSETTINGS}"
 echo "Updating futures virtual appsettings from repository config"
 install_config "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_VIRTUAL_APPSETTINGS}"
 echo "Updating market data worker appsettings from repository config"
@@ -220,6 +229,22 @@ echo "Writing Lukas futures live environment to ${FUTURES_LUKAS_LIVE_ENV_FILE}"
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${FUTURES_LUKAS_LIVE_ENV_FILE}"
 
+# Pukis has no environment-backed Kraken credentials. The worker starts in live mode
+# so database credentials can activate it without a redeploy, while the zero database
+# margin seeded below prevents all exchange calls and new entries until the user opts in.
+echo "Writing Pukis futures live environment to ${FUTURES_PUKIS_LIVE_ENV_FILE}"
+{
+  printf 'TRADINGBOT_BOT_INSTANCE_ID=futures-pukis-live\n'
+  printf 'TRADINGBOT_BOT_INSTANCE_NAME=Pukis live futures worker\n'
+  printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
+  printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
+  printf 'TRADINGBOT_MARKET_DATA_MODE=database\n'
+  printf 'TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true\n'
+  printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=true\n'
+  printf 'SENTRY_DSN=%s\n' "${SENTRY_DSN:-}"
+  printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
+} > "${FUTURES_PUKIS_LIVE_ENV_FILE}"
+
 echo "Writing futures virtual environment to ${FUTURES_VIRTUAL_ENV_FILE}"
 {
   printf 'TRADINGBOT_BOT_INSTANCE_ID=futures-virtual\n'
@@ -325,10 +350,217 @@ database_ready_check() {
     pg_isready -h database -p 5432 -U tradingbot -d tradingbot >/dev/null
 }
 
+seed_pukis_instance() {
+  local profile_values
+  profile_values="$(python3 - "${FUTURES_PUKIS_APPSETTINGS_SOURCE}" <<'PY'
+import json
+import sys
+
+allowed = {
+    "Trading", "Strategy", "Funding", "Entry", "Freshness", "Dip", "Filters",
+    "Exits", "Regime", "Shorts", "Reversal", "Risk", "ExecutionPolicy", "TpSl"
+}
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    configuration = json.load(source)
+
+print(json.dumps(
+    {key: value for key, value in configuration.items() if key in allowed},
+    separators=(",", ":")))
+PY
+)"
+
+  docker compose \
+    -p "${PROJECT_NAME}" \
+    -f "${COMPOSE_FILE}" \
+    exec -T database psql \
+      -v ON_ERROR_STOP=1 \
+      -v "pukis_profile_values=${profile_values}" \
+      -U tradingbot \
+      -d tradingbot <<'SQL'
+create table if not exists bot_config_overrides (
+    bot_instance_id text not null,
+    override_key text not null,
+    numeric_value numeric not null,
+    updated_at timestamptz not null default now(),
+    primary key (bot_instance_id, override_key)
+);
+
+create table if not exists bot_instance_webapp_users (
+    bot_instance_id text primary key,
+    webapp_username text not null,
+    bot_instance_public_alias text not null,
+    is_active boolean not null default true,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    check (btrim(bot_instance_id) <> ''),
+    check (btrim(webapp_username) <> '')
+);
+
+create index if not exists ix_bot_instance_webapp_users_username
+    on bot_instance_webapp_users (webapp_username)
+    where is_active;
+
+create table if not exists bot_strategy_profiles (
+    profile_id uuid primary key,
+    name text not null unique,
+    description text,
+    is_archived boolean not null default false,
+    created_at timestamptz not null default now(),
+    created_by text,
+    updated_at timestamptz not null default now(),
+    updated_by text,
+    check (btrim(name) <> '')
+);
+
+create table if not exists bot_strategy_profile_revisions (
+    profile_id uuid not null references bot_strategy_profiles(profile_id) on delete restrict,
+    revision integer not null,
+    values_jsonb jsonb not null,
+    change_note text,
+    created_at timestamptz not null default now(),
+    created_by text,
+    primary key (profile_id, revision),
+    check (revision > 0),
+    check (jsonb_typeof(values_jsonb) = 'object')
+);
+
+create table if not exists bot_instance_strategy_profiles (
+    bot_instance_id text primary key,
+    profile_id uuid not null,
+    profile_revision integer not null,
+    overrides_jsonb jsonb not null default '{}'::jsonb,
+    is_active boolean not null default true,
+    created_at timestamptz not null default now(),
+    created_by text,
+    updated_at timestamptz not null default now(),
+    updated_by text,
+    foreign key (profile_id, profile_revision)
+        references bot_strategy_profile_revisions(profile_id, revision)
+        on delete restrict,
+    check (btrim(bot_instance_id) <> ''),
+    check (jsonb_typeof(overrides_jsonb) = 'object')
+);
+
+insert into bot_instance_webapp_users (
+    bot_instance_id,
+    webapp_username,
+    bot_instance_public_alias,
+    is_active
+)
+values ('futures-pukis-live', 'pukis', 'PUKIS', true)
+on conflict (bot_instance_id) do update set
+    webapp_username = excluded.webapp_username,
+    bot_instance_public_alias = excluded.bot_instance_public_alias,
+    is_active = excluded.is_active,
+    updated_at = now();
+
+insert into bot_strategy_profiles (
+    profile_id,
+    name,
+    description,
+    is_archived,
+    created_by,
+    updated_by
+)
+values (
+    'd6d42f9b-3c57-4e85-9294-ef60962c5de1',
+    'Pukis initial Lukas clone',
+    'Immutable fallback snapshot of the Lukas futures strategy at instance creation.',
+    false,
+    'deploy',
+    'deploy'
+)
+on conflict (profile_id) do nothing;
+
+insert into bot_strategy_profile_revisions (
+    profile_id,
+    revision,
+    values_jsonb,
+    change_note,
+    created_by
+)
+values (
+    'd6d42f9b-3c57-4e85-9294-ef60962c5de1',
+    1,
+    :'pukis_profile_values'::jsonb,
+    'Initial fallback snapshot from appsettings.lukas.json.',
+    'deploy'
+)
+on conflict (profile_id, revision) do nothing;
+
+insert into bot_instance_strategy_profiles (
+    bot_instance_id,
+    profile_id,
+    profile_revision,
+    overrides_jsonb,
+    is_active,
+    created_by,
+    updated_by
+)
+select
+    'futures-pukis-live',
+    source.profile_id,
+    source.profile_revision,
+    source.overrides_jsonb,
+    source.is_active,
+    'deploy',
+    'deploy'
+from (
+    select profile_id, profile_revision, overrides_jsonb, is_active
+    from bot_instance_strategy_profiles
+    where bot_instance_id = 'futures-lukas-live'
+
+    union all
+
+    select
+        'd6d42f9b-3c57-4e85-9294-ef60962c5de1'::uuid,
+        1,
+        '{}'::jsonb,
+        true
+    where not exists (
+        select 1
+        from bot_instance_strategy_profiles
+        where bot_instance_id = 'futures-lukas-live'
+    )
+) source
+on conflict (bot_instance_id) do nothing;
+
+insert into bot_config_overrides (bot_instance_id, override_key, numeric_value)
+select
+    'futures-pukis-live',
+    override_key,
+    case
+        when override_key = 'position_margin_usd' then 0
+        else numeric_value
+    end
+from bot_config_overrides
+where bot_instance_id = 'futures-lukas-live'
+  and override_key in (
+      'position_margin_usd',
+      'leverage',
+      'max_open_positions',
+      'max_open_positions_per_group'
+  )
+on conflict (bot_instance_id, override_key) do nothing;
+
+insert into bot_config_overrides (bot_instance_id, override_key, numeric_value)
+values
+    ('futures-pukis-live', 'position_margin_usd', 0),
+    ('futures-pukis-live', 'leverage', 10),
+    ('futures-pukis-live', 'max_open_positions', 3),
+    ('futures-pukis-live', 'max_open_positions_per_group', 1)
+on conflict (bot_instance_id, override_key) do nothing;
+SQL
+}
+
 # Database health: check the real compose-network DNS alias instead of docker
 # exec'ing into Postgres. This still works on hosts where Docker exec healthchecks
 # are broken by runtime/seccomp issues.
 run_healthcheck_with_retries "database DNS and Postgres readiness" 45 2 database_ready_check
+
+echo "Seeding Pukis paused futures instance in Postgres."
+seed_pukis_instance
 
 echo "Starting application services after database readiness."
 if [ "${FUTURES_LUKAS_LIVE_TRADING_FLAG}" != "true" ]; then
@@ -375,6 +607,7 @@ run_healthcheck_with_retries "trading-bot-api public stats" 30 2 \
 # that is deliberately not started would fail every deploy.
 WORKER_CONTAINERS=(
   trading-bot-futures-worker-live
+  trading-bot-pukis-futures-worker-live
 )
 if [ "${FUTURES_LUKAS_LIVE_TRADING_FLAG}" = "true" ]; then
   WORKER_CONTAINERS+=(trading-bot-lukas-futures-worker-live)

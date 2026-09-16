@@ -72,6 +72,22 @@ services:
       - /opt/trading-bot/futures/lukas-live/data:/app/data
       - /opt/trading-bot/futures/lukas-live/logs:/app/logs
 
+  futures-worker-pukis-live:
+    container_name: trading-bot-pukis-futures-worker-live
+    image: ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - /opt/trading-bot/futures/pukis-live/.env
+    depends_on:
+      db-ready:
+        condition: service_completed_successfully
+    # Pukis starts paused through the database margin override until credentials and
+    # a non-zero position margin are supplied from the strategy settings UI.
+    volumes:
+      - /opt/trading-bot/futures/pukis-live/appsettings.json:/app/appsettings.json:ro
+      - /opt/trading-bot/futures/pukis-live/data:/app/data
+      - /opt/trading-bot/futures/pukis-live/logs:/app/logs
+
   futures-worker-virtual:
     container_name: trading-bot-futures-worker-virtual
     image: ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG:-latest}

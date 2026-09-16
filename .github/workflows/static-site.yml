@@ -165,6 +165,7 @@ jobs:
             infra/traefik/trading-bot.yml
             src/TradingBot.FuturesWorker/appsettings.json
             src/TradingBot.FuturesWorker/appsettings.lukas.json
+            src/TradingBot.FuturesWorker/appsettings.pukis.json
             src/TradingBot.MarketDataWorker/appsettings.json
 
   deploy:

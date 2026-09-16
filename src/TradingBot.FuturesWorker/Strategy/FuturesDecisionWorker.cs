@@ -66,6 +66,10 @@ internal sealed class FuturesDecisionWorker(
             ? $"follower<-{config.EntryMirror.FollowSourceBotInstanceId}"
             : "independent";
 
+    private bool RequiresLiveBroker(PortfolioState state) =>
+        config.Futures.LiveTradingEnabled
+        && (!config.RuntimeLimits.NewEntriesPaused || state.Positions.Count > 0);
+
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         if (IsLiveInstance && !config.Futures.LiveTradingEnabled)
@@ -73,9 +77,13 @@ internal sealed class FuturesDecisionWorker(
             throw new InvalidOperationException($"Bot instance '{config.BotInstance.Id}' is live but TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED is not true; refusing to create virtual positions under a live instance id.");
         }
 
+        await _strategyProfileProvider.RefreshAsync(cancellationToken);
+        await _runtimeLimitProvider.RefreshAsync(cancellationToken);
         await _apiCredentialProvider.RefreshAsync(cancellationToken);
 
-        if (config.Futures.LiveTradingEnabled && broker?.IsConfigured != true)
+        if (config.Futures.LiveTradingEnabled
+            && !config.RuntimeLimits.NewEntriesPaused
+            && broker?.IsConfigured != true)
         {
             throw new InvalidOperationException("TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=true but Kraken Futures API keys are missing or broker is not configured.");
         }
@@ -83,10 +91,10 @@ internal sealed class FuturesDecisionWorker(
         Console.WriteLine($"futures worker start instance={config.BotInstance.Id} marketDataMode={config.Kraken.MarketDataMode} dryRunOnly={!config.Futures.LiveTradingEnabled}");
         if (config.Futures.LiveTradingEnabled)
         {
-            Console.WriteLine("!!! FUTURES LIVE TRADING ENABLED: approved decisions will place REAL Kraken Futures market orders !!!");
+            Console.WriteLine(config.RuntimeLimits.NewEntriesPaused
+                ? "Futures live execution is paused by the database position-margin override."
+                : "!!! FUTURES LIVE TRADING ENABLED: approved decisions will place REAL Kraken Futures market orders !!!");
         }
-        await _strategyProfileProvider.RefreshAsync(cancellationToken);
-        await _runtimeLimitProvider.RefreshAsync(cancellationToken);
         Console.WriteLine($"futures limits: {config.RuntimeLimits.Describe()}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, flipLongEntries={config.Futures.FlipLongEntries}, ownSignalEntries={(config.Futures.OwnSignalEntriesEnabled ? "on" : "off (mirror only)")}, mirrorRole={MirrorRole}");
         Console.WriteLine($"futures exit checks: fastExit={config.Futures.FastExitCheckSeconds}s fullCycle={config.Worker.LoopIntervalSeconds}s aligned={config.Worker.AlignCyclesToClock}");
         HydratePriceHistory();
@@ -204,7 +212,7 @@ internal sealed class FuturesDecisionWorker(
         PersistMarketSnapshots(cycleId, utc, lightStates);
         _priceHistory.Record(utc, lightStates);
         var valuationUnsettled = false;
-        if (config.Futures.LiveTradingEnabled)
+        if (RequiresLiveBroker(state))
         {
             valuationUnsettled = await ReconcileWithKrakenAsync(state, universe, lightStates, utc, cancellationToken);
             await RefreshDeadManSwitchAsync(cancellationToken);
@@ -939,14 +947,15 @@ internal sealed class FuturesDecisionWorker(
         await _apiCredentialProvider.RefreshAsync(cancellationToken);
         var utc = _clock.UtcNow;
         var state = portfolio.Load();
-        if (state.Positions.Count == 0 && !config.Futures.LiveTradingEnabled)
+        if (state.Positions.Count == 0
+            && (!config.Futures.LiveTradingEnabled || config.RuntimeLimits.NewEntriesPaused))
         {
             return;
         }
 
         var universeSelection = await ResolveUniverseAsync(cancellationToken);
         var universe = universeSelection.Instruments.Where(instrument => instrument.Enabled).ToList();
-        if (config.Futures.LiveTradingEnabled)
+        if (RequiresLiveBroker(state))
         {
             await ReconcileWithKrakenAsync(state, universe, Array.Empty<InstrumentMarketState>(), utc, cancellationToken);
         }
