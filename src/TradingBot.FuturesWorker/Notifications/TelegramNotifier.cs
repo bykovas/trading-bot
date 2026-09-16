@@ -7,6 +7,8 @@ internal interface ITelegramNotifier
 {
     Task SendAsync(string text, CancellationToken cancellationToken);
 
+    Task<bool> TrySendAsync(string text, CancellationToken cancellationToken);
+
     // A 🚨 line for something the bot could not do - a full book, a broken exchange call.
     // Self-throttled so a condition that repeats every cycle posts at most once per window;
     // the reason is the human half of the sentence, the head and the throttle are the
@@ -57,11 +59,14 @@ internal sealed class TelegramNotifier(TelegramNotificationOptions options, Http
         return SendAsync(head + label + Escape(reason), cancellationToken);
     }
 
-    public async Task SendAsync(string text, CancellationToken cancellationToken)
+    public async Task SendAsync(string text, CancellationToken cancellationToken) =>
+        await TrySendAsync(text, cancellationToken);
+
+    public async Task<bool> TrySendAsync(string text, CancellationToken cancellationToken)
     {
         if (!options.IsConfigured || string.IsNullOrWhiteSpace(text))
         {
-            return;
+            return false;
         }
 
         try
@@ -81,11 +86,15 @@ internal sealed class TelegramNotifier(TelegramNotificationOptions options, Http
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
                 // The token is never logged; the body can carry a description but not it.
                 Console.WriteLine($"TELEGRAM_SEND_FAILED status={(int)response.StatusCode} body={Trim(body)}");
+                return false;
             }
+
+            return true;
         }
         catch (Exception error)
         {
             Console.WriteLine($"TELEGRAM_SEND_FAILED error={error.GetType().Name}: {error.Message}");
+            return false;
         }
     }
 
@@ -101,6 +110,8 @@ internal sealed class TelegramNotifier(TelegramNotificationOptions options, Http
 internal sealed class NullTelegramNotifier : ITelegramNotifier
 {
     public Task SendAsync(string text, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task<bool> TrySendAsync(string text, CancellationToken cancellationToken) => Task.FromResult(false);
 
     public Task SendAlertAsync(string reason, CancellationToken cancellationToken) => Task.CompletedTask;
 }

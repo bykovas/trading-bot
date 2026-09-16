@@ -20,7 +20,8 @@ internal sealed class FuturesDecisionWorker(
     ITelegramNotifier? telegramNotifier = null,
     FuturesStrategyProfileProvider? strategyProfileProvider = null,
     FuturesRuntimeLimitProvider? runtimeLimitProvider = null,
-    KrakenApiCredentialProvider? apiCredentialProvider = null)
+    KrakenApiCredentialProvider? apiCredentialProvider = null,
+    FuturesCapacitySummaryReporter? capacitySummaryReporter = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly ITelegramNotifier _telegram = telegramNotifier
@@ -37,6 +38,7 @@ internal sealed class FuturesDecisionWorker(
             BotApiCredentialScope.KrakenFutures,
             config.Kraken,
             new NullBotApiCredentialStore());
+    private readonly FuturesCapacitySummaryReporter? _capacitySummaryReporter = capacitySummaryReporter;
     private readonly WorkerBuildInfo _buildInfo = WorkerBuildInfo.FromEnvironment();
     private readonly SentryFailureGate _cycleFailureGate = new("futures-worker", config.BotInstance.Id);
     private readonly SentryFailureGate _fastExitFailureGate = new("futures-worker", config.BotInstance.Id);
@@ -241,6 +243,8 @@ internal sealed class FuturesDecisionWorker(
         var btcRegime = EvaluateBtcRegime(fullStates);
         var decisions = new List<DryRunDecisionRecord>(mirrorDecisions);
         var newEntriesThisCycle = 0;
+        var slotSkipsThisCycle = 0;
+        var marginSkipsThisCycle = 0;
 
         // Slots are finite, and this loop used to fill them in the order it walked the
         // universe - which is ranked by 24h move, not by signal quality. The score
@@ -533,12 +537,7 @@ internal sealed class FuturesDecisionWorker(
                     desired = FuturesDesiredExposure.Flat;
                     riskReasons = new[] { $"entry skipped: futures position slots exhausted ({config.RuntimeLimits.MaxOpenPositions} max)" };
                     riskApproved = false;
-                    // A real candidate cleared every gate and found no free slot: the book
-                    // is full and signals are going by. The notifier throttles this to once
-                    // per window, so the tight per-candidate loop pays nothing after the first.
-                    await _telegram.SendAlertAsync(
-                        $"nėra laisvų slotų (visi {config.RuntimeLimits.MaxOpenPositions} užimti) — praleidžiu {pair} ir kitus signalus",
-                        cancellationToken);
+                    slotSkipsThisCycle++;
                 }
                 else if (reversal is { Fires: true })
                 {
@@ -569,6 +568,11 @@ internal sealed class FuturesDecisionWorker(
                     riskApproved = reversalEvaluation.Approved;
                     if (!reversalEvaluation.Approved)
                     {
+                        if (IsMarginCapacityRejection(reversalEvaluation.Reasons))
+                        {
+                            marginSkipsThisCycle++;
+                        }
+
                         desired = FuturesDesiredExposure.Flat;
                     }
                     else
@@ -740,6 +744,11 @@ internal sealed class FuturesDecisionWorker(
                     riskApproved = evaluation.Approved;
                     if (!evaluation.Approved)
                     {
+                        if (IsMarginCapacityRejection(evaluation.Reasons))
+                        {
+                            marginSkipsThisCycle++;
+                        }
+
                         desired = FuturesDesiredExposure.Flat;
                     }
                     else
@@ -920,6 +929,11 @@ internal sealed class FuturesDecisionWorker(
             decisions.Add(BuildDecisionRecord(marketState, indicators, signal, fill, riskApproved, riskReasons, priceAction));
         }
 
+        await RecordCapacitySummaryAsync(
+            utc,
+            new FuturesCapacitySkipCounts(slotSkipsThisCycle, marginSkipsThisCycle),
+            cancellationToken);
+
         portfolio.Save(state);
         portfolio.Store.AppendCycle(new DryRunCycleRecord
         {
@@ -939,6 +953,33 @@ internal sealed class FuturesDecisionWorker(
         });
         Console.WriteLine($"futures cycle done: decisions={decisions.Count} cash={state.CashEur:0.####} total={state.TotalValueEur:0.####} positions={state.Positions.Count}");
     }
+
+    private async Task RecordCapacitySummaryAsync(
+        DateTimeOffset utc,
+        FuturesCapacitySkipCounts counts,
+        CancellationToken cancellationToken)
+    {
+        if (_capacitySummaryReporter is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _capacitySummaryReporter.RecordAsync(config.BotInstance.Id, utc, counts, cancellationToken);
+            if (config.Telegram.CapacitySummaryReporter)
+            {
+                await _capacitySummaryReporter.ReportCompletedWindowAsync(utc, cancellationToken);
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"futures capacity summary failed: {exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
+    private static bool IsMarginCapacityRejection(IEnumerable<string> reasons) =>
+        reasons.Any(reason => reason.StartsWith("INSUFFICIENT_AVAILABLE_MARGIN:", StringComparison.Ordinal));
 
     public async Task RunFastExitCheckAsync(CancellationToken cancellationToken)
     {

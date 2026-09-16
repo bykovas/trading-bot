@@ -1,3 +1,9 @@
+## 2026-09-16-shared-capacity-summary
+
+- Replaced per-candidate Telegram alerts for exhausted futures slots with database-backed two-hour capacity summaries. Each worker records only real candidates skipped because all position slots are occupied or free margin is insufficient; the Lukas reporter emits one shared BYKO/LUKO/PUKO summary for the completed UTC window.
+- Bucket counts are retained in `futures_capacity_summary_buckets`. A distinct delivery claim is marked delivered only after Telegram accepts the message; a failed send releases the claim for retry, so counts are never cleared or silently lost.
+- No entry selection, sizing, risk limits, execution, exit handling, or existing Telegram trade announcements changed.
+
 ## 2026-09-16-pukis-paused-futures-instance
 
 - Added the independent `futures-pukis-live` Kraken Futures worker. Its baseline configuration is a snapshot of the Lukas control profile; deployment records its web user mapping, a database strategy-profile assignment, and all four runtime sizing overrides. The initial `position_margin_usd` override is explicitly `0`, so the container starts in an operator-controlled pause.

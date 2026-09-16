@@ -40,6 +40,13 @@ var portfolio = new FuturesVirtualPortfolio(config, store);
 var entryMirrorStore = CreateEntryMirrorStore(config);
 var strategyProfileProvider = new FuturesStrategyProfileProvider(config, CreateBotStrategyProfileStore(config));
 var runtimeLimitProvider = new FuturesRuntimeLimitProvider(config, CreateBotConfigOverrideStore(config));
+ITelegramNotifier telegramNotifier = config.Telegram.IsConfigured
+    ? new TelegramNotifier(config.Telegram)
+    : new NullTelegramNotifier();
+var capacitySummaryReporter = new FuturesCapacitySummaryReporter(
+    CreateFuturesCapacitySummaryStore(config),
+    telegramNotifier,
+    config.BotInstance.Id);
 var krakenFuturesBroker = new KrakenFuturesBroker(httpClient, config.Kraken);
 var worker = new FuturesDecisionWorker(
     config,
@@ -52,9 +59,11 @@ var worker = new FuturesDecisionWorker(
     krakenFuturesBroker,
     universeProvider: universeProvider,
     entryMirrorStore: entryMirrorStore,
+    telegramNotifier: telegramNotifier,
     strategyProfileProvider: strategyProfileProvider,
     runtimeLimitProvider: runtimeLimitProvider,
-    apiCredentialProvider: apiCredentialProvider);
+    apiCredentialProvider: apiCredentialProvider,
+    capacitySummaryReporter: capacitySummaryReporter);
 
 await worker.RunAsync(cancellation.Token);
 
@@ -77,6 +86,11 @@ static IBotApiCredentialStore CreateBotApiCredentialStore(FuturesBotConfiguratio
     config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
         ? new PostgresBotApiCredentialStore(config.Database.ConnectionString)
         : new NullBotApiCredentialStore();
+
+static IFuturesCapacitySummaryStore CreateFuturesCapacitySummaryStore(FuturesBotConfiguration config) =>
+    config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
+        ? new PostgresFuturesCapacitySummaryStore(config.Database.ConnectionString)
+        : new NullFuturesCapacitySummaryStore();
 
 static IBotStrategyProfileStore CreateBotStrategyProfileStore(FuturesBotConfiguration config) =>
     config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)

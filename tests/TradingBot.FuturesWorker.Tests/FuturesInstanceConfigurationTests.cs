@@ -170,6 +170,8 @@ public sealed class FuturesInstanceConfigurationTests
             ("Telegram", "Label"),
             // The face at the head of every post, one per instance, same reason as the label.
             ("Telegram", "Emoji"),
+            // One configured reporter creates the shared two-hour capacity summary.
+            ("Telegram", "CapacitySummaryReporter"),
             // The experiment arm's own knobs; absent on the control by design.
             ("Futures", "DisabledLongEntryChannels"),
             ("Freshness", "FreshTapeSnapshotCount"),

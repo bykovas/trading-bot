@@ -631,6 +631,9 @@ internal sealed class TelegramNotificationOptions
     public string? BotToken { get; set; }
     public string? ChatId { get; set; }
 
+    // Exactly one worker owns the shared capacity summary so all accounts report in one post.
+    public bool CapacitySummaryReporter { get; set; }
+
     public bool IsConfigured =>
         Enabled
         && !string.IsNullOrWhiteSpace(BotToken)
