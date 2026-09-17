@@ -1,3 +1,8 @@
+## 2026-09-17-capacity-summary-qualified-candidates
+
+- Corrected the two-hour capacity summary: it now counts a skipped entry only after it has passed every strategy, market-quality, range, portfolio, and non-capacity money gate. A full-book candidate receives a second risk probe that excludes only aggregate slot-derived limits; any separate blocker, including adverse funding, correlation, spread, freshness, or insufficient free margin, prevents a slot count.
+- The previous summary counted preliminary score-direction signals before those gates, which overstated missed entries. This changes notification diagnostics only; order placement, risk enforcement, and entry eligibility are unchanged.
+
 ## 2026-09-16-shared-capacity-summary
 
 - Replaced per-candidate Telegram alerts for exhausted futures slots with database-backed two-hour capacity summaries. Each worker records only real candidates skipped because all position slots are occupied or free margin is insufficient; the Lukas reporter emits one shared BYKO/LUKO/PUKO summary for the completed UTC window.

@@ -4,7 +4,9 @@ namespace TradingBot.FuturesWorker;
 // missing input (zero mark price, unknown funding) fails closed for entries.
 internal sealed class MarginRiskManager(FuturesBotConfiguration config)
 {
-    public RiskEvaluation EvaluateEntry(FuturesEntryRiskInputs input)
+    public RiskEvaluation EvaluateEntry(
+        FuturesEntryRiskInputs input,
+        bool ignoreAggregateCapacityLimits = false)
     {
         var limits = config.RuntimeLimits;
         var reasons = new List<string>();
@@ -103,7 +105,8 @@ internal sealed class MarginRiskManager(FuturesBotConfiguration config)
             return new RiskEvaluation(false, reasons);
         }
 
-        if (input.State.Positions.Count >= limits.MaxOpenPositions)
+        if (!ignoreAggregateCapacityLimits
+            && input.State.Positions.Count >= limits.MaxOpenPositions)
         {
             reasons.Add($"max futures positions {limits.MaxOpenPositions} reached");
             return new RiskEvaluation(false, reasons);
@@ -145,7 +148,7 @@ internal sealed class MarginRiskManager(FuturesBotConfiguration config)
         }
 
         // Independent cap: max aggregate notional across all open positions.
-        if (limits.MaxTotalNotionalUsd > 0m)
+        if (!ignoreAggregateCapacityLimits && limits.MaxTotalNotionalUsd > 0m)
         {
             var totalNotionalAfter = input.State.Positions.Sum(position => position.EntryNotionalEur) + input.FilledNotionalEur;
             if (totalNotionalAfter > limits.MaxTotalNotionalUsd)
@@ -173,7 +176,8 @@ internal sealed class MarginRiskManager(FuturesBotConfiguration config)
         // Concurrent open-risk cap = pure stop-distance heat summed across positions
         // (= TargetRiskUsd * MaxPositions by default). Execution/slippage cost is bounded
         // by the notional caps above and reported per trade, not double-counted here.
-        if (limits.MaxConcurrentOpenRiskUsd > 0m
+        if (!ignoreAggregateCapacityLimits
+            && limits.MaxConcurrentOpenRiskUsd > 0m
             && input.ProjectedOpenRiskEur > limits.MaxConcurrentOpenRiskUsd)
         {
             reasons.Add($"open risk USD {input.ProjectedOpenRiskEur:0.####} exceeds cap USD {limits.MaxConcurrentOpenRiskUsd:0.####}");

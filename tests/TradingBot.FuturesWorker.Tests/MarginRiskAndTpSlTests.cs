@@ -120,6 +120,39 @@ public sealed class MarginRiskAndTpSlTests
     }
 
     [Fact]
+    public void Capacity_probe_ignores_only_aggregate_capacity_limits()
+    {
+        var config = Config();
+        config.Futures.MaxPositions = 1;
+        config.Futures.MaxNotionalUsd = 1_000m;
+        config.Futures.MaxTotalNotionalUsd = 1_000m;
+        config.Futures.MaxMarginPerPositionUsd = 1_000m;
+        config.Risk.MaxConcurrentOpenRiskUsd = 1_000m;
+        config.Margin.MaxAccountMarginUtilizationPercent = 100m;
+        var risk = new MarginRiskManager(config);
+        var state = State();
+        state.Positions.Add(new PortfolioPosition
+        {
+            Pair = "ETH/USD",
+            Side = "LONG",
+            EntryPrice = 100m,
+            StopLossPrice = 95m
+        });
+
+        var normal = risk.EvaluateEntry(Inputs(config, state));
+        var capacityProbe = risk.EvaluateEntry(Inputs(config, state), ignoreAggregateCapacityLimits: true);
+        var adverseFundingProbe = risk.EvaluateEntry(
+            Inputs(config, state, fundingRatePercent: 0.2m),
+            ignoreAggregateCapacityLimits: true);
+
+        Assert.False(normal.Approved);
+        Assert.Contains(normal.Reasons, reason => reason.StartsWith("max futures positions", StringComparison.Ordinal));
+        Assert.True(capacityProbe.Approved);
+        Assert.False(adverseFundingProbe.Approved);
+        Assert.Contains(adverseFundingProbe.Reasons, reason => reason.Contains("adverse for long"));
+    }
+
+    [Fact]
     public void Shorts_disabled_blocks_short_entry()
     {
         var config = Config();

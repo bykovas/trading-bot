@@ -475,8 +475,7 @@ internal sealed class FuturesDecisionWorker(
                     && config.Dip.Enabled
                     && signal.AllowsLong
                     && signal.Score >= config.Dip.MinScore
-                    && signal.Score < config.Strategy.MinimumLongScore
-                    && newEntriesThisCycle < remainingSlots)
+                    && signal.Score < config.Strategy.MinimumLongScore)
                 {
                     var dipFreshness = FuturesEntryFreshnessGuard.Evaluate(
                         marketState,
@@ -532,13 +531,6 @@ internal sealed class FuturesDecisionWorker(
                     riskReasons = new[] { ExplainNoEntry(signal) };
                     riskApproved = true;
                 }
-                else if (newEntriesThisCycle >= remainingSlots)
-                {
-                    desired = FuturesDesiredExposure.Flat;
-                    riskReasons = new[] { $"entry skipped: futures position slots exhausted ({config.RuntimeLimits.MaxOpenPositions} max)" };
-                    riskApproved = false;
-                    slotSkipsThisCycle++;
-                }
                 else if (reversal is { Fires: true })
                 {
                     // The Reversal gate chain, whole and short: spread ceiling, the
@@ -559,8 +551,9 @@ internal sealed class FuturesDecisionWorker(
                             desired,
                             utc,
                             entryPlan.SizedNotionalEur > 0m ? entryPlan.SizedNotionalEur : entryPlan.RequestedNotionalEur);
+                    var reversalRiskInputs = BuildReversalRiskInputs(state, marketState, desired, entryPlan);
                     var reversalEvaluation = reversalGate.Approved
-                        ? riskManager.EvaluateEntry(BuildReversalRiskInputs(state, marketState, desired, entryPlan))
+                        ? riskManager.EvaluateEntry(reversalRiskInputs)
                         : reversalGate;
                     riskReasons = reversalEvaluation.Reasons
                         .Select(reason => $"reversal: {reason}")
@@ -568,7 +561,22 @@ internal sealed class FuturesDecisionWorker(
                     riskApproved = reversalEvaluation.Approved;
                     if (!reversalEvaluation.Approved)
                     {
-                        if (IsMarginCapacityRejection(reversalEvaluation.Reasons))
+                        if (newEntriesThisCycle >= remainingSlots
+                            && IsSlotCapacityRejection(reversalEvaluation.Reasons))
+                        {
+                            var capacityProbe = riskManager.EvaluateEntry(
+                                reversalRiskInputs,
+                                ignoreAggregateCapacityLimits: true);
+                            if (capacityProbe.Approved)
+                            {
+                                slotSkipsThisCycle++;
+                            }
+                            else if (IsMarginCapacityRejection(capacityProbe.Reasons))
+                            {
+                                marginSkipsThisCycle++;
+                            }
+                        }
+                        else if (IsMarginCapacityRejection(reversalEvaluation.Reasons))
                         {
                             marginSkipsThisCycle++;
                         }
@@ -737,14 +745,30 @@ internal sealed class FuturesDecisionWorker(
                                 ? entryPlan.SizedNotionalEur
                                 : entryPlan!.RequestedNotionalEur)
                         : experimentGate;
+                    var riskInputs = BuildRiskInputs(state, marketState, desired, signal, entryPlan, btcRegime);
                     var evaluation = portfolioGate.Approved
-                        ? riskManager.EvaluateEntry(BuildRiskInputs(state, marketState, desired, signal, entryPlan, btcRegime))
+                        ? riskManager.EvaluateEntry(riskInputs)
                         : portfolioGate;
                     riskReasons = evaluation.Reasons;
                     riskApproved = evaluation.Approved;
                     if (!evaluation.Approved)
                     {
-                        if (IsMarginCapacityRejection(evaluation.Reasons))
+                        if (newEntriesThisCycle >= remainingSlots
+                            && IsSlotCapacityRejection(evaluation.Reasons))
+                        {
+                            var capacityProbe = riskManager.EvaluateEntry(
+                                riskInputs,
+                                ignoreAggregateCapacityLimits: true);
+                            if (capacityProbe.Approved)
+                            {
+                                slotSkipsThisCycle++;
+                            }
+                            else if (IsMarginCapacityRejection(capacityProbe.Reasons))
+                            {
+                                marginSkipsThisCycle++;
+                            }
+                        }
+                        else if (IsMarginCapacityRejection(evaluation.Reasons))
                         {
                             marginSkipsThisCycle++;
                         }
@@ -980,6 +1004,9 @@ internal sealed class FuturesDecisionWorker(
 
     private static bool IsMarginCapacityRejection(IEnumerable<string> reasons) =>
         reasons.Any(reason => reason.StartsWith("INSUFFICIENT_AVAILABLE_MARGIN:", StringComparison.Ordinal));
+
+    private static bool IsSlotCapacityRejection(IEnumerable<string> reasons) =>
+        reasons.Any(reason => reason.StartsWith("max futures positions ", StringComparison.Ordinal));
 
     public async Task RunFastExitCheckAsync(CancellationToken cancellationToken)
     {
