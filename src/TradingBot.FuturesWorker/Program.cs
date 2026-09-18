@@ -40,6 +40,7 @@ var portfolio = new FuturesVirtualPortfolio(config, store);
 var entryMirrorStore = CreateEntryMirrorStore(config);
 var strategyProfileProvider = new FuturesStrategyProfileProvider(config, CreateBotStrategyProfileStore(config));
 var runtimeLimitProvider = new FuturesRuntimeLimitProvider(config, CreateBotConfigOverrideStore(config));
+var universePreferenceProvider = new FuturesUniversePreferenceProvider(config, CreateBotUniversePreferenceStore(config));
 ITelegramNotifier telegramNotifier = config.Telegram.IsConfigured
     ? new TelegramNotifier(config.Telegram)
     : new NullTelegramNotifier();
@@ -62,6 +63,7 @@ var worker = new FuturesDecisionWorker(
     telegramNotifier: telegramNotifier,
     strategyProfileProvider: strategyProfileProvider,
     runtimeLimitProvider: runtimeLimitProvider,
+    universePreferenceProvider: universePreferenceProvider,
     apiCredentialProvider: apiCredentialProvider,
     capacitySummaryReporter: capacitySummaryReporter);
 
@@ -81,6 +83,11 @@ static IBotConfigOverrideStore CreateBotConfigOverrideStore(FuturesBotConfigurat
     config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
         ? new PostgresBotConfigOverrideStore(config.Database.ConnectionString)
         : new NullBotConfigOverrideStore();
+
+static IBotUniversePreferenceStore CreateBotUniversePreferenceStore(FuturesBotConfiguration config) =>
+    config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
+        ? new PostgresBotUniversePreferenceStore(config.Database.ConnectionString)
+        : new NullBotUniversePreferenceStore();
 
 static IBotApiCredentialStore CreateBotApiCredentialStore(FuturesBotConfiguration config) =>
     config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)

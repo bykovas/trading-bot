@@ -1505,3 +1505,7 @@
 - Added clear-text, per-instance Kraken credential storage in `bot_instance_api_credentials`. Its primary key is `(bot_instance_id, api_scope)` and each row contains a complete `api_key`/`api_secret` pair for either `kraken_spot` or `kraken_futures`.
 - Futures and archived Spot workers now prefer the matching database row, refresh it before each decision cycle, and fall back to their startup environment credentials only when no row exists. Credential values are never written to worker logs; failed database reads retain the last effective pair.
 - No credentials were copied into the database by this code change. Existing environment secrets remain the fallback until complete rows are inserted for the relevant bot instances.
+## 2026-09-18-database-universe-preferences
+- Added per-instance database universe preferences: automatic candidate count, always-included pairs, and always-excluded pairs.
+- Futures workers reload those preferences each cycle. A stored row overrides only universe selection; absent rows retain the current strategy/appsettings behavior.
+- Excluded pairs are removed before market analysis while already open positions remain tracked for exits and reconciliation.

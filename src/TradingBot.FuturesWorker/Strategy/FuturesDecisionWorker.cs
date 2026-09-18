@@ -20,6 +20,7 @@ internal sealed class FuturesDecisionWorker(
     ITelegramNotifier? telegramNotifier = null,
     FuturesStrategyProfileProvider? strategyProfileProvider = null,
     FuturesRuntimeLimitProvider? runtimeLimitProvider = null,
+    FuturesUniversePreferenceProvider? universePreferenceProvider = null,
     KrakenApiCredentialProvider? apiCredentialProvider = null,
     FuturesCapacitySummaryReporter? capacitySummaryReporter = null)
 {
@@ -32,6 +33,8 @@ internal sealed class FuturesDecisionWorker(
         ?? new FuturesStrategyProfileProvider(config, new NullBotStrategyProfileStore());
     private readonly FuturesRuntimeLimitProvider _runtimeLimitProvider = runtimeLimitProvider
         ?? new FuturesRuntimeLimitProvider(config, new NullBotConfigOverrideStore());
+    private readonly FuturesUniversePreferenceProvider _universePreferenceProvider = universePreferenceProvider
+        ?? new FuturesUniversePreferenceProvider(config, new NullBotUniversePreferenceStore());
     private readonly KrakenApiCredentialProvider _apiCredentialProvider = apiCredentialProvider
         ?? new KrakenApiCredentialProvider(
             config.BotInstance.Id,
@@ -202,14 +205,15 @@ internal sealed class FuturesDecisionWorker(
     {
         await _strategyProfileProvider.RefreshAsync(cancellationToken);
         await _runtimeLimitProvider.RefreshAsync(cancellationToken);
+        await _universePreferenceProvider.RefreshAsync(cancellationToken);
         await _apiCredentialProvider.RefreshAsync(cancellationToken);
         var utc = _clock.UtcNow;
         var cycleId = $"{config.BotInstance.Id}-{utc:yyyyMMddHHmmss}";
         Console.WriteLine($"futures cycle={cycleId} utc={utc:O}");
 
-        var universeSelection = await ResolveUniverseAsync(cancellationToken);
-        var universe = universeSelection.Instruments.Where(instrument => instrument.Enabled).ToList();
         var state = portfolio.Load();
+        var universeSelection = await ResolveUniverseAsync(state, cancellationToken);
+        var universe = universeSelection.Instruments.Where(instrument => instrument.Enabled).ToList();
         var lightStates = await marketDataSource.GetLightMarketStatesAsync(universe, cancellationToken);
         PersistMarketSnapshots(cycleId, utc, lightStates);
         _priceHistory.Record(utc, lightStates);
@@ -1012,6 +1016,7 @@ internal sealed class FuturesDecisionWorker(
     {
         await _strategyProfileProvider.RefreshAsync(cancellationToken);
         await _runtimeLimitProvider.RefreshAsync(cancellationToken);
+        await _universePreferenceProvider.RefreshAsync(cancellationToken);
         await _apiCredentialProvider.RefreshAsync(cancellationToken);
         var utc = _clock.UtcNow;
         var state = portfolio.Load();
@@ -1021,7 +1026,7 @@ internal sealed class FuturesDecisionWorker(
             return;
         }
 
-        var universeSelection = await ResolveUniverseAsync(cancellationToken);
+        var universeSelection = await ResolveUniverseAsync(state, cancellationToken);
         var universe = universeSelection.Instruments.Where(instrument => instrument.Enabled).ToList();
         if (RequiresLiveBroker(state))
         {
@@ -1632,7 +1637,7 @@ internal sealed class FuturesDecisionWorker(
         var symbolToPair = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            foreach (var instrument in (await ResolveUniverseAsync(cancellationToken)).Instruments)
+            foreach (var instrument in (await _universeProvider.GetUniverseAsync(cancellationToken)).Instruments)
             {
                 symbolToPair[instrument.KrakenPair] = instrument.Pair;
             }
@@ -2073,15 +2078,45 @@ internal sealed class FuturesDecisionWorker(
         }
     }
 
-    private async Task<UniverseSelection> ResolveUniverseAsync(CancellationToken cancellationToken)
+    private async Task<UniverseSelection> ResolveUniverseAsync(PortfolioState state, CancellationToken cancellationToken)
     {
         var universe = await _universeProvider.GetUniverseAsync(cancellationToken);
-        var diagnostics = universe.Diagnostics;
+        var filtered = ApplyUniverseExclusions(
+            universe.Instruments,
+            state.Positions.Select(position => position.Pair),
+            config.UniverseDiscovery.Blacklist);
+        var excludedCount = universe.Instruments.Count - filtered.Count;
+        var diagnostics = universe.Diagnostics with
+        {
+            IncludedCount = filtered.Count,
+            BlacklistedCount = universe.Diagnostics.BlacklistedCount + excludedCount
+        };
         Console.WriteLine(
             $"futures universe source={diagnostics.Source} discovered={diagnostics.DiscoveredCount} configured={diagnostics.ConfiguredCount} " +
             $"included={diagnostics.IncludedCount} blacklisted={diagnostics.BlacklistedCount}" +
             (string.IsNullOrWhiteSpace(diagnostics.Warning) ? string.Empty : $" warning={diagnostics.Warning}"));
-        return universe;
+        return new UniverseSelection(filtered, diagnostics);
+    }
+
+    internal static IReadOnlyList<InstrumentOptions> ApplyUniverseExclusions(
+        IReadOnlyList<InstrumentOptions> instruments,
+        IEnumerable<string> heldPairs,
+        IEnumerable<string> excludedPairs)
+    {
+        var excluded = excludedPairs
+            .Where(pair => !string.IsNullOrWhiteSpace(pair))
+            .Select(pair => pair.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (excluded.Count == 0)
+        {
+            return instruments;
+        }
+
+        var held = heldPairs.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return instruments
+            .Where(instrument => held.Contains(instrument.Pair)
+                || (!excluded.Contains(instrument.Pair) && !excluded.Contains(instrument.KrakenPair)))
+            .ToList();
     }
 
     private async Task<FuturesFillResult> HandleTpSlTriggerAsync(
