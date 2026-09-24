@@ -2,7 +2,7 @@
 
 - Added automatic four-hour retention for non-trading decision diagnostics. `NO_ORDER` decision rows and their signal, risk, freshness, range, and action children are deleted in bounded batches; cycle-level active-pair, excluded-pair, rejection, candidate, and entry-diagnostic lists use the same four-hour window.
 - Trading actions, attempted orders, execution failures, `WOULD_HOLD` position observations, fills, cycle summaries, portfolio state, cash events, and market snapshots are not deleted. Dashboard trade history and closed-position linkage therefore retain their source rows.
-- All live instances run the same maintenance loop, coordinated by a PostgreSQL advisory lock so only one worker prunes at a time. Cleanup waits five minutes after startup, then runs small bounded batches every 15 minutes so schema initialization and trading writes are not held behind historical maintenance. Decisions, order placement, exits, risk, sizing, and per-instance strategy settings are unchanged.
+- All live instances run the same maintenance loop, coordinated by a PostgreSQL advisory lock so only one worker prunes at a time. Cleanup waits five minutes after startup, then removes at most 25 old cycles per minute so schema initialization and trading writes are not held behind historical maintenance while the initial backlog still drains faster than new diagnostics arrive. Decisions, order placement, exits, risk, sizing, and per-instance strategy settings are unchanged.
 
 ## 2026-09-17-capacity-summary-qualified-candidates
 

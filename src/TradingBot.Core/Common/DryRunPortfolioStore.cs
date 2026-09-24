@@ -154,9 +154,9 @@ public sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunPor
 public sealed class PostgresDryRunPortfolioStore(string connectionString, string botInstanceId = "default") : IDryRunPortfolioStore
 {
     private static readonly TimeSpan NoOrderRetentionInitialDelay = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan NoOrderRetentionSweepInterval = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan NoOrderRetentionSweepInterval = TimeSpan.FromMinutes(1);
     private const int NoOrderRetentionCycleBatchSize = 25;
-    private const int NoOrderRetentionMaxBatchesPerSweep = 4;
+    private const int NoOrderRetentionMaxBatchesPerSweep = 1;
 
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
