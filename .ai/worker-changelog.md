@@ -1,3 +1,9 @@
+## 2026-09-24-no-order-retention
+
+- Added automatic four-hour retention for non-trading decision diagnostics. `NO_ORDER` decision rows and their signal, risk, freshness, range, and action children are deleted in bounded batches; cycle-level active-pair, excluded-pair, rejection, candidate, and entry-diagnostic lists use the same four-hour window.
+- Trading actions, attempted orders, execution failures, `WOULD_HOLD` position observations, fills, cycle summaries, portfolio state, cash events, and market snapshots are not deleted. Dashboard trade history and closed-position linkage therefore retain their source rows.
+- All live instances run the same maintenance loop, coordinated by a PostgreSQL advisory lock so only one worker prunes at a time. Cleanup runs immediately after startup and every 15 minutes without changing decisions, order placement, exits, risk, sizing, or per-instance strategy settings.
+
 ## 2026-09-17-capacity-summary-qualified-candidates
 
 - Corrected the two-hour capacity summary: it now counts a skipped entry only after it has passed every strategy, market-quality, range, portfolio, and non-capacity money gate. A full-book candidate receives a second risk probe that excludes only aggregate slot-derived limits; any separate blocker, including adverse funding, correlation, spread, freshness, or insufficient free margin, prevents a slot count.

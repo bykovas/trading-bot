@@ -153,6 +153,10 @@ public sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunPor
 
 public sealed class PostgresDryRunPortfolioStore(string connectionString, string botInstanceId = "default") : IDryRunPortfolioStore
 {
+    private static readonly TimeSpan NoOrderRetentionSweepInterval = TimeSpan.FromMinutes(15);
+    private const int NoOrderRetentionCycleBatchSize = 500;
+    private const int NoOrderRetentionMaxBatchesPerSweep = 20;
+
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -446,6 +450,164 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
 
         SaveNormalizedCycle(connection, transaction, record);
         transaction.Commit();
+    }
+
+    public async Task RunNoOrderRetentionLoopAsync(TimeSpan retention, CancellationToken cancellationToken)
+    {
+        if (retention <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(retention), "Retention must be positive.");
+        }
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await PruneNoOrderDiagnosticsAsync(retention, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"decision-journal-retention: failed ({ex.Message})");
+            }
+
+            await Task.Delay(NoOrderRetentionSweepInterval, cancellationToken);
+        }
+    }
+
+    private async Task PruneNoOrderDiagnosticsAsync(TimeSpan retention, CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var lockCommand = new NpgsqlCommand(
+            "select pg_try_advisory_lock(hashtextextended('trading-bot:no-order-retention', 0))",
+            connection);
+        var lockAcquired = await lockCommand.ExecuteScalarAsync(cancellationToken) is true;
+        if (!lockAcquired)
+        {
+            return;
+        }
+
+        var processedCycles = 0L;
+        var deletedNoOrderDecisions = 0L;
+        var deletedCycleDiagnostics = 0L;
+
+        try
+        {
+            for (var batch = 0; batch < NoOrderRetentionMaxBatchesPerSweep; batch++)
+            {
+                await using var command = new NpgsqlCommand(
+                    """
+                    with old_cycles as materialized (
+                        select cycle.cycle_id
+                        from dry_run_cycles cycle
+                        where cycle.utc < @cutoff
+                          and (
+                              exists (
+                                  select 1
+                                  from dry_run_actions action
+                                  where action.cycle_id = cycle.cycle_id
+                                    and action.action = 'NO_ORDER'
+                              )
+                              or exists (select 1 from dry_run_cycle_active_pairs item where item.cycle_id = cycle.cycle_id)
+                              or exists (select 1 from dry_run_excluded_pairs item where item.cycle_id = cycle.cycle_id)
+                              or exists (select 1 from dry_run_cycle_entry_diagnostic_facts item where item.cycle_id = cycle.cycle_id)
+                              or exists (select 1 from dry_run_rejection_counts item where item.cycle_id = cycle.cycle_id)
+                              or exists (select 1 from dry_run_top_candidates item where item.cycle_id = cycle.cycle_id)
+                          )
+                        order by cycle.utc
+                        limit @cycle_batch_size
+                    ),
+                    deleted_no_order as (
+                        delete from dry_run_decision_facts decision
+                        using dry_run_actions action, old_cycles cycle
+                        where decision.cycle_id = cycle.cycle_id
+                          and action.cycle_id = decision.cycle_id
+                          and action.decision_index = decision.decision_index
+                          and action.action = 'NO_ORDER'
+                        returning decision.cycle_id
+                    ),
+                    deleted_active_pairs as (
+                        delete from dry_run_cycle_active_pairs item
+                        using old_cycles cycle
+                        where item.cycle_id = cycle.cycle_id
+                        returning item.cycle_id
+                    ),
+                    deleted_excluded_pairs as (
+                        delete from dry_run_excluded_pairs item
+                        using old_cycles cycle
+                        where item.cycle_id = cycle.cycle_id
+                        returning item.cycle_id
+                    ),
+                    deleted_entry_diagnostics as (
+                        delete from dry_run_cycle_entry_diagnostic_facts item
+                        using old_cycles cycle
+                        where item.cycle_id = cycle.cycle_id
+                        returning item.cycle_id
+                    ),
+                    deleted_rejection_counts as (
+                        delete from dry_run_rejection_counts item
+                        using old_cycles cycle
+                        where item.cycle_id = cycle.cycle_id
+                        returning item.cycle_id
+                    ),
+                    deleted_top_candidates as (
+                        delete from dry_run_top_candidates item
+                        using old_cycles cycle
+                        where item.cycle_id = cycle.cycle_id
+                        returning item.cycle_id
+                    )
+                    select
+                        (select count(*) from old_cycles),
+                        (select count(*) from deleted_no_order),
+                        (select count(*) from deleted_active_pairs)
+                            + (select count(*) from deleted_excluded_pairs)
+                            + (select count(*) from deleted_entry_diagnostics)
+                            + (select count(*) from deleted_rejection_counts)
+                            + (select count(*) from deleted_top_candidates)
+                    """,
+                    connection)
+                {
+                    CommandTimeout = 120
+                };
+                command.Parameters.Add("cutoff", NpgsqlDbType.TimestampTz).Value = DateTime.UtcNow.Subtract(retention);
+                command.Parameters.Add("cycle_batch_size", NpgsqlDbType.Integer).Value = NoOrderRetentionCycleBatchSize;
+
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    break;
+                }
+
+                var batchCycles = reader.GetInt64(0);
+                processedCycles += batchCycles;
+                deletedNoOrderDecisions += reader.GetInt64(1);
+                deletedCycleDiagnostics += reader.GetInt64(2);
+                if (batchCycles == 0)
+                {
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            await using var unlockCommand = new NpgsqlCommand(
+                "select pg_advisory_unlock(hashtextextended('trading-bot:no-order-retention', 0))",
+                connection);
+            await unlockCommand.ExecuteScalarAsync(CancellationToken.None);
+        }
+
+        if (processedCycles > 0)
+        {
+            Console.WriteLine(
+                $"decision-journal-retention: cutoff={DateTime.UtcNow.Subtract(retention):O} " +
+                $"cycles={processedCycles} noOrderDecisions={deletedNoOrderDecisions} " +
+                $"cycleDiagnostics={deletedCycleDiagnostics}");
+        }
     }
 
     public IReadOnlySet<string> LoadRecordedExchangeOrderIds(string botInstanceId, DateTimeOffset sinceUtc)

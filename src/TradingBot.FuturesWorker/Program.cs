@@ -67,7 +67,25 @@ var worker = new FuturesDecisionWorker(
     apiCredentialProvider: apiCredentialProvider,
     capacitySummaryReporter: capacitySummaryReporter);
 
-await worker.RunAsync(cancellation.Token);
+var retentionTask = store is PostgresDryRunPortfolioStore postgresStore
+    ? postgresStore.RunNoOrderRetentionLoopAsync(TimeSpan.FromHours(4), cancellation.Token)
+    : Task.CompletedTask;
+
+try
+{
+    await worker.RunAsync(cancellation.Token);
+}
+finally
+{
+    cancellation.Cancel();
+    try
+    {
+        await retentionTask;
+    }
+    catch (OperationCanceledException)
+    {
+    }
+}
 
 static IDryRunPortfolioStore CreatePortfolioStore(FuturesBotConfiguration config) =>
     config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
