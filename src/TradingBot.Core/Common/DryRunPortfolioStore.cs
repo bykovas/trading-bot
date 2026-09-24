@@ -153,9 +153,10 @@ public sealed class FileDryRunPortfolioStore(DryRunOptions options) : IDryRunPor
 
 public sealed class PostgresDryRunPortfolioStore(string connectionString, string botInstanceId = "default") : IDryRunPortfolioStore
 {
+    private static readonly TimeSpan NoOrderRetentionInitialDelay = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan NoOrderRetentionSweepInterval = TimeSpan.FromMinutes(15);
-    private const int NoOrderRetentionCycleBatchSize = 500;
-    private const int NoOrderRetentionMaxBatchesPerSweep = 20;
+    private const int NoOrderRetentionCycleBatchSize = 25;
+    private const int NoOrderRetentionMaxBatchesPerSweep = 4;
 
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -459,6 +460,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             throw new ArgumentOutOfRangeException(nameof(retention), "Retention must be positive.");
         }
 
+        await Task.Delay(NoOrderRetentionInitialDelay, cancellationToken);
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -572,7 +575,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     """,
                     connection)
                 {
-                    CommandTimeout = 120
+                    CommandTimeout = 10
                 };
                 command.Parameters.Add("cutoff", NpgsqlDbType.TimestampTz).Value = DateTime.UtcNow.Subtract(retention);
                 command.Parameters.Add("cycle_batch_size", NpgsqlDbType.Integer).Value = NoOrderRetentionCycleBatchSize;
