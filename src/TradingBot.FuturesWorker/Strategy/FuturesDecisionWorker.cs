@@ -186,7 +186,7 @@ internal sealed class FuturesDecisionWorker(
             }.Where(value => value > TimeSpan.Zero).Min();
             await Task.Delay(wait, cancellationToken);
 
-            if (config.Futures.UsesDebykoEntrySignals)
+            if (config.Futures.UsesDebykoEntrySignals || config.Futures.UsesBykoV2EntrySignals)
             {
                 await ProcessDebykoEntryAsync(cancellationToken);
             }
@@ -195,6 +195,8 @@ internal sealed class FuturesDecisionWorker(
             {
                 await ProcessBykoV2LocalEntriesAsync(cancellationToken);
             }
+
+            await SendBykoV2SignalNoticesAsync(cancellationToken);
 
             if (DateTimeOffset.UtcNow < nextFastExitUtc)
             {
@@ -1048,7 +1050,7 @@ internal sealed class FuturesDecisionWorker(
 
     internal async Task ProcessDebykoEntryAsync(CancellationToken cancellationToken)
     {
-        if (!config.Futures.UsesDebykoEntrySignals || !_debykoSignalInbox.IsAvailable)
+        if ((!config.Futures.UsesDebykoEntrySignals && !config.Futures.UsesBykoV2EntrySignals) || !_debykoSignalInbox.IsAvailable)
         {
             return;
         }
@@ -1059,7 +1061,7 @@ internal sealed class FuturesDecisionWorker(
 
         // Zero margin is the instance-wide pause contract. Do not claim an event,
         // evaluate a signal or emit a journal/Telegram row while it is active.
-        if (config.RuntimeLimits.NewEntriesPaused || broker?.IsConfigured != true)
+        if (config.RuntimeLimits.NewEntriesPaused || (config.Futures.UsesDebykoEntrySignals && broker?.IsConfigured != true))
         {
             return;
         }
@@ -1105,6 +1107,13 @@ internal sealed class FuturesDecisionWorker(
 
             var firedAt = signal.FiredAtUtc ?? signal.ReceivedAtUtc;
             TryRecordDebykoShadowFiring(signalPair, rule, firedAt, signal);
+
+            if (config.Futures.UsesBykoV2EntrySignals)
+            {
+                await _debykoSignalInbox.MarkCompletedAsync(signal.Id,
+                    "DEBYKO firing recorded for comparison; local signals own entry authority", cancellationToken);
+                return;
+            }
 
             if (signal.ExpiresAtUtc is { } expiresAt && expiresAt <= now
                 || now - firedAt > TimeSpan.FromSeconds(config.BykoV2.SignalMaxAgeSeconds))
@@ -1311,6 +1320,38 @@ internal sealed class FuturesDecisionWorker(
             state,
             [BuildBykoV2DecisionRecord(selected, fill)],
             [selected.Pair]);
+        if (fill.PositionOpened)
+        {
+            await AnnounceEntryAsync(selected.Pair, selected.Desired, fill, rule, opened, null, null,
+                new EntrySignalDetails(0m, Array.Empty<SignalContribution>(), null, null, null, null, false), cancellationToken);
+        }
+    }
+
+    internal async Task SendBykoV2SignalNoticesAsync(CancellationToken cancellationToken)
+    {
+        if (!config.BykoV2.Enabled || config.RuntimeLimits.NewEntriesPaused || !config.Telegram.IsConfigured)
+        {
+            return;
+        }
+        try
+        {
+            foreach (var notice in _bykoV2VerdictStore.PendingNotices(config.BotInstance.Id, _clock.UtcNow))
+            {
+                if (await _telegram.TrySendAsync(notice.Compose(config.Telegram.Label), cancellationToken))
+                {
+                    _bykoV2VerdictStore.MarkNoticeSent(config.BotInstance.Id, notice.Key);
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception error)
+        {
+            Console.WriteLine($"byko-v2-signal-notices: failed: {error.Message}");
+        }
     }
 
     private async Task RetryOrIgnoreDebykoAsync(

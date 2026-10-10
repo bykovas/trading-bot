@@ -21,6 +21,18 @@ internal interface IBykoV2VerdictStore
     bool IsAvailable { get; }
     bool Record(string botInstanceId, string pair, DateTimeOffset barClosedAt, BykoV2Verdict verdict, DateTimeOffset evaluatedAt, TimeSpan cooldown);
     void RecordDebykoFiring(string botInstanceId, string pair, string rule, DateTimeOffset firedAt, string? firingId, DateTimeOffset receivedAt);
+    IReadOnlyList<BykoV2SignalNotice> PendingNotices(string botInstanceId, DateTimeOffset now) => Array.Empty<BykoV2SignalNotice>();
+    void MarkNoticeSent(string botInstanceId, string key) { }
+}
+
+internal sealed record BykoV2SignalNotice(string Key, string Kind, string Pair, string Rule, DateTimeOffset Bar, bool? BotVerdict, bool DebykoReceived)
+{
+    public string Compose(string label) => System.Net.WebUtility.HtmlEncode($"{label} · {Pair} · {Rule}\n" + (Kind switch
+    {
+        "local" => "Boto signalas: rastas įėjimas. Tai signalas, ne atidaryta pozicija.",
+        "received" => "DEBYKO signalas gautas. Tai signalas, ne atidaryta pozicija.",
+        _ => $"Palyginimas: botas {(BotVerdict is null ? "nežinoma" : BotVerdict.Value ? "+" : "−")}; DEBYKO {(DebykoReceived ? "gautas" : "negautas per 90 s")}."
+    }) + $"\nUTC: {Bar:yyyy-MM-dd HH:mm:ss}");
 }
 
 internal sealed class NullBykoV2VerdictStore : IBykoV2VerdictStore
@@ -321,6 +333,13 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
             create index if not exists ix_byko_v2_shadow_verdicts_recent
                 on byko_v2_shadow_verdicts (bot_instance_id, bar_closed_at desc);
 
+            create table if not exists byko_v2_signal_notices (
+                bot_instance_id text not null,
+                notice_key text not null,
+                sent_at timestamptz not null default now(),
+                primary key (bot_instance_id, notice_key)
+            );
+
             create table if not exists byko_v2_debyko_firings (
                 id bigserial primary key,
                 bot_instance_id text not null,
@@ -356,6 +375,64 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
         var connection = new NpgsqlConnection(connectionString);
         connection.Open();
         return connection;
+    }
+
+    public IReadOnlyList<BykoV2SignalNotice> PendingNotices(string botInstanceId, DateTimeOffset now)
+    {
+        EnsureSchema();
+        using var connection = Open();
+        using var command = new NpgsqlCommand(
+            """
+            with candidates as (
+                select 'local:' || id as key, 'local' as kind, pair, rule, bar_closed_at as bar,
+                       bot_verdict, debyko_fired
+                from byko_v2_shadow_verdicts
+                where bot_instance_id = @bot and fired_edge and bot_evaluated_at >= @since
+                union all
+                select 'received:' || id, 'received', pair, rule, fired_at, null::boolean, true
+                from byko_v2_debyko_firings
+                where bot_instance_id = @bot and received_at >= @since
+                union all
+                select 'comparison:' || id, 'comparison', pair, rule, bar_closed_at, bot_verdict, debyko_fired
+                from byko_v2_shadow_verdicts
+                where bot_instance_id = @bot and (fired_edge or debyko_fired)
+                  and bot_evaluated_at >= @since
+                  and (debyko_fired or bar_closed_at <= @deadline)
+                union all
+                select 'unmatched:' || id, 'comparison', pair, rule, fired_at, null::boolean, true
+                from byko_v2_debyko_firings
+                where bot_instance_id = @bot and shadow_verdict_id is null
+                  and received_at >= @since and received_at <= @deadline
+            )
+            select key, kind, pair, rule, bar, bot_verdict, debyko_fired from candidates c
+            where not exists (
+                select 1 from byko_v2_signal_notices n where n.bot_instance_id = @bot and n.notice_key = c.key
+            )
+            order by bar, case kind when 'local' then 0 when 'received' then 1 else 2 end, key
+            limit 30
+            """, connection);
+        command.Parameters.AddWithValue("bot", botInstanceId);
+        command.Parameters.AddWithValue("since", now.AddMinutes(-10).UtcDateTime);
+        command.Parameters.AddWithValue("deadline", now.AddSeconds(-90).UtcDateTime);
+        using var reader = command.ExecuteReader();
+        var notices = new List<BykoV2SignalNotice>();
+        while (reader.Read())
+        {
+            notices.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc)),
+                reader.IsDBNull(5) ? null : reader.GetBoolean(5), reader.GetBoolean(6)));
+        }
+        return notices;
+    }
+
+    public void MarkNoticeSent(string botInstanceId, string key)
+    {
+        using var connection = Open();
+        using var command = new NpgsqlCommand(
+            "insert into byko_v2_signal_notices (bot_instance_id, notice_key) values (@bot, @key) on conflict do nothing", connection);
+        command.Parameters.AddWithValue("bot", botInstanceId);
+        command.Parameters.AddWithValue("key", key);
+        command.ExecuteNonQuery();
     }
 
     internal static string RuleName(BykoV2Rule rule) => rule switch

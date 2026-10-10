@@ -1,3 +1,8 @@
+## 2026-10-10-byko-v2-signal-telegram
+
+- BYKO and PUKO report local entry edges and received DEBYKO firings to Telegram separately from actual position openings. Comparison notices state when no webhook arrived within 90 seconds, without claiming a negative DEBYKO verdict. Both-negative bars stay silent; recent pending notices retry after failed delivery and successful sends are persisted across restarts.
+- PUKO consumes its signed DEBYKO inbox for comparison only while its local rules retain entry authority. Paper openings now use the existing entry announcement. Zero-margin pause suppresses inbox consumption, calculations and signal notices; LUKO is unchanged.
+
 ## 2026-10-10-puko-baseline-seed
 
 - Corrected PUKO's initial runtime-limit seed to the owner-approved one-position paper model: zero margin pause, 10x leverage, one total slot and one correlation-group slot. The former copy-first seed could retain LUKO's three-slot override because the later PUKO insert used conflict-ignore.
