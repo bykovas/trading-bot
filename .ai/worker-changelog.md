@@ -1,8 +1,14 @@
+## 2026-10-10-byko-debyko-entry-authority
+
+- BYKO is now a live DEBYKO-entry executor. Its local scorer cannot authorize new positions; the worker claims only signed `BYKO_FLUSH_LONG`, `BYKO_FLUSH_SHORT`, `BYKO_BREAKOUT_LONG`, and `BYKO_BREAKOUT_SHORT` firings from its own inbox, rejects signals older than 90 seconds, maps DEBYKO instruments to configured Kraken Futures contracts, re-synchronizes the account, applies current executor capacity/margin limits, and records the order outcome in the existing decision journal.
+- Signal polling runs once per second inside the worker's single-threaded decision loop rather than in a concurrent background executor. Existing reconciliation and exit checks retain ownership of open positions. Unsupported/stale events are ignored explicitly; retryable market/execution misses retain the existing bounded retry policy.
+- BYKO's cents-stage sizing is one position at USD 5 margin and 10x leverage (USD 50 notional). PUKO's configured model is one USD 50-margin position at 10x (USD 500 notional), while its database `position_margin_usd` remains forcibly seeded to `0`; zero still means a complete no-entry/no-signal-calculation/no-notification pause. LUKO is unchanged.
+
 ## 2026-10-10-debyko-signed-signal-inbox
 
 - Added a per-instance DEBYKO webhook transport. `TradingBot.Api` verifies Standard Webhooks signatures and the five-minute timestamp tolerance against a database-backed channel key, answers the DEBYKO `destination.verify` challenge, deduplicates by channel/event id, and persists the complete signed payload plus its routing, tag, instrument, firing, and expiry metadata.
-- Every futures instance now polls only its own durable inbox once per second. Fresh `watch.became_true` events are recorded as received and expired or unsupported events are explicitly ignored; claims are recoverable after a stale worker lease.
-- This change is deliberately transport-only. A DEBYKO signal cannot place, modify, or close an order yet, does not enter the existing scoring/risk path, sends no Telegram message, and changes no strategy, sizing, exit, Kraken, or market-data behavior.
+- The transport exposes recoverable per-instance claims; execution policy is owned by the later `2026-10-10-byko-debyko-entry-authority` change set.
+- This layer alone is transport-only and does not decide whether an event may trade.
 
 ## 2026-09-24-no-order-retention
 

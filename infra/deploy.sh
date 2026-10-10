@@ -552,9 +552,23 @@ insert into bot_config_overrides (bot_instance_id, override_key, numeric_value)
 values
     ('futures-pukis-live', 'position_margin_usd', 0),
     ('futures-pukis-live', 'leverage', 10),
-    ('futures-pukis-live', 'max_open_positions', 3),
+    ('futures-pukis-live', 'max_open_positions', 1),
     ('futures-pukis-live', 'max_open_positions_per_group', 1)
-on conflict (bot_instance_id, override_key) do nothing;
+on conflict (bot_instance_id, override_key) do update set
+    numeric_value = excluded.numeric_value,
+    updated_at = now();
+
+-- BYKO is the live DEBYKO executor. Keep its cents-stage position exactly ten
+-- times smaller than the PUKO model: USD 5 margin at 10x = USD 50 notional.
+insert into bot_config_overrides (bot_instance_id, override_key, numeric_value)
+values
+    ('futures-live', 'position_margin_usd', 5),
+    ('futures-live', 'leverage', 10),
+    ('futures-live', 'max_open_positions', 1),
+    ('futures-live', 'max_open_positions_per_group', 1)
+on conflict (bot_instance_id, override_key) do update set
+    numeric_value = excluded.numeric_value,
+    updated_at = now();
 
 -- The worker opened Pukis's ledger from appsettings StartingCashUsd (60), a
 -- placeholder copied from Lukas, and a paused instance never reconciles with

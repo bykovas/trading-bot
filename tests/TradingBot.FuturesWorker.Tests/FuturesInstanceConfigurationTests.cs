@@ -16,7 +16,7 @@ public sealed class FuturesInstanceConfigurationTests
         var primary = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.json"));
         var lukas = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.lukas.json"));
 
-        AssertSlotsAreFunded(primary, expectedSlots: 3);
+        AssertSlotsAreFunded(primary, expectedSlots: 1);
         AssertSlotsAreFunded(lukas, expectedSlots: 3);
     }
 
@@ -68,11 +68,12 @@ public sealed class FuturesInstanceConfigurationTests
         // at 1x while the control keeps 15 USD at 10x.
         Assert.False(followerInverts);
 
-        // Both trade their own signals since 2026-08-24. lukas is the unmodified control;
-        // futures-live is the experiment arm and carries explicit entry subtractions
-        // and stronger snapshot confirmation while Lukas remains the control.
-        Assert.True(primary["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
+        // BYKO is now the DEBYKO executor: old local scoring can still manage exits,
+        // but it cannot authorize a new position. LUKO remains the local control.
+        Assert.False(primary["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
+        Assert.Equal("Debyko", primary["Futures"]?["EntrySignalSource"]?.GetValue<string>());
         Assert.True(lukas["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
+        Assert.Null(lukas["Futures"]?["EntrySignalSource"]);
         Assert.Equal(
             new[] { "Continuation", "Reclaim", "Standard" },
             primary["Futures"]?["DisabledLongEntryChannels"]?.AsArray().Select(node => node?.GetValue<string>()).ToArray());
@@ -151,6 +152,7 @@ public sealed class FuturesInstanceConfigurationTests
         var mayDiffer = new[]
         {
             ("Futures", "OwnSignalEntriesEnabled"),
+            ("Futures", "EntrySignalSource"),
             ("Futures", "TargetMarginUsd"),
             ("Futures", "MaxMarginPerPositionUsd"),
             ("Futures", "MaxNotionalUsd"),
@@ -167,6 +169,7 @@ public sealed class FuturesInstanceConfigurationTests
             // other fails the moment an account is actually resized.
             ("Risk", "TargetRiskUsd"),
             ("Risk", "MaxConcurrentOpenRiskUsd"),
+            ("CorrelationRisk", "MaxExposureUsdPerGroup"),
             ("Telegram", "Label"),
             // The face at the head of every post, one per instance, same reason as the label.
             ("Telegram", "Emoji"),
@@ -249,7 +252,7 @@ public sealed class FuturesInstanceConfigurationTests
         // control's 9 over the same window, the arm better per close (-0.48% vs -0.67%)
         // but ~12 USD of the ~35 USD gap was pure execution cost. Half the slots, one
         // position per correlation group. The control keeps the publisher stake, 15 at 10x.
-        Assert.Equal(10m, primary["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
+        Assert.Equal(50m, primary["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
         Assert.Equal(150m, lukas["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
 
         var normalizedLukas = lukas.DeepClone().AsObject();
@@ -270,7 +273,7 @@ public sealed class FuturesInstanceConfigurationTests
     }
 
     [Fact]
-    public void Pukis_profile_is_an_independent_copy_of_the_lukas_baseline()
+    public void Pukis_profile_keeps_the_v2_model_size_while_database_margin_starts_paused()
     {
         var root = FindRepositoryRoot();
         var lukas = LoadObject(Path.Combine(root, "src", "TradingBot.FuturesWorker", "appsettings.lukas.json"));
@@ -280,11 +283,49 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.Equal("Pukis live futures worker", pukis["BotInstance"]?["Name"]?.GetValue<string>());
         Assert.Equal("PUKIS", pukis["Telegram"]?["Label"]?.GetValue<string>());
 
-        var normalizedPukis = pukis.DeepClone().AsObject();
-        normalizedPukis["BotInstance"] = lukas["BotInstance"]?.DeepClone();
-        normalizedPukis["Telegram"] = lukas["Telegram"]?.DeepClone();
+        Assert.True(pukis["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
+        Assert.Null(pukis["Futures"]?["EntrySignalSource"]);
+        Assert.Equal(10m, pukis["Futures"]?["DefaultLeverage"]?.GetValue<decimal>());
+        Assert.Equal(1, pukis["Futures"]?["MaxPositions"]?.GetValue<int>());
+        Assert.Equal(50m, pukis["Futures"]?["TargetMarginUsd"]?.GetValue<decimal>());
+        Assert.Equal(500m, pukis["Futures"]?["MaxNotionalUsd"]?.GetValue<decimal>());
+        Assert.Equal(500m, pukis["Futures"]?["MaxTotalNotionalUsd"]?.GetValue<decimal>());
+        Assert.Equal(50m, pukis["Futures"]?["MaxMarginPerPositionUsd"]?.GetValue<decimal>());
+        Assert.Equal(2.25m, pukis["Risk"]?["TargetRiskUsd"]?.GetValue<decimal>());
+        Assert.Equal(2.25m, pukis["Risk"]?["MaxConcurrentOpenRiskUsd"]?.GetValue<decimal>());
 
-        Assert.True(JsonNode.DeepEquals(lukas, normalizedPukis));
+        var deploy = File.ReadAllText(Path.Combine(root, "infra", "deploy.sh"));
+        Assert.Contains("('futures-pukis-live', 'position_margin_usd', 0)", deploy);
+    }
+
+    [Fact]
+    public void Debyko_entry_source_forces_local_entries_off_but_local_source_does_not()
+    {
+        var debyko = new FuturesBotConfiguration
+        {
+            Futures = new FuturesOptions
+            {
+                EntrySignalSource = "debyko",
+                OwnSignalEntriesEnabled = true
+            }
+        };
+        debyko.Normalize();
+
+        Assert.Equal(FuturesEntrySignalSources.Debyko, debyko.Futures.EntrySignalSource);
+        Assert.False(debyko.Futures.OwnSignalEntriesEnabled);
+
+        var local = new FuturesBotConfiguration
+        {
+            Futures = new FuturesOptions
+            {
+                EntrySignalSource = "local",
+                OwnSignalEntriesEnabled = true
+            }
+        };
+        local.Normalize();
+
+        Assert.Equal(FuturesEntrySignalSources.Local, local.Futures.EntrySignalSource);
+        Assert.True(local.Futures.OwnSignalEntriesEnabled);
     }
 
     [Fact]

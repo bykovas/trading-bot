@@ -254,6 +254,23 @@ internal sealed class FuturesBotConfiguration
         Futures.MaxPositions = Math.Clamp(Futures.MaxPositions <= 0 ? 3 : Futures.MaxPositions, 1, MaxPositionsCeiling);
         Futures.AllowFlip = false;
 
+        Futures.EntrySignalSource = Futures.EntrySignalSource?.Trim() switch
+        {
+            var value when value?.Equals(FuturesEntrySignalSources.Debyko, StringComparison.OrdinalIgnoreCase) == true
+                => FuturesEntrySignalSources.Debyko,
+            var value when value?.Equals(FuturesEntrySignalSources.Local, StringComparison.OrdinalIgnoreCase) == true
+                => FuturesEntrySignalSources.Local,
+            _ => FuturesEntrySignalSources.Local
+        };
+
+        // An external-signal instance must have exactly one entry authority. Keep the
+        // legacy property for old profiles, but never let it re-enable local entries on
+        // a DEBYKO executor. Existing positions still pass through every exit path.
+        if (Futures.UsesDebykoEntrySignals)
+        {
+            Futures.OwnSignalEntriesEnabled = false;
+        }
+
         // The flipped-logic experiment opens real shorts, so it cannot run with
         // shorts disabled; drop the flip rather than silently opening nothing.
         if (Futures.FlipLongEntries && !Futures.AllowShorts)
@@ -710,6 +727,13 @@ internal sealed class FuturesOptions
     // and an account that could not close what it opened would be a trap.
     public bool OwnSignalEntriesEnabled { get; set; } = true;
 
+    // Selects who is allowed to request NEW entries. Local preserves the existing
+    // scorer. Debyko consumes signed events from the shared inbox. This does not own
+    // exits, reconciliation, sizing or Kraken credentials.
+    public string EntrySignalSource { get; set; } = FuturesEntrySignalSources.Local;
+    public bool UsesDebykoEntrySignals =>
+        EntrySignalSource.Equals(FuturesEntrySignalSources.Debyko, StringComparison.OrdinalIgnoreCase);
+
     // Long entry channels this instance refuses to trade (by ClassifyEntryChannel name,
     // case-insensitive). Part of the own-strategy experiment; empty on the control.
     public List<string> DisabledLongEntryChannels { get; set; } = new();
@@ -761,6 +785,12 @@ internal sealed class FuturesOptions
     public decimal DerivedNotionalUsd(decimal leverage) => TargetMarginUsd * Math.Max(1m, leverage);
 
     public decimal DerivedNotionalEur(decimal leverage) => DerivedNotionalUsd(leverage);
+}
+
+internal static class FuturesEntrySignalSources
+{
+    public const string Local = "Local";
+    public const string Debyko = "Debyko";
 }
 
 internal sealed class MarginOptions
