@@ -529,31 +529,33 @@ from (
 ) source
 on conflict (bot_instance_id) do nothing;
 
-insert into bot_config_overrides (bot_instance_id, override_key, numeric_value)
-select
-    'futures-pukis-live',
-    override_key,
-    case
-        when override_key = 'position_margin_usd' then 0
-        else numeric_value
-    end
-from bot_config_overrides
-where bot_instance_id = 'futures-lukas-live'
-  and override_key in (
-      'position_margin_usd',
-      'leverage',
-      'max_open_positions',
-      'max_open_positions_per_group'
-  )
-on conflict (bot_instance_id, override_key) do nothing;
+create table if not exists bot_instance_seed_migrations (
+    migration_id text primary key,
+    applied_at timestamptz not null default now()
+);
 
+-- Apply the owner-approved PUKO baseline once. The marker and values are one
+-- statement, so a failed deploy cannot record the migration without the limits.
+-- Later deploys deliberately preserve every value changed through the UI.
+with applied as (
+    insert into bot_instance_seed_migrations (migration_id)
+    values ('puko-v2-paper-baseline-20261010')
+    on conflict (migration_id) do nothing
+    returning 1
+), desired (override_key, numeric_value) as (
+    values
+        ('position_margin_usd', 0::numeric),
+        ('leverage', 10::numeric),
+        ('max_open_positions', 1::numeric),
+        ('max_open_positions_per_group', 1::numeric)
+)
 insert into bot_config_overrides (bot_instance_id, override_key, numeric_value)
-values
-    ('futures-pukis-live', 'position_margin_usd', 0),
-    ('futures-pukis-live', 'leverage', 10),
-    ('futures-pukis-live', 'max_open_positions', 1),
-    ('futures-pukis-live', 'max_open_positions_per_group', 1)
-on conflict (bot_instance_id, override_key) do nothing;
+select 'futures-pukis-live', desired.override_key, desired.numeric_value
+from desired
+where exists (select 1 from applied)
+on conflict (bot_instance_id, override_key) do update set
+    numeric_value = excluded.numeric_value,
+    updated_at = now();
 
 -- BYKO is the live DEBYKO executor. Keep its cents-stage position exactly ten
 -- times smaller than the PUKO model: USD 5 margin at 10x = USD 50 notional.

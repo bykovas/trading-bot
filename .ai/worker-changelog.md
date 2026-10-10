@@ -1,3 +1,8 @@
+## 2026-10-10-puko-baseline-seed
+
+- Corrected PUKO's initial runtime-limit seed to the owner-approved one-position paper model: zero margin pause, 10x leverage, one total slot and one correlation-group slot. The former copy-first seed could retain LUKO's three-slot override because the later PUKO insert used conflict-ignore.
+- The baseline is now guarded by a durable one-time migration marker. It repairs the already-provisioned instance on the next deploy and never overwrites later margin, leverage or slot changes made through the UI.
+
 ## 2026-10-10-byko-v2-runtime-routing
 
 - BYKO now evaluates the four BYKO-v2 rules locally for a durable shadow comparison while keeping signed DEBYKO firings as its only entry authority. Each closed-bar verdict, local edge and matching DEBYKO firing is linked even when the webhook and local evaluation arrive in either order.

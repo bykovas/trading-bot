@@ -303,7 +303,8 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.Equal(2.25m, pukis["Risk"]?["MaxConcurrentOpenRiskUsd"]?.GetValue<decimal>());
 
         var deploy = File.ReadAllText(Path.Combine(root, "infra", "deploy.sh"));
-        Assert.Contains("('futures-pukis-live', 'position_margin_usd', 0)", deploy);
+        Assert.Contains("puko-v2-paper-baseline-20261010", deploy);
+        Assert.Contains("('position_margin_usd', 0::numeric)", deploy);
     }
 
     [Fact]
@@ -371,7 +372,11 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.Contains("/opt/trading-bot/futures/pukis-live/.env", compose);
         Assert.Contains("/opt/trading-bot/futures/pukis-live/appsettings.json", compose);
         Assert.Contains("TRADINGBOT_BOT_INSTANCE_ID=futures-pukis-live", deploy);
-        Assert.Contains("'futures-pukis-live', 'position_margin_usd', 0", deploy);
+        Assert.Contains("puko-v2-paper-baseline-20261010", deploy);
+        Assert.Contains("('position_margin_usd', 0::numeric)", deploy);
+        Assert.Contains("('leverage', 10::numeric)", deploy);
+        Assert.Contains("('max_open_positions', 1::numeric)", deploy);
+        Assert.Contains("('max_open_positions_per_group', 1::numeric)", deploy);
         Assert.Contains("src/TradingBot.FuturesWorker/appsettings.pukis.json", workflow);
     }
 
