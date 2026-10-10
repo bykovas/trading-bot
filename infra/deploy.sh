@@ -240,6 +240,7 @@ echo "Writing Pukis futures live environment to ${FUTURES_PUKIS_LIVE_ENV_FILE}"
   printf 'TRADINGBOT_MARKET_DATA_MODE=database\n'
   printf 'TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true\n'
   printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=false\n'
+  printf 'TRADINGBOT_TELEGRAM_BOT_TOKEN=%s\n' "${TRADINGBOT_TELEGRAM_BOT_TOKEN:-}"
   printf 'SENTRY_DSN=%s\n' "${SENTRY_DSN:-}"
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${FUTURES_PUKIS_LIVE_ENV_FILE}"

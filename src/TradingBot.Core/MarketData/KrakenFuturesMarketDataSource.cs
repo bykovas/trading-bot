@@ -239,13 +239,16 @@ public sealed class KrakenFuturesMarketDataSource(HttpClient httpClient, KrakenO
                 var last = GetDecimal(item, "last");
                 var bid = GetDecimal(item, "bid");
                 var ask = GetDecimal(item, "ask");
+                // Kraken publishes funding in quote currency per contract per hour, not percent.
+                var fundingRate = GetNullableDecimal(item, "fundingRate");
+                var fundingPercent = mark > 0m ? fundingRate / mark * 100m : null;
                 quotes[symbol] = new Quote(
                     bid,
                     ask,
                     mark > 0m ? mark : last,
                     GetDecimal(item, "volumeQuote", fallbackProperty: "vol24h"),
                     GetNullableDecimal(item, "change24h"),
-                    GetNullableDecimal(item, "fundingRate"),
+                    fundingPercent,
                     mark > 0m ? mark : null,
                     GetNullableDecimal(item, "indexPrice"),
                     GetNullableDecimal(item, "bidSize"),
@@ -469,7 +472,10 @@ public sealed class KrakenFuturesMarketDataSource(HttpClient httpClient, KrakenO
     }
 
     private static decimal? GetNullableDecimal(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var property) ? ParseDecimal(property) : null;
+        element.TryGetProperty(propertyName, out var property)
+            && property.ValueKind is JsonValueKind.Number or JsonValueKind.String
+                ? ParseDecimal(property)
+                : null;
 
     private static decimal ParseDecimal(JsonElement property) =>
         property.ValueKind switch

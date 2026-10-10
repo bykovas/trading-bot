@@ -547,7 +547,7 @@ internal sealed class BykoV2LocalSignalRunner(
             quote?.Bid,
             quote?.Ask,
             quote?.Volume24h,
-            quote?.FundingRatePercent * 8m,
+            quote?.FundingRatePercent / 100m * 8m,
             liquidation);
     }
 

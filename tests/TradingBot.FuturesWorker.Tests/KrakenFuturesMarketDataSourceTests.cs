@@ -82,11 +82,49 @@ public sealed class KrakenFuturesMarketDataSourceTests
         Assert.Equal(60000m, state.LastPrice);
         Assert.Equal(59990m, state.BestBid);
         Assert.Equal(60010m, state.BestAsk);
-        Assert.Equal(-0.0001m, state.Quote!.FundingRatePercent);
+        Assert.Equal(-0.0001m / 60000m * 100m, state.Quote!.FundingRatePercent);
         Assert.Equal(60005m, state.Quote.IndexPrice);
         Assert.Equal(0.5m, state.Quote.BidSize);
         Assert.Equal(0.25m, state.Quote.AskSize);
         Assert.Equal("online", state.PairRules!.Status);
+    }
+
+    [Theory]
+    [InlineData("1.257", "0.000063134400946042", "0.0050226253735912490055688100")]
+    [InlineData("100", "-0.01", "-0.01")]
+    [InlineData("100", "0", "0")]
+    [InlineData("0", "0.01", null)]
+    [InlineData("-1", "0.01", null)]
+    [InlineData("100", "null", null)]
+    public async Task Funding_is_hourly_percent_of_mark_or_unknown(
+        string mark, string funding, string? expected)
+    {
+        var handler = new StubHandler(request =>
+            request.RequestUri!.AbsolutePath.EndsWith("/tickers", StringComparison.Ordinal)
+                ? Json($$"""
+                    { "result": "success", "tickers": [
+                        { "symbol": "PF_XBTEUR", "markPrice": {{mark}}, "last": 100,
+                          "bid": 99, "ask": 101, "fundingRate": {{funding}} }
+                    ] }
+                    """)
+                : Json("""
+                    { "result": "success", "instruments": [
+                        { "symbol": "PF_XBTEUR", "pair": "XBT:EUR", "tradeable": true }
+                    ] }
+                    """));
+        using var client = new HttpClient(handler);
+        var source = new KrakenFuturesMarketDataSource(client,
+            new KrakenOptions { BaseUrl = "https://futures.kraken.test" });
+
+        var state = Assert.Single(await source.GetLightMarketStatesAsync(Instruments, CancellationToken.None));
+        decimal? expectedPercent = expected is null ? null : decimal.Parse(expected, CultureInfo.InvariantCulture);
+        Assert.Equal(expectedPercent, state.Quote!.FundingRatePercent);
+        if (expectedPercent is not null)
+        {
+            Assert.Equal(decimal.Parse(funding, CultureInfo.InvariantCulture)
+                / decimal.Parse(mark, CultureInfo.InvariantCulture) * 8m,
+                state.Quote.FundingRatePercent / 100m * 8m);
+        }
     }
 
     [Fact]

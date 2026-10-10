@@ -1,3 +1,9 @@
+## 2026-10-10-kraken-funding-units
+
+- Normalize Kraken Futures hourly funding from quote currency per contract to percent of mark price before storing shared quotes or applying entry-risk/cost checks. Missing funding or a non-positive mark stays unknown; last trade price is not substituted for mark.
+- Convert the hourly percent to an eight-hour fraction in BYKO/PUKO v2. This corrects false breakout rejections such as DOT at 2026-10-10 16:30 UTC without changing strategy thresholds. Shared funding normalization also applies to LUKO; sizing and execution routing are unchanged.
+- Supply the existing shared Telegram token to PUKO's paper worker so its automatic signal/comparison notices can be delivered; retain the owner-selected PUKO Telegram icon.
+
 ## 2026-10-10-byko-v2-signal-telegram
 
 - BYKO and PUKO report local entry edges and received DEBYKO firings to Telegram separately from actual position openings. Comparison notices state when no webhook arrived within 90 seconds, without claiming a negative DEBYKO verdict. Both-negative bars stay silent; recent pending notices retry after failed delivery and successful sends are persisted across restarts.
