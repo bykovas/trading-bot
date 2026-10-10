@@ -291,6 +291,15 @@ public sealed class MarketDataIngestionOptions
     public List<string> ForceInclude { get; set; } = new();
     public List<string> Blacklist { get; set; } = new();
 
+    // A small, fixed strategy basket needs deeper trade candles at several
+    // timeframes. Keep it separate from the broad legacy mark-candle sweep.
+    public int StrategyCandleIntervalSeconds { get; set; } = 60;
+    public int StrategyCandleBars { get; set; } = 240;
+    public List<int> StrategyTimeframesMinutes { get; set; } = [1, 5, 15, 60];
+    public List<string> StrategyPairs { get; set; } = new();
+    public bool FuturesLiquidationsEnabled { get; set; } = false;
+    public string FuturesWebSocketUrl { get; set; } = "wss://futures.kraken.com/ws/v1";
+
     // Which venues the collector sweeps. Both default to on, but a venue nobody
     // trades is pure cost: its sweep competes for the same per-IP rate budget as the
     // venue that does carry money, and on Kraken spot the candle pass alone was

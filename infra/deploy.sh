@@ -362,7 +362,7 @@ import sys
 
 allowed = {
     "Trading", "Strategy", "Funding", "Entry", "Freshness", "Dip", "Filters",
-    "Exits", "Regime", "Shorts", "Reversal", "Risk", "ExecutionPolicy", "TpSl"
+    "Exits", "Regime", "Shorts", "Reversal", "Risk", "ExecutionPolicy", "TpSl", "BykoV2"
 }
 
 with open(sys.argv[1], encoding="utf-8") as source:
@@ -570,44 +570,33 @@ on conflict (bot_instance_id, override_key) do update set
     numeric_value = excluded.numeric_value,
     updated_at = now();
 
--- The worker opened Pukis's ledger from appsettings StartingCashUsd (60), a
--- placeholder copied from Lukas, and a paused instance never reconciles with
--- Kraken, so 60 USD was persisted and drawn as a balance nobody has. Until the
--- first credentials exist the balance is unknown; zero is the value the equity
--- rollup already skips as "not yet reconciled". Guarded so it can never touch a
--- Pukis account that has keys or a position.
-do $$
-declare
-    has_keys boolean := false;
-begin
-    if to_regclass('public.bot_instance_api_credentials') is not null then
-        execute 'select exists (select 1 from bot_instance_api_credentials
-                                where bot_instance_id = ''futures-pukis-live'')'
-            into has_keys;
-    end if;
-    if has_keys then
-        return;
-    end if;
-    if exists (select 1 from portfolio_state_summary
-               where bot_instance_id = 'futures-pukis-live' and open_positions > 0) then
-        return;
-    end if;
-
-    update portfolio_state_summary
-    set cash_eur = 0, cash_quote_value = 0, positions_value_eur = 0, total_value_eur = 0
-    where bot_instance_id = 'futures-pukis-live'
-      and (cash_eur <> 0 or total_value_eur <> 0);
-
-    update dry_run_cycle_facts
-    set cash_before_eur = 0, cash_after_eur = 0,
-        positions_value_before_eur = 0, positions_value_after_eur = 0,
-        portfolio_value_before_eur = 0, portfolio_value_after_eur = 0
-    where bot_instance_id = 'futures-pukis-live'
-      and (cash_after_eur <> 0 or portfolio_value_after_eur <> 0
-           or cash_before_eur <> 0 or portfolio_value_before_eur <> 0);
-
-    delete from portfolio_daily_equity where bot_instance_id = 'futures-pukis-live';
-end $$;
+-- Owner-provided manual starting capital for the PUKO paper portfolio. The fixed
+-- event id makes this idempotent across deploys; margin=0 above still keeps every
+-- entry path paused and prevents calculations, notifications, and orders.
+with inserted as (
+    insert into portfolio_cash_events (
+        bot_instance_id, event_id, occurred_at, event_type, amount, asset, source)
+    values (
+        'futures-pukis-live',
+        'manual-deposit-puko-60-usd-20261010',
+        '2026-10-10T00:00:00Z',
+        'deposit',
+        60,
+        'USD',
+        'manual')
+    on conflict (bot_instance_id, event_id) do nothing
+    returning 1
+)
+update portfolio_state_summary
+set updated_at = now(),
+    cash_eur = 60,
+    cash_quote_value = 60,
+    cash_quote_currency = 'USD',
+    positions_value_eur = 0,
+    total_value_eur = 60
+where bot_instance_id = 'futures-pukis-live'
+  and open_positions = 0
+  and exists (select 1 from inserted);
 SQL
 }
 

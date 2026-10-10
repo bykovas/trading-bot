@@ -55,6 +55,12 @@ internal sealed class MarketDataWorkerConfiguration
         SetIfPresent("TRADINGBOT_MARKET_DATA_STRONG_MOVER_PERCENT", value => config.Ingestion.StrongMoverPercent = ParseDecimal(value, config.Ingestion.StrongMoverPercent));
         SetIfPresent("TRADINGBOT_MARKET_DATA_FORCE_INCLUDE", value => config.Ingestion.ForceInclude = ParseCsv(value));
         SetIfPresent("TRADINGBOT_MARKET_DATA_BLACKLIST", value => config.Ingestion.Blacklist = ParseCsv(value));
+        SetIfPresent("TRADINGBOT_MARKET_DATA_STRATEGY_CANDLE_INTERVAL_SECONDS", value => config.Ingestion.StrategyCandleIntervalSeconds = ParseInt(value, config.Ingestion.StrategyCandleIntervalSeconds));
+        SetIfPresent("TRADINGBOT_MARKET_DATA_STRATEGY_CANDLE_BARS", value => config.Ingestion.StrategyCandleBars = ParseInt(value, config.Ingestion.StrategyCandleBars));
+        SetIfPresent("TRADINGBOT_MARKET_DATA_STRATEGY_TIMEFRAMES_MINUTES", value => config.Ingestion.StrategyTimeframesMinutes = ParseCsv(value).Select(item => ParseInt(item, 0)).Where(item => item > 0).ToList());
+        SetIfPresent("TRADINGBOT_MARKET_DATA_STRATEGY_PAIRS", value => config.Ingestion.StrategyPairs = ParseCsv(value));
+        SetIfPresent("TRADINGBOT_MARKET_DATA_FUTURES_LIQUIDATIONS_ENABLED", value => config.Ingestion.FuturesLiquidationsEnabled = ParseBool(value, config.Ingestion.FuturesLiquidationsEnabled));
+        SetIfPresent("TRADINGBOT_KRAKEN_FUTURES_WEBSOCKET_URL", value => config.Ingestion.FuturesWebSocketUrl = value);
     }
 
     private void Normalize()
@@ -63,6 +69,18 @@ internal sealed class MarketDataWorkerConfiguration
         Http.TimeoutSeconds = Math.Clamp(Http.TimeoutSeconds, 5, 120);
         Ingestion.LightIntervalSeconds = Math.Max(10, Ingestion.LightIntervalSeconds);
         Ingestion.CandleIntervalSeconds = Math.Max(Ingestion.LightIntervalSeconds, Ingestion.CandleIntervalSeconds);
+        Ingestion.StrategyCandleIntervalSeconds = Math.Max(30, Ingestion.StrategyCandleIntervalSeconds);
+        Ingestion.StrategyCandleBars = Math.Clamp(Ingestion.StrategyCandleBars, 203, 500);
+        Ingestion.StrategyTimeframesMinutes = Ingestion.StrategyTimeframesMinutes
+            .Where(value => value is 1 or 5 or 15 or 60)
+            .Distinct()
+            .OrderBy(value => value)
+            .ToList();
+        Ingestion.StrategyPairs = Ingestion.StrategyPairs
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim().ToUpperInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         Ingestion.TimeframeMinutes = Ingestion.TimeframeMinutes <= 0 ? 15 : Ingestion.TimeframeMinutes;
         Ingestion.MaxCandlePairs = Math.Clamp(Ingestion.MaxCandlePairs <= 0 ? 100 : Ingestion.MaxCandlePairs, 1, 120);
         Ingestion.TopVolumePairs = Math.Clamp(Ingestion.TopVolumePairs <= 0 ? 30 : Ingestion.TopVolumePairs, 1, Ingestion.MaxCandlePairs);

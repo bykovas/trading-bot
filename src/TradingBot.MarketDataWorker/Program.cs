@@ -37,4 +37,16 @@ var worker = new MarketDataIngestionWorker(
     spotMarketData,
     futuresMarketData);
 
-await worker.RunAsync(cancellation.Token);
+var ingestionTask = worker.RunAsync(cancellation.Token);
+if (config.Worker.RunOnce)
+{
+    await ingestionTask;
+}
+else
+{
+    var liquidationWorker = new KrakenFuturesLiquidationWorker(
+        config,
+        store,
+        futuresUniverse);
+    await Task.WhenAll(ingestionTask, liquidationWorker.RunAsync(cancellation.Token));
+}

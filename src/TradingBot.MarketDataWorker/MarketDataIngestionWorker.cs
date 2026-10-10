@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace TradingBot.MarketDataWorker;
 
@@ -14,6 +15,7 @@ internal sealed class MarketDataIngestionWorker(
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly SentryFailureGate _cycleFailureGate = new();
     private DateTimeOffset _nextCandleRefreshUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _nextStrategyCandleRefreshUtc = DateTimeOffset.MinValue;
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
@@ -56,6 +58,14 @@ internal sealed class MarketDataIngestionWorker(
                     _nextCandleRefreshUtc = utc.AddSeconds(config.Ingestion.CandleIntervalSeconds);
                 }
 
+                if (config.Ingestion.FuturesEnabled
+                    && config.Ingestion.StrategyPairs.Count > 0
+                    && utc >= _nextStrategyCandleRefreshUtc)
+                {
+                    await RefreshStrategyCandlesAsync(utc, cancellationToken);
+                    _nextStrategyCandleRefreshUtc = utc.AddSeconds(config.Ingestion.StrategyCandleIntervalSeconds);
+                }
+
                 _cycleFailureGate.Recovered();
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -74,6 +84,58 @@ internal sealed class MarketDataIngestionWorker(
             }
 
             await Task.Delay(TimeSpan.FromSeconds(config.Ingestion.LightIntervalSeconds), cancellationToken);
+        }
+    }
+
+    private async Task RefreshStrategyCandlesAsync(DateTimeOffset utc, CancellationToken cancellationToken)
+    {
+        if (futuresMarketDataSource is not KrakenFuturesMarketDataSource source)
+        {
+            throw new InvalidOperationException("Strategy trade candles require the Kraken Futures market-data source.");
+        }
+
+        var universe = await futuresUniverseProvider.GetUniverseAsync(cancellationToken);
+        var requested = config.Ingestion.StrategyPairs.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var instruments = universe.Instruments
+            .Where(instrument => instrument.Enabled && requested.Contains(instrument.Pair))
+            .ToList();
+        var missing = requested.Except(instruments.Select(instrument => instrument.Pair), StringComparer.OrdinalIgnoreCase).ToList();
+        if (missing.Count > 0)
+        {
+            Console.WriteLine($"market-data strategy pairs unavailable: {string.Join(',', missing)}");
+        }
+
+        foreach (var timeframe in config.Ingestion.StrategyTimeframesMinutes)
+        {
+            var records = new List<SharedStrategyCandleRecord>();
+            foreach (var instrument in instruments)
+            {
+                try
+                {
+                    var candles = await source.GetClosedTradeCandlesAsync(
+                        instrument.KrakenPair,
+                        timeframe,
+                        config.Ingestion.StrategyCandleBars,
+                        cancellationToken);
+                    records.AddRange(candles.Select(candle => new SharedStrategyCandleRecord(
+                        MarketDataVenue.Futures,
+                        instrument.Pair,
+                        timeframe,
+                        candle.OpenTime,
+                        candle.Open,
+                        candle.High,
+                        candle.Low,
+                        candle.Close,
+                        candle.Volume)));
+                }
+                catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException)
+                {
+                    Console.WriteLine($"market-data strategy candles FAILED pair={instrument.Pair} timeframe={timeframe}m: {ex.Message}");
+                }
+            }
+
+            store.UpsertStrategyCandles(records, timeframe);
+            Console.WriteLine($"market-data strategy candles timeframe={timeframe}m pairs={instruments.Count} rows={records.Count} utc={utc:O}");
         }
     }
 

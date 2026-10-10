@@ -49,3 +49,32 @@ public sealed record MarketDataCycleRecord(
     int CandlePairCount,
     int DurationMs,
     string? Warnings);
+
+public sealed record SharedStrategyCandleRecord(
+    string Venue,
+    string Pair,
+    int TimeframeMinutes,
+    DateTimeOffset OpenTime,
+    decimal Open,
+    decimal High,
+    decimal Low,
+    decimal Close,
+    decimal Volume);
+
+public sealed record SharedLiquidationRecord(
+    string Venue,
+    string Pair,
+    string EventId,
+    DateTimeOffset EventTime,
+    string Side,
+    string Type,
+    decimal Price,
+    decimal Quantity,
+    decimal ValueUsd,
+    DateTimeOffset ReceivedAt);
+
+public sealed record SharedLiquidationWindow(
+    decimal LongValueUsd,
+    decimal ShortValueUsd,
+    bool Complete,
+    DateTimeOffset? LastGapAt);

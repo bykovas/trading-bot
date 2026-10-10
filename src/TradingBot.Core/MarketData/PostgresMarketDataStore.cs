@@ -63,6 +63,48 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
             create index if not exists ix_market_candles_lookup
                 on market_candles (venue, pair, timeframe_minutes, open_time desc);
 
+            create table if not exists market_strategy_candles (
+                venue text not null,
+                pair text not null,
+                timeframe_minutes int not null,
+                open_time timestamptz not null,
+                open numeric not null,
+                high numeric not null,
+                low numeric not null,
+                close numeric not null,
+                volume numeric not null,
+                primary key (venue, pair, timeframe_minutes, open_time)
+            );
+
+            create index if not exists ix_market_strategy_candles_lookup
+                on market_strategy_candles (venue, pair, timeframe_minutes, open_time desc);
+
+            create table if not exists market_liquidations (
+                venue text not null,
+                pair text not null,
+                event_id text not null,
+                event_time timestamptz not null,
+                side text not null,
+                liquidation_type text not null,
+                price numeric not null,
+                quantity numeric not null,
+                value_usd numeric not null,
+                received_at timestamptz not null,
+                primary key (venue, event_id)
+            );
+
+            create index if not exists ix_market_liquidations_window
+                on market_liquidations (venue, pair, event_time);
+
+            create table if not exists market_stream_state (
+                venue text not null,
+                stream text not null,
+                is_connected boolean not null,
+                state_changed_at timestamptz not null,
+                last_gap_at timestamptz,
+                primary key (venue, stream)
+            );
+
             create table if not exists market_orderbooks (
                 venue text not null,
                 pair text not null,
@@ -312,6 +354,149 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
         transaction.Commit();
     }
 
+    public void UpsertStrategyCandles(IReadOnlyList<SharedStrategyCandleRecord> candles, int timeframeMinutes)
+    {
+        if (candles.Count == 0)
+        {
+            return;
+        }
+
+        EnsureSchema();
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        using (var create = new NpgsqlCommand(
+            """
+            create temp table tmp_market_strategy_candles (
+                venue text, pair text, timeframe_minutes int, open_time timestamptz,
+                open numeric, high numeric, low numeric, close numeric, volume numeric
+            ) on commit drop
+            """,
+            connection,
+            transaction))
+        {
+            create.ExecuteNonQuery();
+        }
+
+        using (var writer = connection.BeginBinaryImport(
+            """
+            copy tmp_market_strategy_candles (
+                venue, pair, timeframe_minutes, open_time, open, high, low, close, volume)
+            from stdin (format binary)
+            """))
+        {
+            foreach (var candle in candles)
+            {
+                writer.StartRow();
+                writer.Write(candle.Venue, NpgsqlDbType.Text);
+                writer.Write(candle.Pair, NpgsqlDbType.Text);
+                writer.Write(timeframeMinutes, NpgsqlDbType.Integer);
+                writer.Write(candle.OpenTime.UtcDateTime, NpgsqlDbType.TimestampTz);
+                writer.Write(candle.Open, NpgsqlDbType.Numeric);
+                writer.Write(candle.High, NpgsqlDbType.Numeric);
+                writer.Write(candle.Low, NpgsqlDbType.Numeric);
+                writer.Write(candle.Close, NpgsqlDbType.Numeric);
+                writer.Write(candle.Volume, NpgsqlDbType.Numeric);
+            }
+
+            writer.Complete();
+        }
+
+        using (var merge = new NpgsqlCommand(
+            """
+            insert into market_strategy_candles (
+                venue, pair, timeframe_minutes, open_time, open, high, low, close, volume)
+            select distinct on (venue, pair, timeframe_minutes, open_time)
+                venue, pair, timeframe_minutes, open_time, open, high, low, close, volume
+            from tmp_market_strategy_candles
+            order by venue, pair, timeframe_minutes, open_time
+            on conflict (venue, pair, timeframe_minutes, open_time) do update set
+                open = excluded.open,
+                high = excluded.high,
+                low = excluded.low,
+                close = excluded.close,
+                volume = excluded.volume
+            where market_strategy_candles.open is distinct from excluded.open
+               or market_strategy_candles.high is distinct from excluded.high
+               or market_strategy_candles.low is distinct from excluded.low
+               or market_strategy_candles.close is distinct from excluded.close
+               or market_strategy_candles.volume is distinct from excluded.volume
+            """,
+            connection,
+            transaction))
+        {
+            merge.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    public void AppendLiquidations(IReadOnlyList<SharedLiquidationRecord> liquidations)
+    {
+        if (liquidations.Count == 0)
+        {
+            return;
+        }
+
+        EnsureSchema();
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        foreach (var liquidation in liquidations)
+        {
+            using var command = new NpgsqlCommand(
+                """
+                insert into market_liquidations (
+                    venue, pair, event_id, event_time, side, liquidation_type,
+                    price, quantity, value_usd, received_at)
+                values (
+                    @venue, @pair, @event_id, @event_time, @side, @type,
+                    @price, @quantity, @value_usd, @received_at)
+                on conflict (venue, event_id) do nothing
+                """,
+                connection,
+                transaction);
+            command.Parameters.AddWithValue("venue", liquidation.Venue);
+            command.Parameters.AddWithValue("pair", liquidation.Pair);
+            command.Parameters.AddWithValue("event_id", liquidation.EventId);
+            command.Parameters.AddWithValue("event_time", liquidation.EventTime.UtcDateTime);
+            command.Parameters.AddWithValue("side", liquidation.Side);
+            command.Parameters.AddWithValue("type", liquidation.Type);
+            command.Parameters.AddWithValue("price", liquidation.Price);
+            command.Parameters.AddWithValue("quantity", liquidation.Quantity);
+            command.Parameters.AddWithValue("value_usd", liquidation.ValueUsd);
+            command.Parameters.AddWithValue("received_at", liquidation.ReceivedAt.UtcDateTime);
+            command.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    public void SetStreamState(string venue, string stream, bool connected, DateTimeOffset utc, bool recordGap)
+    {
+        EnsureSchema();
+        using var connection = OpenConnection();
+        using var command = new NpgsqlCommand(
+            """
+            insert into market_stream_state (
+                venue, stream, is_connected, state_changed_at, last_gap_at)
+            values (
+                @venue, @stream, @connected, @utc, case when @record_gap then @utc else null end)
+            on conflict (venue, stream) do update set
+                is_connected = excluded.is_connected,
+                state_changed_at = excluded.state_changed_at,
+                last_gap_at = case
+                    when @record_gap then excluded.state_changed_at
+                    else market_stream_state.last_gap_at
+                end
+            """,
+            connection);
+        command.Parameters.AddWithValue("venue", venue);
+        command.Parameters.AddWithValue("stream", stream);
+        command.Parameters.AddWithValue("connected", connected);
+        command.Parameters.AddWithValue("utc", utc.UtcDateTime);
+        command.Parameters.AddWithValue("record_gap", recordGap);
+        command.ExecuteNonQuery();
+    }
+
     public void UpsertOrderBooks(IReadOnlyList<SharedMarketOrderBookRecord> orderBooks)
     {
         if (orderBooks.Count == 0)
@@ -437,6 +622,96 @@ public sealed class PostgresMarketDataStore(string connectionString) : IMarketDa
         command.Parameters.AddWithValue("max_bars", Math.Max(1, maxBars));
         var candles = ReadCandles(command);
         return candles.OrderBy(candle => candle.OpenTime).ToList();
+    }
+
+    public IReadOnlyList<SharedStrategyCandleRecord> LoadStrategyCandles(
+        string venue,
+        string pair,
+        int timeframeMinutes,
+        int maxBars)
+    {
+        EnsureSchema();
+        using var connection = OpenConnection();
+        using var command = new NpgsqlCommand(
+            """
+            select venue, pair, timeframe_minutes, open_time, open, high, low, close, volume
+            from market_strategy_candles
+            where venue = @venue and pair = @pair and timeframe_minutes = @timeframe_minutes
+            order by open_time desc
+            limit @max_bars
+            """,
+            connection);
+        command.Parameters.AddWithValue("venue", venue);
+        command.Parameters.AddWithValue("pair", pair);
+        command.Parameters.AddWithValue("timeframe_minutes", timeframeMinutes);
+        command.Parameters.AddWithValue("max_bars", Math.Max(1, maxBars));
+        var results = new List<SharedStrategyCandleRecord>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            results.Add(new SharedStrategyCandleRecord(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetInt32(2),
+                new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(3), DateTimeKind.Utc)),
+                reader.GetDecimal(4),
+                reader.GetDecimal(5),
+                reader.GetDecimal(6),
+                reader.GetDecimal(7),
+                reader.GetDecimal(8)));
+        }
+
+        return results.OrderBy(candle => candle.OpenTime).ToList();
+    }
+
+    public SharedLiquidationWindow LoadLiquidationWindow(
+        string venue,
+        string pair,
+        DateTimeOffset fromExclusive,
+        DateTimeOffset toInclusive)
+    {
+        EnsureSchema();
+        using var connection = OpenConnection();
+        using var command = new NpgsqlCommand(
+            """
+            select
+                coalesce((
+                    select sum(value_usd)
+                    from market_liquidations
+                    where venue = @venue and pair = @pair and side = 'sell'
+                      and event_time > @from_utc and event_time <= @to_utc
+                ), 0),
+                coalesce((
+                    select sum(value_usd)
+                    from market_liquidations
+                    where venue = @venue and pair = @pair and side = 'buy'
+                      and event_time > @from_utc and event_time <= @to_utc
+                ), 0),
+                (select is_connected from market_stream_state where venue = @venue and stream = 'trade'),
+                (select last_gap_at from market_stream_state where venue = @venue and stream = 'trade'),
+                (select state_changed_at from market_stream_state where venue = @venue and stream = 'trade')
+            """,
+            connection);
+        command.Parameters.AddWithValue("venue", venue);
+        command.Parameters.AddWithValue("pair", pair);
+        command.Parameters.AddWithValue("from_utc", fromExclusive.UtcDateTime);
+        command.Parameters.AddWithValue("to_utc", toInclusive.UtcDateTime);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read() || reader.IsDBNull(2))
+        {
+            return new SharedLiquidationWindow(0m, 0m, false, null);
+        }
+
+        var gap = reader.IsDBNull(3)
+            ? (DateTimeOffset?)null
+            : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(3), DateTimeKind.Utc));
+        var lastSeen = reader.IsDBNull(4)
+            ? (DateTimeOffset?)null
+            : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc));
+        var complete = reader.GetBoolean(2)
+            && lastSeen >= toInclusive
+            && (gap is null || gap <= fromExclusive);
+        return new SharedLiquidationWindow(reader.GetDecimal(0), reader.GetDecimal(1), complete, gap);
     }
 
     public SharedMarketOrderBookRecord? LoadOrderBook(string venue, string pair)

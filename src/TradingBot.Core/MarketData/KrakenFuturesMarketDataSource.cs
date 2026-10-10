@@ -302,9 +302,24 @@ public sealed class KrakenFuturesMarketDataSource(HttpClient httpClient, KrakenO
         string symbol,
         int timeframeMinutes,
         CancellationToken cancellationToken)
+        => await GetClosedCandlesAsync(symbol, timeframeMinutes, 120, "mark", cancellationToken);
+
+    public async Task<IReadOnlyList<Candle>> GetClosedTradeCandlesAsync(
+        string symbol,
+        int timeframeMinutes,
+        int count,
+        CancellationToken cancellationToken)
+        => await GetClosedCandlesAsync(symbol, timeframeMinutes, count, "trade", cancellationToken);
+
+    private async Task<IReadOnlyList<Candle>> GetClosedCandlesAsync(
+        string symbol,
+        int timeframeMinutes,
+        int count,
+        string feed,
+        CancellationToken cancellationToken)
     {
         var resolution = ResolutionOf(timeframeMinutes);
-        var uri = $"{BaseUrl()}/api/charts/v1/mark/{Uri.EscapeDataString(symbol)}/{resolution}?count=120";
+        var uri = $"{BaseUrl()}/api/charts/v1/{feed}/{Uri.EscapeDataString(symbol)}/{resolution}?count={Math.Clamp(count, 30, 500)}";
         using var response = await httpClient.GetAsync(uri, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);

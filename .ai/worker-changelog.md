@@ -1,3 +1,9 @@
+## 2026-10-10-byko-v2-market-inputs
+
+- Added a dedicated BYKO v2 market-data path without changing the legacy strategy feed: the collector stores closed Kraken Futures trade candles for the fixed 15-symbol basket at 1m/5m/15m/1h and keeps the existing broad mark-candle tables intact.
+- Added a single shared Kraken Futures trade WebSocket collector for liquidation and partial-liquidation events. Forced sells count as long liquidations and forced buys as short liquidations; event ids are deduplicated, subscription errors are rejected, and reconnect/process-liveness gaps make affected windows incomplete rather than silently zero.
+- Provisioning now records the owner's USD 60 PUKO paper capital as one idempotent manual-deposit ledger event. PUKO remains paused by its zero database margin; repeated deploys cannot reapply the deposit or reset a later portfolio balance. BYKO and LUKO balances are unchanged.
+
 ## 2026-10-10-byko-v2-rule-evaluator
 
 - Added a side-effect-free evaluator for the four owner-specified BYKO v2 entry rules: liquidation flush/reclaim LONG and SHORT on closed 1-minute candles, plus trend-filtered Donchian breakout LONG and SHORT on closed 15-minute/1-hour candles.
