@@ -1,3 +1,9 @@
+## 2026-10-10-debyko-signed-signal-inbox
+
+- Added a per-instance DEBYKO webhook transport. `TradingBot.Api` verifies Standard Webhooks signatures and the five-minute timestamp tolerance against a database-backed channel key, answers the DEBYKO `destination.verify` challenge, deduplicates by channel/event id, and persists the complete signed payload plus its routing, tag, instrument, firing, and expiry metadata.
+- Every futures instance now polls only its own durable inbox once per second. Fresh `watch.became_true` events are recorded as received and expired or unsupported events are explicitly ignored; claims are recoverable after a stale worker lease.
+- This change is deliberately transport-only. A DEBYKO signal cannot place, modify, or close an order yet, does not enter the existing scoring/risk path, sends no Telegram message, and changes no strategy, sizing, exit, Kraken, or market-data behavior.
+
 ## 2026-09-24-no-order-retention
 
 - Added automatic four-hour retention for non-trading decision diagnostics. `NO_ORDER` decision rows and their signal, risk, freshness, range, and action children are deleted in bounded batches; cycle-level active-pair, excluded-pair, rejection, candidate, and entry-diagnostic lists use the same four-hour window.

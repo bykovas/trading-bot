@@ -38,6 +38,10 @@ Console.WriteLine($"futures persistence: state={store.StateDescription} events={
 
 var portfolio = new FuturesVirtualPortfolio(config, store);
 var entryMirrorStore = CreateEntryMirrorStore(config);
+var debykoSignalInbox = CreateDebykoSignalInbox(config);
+var debykoSignalObserver = new DebykoSignalInboxObserver(
+    debykoSignalInbox,
+    config.BotInstance.Id);
 var strategyProfileProvider = new FuturesStrategyProfileProvider(config, CreateBotStrategyProfileStore(config));
 var runtimeLimitProvider = new FuturesRuntimeLimitProvider(config, CreateBotConfigOverrideStore(config));
 var universePreferenceProvider = new FuturesUniversePreferenceProvider(config, CreateBotUniversePreferenceStore(config));
@@ -70,6 +74,7 @@ var worker = new FuturesDecisionWorker(
 var retentionTask = store is PostgresDryRunPortfolioStore postgresStore
     ? postgresStore.RunNoOrderRetentionLoopAsync(TimeSpan.FromHours(4), cancellation.Token)
     : Task.CompletedTask;
+var debykoSignalTask = debykoSignalObserver.RunAsync(cancellation.Token);
 
 try
 {
@@ -80,12 +85,17 @@ finally
     cancellation.Cancel();
     try
     {
-        await retentionTask;
+        await Task.WhenAll(retentionTask, debykoSignalTask);
     }
     catch (OperationCanceledException)
     {
     }
 }
+
+static IDebykoSignalInbox CreateDebykoSignalInbox(FuturesBotConfiguration config) =>
+    config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
+        ? new PostgresDebykoSignalInbox(config.Database.ConnectionString)
+        : new NullDebykoSignalInbox();
 
 static IDryRunPortfolioStore CreatePortfolioStore(FuturesBotConfiguration config) =>
     config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)

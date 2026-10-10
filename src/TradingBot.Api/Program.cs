@@ -30,6 +30,9 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 var app = builder.Build();
 SentrySdk.ConfigureScope(scope => scope.SetTag("service", "api"));
 var publicStatsFailureGate = new SentryFailureGate();
+var debykoSignalInbox = CreateDebykoSignalInbox(builder.Configuration);
+
+app.MapDebykoWebhookEndpoints(debykoSignalInbox);
 
 app.MapGet("/api/health", () => Results.Ok(new
 {
@@ -638,6 +641,14 @@ static async Task<long> ReadDecisionsTotal(NpgsqlConnection connection, Cancella
         connection);
     command.CommandTimeout = PublicStatsDefaults.QueryTimeoutSeconds;
     return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+}
+
+static IDebykoSignalInbox CreateDebykoSignalInbox(IConfiguration configuration)
+{
+    var connectionString = GetConnectionString(configuration);
+    return string.IsNullOrWhiteSpace(connectionString)
+        ? new NullDebykoSignalInbox()
+        : new PostgresDebykoSignalInbox(connectionString);
 }
 
 static string GetConnectionString(IConfiguration configuration) =>

@@ -49,6 +49,17 @@ http:
         certResolver: letsencrypt
       service: trading-bot-api
 
+    # Signed server-to-server ingress. Keep it outside the public dashboard CORS
+    # middleware: DEBYKO POSTs raw bytes whose signature must reach the API intact.
+    trading-bot-debyko-webhook-https:
+      rule: "(Host(`blynai.eu`) || Host(`fin.bykovas.lt`) || Host(`blynai.meetluko.eu`) || Host(`blynai.bykovas.lt`)) && PathPrefix(`/api/webhooks/debyko/`)"
+      entryPoints:
+        - websecure
+      priority: 1100
+      tls:
+        certResolver: letsencrypt
+      service: trading-bot-api
+
     # The old dashboard hosts. Both schemes, because a card shared before the move
     # carries an http link as readily as an https one.
     trading-bot-legacy-http:
@@ -78,8 +89,9 @@ http:
         replacement: "https://blynai.${1}${2}"
         permanent: true
 
-    # Every /api route is a GET with no authentication and no write endpoint, so
-    # the data behind it is already fetchable with curl from anywhere. CORS only
+    # Dashboard /api routes are public reads. The signed DEBYKO write endpoint has
+    # its own higher-priority router above and never passes through this middleware.
+    # CORS only
     # decides whether a browser on another origin may read the same bytes, which
     # makes the wildcard the honest setting rather than a loosened one — and it
     # lets design previews and one-off tools pull live figures without a proxy.
