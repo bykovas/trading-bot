@@ -229,9 +229,8 @@ echo "Writing Lukas futures live environment to ${FUTURES_LUKAS_LIVE_ENV_FILE}"
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${FUTURES_LUKAS_LIVE_ENV_FILE}"
 
-# Pukis has no environment-backed Kraken credentials. The worker starts in live mode
-# so database credentials can activate it without a redeploy, while the zero database
-# margin seeded below prevents all exchange calls and new entries until the user opts in.
+# PUKO is the local BYKO-v2 paper arm. Zero database margin pauses all evaluation;
+# raising it later enables only virtual fills against its manual USD 60 portfolio.
 echo "Writing Pukis futures live environment to ${FUTURES_PUKIS_LIVE_ENV_FILE}"
 {
   printf 'TRADINGBOT_BOT_INSTANCE_ID=futures-pukis-live\n'
@@ -240,7 +239,7 @@ echo "Writing Pukis futures live environment to ${FUTURES_PUKIS_LIVE_ENV_FILE}"
   printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
   printf 'TRADINGBOT_MARKET_DATA_MODE=database\n'
   printf 'TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true\n'
-  printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=true\n'
+  printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=false\n'
   printf 'SENTRY_DSN=%s\n' "${SENTRY_DSN:-}"
   printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
 } > "${FUTURES_PUKIS_LIVE_ENV_FILE}"
@@ -554,9 +553,7 @@ values
     ('futures-pukis-live', 'leverage', 10),
     ('futures-pukis-live', 'max_open_positions', 1),
     ('futures-pukis-live', 'max_open_positions_per_group', 1)
-on conflict (bot_instance_id, override_key) do update set
-    numeric_value = excluded.numeric_value,
-    updated_at = now();
+on conflict (bot_instance_id, override_key) do nothing;
 
 -- BYKO is the live DEBYKO executor. Keep its cents-stage position exactly ten
 -- times smaller than the PUKO model: USD 5 margin at 10x = USD 50 notional.

@@ -23,7 +23,9 @@ internal sealed class FuturesDecisionWorker(
     FuturesUniversePreferenceProvider? universePreferenceProvider = null,
     KrakenApiCredentialProvider? apiCredentialProvider = null,
     FuturesCapacitySummaryReporter? capacitySummaryReporter = null,
-    IDebykoSignalInbox? debykoSignalInbox = null)
+    IDebykoSignalInbox? debykoSignalInbox = null,
+    BykoV2LocalSignalRunner? bykoV2LocalSignalRunner = null,
+    IBykoV2VerdictStore? bykoV2VerdictStore = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly ITelegramNotifier _telegram = telegramNotifier
@@ -44,6 +46,8 @@ internal sealed class FuturesDecisionWorker(
             new NullBotApiCredentialStore());
     private readonly FuturesCapacitySummaryReporter? _capacitySummaryReporter = capacitySummaryReporter;
     private readonly IDebykoSignalInbox _debykoSignalInbox = debykoSignalInbox ?? new NullDebykoSignalInbox();
+    private readonly BykoV2LocalSignalRunner? _bykoV2LocalSignalRunner = bykoV2LocalSignalRunner;
+    private readonly IBykoV2VerdictStore _bykoV2VerdictStore = bykoV2VerdictStore ?? new NullBykoV2VerdictStore();
     private readonly WorkerBuildInfo _buildInfo = WorkerBuildInfo.FromEnvironment();
     private readonly SentryFailureGate _cycleFailureGate = new("futures-worker", config.BotInstance.Id);
     private readonly SentryFailureGate _fastExitFailureGate = new("futures-worker", config.BotInstance.Id);
@@ -79,7 +83,7 @@ internal sealed class FuturesDecisionWorker(
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        if (IsLiveInstance && !config.Futures.LiveTradingEnabled)
+        if (IsLiveInstance && !config.Futures.LiveTradingEnabled && !config.Futures.PaperTradingEnabled)
         {
             throw new InvalidOperationException($"Bot instance '{config.BotInstance.Id}' is live but TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED is not true; refusing to create virtual positions under a live instance id.");
         }
@@ -171,13 +175,13 @@ internal sealed class FuturesDecisionWorker(
                 return;
             }
 
-            var debykoPollInterval = config.Futures.UsesDebykoEntrySignals
+            var signalPollInterval = config.Futures.UsesDebykoEntrySignals || config.BykoV2.LocalEvaluationEnabled
                 ? TimeSpan.FromSeconds(1)
                 : fastExitInterval;
             var wait = new[]
             {
                 remaining,
-                debykoPollInterval,
+                signalPollInterval,
                 nextFastExitUtc - DateTimeOffset.UtcNow
             }.Where(value => value > TimeSpan.Zero).Min();
             await Task.Delay(wait, cancellationToken);
@@ -185,6 +189,11 @@ internal sealed class FuturesDecisionWorker(
             if (config.Futures.UsesDebykoEntrySignals)
             {
                 await ProcessDebykoEntryAsync(cancellationToken);
+            }
+
+            if (config.BykoV2.Enabled && config.BykoV2.LocalEvaluationEnabled)
+            {
+                await ProcessBykoV2LocalEntriesAsync(cancellationToken);
             }
 
             if (DateTimeOffset.UtcNow < nextFastExitUtc)
@@ -227,10 +236,16 @@ internal sealed class FuturesDecisionWorker(
         await _universePreferenceProvider.RefreshAsync(cancellationToken);
         await _apiCredentialProvider.RefreshAsync(cancellationToken);
         var utc = _clock.UtcNow;
+        var state = portfolio.Load();
+        if (state.Positions.Count == 0
+            && (config.RuntimeLimits.NewEntriesPaused || !config.Futures.OwnSignalEntriesEnabled))
+        {
+            return;
+        }
+
         var cycleId = $"{config.BotInstance.Id}-{utc:yyyyMMddHHmmss}";
         Console.WriteLine($"futures cycle={cycleId} utc={utc:O}");
 
-        var state = portfolio.Load();
         var universeSelection = await ResolveUniverseAsync(state, cancellationToken);
         var universe = universeSelection.Instruments.Where(instrument => instrument.Enabled).ToList();
         var lightStates = await marketDataSource.GetLightMarketStatesAsync(universe, cancellationToken);
@@ -1079,9 +1094,20 @@ internal sealed class FuturesDecisionWorker(
                 return;
             }
 
+            if (!TryMapDebykoPair(signal.Instrument, out var signalPair))
+            {
+                await _debykoSignalInbox.MarkIgnoredAsync(
+                    signal.Id,
+                    $"unsupported DEBYKO instrument {signal.Instrument ?? "(missing)"}",
+                    cancellationToken);
+                return;
+            }
+
             var firedAt = signal.FiredAtUtc ?? signal.ReceivedAtUtc;
+            TryRecordDebykoShadowFiring(signalPair, rule, firedAt, signal);
+
             if (signal.ExpiresAtUtc is { } expiresAt && expiresAt <= now
-                || now - firedAt > TimeSpan.FromSeconds(90))
+                || now - firedAt > TimeSpan.FromSeconds(config.BykoV2.SignalMaxAgeSeconds))
             {
                 await _debykoSignalInbox.MarkIgnoredAsync(
                     signal.Id,
@@ -1204,6 +1230,89 @@ internal sealed class FuturesDecisionWorker(
         }
     }
 
+    internal async Task ProcessBykoV2LocalEntriesAsync(CancellationToken cancellationToken)
+    {
+        if (_bykoV2LocalSignalRunner is null || !config.BykoV2.Enabled || !config.BykoV2.LocalEvaluationEnabled)
+        {
+            return;
+        }
+
+        await _strategyProfileProvider.RefreshAsync(cancellationToken);
+        await _runtimeLimitProvider.RefreshAsync(cancellationToken);
+        if (config.RuntimeLimits.NewEntriesPaused)
+        {
+            return;
+        }
+
+        var signals = _bykoV2LocalSignalRunner.EvaluateLatest();
+        if (!config.Futures.UsesBykoV2EntrySignals || signals.Count == 0)
+        {
+            return;
+        }
+
+        var state = portfolio.Load();
+        if (state.Positions.Count > 0)
+        {
+            return;
+        }
+
+        var selected = signals
+            .OrderBy(signal => signal.Rule is BykoV2Rule.FlushLong or BykoV2Rule.FlushShort ? 0 : 1)
+            .ThenBy(signal => signal.Pair, StringComparer.Ordinal)
+            .First();
+        var portfolioBefore = state.Clone();
+        var universe = (await ResolveUniverseAsync(state, cancellationToken)).Instruments
+            .Where(instrument => instrument.Enabled)
+            .ToList();
+        var instrument = universe.FirstOrDefault(candidate =>
+            candidate.Pair.Equals(selected.Pair, StringComparison.OrdinalIgnoreCase));
+        if (instrument is null)
+        {
+            return;
+        }
+
+        var leverage = config.RuntimeLimits.Leverage;
+        var notional = config.RuntimeLimits.PositionNotionalUsd;
+        var capacityReason = MirrorCapacityBlockReason(state, instrument.Pair, notional, leverage);
+        if (capacityReason is not null)
+        {
+            return;
+        }
+
+        var rule = PostgresBykoV2VerdictStore.RuleName(selected.Rule);
+        var fill = await ApplyOrExecuteLiveAsync(
+            state,
+            selected.Pair,
+            selected.Desired,
+            selected.Price,
+            notional,
+            leverage,
+            reduceOnly: false,
+            reason: $"local {rule} edge at {selected.BarClosedAt:O}",
+            exitTriggerSource: null,
+            instrument,
+            entryPlan: null,
+            cancellationToken,
+            signalPrice: selected.Price);
+        fill.Action.EntryChannel = rule;
+        fill.Action.Strategy = "BYKO_V2";
+        var opened = state.Positions.FirstOrDefault(position =>
+            position.Pair.Equals(selected.Pair, StringComparison.OrdinalIgnoreCase));
+        if (opened is not null && fill.PositionOpened)
+        {
+            opened.EntryChannel = rule;
+            opened.Strategy = "BYKO_V2";
+        }
+
+        portfolio.Save(state);
+        AppendFastCycle(
+            _clock.UtcNow,
+            portfolioBefore,
+            state,
+            [BuildBykoV2DecisionRecord(selected, fill)],
+            [selected.Pair]);
+    }
+
     private async Task RetryOrIgnoreDebykoAsync(
         DebykoWebhookEvent signal,
         string reason,
@@ -1239,21 +1348,65 @@ internal sealed class FuturesDecisionWorker(
         string? debykoInstrument,
         IReadOnlyList<InstrumentOptions> universe)
     {
-        if (string.IsNullOrWhiteSpace(debykoInstrument))
+        if (!TryMapDebykoPair(debykoInstrument, out var pair))
         {
             return null;
         }
 
-        var baseAsset = debykoInstrument.Trim().ToUpperInvariant() switch
+        return universe.FirstOrDefault(candidate =>
+                candidate.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase))
+            ?? (pair.Equals("DOGE/USD", StringComparison.OrdinalIgnoreCase)
+                ? universe.FirstOrDefault(candidate => candidate.Pair.Equals("XDG/USD", StringComparison.OrdinalIgnoreCase))
+                : null);
+    }
+
+    private static bool TryMapDebykoPair(string? debykoInstrument, out string pair)
+    {
+        pair = string.Empty;
+        if (string.IsNullOrWhiteSpace(debykoInstrument))
         {
-            "BTC-PERP" => "XBT",
-            "DOGE-PERP" => "XDG",
-            var value when value.EndsWith("-PERP", StringComparison.Ordinal) => value[..^5],
+            return false;
+        }
+
+        var normalized = debykoInstrument.Trim().ToUpperInvariant();
+        if (!normalized.EndsWith("-PERP", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var baseAsset = normalized[..^5] switch
+        {
+            "BTC" => "XBT",
+            "DOGE" => "DOGE",
             var value => value
         };
-        var pair = $"{baseAsset}/USD";
-        return universe.FirstOrDefault(candidate =>
-            candidate.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase));
+        pair = $"{baseAsset}/USD";
+        return true;
+    }
+
+    private void TryRecordDebykoShadowFiring(
+        string pair,
+        string rule,
+        DateTimeOffset firedAt,
+        DebykoWebhookEvent signal)
+    {
+        try
+        {
+            _bykoV2VerdictStore.RecordDebykoFiring(
+                config.BotInstance.Id,
+                pair,
+                rule,
+                firedAt,
+                signal.FiringId ?? signal.EventId,
+                signal.ReceivedAtUtc);
+        }
+        catch (Exception error)
+        {
+            // Shadow comparison is observability, never an execution prerequisite.
+            // A journal outage must not turn a valid signed DEBYKO firing into a missed trade.
+            Console.WriteLine(
+                $"byko-v2-shadow: failed to record DEBYKO firing instance={config.BotInstance.Id} pair={pair} rule={rule}: {error.Message}");
+        }
     }
 
     public async Task RunFastExitCheckAsync(CancellationToken cancellationToken)
@@ -4700,6 +4853,46 @@ internal sealed class FuturesDecisionWorker(
         EmaGapVelocityPercent = null,
         AllowsShort = desired == FuturesDesiredExposure.Short,
         HasBearishStructure = desired == FuturesDesiredExposure.Short,
+        BearishEmaGapPercent = null,
+        ShortScore = null,
+        LongScoreThreshold = config.Strategy.MinimumLongScore,
+        ShortScoreThreshold = config.Shorts.MinShortScore,
+        MinimumEmaGapPercent = config.Strategy.MinimumEmaGapPercent,
+        ShortBaseBlockReasonCode = null,
+        ShortBaseBlockReason = null,
+        PriceActionDirection = null,
+        PriceActionTrendPercent = null
+    };
+
+    private DryRunDecisionRecord BuildBykoV2DecisionRecord(
+        BykoV2LocalSignal signal,
+        FuturesFillResult fill) => new()
+    {
+        Pair = signal.Pair,
+        Price = signal.Price,
+        FastEma = signal.Verdict.Values.GetValueOrDefault("pair_ema20_1h"),
+        SlowEma = signal.Verdict.Values.GetValueOrDefault("pair_ema50_1h"),
+        Rsi = signal.Verdict.Values.GetValueOrDefault("rsi"),
+        DesiredPosition = ExposureSide(signal.Desired),
+        Score = 0m,
+        RiskApproved = fill.PositionOpened,
+        RiskReasons = new[]
+        {
+            $"local {PostgresBykoV2VerdictStore.RuleName(signal.Rule)} edge at {signal.BarClosedAt:O}",
+            fill.Action.Reason
+        },
+        Contributions = Array.Empty<SignalContribution>(),
+        DryRunAction = fill.Action,
+        EntryRejectionReason = fill.PositionOpened
+            ? null
+            : fill.Action.HoldReasonCode ?? "REJECT_BYKO_V2_EXECUTION",
+        SpreadPercent = (signal.Verdict.Values.GetValueOrDefault("spread") ?? 0m) * 100m,
+        HasBullishStructure = signal.Desired == FuturesDesiredExposure.Long,
+        EmaFullyConfirmed = false,
+        BullishEmaGapPercent = null,
+        EmaGapVelocityPercent = null,
+        AllowsShort = signal.Desired == FuturesDesiredExposure.Short,
+        HasBearishStructure = signal.Desired == FuturesDesiredExposure.Short,
         BearishEmaGapPercent = null,
         ShortScore = null,
         LongScoreThreshold = config.Strategy.MinimumLongScore,

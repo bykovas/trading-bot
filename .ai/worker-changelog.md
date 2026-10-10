@@ -1,3 +1,9 @@
+## 2026-10-10-byko-v2-runtime-routing
+
+- BYKO now evaluates the four BYKO-v2 rules locally for a durable shadow comparison while keeping signed DEBYKO firings as its only entry authority. Each closed-bar verdict, local edge and matching DEBYKO firing is linked even when the webhook and local evaluation arrive in either order.
+- PUKO uses the same local BYKO-v2 evaluator as its only entry source, but is explicitly paper-only: eligible edges create virtual fills and cannot reach Kraken order submission. Its database margin is initially seeded to zero as a complete pause, so it performs no strategy calculation, journal write, Telegram notification or order attempt until the owner raises the margin; later deploys do not reset that operator value.
+- BYKO remains one USD 5-margin position at 10x (USD 50 notional). PUKO retains its USD 50-margin, 10x model and idempotent manual USD 60 paper deposit. LUKO is unchanged.
+
 ## 2026-10-10-byko-v2-market-inputs
 
 - Added a dedicated BYKO v2 market-data path without changing the legacy strategy feed: the collector stores closed Kraken Futures trade candles for the fixed 15-symbol basket at 1m/5m/15m/1h and keeps the existing broad mark-candle tables intact.

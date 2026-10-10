@@ -171,12 +171,13 @@ public sealed class FuturesRuntimeLimitsTests
     }
 
     [Fact]
-    public async Task Paused_live_instance_starts_without_kraken_credentials()
+    public async Task Paused_paper_instance_starts_without_credentials_or_market_calculation()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), "trading-bot-tests", Guid.NewGuid().ToString("N"));
         var config = Configuration();
         config.BotInstance = new BotInstanceOptions { Id = "futures-pukis-live", Name = "Pukis live futures worker" };
-        config.Futures.LiveTradingEnabled = true;
+        config.Futures.LiveTradingEnabled = false;
+        config.Futures.PaperTradingEnabled = true;
         config.Worker.RunOnce = true;
         config.Kraken = new KrakenOptions { MarketDataMode = "sample" };
         config.DryRun.OutputDirectory = outputDirectory;
@@ -192,7 +193,7 @@ public sealed class FuturesRuntimeLimitsTests
             });
         var worker = new FuturesDecisionWorker(
             config,
-            new SampleMarketDataSource(),
+            new ThrowingMarketDataSource(),
             new IndicatorEngine(),
             new LongShortStrategy(config),
             new MarginRiskManager(config),
@@ -203,6 +204,21 @@ public sealed class FuturesRuntimeLimitsTests
         await worker.RunAsync(CancellationToken.None);
 
         Assert.True(config.RuntimeLimits.NewEntriesPaused);
+    }
+
+    private sealed class ThrowingMarketDataSource : IMarketDataSource
+    {
+        public Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
+            IReadOnlyList<InstrumentOptions> instruments,
+            CancellationToken cancellationToken) =>
+            throw new Xunit.Sdk.XunitException("Paused worker must not request light market state.");
+
+        public Task<IReadOnlyList<InstrumentMarketState>> GetFullMarketStatesAsync(
+            IReadOnlyList<InstrumentOptions> instruments,
+            int timeframeMinutes,
+            IReadOnlyList<InstrumentMarketState> lightStates,
+            CancellationToken cancellationToken) =>
+            throw new Xunit.Sdk.XunitException("Paused worker must not request full market state.");
     }
 
     [Fact]

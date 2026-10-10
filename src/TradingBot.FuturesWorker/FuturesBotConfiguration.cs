@@ -262,13 +262,15 @@ internal sealed class FuturesBotConfiguration
                 => FuturesEntrySignalSources.Debyko,
             var value when value?.Equals(FuturesEntrySignalSources.Local, StringComparison.OrdinalIgnoreCase) == true
                 => FuturesEntrySignalSources.Local,
+            var value when value?.Equals(FuturesEntrySignalSources.BykoV2, StringComparison.OrdinalIgnoreCase) == true
+                => FuturesEntrySignalSources.BykoV2,
             _ => FuturesEntrySignalSources.Local
         };
 
         // An external-signal instance must have exactly one entry authority. Keep the
         // legacy property for old profiles, but never let it re-enable local entries on
         // a DEBYKO executor. Existing positions still pass through every exit path.
-        if (Futures.UsesDebykoEntrySignals)
+        if (Futures.UsesDebykoEntrySignals || Futures.UsesBykoV2EntrySignals)
         {
             Futures.OwnSignalEntriesEnabled = false;
         }
@@ -737,6 +739,8 @@ internal sealed class FuturesOptions
     public string EntrySignalSource { get; set; } = FuturesEntrySignalSources.Local;
     public bool UsesDebykoEntrySignals =>
         EntrySignalSource.Equals(FuturesEntrySignalSources.Debyko, StringComparison.OrdinalIgnoreCase);
+    public bool UsesBykoV2EntrySignals =>
+        EntrySignalSource.Equals(FuturesEntrySignalSources.BykoV2, StringComparison.OrdinalIgnoreCase);
 
     // Long entry channels this instance refuses to trade (by ClassifyEntryChannel name,
     // case-insensitive). Part of the own-strategy experiment; empty on the control.
@@ -782,6 +786,7 @@ internal sealed class FuturesOptions
 
     public int FastExitCheckSeconds { get; set; } = 10;
     public bool LiveTradingEnabled { get; set; }
+    public bool PaperTradingEnabled { get; set; }
     public bool DeadManSwitchEnabled { get; set; }
     public int DeadManSwitchSeconds { get; set; } = 90;
 
@@ -795,6 +800,7 @@ internal static class FuturesEntrySignalSources
 {
     public const string Local = "Local";
     public const string Debyko = "Debyko";
+    public const string BykoV2 = "BykoV2";
 }
 
 internal sealed class BykoV2Options
@@ -804,7 +810,7 @@ internal sealed class BykoV2Options
     public List<string> Universe { get; set; } =
     [
         "XBT/USD", "ETH/USD", "SOL/USD", "ZEC/USD", "XRP/USD",
-        "HYPE/USD", "XDG/USD", "ADA/USD", "AVAX/USD", "DOT/USD",
+        "HYPE/USD", "DOGE/USD", "ADA/USD", "AVAX/USD", "DOT/USD",
         "LINK/USD", "LTC/USD", "BNB/USD", "AAVE/USD", "FIL/USD"
     ];
 
@@ -831,6 +837,7 @@ internal sealed class BykoV2Options
     public int FlushCooldownMinutes { get; set; } = 30;
     public int BreakoutCooldownMinutes { get; set; } = 120;
     public int SignalMaxAgeSeconds { get; set; } = 90;
+    public int EvaluationDelaySeconds { get; set; } = 5;
 
     public void Normalize()
     {
@@ -849,6 +856,7 @@ internal sealed class BykoV2Options
         FlushCooldownMinutes = Math.Max(0, FlushCooldownMinutes);
         BreakoutCooldownMinutes = Math.Max(0, BreakoutCooldownMinutes);
         SignalMaxAgeSeconds = Math.Clamp(SignalMaxAgeSeconds, 10, 300);
+        EvaluationDelaySeconds = Math.Clamp(EvaluationDelaySeconds, 0, 30);
     }
 }
 

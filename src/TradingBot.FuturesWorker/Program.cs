@@ -39,6 +39,8 @@ Console.WriteLine($"futures persistence: state={store.StateDescription} events={
 var portfolio = new FuturesVirtualPortfolio(config, store);
 var entryMirrorStore = CreateEntryMirrorStore(config);
 var debykoSignalInbox = CreateDebykoSignalInbox(config);
+var bykoV2VerdictStore = CreateBykoV2VerdictStore(config);
+var bykoV2LocalSignalRunner = CreateBykoV2LocalSignalRunner(config, bykoV2VerdictStore);
 var strategyProfileProvider = new FuturesStrategyProfileProvider(config, CreateBotStrategyProfileStore(config));
 var runtimeLimitProvider = new FuturesRuntimeLimitProvider(config, CreateBotConfigOverrideStore(config));
 var universePreferenceProvider = new FuturesUniversePreferenceProvider(config, CreateBotUniversePreferenceStore(config));
@@ -67,7 +69,9 @@ var worker = new FuturesDecisionWorker(
     universePreferenceProvider: universePreferenceProvider,
     apiCredentialProvider: apiCredentialProvider,
     capacitySummaryReporter: capacitySummaryReporter,
-    debykoSignalInbox: debykoSignalInbox);
+    debykoSignalInbox: debykoSignalInbox,
+    bykoV2LocalSignalRunner: bykoV2LocalSignalRunner,
+    bykoV2VerdictStore: bykoV2VerdictStore);
 
 var retentionTask = store is PostgresDryRunPortfolioStore postgresStore
     ? postgresStore.RunNoOrderRetentionLoopAsync(TimeSpan.FromHours(4), cancellation.Token)
@@ -93,6 +97,23 @@ static IDebykoSignalInbox CreateDebykoSignalInbox(FuturesBotConfiguration config
     config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
         ? new PostgresDebykoSignalInbox(config.Database.ConnectionString)
         : new NullDebykoSignalInbox();
+
+static IBykoV2VerdictStore CreateBykoV2VerdictStore(FuturesBotConfiguration config) =>
+    config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
+        ? new PostgresBykoV2VerdictStore(config.Database.ConnectionString)
+        : new NullBykoV2VerdictStore();
+
+static BykoV2LocalSignalRunner? CreateBykoV2LocalSignalRunner(
+    FuturesBotConfiguration config,
+    IBykoV2VerdictStore verdictStore) =>
+    config.Database.Enabled
+    && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)
+    && config.BykoV2.Enabled
+        ? new BykoV2LocalSignalRunner(
+            config,
+            new PostgresMarketDataStore(config.Database.ConnectionString),
+            verdictStore)
+        : null;
 
 static IDryRunPortfolioStore CreatePortfolioStore(FuturesBotConfiguration config) =>
     config.Database.Enabled && !string.IsNullOrWhiteSpace(config.Database.ConnectionString)

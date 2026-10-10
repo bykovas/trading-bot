@@ -287,10 +287,12 @@ public sealed class FuturesInstanceConfigurationTests
 
         Assert.Equal("futures-pukis-live", pukis["BotInstance"]?["Id"]?.GetValue<string>());
         Assert.Equal("Pukis live futures worker", pukis["BotInstance"]?["Name"]?.GetValue<string>());
-        Assert.Equal("PUKIS", pukis["Telegram"]?["Label"]?.GetValue<string>());
+        Assert.Equal("PUKO", pukis["Telegram"]?["Label"]?.GetValue<string>());
 
-        Assert.True(pukis["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
-        Assert.Null(pukis["Futures"]?["EntrySignalSource"]);
+        Assert.False(pukis["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
+        Assert.Equal("BykoV2", pukis["Futures"]?["EntrySignalSource"]?.GetValue<string>());
+        Assert.True(pukis["Futures"]?["PaperTradingEnabled"]?.GetValue<bool>());
+        Assert.False(pukis["Futures"]?["LiveTradingEnabled"]?.GetValue<bool>());
         Assert.Equal(10m, pukis["Futures"]?["DefaultLeverage"]?.GetValue<decimal>());
         Assert.Equal(1, pukis["Futures"]?["MaxPositions"]?.GetValue<int>());
         Assert.Equal(50m, pukis["Futures"]?["TargetMarginUsd"]?.GetValue<decimal>());
@@ -305,7 +307,7 @@ public sealed class FuturesInstanceConfigurationTests
     }
 
     [Fact]
-    public void Debyko_entry_source_forces_local_entries_off_but_local_source_does_not()
+    public void Non_legacy_entry_sources_force_legacy_entries_off_but_local_does_not()
     {
         var debyko = new FuturesBotConfiguration
         {
@@ -319,6 +321,19 @@ public sealed class FuturesInstanceConfigurationTests
 
         Assert.Equal(FuturesEntrySignalSources.Debyko, debyko.Futures.EntrySignalSource);
         Assert.False(debyko.Futures.OwnSignalEntriesEnabled);
+
+        var bykoV2 = new FuturesBotConfiguration
+        {
+            Futures = new FuturesOptions
+            {
+                EntrySignalSource = "bykov2",
+                OwnSignalEntriesEnabled = true
+            }
+        };
+        bykoV2.Normalize();
+
+        Assert.Equal(FuturesEntrySignalSources.BykoV2, bykoV2.Futures.EntrySignalSource);
+        Assert.False(bykoV2.Futures.OwnSignalEntriesEnabled);
 
         var local = new FuturesBotConfiguration
         {
