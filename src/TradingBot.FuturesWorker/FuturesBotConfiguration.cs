@@ -42,6 +42,7 @@ internal sealed class FuturesBotConfiguration
     public FuturesRiskOptions Risk { get; set; } = new();
     public FuturesExecutionPolicyOptions ExecutionPolicy { get; set; } = new();
     public FuturesEntryMirrorOptions EntryMirror { get; set; } = new();
+    public BykoV2Options BykoV2 { get; set; } = new();
 
     public TelegramNotificationOptions Telegram { get; set; } = new();
     public CorrelationRiskOptions CorrelationRisk { get; set; } = new();
@@ -206,6 +207,7 @@ internal sealed class FuturesBotConfiguration
         Risk = candidate.Risk;
         ExecutionPolicy = candidate.ExecutionPolicy;
         TpSl = candidate.TpSl;
+        BykoV2 = candidate.BykoV2;
         Normalize();
     }
 
@@ -331,6 +333,8 @@ internal sealed class FuturesBotConfiguration
             EntryMirror.MaxAttempts <= 0 ? 3 : EntryMirror.MaxAttempts,
             1,
             10);
+
+        BykoV2.Normalize();
 
         if (!string.IsNullOrWhiteSpace(EntryMirror.PublishToBotInstanceId)
             && !string.IsNullOrWhiteSpace(EntryMirror.FollowSourceBotInstanceId))
@@ -791,6 +795,61 @@ internal static class FuturesEntrySignalSources
 {
     public const string Local = "Local";
     public const string Debyko = "Debyko";
+}
+
+internal sealed class BykoV2Options
+{
+    public bool Enabled { get; set; }
+    public bool LocalEvaluationEnabled { get; set; } = true;
+    public List<string> Universe { get; set; } =
+    [
+        "XBT/USD", "ETH/USD", "SOL/USD", "ZEC/USD", "XRP/USD",
+        "HYPE/USD", "XDG/USD", "ADA/USD", "AVAX/USD", "DOT/USD",
+        "LINK/USD", "LTC/USD", "BNB/USD", "AAVE/USD", "FIL/USD"
+    ];
+
+    public int RsiPeriod { get; set; } = 14;
+    public int AtrPeriod { get; set; } = 14;
+    public int FastEmaPeriod { get; set; } = 20;
+    public int SlowEmaPeriod { get; set; } = 50;
+    public int DonchianPeriod { get; set; } = 20;
+    public int VolumeSmaPeriod { get; set; } = 20;
+    public decimal VolumeRatioMinimum { get; set; } = 1.5m;
+    public decimal AtrRatioMinimum { get; set; } = 0.002m;
+    public decimal AtrRatioMaximum { get; set; } = 0.03m;
+    public decimal BreakoutSpreadMaximum { get; set; } = 0.001m;
+    public decimal Funding8hMaximumAbs { get; set; } = 0.0005m;
+
+    public int FlushWindowMinutes { get; set; } = 4;
+    public decimal FlushLiquidationTurnoverRatio { get; set; } = 0.25m;
+    public decimal FlushLiquidationDailyTurnoverRatio { get; set; } = 0.001m;
+    public decimal FlushLiquidationMinimumUsd { get; set; } = 20_000m;
+    public decimal FlushMoveMinimum { get; set; } = 0.015m;
+    public decimal FlushReclaimMinimum { get; set; } = 0.003m;
+    public decimal FlushSpreadMaximum { get; set; } = 0.0005m;
+    public decimal BtcOneHourMoveMaximumAbs { get; set; } = 0.02m;
+    public int FlushCooldownMinutes { get; set; } = 30;
+    public int BreakoutCooldownMinutes { get; set; } = 120;
+    public int SignalMaxAgeSeconds { get; set; } = 90;
+
+    public void Normalize()
+    {
+        Universe = Universe
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim().ToUpperInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        RsiPeriod = Math.Max(2, RsiPeriod);
+        AtrPeriod = Math.Max(2, AtrPeriod);
+        FastEmaPeriod = Math.Max(2, FastEmaPeriod);
+        SlowEmaPeriod = Math.Max(FastEmaPeriod + 1, SlowEmaPeriod);
+        DonchianPeriod = Math.Max(2, DonchianPeriod);
+        VolumeSmaPeriod = Math.Max(2, VolumeSmaPeriod);
+        FlushWindowMinutes = Math.Max(1, FlushWindowMinutes);
+        FlushCooldownMinutes = Math.Max(0, FlushCooldownMinutes);
+        BreakoutCooldownMinutes = Math.Max(0, BreakoutCooldownMinutes);
+        SignalMaxAgeSeconds = Math.Clamp(SignalMaxAgeSeconds, 10, 300);
+    }
 }
 
 internal sealed class MarginOptions

@@ -1,3 +1,9 @@
+## 2026-10-10-byko-v2-rule-evaluator
+
+- Added a side-effect-free evaluator for the four owner-specified BYKO v2 entry rules: liquidation flush/reclaim LONG and SHORT on closed 1-minute candles, plus trend-filtered Donchian breakout LONG and SHORT on closed 15-minute/1-hour candles.
+- Indicator semantics match the DEBYKO contract: exact `4n` EMA/RMA windows, closed-candle RSI/ATR, contiguous-window validation, mirrored BTC regime and funding checks, and `unknown` rather than false when any required candle or liquidation interval is incomplete.
+- The evaluator and its profile surface are enabled for BYKO and PUKO only. This change does not schedule evaluation, authorize an order, collect liquidation data, or alter the existing zero-margin pause; LUKO is unchanged.
+
 ## 2026-10-10-byko-debyko-entry-authority
 
 - BYKO is now a live DEBYKO-entry executor. Its local scorer cannot authorize new positions; the worker claims only signed `BYKO_FLUSH_LONG`, `BYKO_FLUSH_SHORT`, `BYKO_BREAKOUT_LONG`, and `BYKO_BREAKOUT_SHORT` firings from its own inbox, rejects signals older than 90 seconds, maps DEBYKO instruments to configured Kraken Futures contracts, re-synchronizes the account, applies current executor capacity/margin limits, and records the order outcome in the existing decision journal.

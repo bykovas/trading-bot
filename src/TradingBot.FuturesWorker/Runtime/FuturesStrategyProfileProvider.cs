@@ -71,7 +71,8 @@ internal sealed class FuturesStrategyProfileProvider(
         "Reversal",
         "Risk",
         "ExecutionPolicy",
-        "TpSl"
+        "TpSl",
+        "BykoV2"
     };
 
     private static void MergeAllowedStrategySections(JsonObject destination, JsonObject source)

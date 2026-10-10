@@ -145,6 +145,11 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.Null(primary["Telegram"]?["BotToken"]);
         Assert.Null(lukas["Telegram"]?["BotToken"]);
 
+        // BYKO v2 is evaluated by the experiment arm only. LUKO remains the
+        // untouched control and must not acquire this profile section.
+        Assert.True(primary["BykoV2"]?["Enabled"]?.GetValue<bool>());
+        Assert.Null(lukas["BykoV2"]);
+
         // What the two accounts are allowed to disagree about: who they are, their
         // role in the mirror, whether they act on their own signals, and how much
         // they stake. Everything else - exits, gates, leverage, cooldowns - must
@@ -261,6 +266,7 @@ public sealed class FuturesInstanceConfigurationTests
         // Whole-section experiment knob, asserted above; normalized here so the
         // remainder of the two profiles must still match key for key.
         normalizedLukas["Reversal"] = primary["Reversal"]?.DeepClone();
+        normalizedLukas["BykoV2"] = primary["BykoV2"]?.DeepClone();
         foreach (var (section, key) in mayDiffer)
         {
             if (primary[section]?[key] is not null)
