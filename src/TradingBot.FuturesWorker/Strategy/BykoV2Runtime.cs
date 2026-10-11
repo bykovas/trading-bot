@@ -9,7 +9,8 @@ internal sealed record BykoV2LocalSignal(
     BykoV2Rule Rule,
     DateTimeOffset BarClosedAt,
     decimal Price,
-    BykoV2Verdict Verdict)
+    BykoV2Verdict Verdict,
+    DateTimeOffset? DataAsOf = null)
 {
     public FuturesDesiredExposure Desired => Rule is BykoV2Rule.FlushLong or BykoV2Rule.BreakoutLong
         ? FuturesDesiredExposure.Long
@@ -153,9 +154,10 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
 
         bool? previous = null;
         DateTimeOffset? lastFired = null;
+        DateTimeOffset? lastBar = null;
         using (var read = new NpgsqlCommand(
             """
-            select last_verdict, last_fired_at
+            select last_verdict, last_fired_at, last_bar_closed_at
             from byko_v2_rule_state
             where bot_instance_id = @bot and pair = @pair and rule = @rule
             for update
@@ -173,10 +175,12 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
                 lastFired = reader.IsDBNull(1)
                     ? null
                     : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc));
+                lastBar = new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(2), DateTimeKind.Utc));
             }
         }
 
         var edge = verdict.Fired == true
+            && (lastBar is null || barClosedAt >= lastBar)
             && previous != true
             && (lastFired is null || evaluatedAt - lastFired >= cooldown);
         using (var updateJournal = new NpgsqlCommand(
@@ -208,6 +212,7 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
                 last_verdict = excluded.last_verdict,
                 last_fired_at = excluded.last_fired_at,
                 updated_at = excluded.updated_at
+            where excluded.last_bar_closed_at >= byko_v2_rule_state.last_bar_closed_at
             """,
             connection,
             transaction))

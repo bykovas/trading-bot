@@ -39,7 +39,14 @@ internal sealed class BykoV2AlignedRunner(
             if (!config.BykoV2.DebykoRuleVersions.TryGetValue(ruleName, out var expectedVersion)
                 || expectedVersion.Length != 64 || !expectedVersion.All(Uri.IsHexDigit))
                 continue;
-            var bar = BarEnd(now, rule);
+            var duration = rule is BykoV2Rule.BreakoutLong or BykoV2Rule.BreakoutShort ? 900 : 60;
+            var currentBar = BarEnd(now, rule);
+            var bars = new[] { currentBar }.Concat(_nextPoll
+                .Where(item => item.Key.Rule == ruleId && item.Key.Bar < currentBar && item.Value <= now
+                    && now - item.Key.Bar <= TimeSpan.FromSeconds(duration + 120))
+                .Select(item => item.Key.Bar)).Distinct().OrderBy(value => value).ToArray();
+            foreach (var bar in bars)
+            {
             if (now < bar.AddSeconds(15)) continue;
 
             foreach (var pair in config.BykoV2.Universe.OrderBy(value => value, StringComparer.Ordinal))
@@ -84,7 +91,6 @@ internal sealed class BykoV2AlignedRunner(
                     _nextPoll[key] = now.AddSeconds(30);
                     continue;
                 }
-                var duration = rule is BykoV2Rule.BreakoutLong or BykoV2Rule.BreakoutShort ? 900 : 60;
                 if (slice < bar.AddSeconds(15) || slice >= bar.AddSeconds(duration)
                     || slice > _clock.UtcNow || result.Attempt < 0
                     || result.Version.Length != 64 || !result.Version.All(Uri.IsHexDigit))
@@ -109,13 +115,13 @@ internal sealed class BykoV2AlignedRunner(
                     TimeSpan.FromMinutes(rule is BykoV2Rule.FlushLong or BykoV2Rule.FlushShort
                         ? config.BykoV2.FlushCooldownMinutes : config.BykoV2.BreakoutCooldownMinutes));
                 if (result.Final) _nextPoll[key] = bar.AddMinutes(16);
-                if (edge && _clock.UtcNow < bar.AddSeconds(duration)
-                    && _clock.UtcNow - slice <= TimeSpan.FromSeconds(config.BykoV2.SignalMaxAgeSeconds)
+                if (edge && _clock.UtcNow - slice <= TimeSpan.FromSeconds(config.BykoV2.SignalMaxAgeSeconds)
                     && frame.Frame is { Bid: > 0m, Ask: > 0m } priceFrame)
                 {
                     var price = rule is BykoV2Rule.FlushLong or BykoV2Rule.BreakoutLong ? priceFrame.Ask.Value : priceFrame.Bid.Value;
-                    signals.Add(new(pair, rule, bar, price, verdict));
+                    signals.Add(new(pair, rule, bar, price, verdict, slice));
                 }
+            }
             }
         }
         return signals;

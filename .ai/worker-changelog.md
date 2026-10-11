@@ -1,3 +1,7 @@
+## 2026-10-11-debyko-cross-bar-retries
+
+- Continue polling unfinished Agent attempts across a bar boundary instead of dropping the final minute-rule retry. Entry freshness uses the named data slice and configured signal age; expired results remain available for comparison but cannot open a position.
+
 ## 2026-10-11-debyko-utc-wire-format
 
 - Emit all DEBYKO result and market-data timestamps with the required UTC Z suffix instead of +00:00; preserve instant precision, bar bounds and evaluation cutoffs.

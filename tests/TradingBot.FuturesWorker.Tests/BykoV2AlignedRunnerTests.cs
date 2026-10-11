@@ -205,6 +205,7 @@ public sealed class BykoV2AlignedRunnerTests
     public async Task Response_finishing_in_next_bar_is_recorded_but_cannot_emit_stale_signal()
     {
         var h = new Harness();
+        h.Config.BykoV2.SignalMaxAgeSeconds = 10;
         h.Client.Frame = (pair, _, reference) =>
         {
             if (reference) h.Clock.UtcNow = End.AddMinutes(1);
@@ -212,6 +213,61 @@ public sealed class BykoV2AlignedRunnerTests
         };
         Assert.Empty(await h.Runner.EvaluateAsync(default));
         Assert.True(Assert.Single(h.Aligned.Records).LocalVerdict);
+        Assert.Single(h.Verdicts.Records);
+    }
+
+    [Theory]
+    [InlineData(65, true)]
+    [InlineData(149, true)]
+    [InlineData(150, false)]
+    public async Task Pending_flush_previous_bar_final_is_recorded_and_entry_expires_from_slice(int receivedSeconds, bool expectedEntry)
+    {
+        var h = new Harness();
+        h.Config.BykoV2.SignalMaxAgeSeconds = 90;
+        h.Client.Result = (id, instrument, bar) => Result(id, instrument, bar) with
+        { Final = false, Verdict = null, DataAsOf = End.AddSeconds(15), Attempt = 0 };
+        h.Client.Frame = (_, _, _) => new(null, "provisional input unavailable", []);
+        Assert.Empty(await h.Runner.EvaluateAsync(default));
+        var provisional = Assert.Single(h.Aligned.Records);
+        Assert.Null(provisional.LocalVerdict);
+        Assert.Null(provisional.DebykoVerdict);
+        Assert.False(provisional.Final);
+        Assert.Empty(h.Verdicts.Records);
+
+        h.Clock.UtcNow = End.AddSeconds(receivedSeconds);
+        h.Client.Result = (id, instrument, bar) => bar == End
+            ? Result(id, instrument, bar) with { Final = true, DataAsOf = End.AddSeconds(59), Attempt = 1 }
+            : Result(id, instrument, bar) with { Final = false, DataAsOf = null, Version = null, Verdict = null, Reason = "not_measured" };
+        h.Client.Frame = (pair, _, _) => new(Market(pair), null, []);
+        var signals = await h.Runner.EvaluateAsync(default);
+        Assert.Equal(2, h.Client.Results.Count(r => r.Item3 == End));
+        Assert.Equal(2, h.Aligned.Records.Count);
+        var final = h.Aligned.Records[1];
+        Assert.Equal(End, final.BarEnd);
+        Assert.Equal(End.AddSeconds(59), final.DataAsOf);
+        Assert.Equal(1, final.Attempt);
+        Assert.True(final.Final);
+        Assert.True(final.LocalVerdict);
+        Assert.True(final.DebykoVerdict);
+        Assert.True(Assert.Single(h.Verdicts.Records).Fired);
+        Assert.All(h.Client.Frames.Skip(2), request =>
+        {
+            Assert.Equal(End, request.Item2);
+            Assert.Equal(End.AddSeconds(59), request.Item3);
+        });
+        Assert.Equal(4, h.Client.Frames.Count);
+        if (expectedEntry)
+        {
+            var signal = Assert.Single(signals);
+            Assert.Equal(End, signal.BarClosedAt);
+            Assert.Equal(End.AddSeconds(59), signal.DataAsOf);
+            Assert.Equal(99.71m, signal.Price);
+        }
+        else Assert.Empty(signals);
+
+        h.Clock.UtcNow = h.Clock.UtcNow.AddSeconds(1);
+        Assert.Empty(await h.Runner.EvaluateAsync(default));
+        Assert.Equal(2, h.Client.Results.Count(r => r.Item3 == End));
         Assert.Single(h.Verdicts.Records);
     }
 

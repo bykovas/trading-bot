@@ -1278,8 +1278,8 @@ internal sealed class FuturesDecisionWorker(
         var signals = await _bykoV2LocalSignalRunner.EvaluateLatestAsync(cancellationToken);
         if (config.BykoV2.DebykoAlignedDataEnabled)
         {
-            signals = signals.Where(signal => _clock.UtcNow < signal.BarClosedAt.AddSeconds(
-                signal.Rule is BykoV2Rule.FlushLong or BykoV2Rule.FlushShort ? 60 : 900)).ToArray();
+            signals = signals.Where(signal => signal.DataAsOf is { } slice
+                && _clock.UtcNow - slice <= TimeSpan.FromSeconds(config.BykoV2.SignalMaxAgeSeconds)).ToArray();
         }
         if (!config.Futures.UsesBykoV2EntrySignals || signals.Count == 0)
         {
