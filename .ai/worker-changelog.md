@@ -1,3 +1,8 @@
+## 2026-10-11-signal-notice-batching
+
+- Batch pending signal/comparison messages per instance; matched DEBYKO receipts are reported together with the comparison rather than as a second receipt-only message. Trading announcements remain separate.
+- Allow five minutes from bar close before declaring no webhook, and send a durable one-time correction when a firing arrives after a missing-signal comparison. Entry expiry and trading rules are unchanged.
+
 ## 2026-10-11-debyko-rule-tags-telegram
 
 - Accept the four live Agent BYKO_V2 rule labels and normalize them to existing BYKO shadow rule identifiers before routing and comparison. Preserve legacy tags; do not replay ignored historical deliveries.

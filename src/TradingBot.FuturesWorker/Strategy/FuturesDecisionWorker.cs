@@ -1335,11 +1335,17 @@ internal sealed class FuturesDecisionWorker(
         }
         try
         {
-            foreach (var notice in _bykoV2VerdictStore.PendingNotices(config.BotInstance.Id, _clock.UtcNow))
+            var notices = _bykoV2VerdictStore.PendingNotices(config.BotInstance.Id, _clock.UtcNow);
+            foreach (var batch in notices.GroupBy(notice => notice.Kind is "local" or "received" ? "signal" : "comparison")
+                         .SelectMany(group => group.Chunk(3)))
             {
-                if (await _telegram.TrySendAsync(notice.Compose(config.Telegram.Label, config.Telegram.Emoji), cancellationToken))
+                var text = string.Join("\n\n", batch.Select(notice => notice.Compose(config.Telegram.Label, config.Telegram.Emoji)));
+                if (await _telegram.TrySendAsync(text, cancellationToken))
                 {
-                    _bykoV2VerdictStore.MarkNoticeSent(config.BotInstance.Id, notice.Key);
+                    foreach (var notice in batch)
+                    {
+                        _bykoV2VerdictStore.MarkNoticeSent(config.BotInstance.Id, notice.Key);
+                    }
                 }
                 else
                 {

@@ -9,6 +9,7 @@ public sealed class BykoV2SignalNoticeTests
     [InlineData("local", "🛜")]
     [InlineData("received", "🛜")]
     [InlineData("comparison", "ℹ️")]
+    [InlineData("correction", "ℹ️")]
     public void Notices_start_with_instance_and_notice_icons(string kind, string icon)
     {
         var notice = new BykoV2SignalNotice("key", kind, "ADA/USD", "BYKO_BREAKOUT_LONG", DateTimeOffset.UtcNow, true, true);
@@ -47,9 +48,10 @@ public sealed class BykoV2SignalNoticeTests
     public void Missing_webhook_is_not_presented_as_a_negative_DQL_verdict_or_an_open_position()
     {
         var notice = new BykoV2SignalNotice("key", "comparison", "ETH/USD", "BYKO_FLUSH_LONG", DateTimeOffset.UtcNow, true, false);
-        Assert.Contains("negautas per 90 s", notice.Compose("BYKO"));
+        Assert.Contains("negautas per 5 min", notice.Compose("BYKO"));
         var local = notice with { Kind = "local" };
         Assert.Contains("ne atidaryta pozicija", local.Compose("BYKO"));
+        Assert.Contains("pavėluotai", (notice with { Kind = "correction", DebykoReceived = true }).Compose("BYKO"));
     }
 
     private sealed class NoticeStore : IBykoV2VerdictStore

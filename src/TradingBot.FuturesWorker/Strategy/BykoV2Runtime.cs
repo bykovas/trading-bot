@@ -31,7 +31,8 @@ internal sealed record BykoV2SignalNotice(string Key, string Kind, string Pair, 
     {
         "local" => "Boto signalas: rastas įėjimas. Tai signalas, ne atidaryta pozicija.",
         "received" => "DEBYKO signalas gautas. Tai signalas, ne atidaryta pozicija.",
-        _ => $"Palyginimas: botas {(BotVerdict is null ? "nežinoma" : BotVerdict.Value ? "+" : "−")}; DEBYKO {(DebykoReceived ? "gautas" : "negautas per 90 s")}."
+        "correction" => "Palyginimo patikslinimas: DEBYKO signalas gautas pavėluotai.",
+        _ => $"Palyginimas: botas {(BotVerdict is null ? "nežinoma" : BotVerdict.Value ? "+" : "−")}; DEBYKO {(DebykoReceived ? "gautas" : "negautas per 5 min")}."
     }) + $"\nUTC: {Bar:yyyy-MM-dd HH:mm:ss}");
 }
 
@@ -391,13 +392,22 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
                 union all
                 select 'received:' || id, 'received', pair, rule, fired_at, null::boolean, true
                 from byko_v2_debyko_firings
-                where bot_instance_id = @bot and received_at >= @since
+                where bot_instance_id = @bot and received_at >= @since and shadow_verdict_id is null
                 union all
                 select 'comparison:' || id, 'comparison', pair, rule, bar_closed_at, bot_verdict, debyko_fired
                 from byko_v2_shadow_verdicts
                 where bot_instance_id = @bot and (fired_edge or debyko_fired)
                   and bot_evaluated_at >= @since
                   and (debyko_fired or bar_closed_at <= @deadline)
+                union all
+                select 'correction:' || id, 'correction', pair, rule, bar_closed_at, bot_verdict, true
+                from byko_v2_shadow_verdicts v
+                where bot_instance_id = @bot and debyko_fired and webhook_received_at >= @since
+                  and exists (
+                      select 1 from byko_v2_signal_notices n
+                      where n.bot_instance_id = @bot and n.notice_key = 'comparison:' || v.id
+                        and n.sent_at < v.webhook_received_at
+                  )
                 union all
                 select 'unmatched:' || id, 'comparison', pair, rule, fired_at, null::boolean, true
                 from byko_v2_debyko_firings
@@ -413,7 +423,7 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
             """, connection);
         command.Parameters.AddWithValue("bot", botInstanceId);
         command.Parameters.AddWithValue("since", now.AddMinutes(-10).UtcDateTime);
-        command.Parameters.AddWithValue("deadline", now.AddSeconds(-90).UtcDateTime);
+        command.Parameters.AddWithValue("deadline", now.AddMinutes(-5).UtcDateTime);
         using var reader = command.ExecuteReader();
         var notices = new List<BykoV2SignalNotice>();
         while (reader.Read())
