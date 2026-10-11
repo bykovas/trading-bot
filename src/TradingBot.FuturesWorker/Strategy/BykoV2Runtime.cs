@@ -29,9 +29,9 @@ internal sealed record BykoV2SignalNotice(string Key, string Kind, string Pair, 
 {
     public string Compose(string label, string emoji = "") => $"{emoji}{(Kind is "local" or "received" ? "🛜" : "ℹ️")} " + System.Net.WebUtility.HtmlEncode($"{label} · {Pair} · {Rule}\n" + (Kind switch
     {
-        "local" => "Boto signalas: rastas įėjimas. Tai signalas, ne atidaryta pozicija.",
-        "received" => "DEBYKO signalas gautas. Tai signalas, ne atidaryta pozicija.",
-        "correction" => "Palyginimo patikslinimas: DEBYKO signalas gautas pavėluotai.",
+        "local" => "Boto signalas",
+        "received" => "DEBYKO signalas",
+        "correction" => "Palyginimas: DEBYKO signalas gautas pavėluotai.",
         _ => $"Palyginimas: botas {(BotVerdict is null ? "nežinoma" : BotVerdict.Value ? "+" : "−")}; DEBYKO {(DebykoReceived ? "gautas" : "negautas per 5 min")}."
     }) + $"\nUTC: {Bar:yyyy-MM-dd HH:mm:ss}");
 }

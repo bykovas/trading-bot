@@ -50,7 +50,9 @@ public sealed class BykoV2SignalNoticeTests
         var notice = new BykoV2SignalNotice("key", "comparison", "ETH/USD", "BYKO_FLUSH_LONG", DateTimeOffset.UtcNow, true, false);
         Assert.Contains("negautas per 5 min", notice.Compose("BYKO"));
         var local = notice with { Kind = "local" };
-        Assert.Contains("ne atidaryta pozicija", local.Compose("BYKO"));
+        Assert.Contains("Boto signalas", local.Compose("BYKO"));
+        Assert.DoesNotContain("atidaryta pozicija", local.Compose("BYKO"));
+        Assert.Contains("DEBYKO signalas", (notice with { Kind = "received" }).Compose("BYKO"));
         Assert.Contains("pavėluotai", (notice with { Kind = "correction", DebykoReceived = true }).Compose("BYKO"));
     }
 

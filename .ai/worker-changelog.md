@@ -1,3 +1,7 @@
+## 2026-10-11-short-signal-labels
+
+- Shorten Telegram notice labels to Boto signalas, DEBYKO signalas and Palyginimas. Preserve comparison outcomes, late-arrival corrections, icons and trading announcements.
+
 ## 2026-10-11-signal-notice-batching
 
 - Batch pending signal/comparison messages per instance; matched DEBYKO receipts are reported together with the comparison rather than as a second receipt-only message. Trading announcements remain separate.
