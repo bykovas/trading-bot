@@ -6,6 +6,16 @@ namespace TradingBot.FuturesWorker.Tests;
 public sealed class BykoV2SignalNoticeTests
 {
     [Theory]
+    [InlineData("local", "🛜")]
+    [InlineData("received", "🛜")]
+    [InlineData("comparison", "ℹ️")]
+    public void Notices_start_with_instance_and_notice_icons(string kind, string icon)
+    {
+        var notice = new BykoV2SignalNotice("key", kind, "ADA/USD", "BYKO_BREAKOUT_LONG", DateTimeOffset.UtcNow, true, true);
+        Assert.StartsWith("😋" + icon + " BYKO", notice.Compose("BYKO", "😋"));
+    }
+
+    [Theory]
     [InlineData(true, false, 0, 0)]
     [InlineData(false, false, 1, 0)]
     [InlineData(false, true, 1, 1)]

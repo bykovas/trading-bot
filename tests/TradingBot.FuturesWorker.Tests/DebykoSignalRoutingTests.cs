@@ -29,6 +29,18 @@ public sealed class DebykoSignalRoutingTests
     }
 
     [Theory]
+    [InlineData("BYKO_V2_FLUSH_LONG", "BYKO_FLUSH_LONG", "Long")]
+    [InlineData("BYKO_V2_FLUSH_SHORT", "BYKO_FLUSH_SHORT", "Short")]
+    [InlineData("BYKO_V2_BREAKOUT_LONG", "BYKO_BREAKOUT_LONG", "Long")]
+    [InlineData("BYKO_V2_BREAKOUT_SHORT", "BYKO_BREAKOUT_SHORT", "Short")]
+    public void Agent_labels_resolve_to_canonical_shadow_rules(string tag, string canonical, string side)
+    {
+        Assert.True(FuturesDecisionWorker.TryResolveDebykoRule(tag, out var actual, out var rule));
+        Assert.Equal(canonical, rule);
+        Assert.Equal(side, actual.ToString());
+    }
+
+    [Theory]
     [InlineData("BTC-PERP", "XBT/USD")]
     [InlineData("DOGE-PERP", "XDG/USD")]
     [InlineData("AAVE-PERP", "AAVE/USD")]

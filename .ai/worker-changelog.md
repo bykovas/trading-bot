@@ -1,3 +1,8 @@
+## 2026-10-11-debyko-rule-tags-telegram
+
+- Accept the four live Agent BYKO_V2 rule labels and normalize them to existing BYKO shadow rule identifiers before routing and comparison. Preserve legacy tags; do not replay ignored historical deliveries.
+- Prefix signal notices with the instance emoji and 🛜, comparison notices with the instance emoji and ℹ️. Ensure every message sent by an instance notifier starts with its configured emoji without duplicating existing prefixes.
+
 ## 2026-10-10-kraken-funding-units
 
 - Normalize Kraken Futures hourly funding from quote currency per contract to percent of mark price before storing shared quotes or applying entry-risk/cost checks. Missing funding or a non-positive mark stays unknown; last trade price is not substituted for mark.

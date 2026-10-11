@@ -27,7 +27,7 @@ internal interface IBykoV2VerdictStore
 
 internal sealed record BykoV2SignalNotice(string Key, string Kind, string Pair, string Rule, DateTimeOffset Bar, bool? BotVerdict, bool DebykoReceived)
 {
-    public string Compose(string label) => System.Net.WebUtility.HtmlEncode($"{label} · {Pair} · {Rule}\n" + (Kind switch
+    public string Compose(string label, string emoji = "") => $"{emoji}{(Kind is "local" or "received" ? "🛜" : "ℹ️")} " + System.Net.WebUtility.HtmlEncode($"{label} · {Pair} · {Rule}\n" + (Kind switch
     {
         "local" => "Boto signalas: rastas įėjimas. Tai signalas, ne atidaryta pozicija.",
         "received" => "DEBYKO signalas gautas. Tai signalas, ne atidaryta pozicija.",

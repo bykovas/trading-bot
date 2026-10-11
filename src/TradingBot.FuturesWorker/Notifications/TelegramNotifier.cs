@@ -69,6 +69,11 @@ internal sealed class TelegramNotifier(TelegramNotificationOptions options, Http
             return false;
         }
 
+        if (!string.IsNullOrWhiteSpace(options.Emoji) && !text.StartsWith(options.Emoji, StringComparison.Ordinal))
+        {
+            text = options.Emoji + " " + text;
+        }
+
         try
         {
             // HTML, not MarkdownV2: the posts carry <b> around the figures, and markdown

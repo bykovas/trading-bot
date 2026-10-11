@@ -1337,7 +1337,7 @@ internal sealed class FuturesDecisionWorker(
         {
             foreach (var notice in _bykoV2VerdictStore.PendingNotices(config.BotInstance.Id, _clock.UtcNow))
             {
-                if (await _telegram.TrySendAsync(notice.Compose(config.Telegram.Label), cancellationToken))
+                if (await _telegram.TrySendAsync(notice.Compose(config.Telegram.Label, config.Telegram.Emoji), cancellationToken))
                 {
                     _bykoV2VerdictStore.MarkNoticeSent(config.BotInstance.Id, notice.Key);
                 }
@@ -1376,6 +1376,14 @@ internal sealed class FuturesDecisionWorker(
         out string rule)
     {
         rule = tag?.Trim().ToUpperInvariant() ?? string.Empty;
+        rule = rule switch
+        {
+            "BYKO_V2_FLUSH_LONG" => "BYKO_FLUSH_LONG",
+            "BYKO_V2_FLUSH_SHORT" => "BYKO_FLUSH_SHORT",
+            "BYKO_V2_BREAKOUT_LONG" => "BYKO_BREAKOUT_LONG",
+            "BYKO_V2_BREAKOUT_SHORT" => "BYKO_BREAKOUT_SHORT",
+            _ => rule
+        };
         desired = rule switch
         {
             "BYKO_FLUSH_LONG" or "BYKO_BREAKOUT_LONG" => FuturesDesiredExposure.Long,
