@@ -46,6 +46,41 @@ internal sealed class TpSlOrchestrator(FuturesBotConfiguration config)
             return null;
         }
 
+        if (!config.Futures.LiveTradingEnabled && config.Exits.AtrTrailingRegimeEnabled
+            && position.Origin?.Equals(PositionOrigins.Bot, StringComparison.OrdinalIgnoreCase) == true
+            && position.AtrPct is > 0m && position.StopDistancePct is > 0m
+            && config.Exits.TrailingActivationRMultiple > 0m)
+        {
+            var profit = FuturesDecisionWorker.ProfitPercentInDirection(position, price);
+            if (position.PeakPnlPercent is not { } peak || profit > peak)
+            {
+                position.PeakPnlPercent = profit;
+            }
+            var active = position.TrailingStopState == "SIMULATED_OPEN";
+            if (!active && profit >= config.Exits.TrailingActivationRMultiple * position.StopDistancePct.Value)
+            {
+                var distance = config.Exits.TrailingAtrMultiple > 0m
+                    ? config.Exits.TrailingAtrMultiple * position.AtrPct.Value
+                    : config.TpSl.WorkingTrailingStopPercent(position.FlippedEntry);
+                var spread = bidPrice is > 0m && askPrice is > 0m
+                    ? (askPrice.Value - bidPrice.Value) / ((askPrice.Value + bidPrice.Value) / 2m) * 100m : 0m;
+                position.TrailingStopPercent = config.TpSl.EffectiveTrailingStopPercent(distance, spread);
+                position.TrailingStopState = "SIMULATED_OPEN";
+                position.PeakPnlPercent = profit;
+                active = true;
+            }
+            if (active && position.TrailingStopPercent is > 0m)
+            {
+                var extreme = position.EntryPrice * (1m + (isShort ? -1m : 1m) * position.PeakPnlPercent!.Value / 100m);
+                var trail = extreme * (1m + (isShort ? 1m : -1m) * position.TrailingStopPercent.Value / 100m);
+                if (isShort ? price >= trail : price <= trail)
+                {
+                    position.TrailingStopState = "TRIGGERED";
+                    return new TpSlTrigger(position.Pair, "TRAILING_STOP", trail, priceSource, position.TpOrderState, position.SlOrderState);
+                }
+            }
+        }
+
         if (IsWorkingOrderOpen(position, position.SlOrderState) && position.StopLossPrice is { } stop)
         {
             var stopHit = isShort ? price >= stop : price <= stop;

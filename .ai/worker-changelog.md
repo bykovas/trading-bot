@@ -1,3 +1,8 @@
+## 2026-10-11-v2-entry-atr-profit-protection
+
+- Persist the recorded entry-bar ATR ratio on local and DEBYKO V2 positions and fill diagnostics. Missing ATR blocks/retries entry rather than opening without trailing context; flush verdicts now record their ATR ratio too.
+- Simulate ATR profit trailing for paper BOT positions in both fast and normal TP/SL checks, using closeable bid/ask, configured R activation, ATR distance and spread floor. Preserve existing hard stops and targets and keep exchange trailing unchanged.
+
 ## 2026-10-11-short-signal-labels
 
 - Shorten Telegram notice labels to Boto signalas, DEBYKO signalas and Palyginimas. Preserve comparison outcomes, late-arrival corrections, icons and trading announcements.

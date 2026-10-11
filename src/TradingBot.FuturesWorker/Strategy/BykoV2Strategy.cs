@@ -121,7 +121,8 @@ internal static class BykoV2Strategy
                 ["reclaim"] = reclaim,
                 ["rsi"] = rsi,
                 ["btc_roc_1h"] = btcRoc,
-                ["spread"] = spread
+                ["spread"] = spread,
+                ["atr_ratio"] = last.Close > 0m ? Atr(oneMinute, options.AtrPeriod) / last.Close : null
             });
     }
 

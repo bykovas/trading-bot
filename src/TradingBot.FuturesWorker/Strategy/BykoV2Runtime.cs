@@ -19,6 +19,7 @@ internal sealed record BykoV2LocalSignal(
 internal interface IBykoV2VerdictStore
 {
     bool IsAvailable { get; }
+    decimal? EntryAtrPct(string botInstanceId, string pair, string rule, DateTimeOffset firedAt) => null;
     bool Record(string botInstanceId, string pair, DateTimeOffset barClosedAt, BykoV2Verdict verdict, DateTimeOffset evaluatedAt, TimeSpan cooldown);
     void RecordDebykoFiring(string botInstanceId, string pair, string rule, DateTimeOffset firedAt, string? firingId, DateTimeOffset receivedAt);
     IReadOnlyList<BykoV2SignalNotice> PendingNotices(string botInstanceId, DateTimeOffset now) => Array.Empty<BykoV2SignalNotice>();
@@ -47,6 +48,25 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
 {
     private bool _schemaReady;
     public bool IsAvailable => !string.IsNullOrWhiteSpace(connectionString);
+
+    public decimal? EntryAtrPct(string botInstanceId, string pair, string rule, DateTimeOffset firedAt)
+    {
+        EnsureSchema();
+        var minutes = rule.Contains("BREAKOUT", StringComparison.OrdinalIgnoreCase) ? 15 : 1;
+        var seconds = firedAt.ToUnixTimeSeconds();
+        var bar = DateTimeOffset.FromUnixTimeSeconds(seconds - seconds % (minutes * 60));
+        using var connection = Open();
+        using var command = new NpgsqlCommand("""
+            select (values_jsonb->>'atr_ratio')::numeric * 100
+            from byko_v2_shadow_verdicts
+            where bot_instance_id=@bot and pair=@pair and rule=@rule and bar_closed_at=@bar
+            """, connection);
+        command.Parameters.AddWithValue("bot", botInstanceId);
+        command.Parameters.AddWithValue("pair", pair);
+        command.Parameters.AddWithValue("rule", rule);
+        command.Parameters.AddWithValue("bar", bar.UtcDateTime);
+        return command.ExecuteScalar() is decimal value && value > 0m ? value : null;
+    }
 
     public bool Record(
         string botInstanceId,

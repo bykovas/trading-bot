@@ -1174,6 +1174,13 @@ internal sealed class FuturesDecisionWorker(
                 return;
             }
 
+            var entryAtrPct = _bykoV2VerdictStore.EntryAtrPct(config.BotInstance.Id, instrument.Pair, rule, firedAt);
+            if (entryAtrPct is not > 0m)
+            {
+                await RetryOrIgnoreDebykoAsync(signal, "entry ATR snapshot unavailable", firedAt, cancellationToken);
+                return;
+            }
+
             var fill = await ApplyOrExecuteLiveAsync(
                 state,
                 instrument.Pair,
@@ -1197,6 +1204,8 @@ internal sealed class FuturesDecisionWorker(
             {
                 opened.EntryChannel = rule;
                 opened.Strategy = "BYKO_V2";
+                opened.AtrPct = entryAtrPct;
+                fill.Action.AtrPct = entryAtrPct;
             }
 
             portfolio.Save(state);
@@ -1289,6 +1298,11 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var rule = PostgresBykoV2VerdictStore.RuleName(selected.Rule);
+        var entryAtrPct = selected.Verdict.Values.TryGetValue("atr_ratio", out var atrRatio) ? atrRatio * 100m : null;
+        if (entryAtrPct is not > 0m)
+        {
+            return;
+        }
         var fill = await ApplyOrExecuteLiveAsync(
             state,
             selected.Pair,
@@ -1311,6 +1325,8 @@ internal sealed class FuturesDecisionWorker(
         {
             opened.EntryChannel = rule;
             opened.Strategy = "BYKO_V2";
+            opened.AtrPct = entryAtrPct;
+            fill.Action.AtrPct = entryAtrPct;
         }
 
         portfolio.Save(state);
@@ -2619,7 +2635,12 @@ internal sealed class FuturesDecisionWorker(
             instrument: instrument,
             entryPlan: null,
             cancellationToken);
-        fill.Action.ExitReasonCode = trigger.Kind == "STOP_LOSS" ? "SELL_STOP_LOSS" : "SELL_TAKE_PROFIT";
+        fill.Action.ExitReasonCode = trigger.Kind switch
+        {
+            "STOP_LOSS" => "SELL_STOP_LOSS",
+            "TRAILING_STOP" => "SIMULATED_TRAILING_STOP",
+            _ => "SELL_TAKE_PROFIT"
+        };
 
         if (fill.PositionClosed && config.Futures.LiveTradingEnabled && IsBotOwnedFuturesPosition(held))
         {
