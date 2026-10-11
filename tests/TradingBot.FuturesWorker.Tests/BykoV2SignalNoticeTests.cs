@@ -10,6 +10,7 @@ public sealed class BykoV2SignalNoticeTests
     [InlineData("received", "🛜")]
     [InlineData("comparison", "ℹ️")]
     [InlineData("correction", "ℹ️")]
+    [InlineData("aligned", "ℹ️")]
     public void Notices_start_with_instance_and_notice_icons(string kind, string icon)
     {
         var notice = new BykoV2SignalNotice("key", kind, "ADA/USD", "BYKO_BREAKOUT_LONG", DateTimeOffset.UtcNow, true, true);
@@ -54,6 +55,22 @@ public sealed class BykoV2SignalNoticeTests
         Assert.DoesNotContain("atidaryta pozicija", local.Compose("BYKO"));
         Assert.Contains("DEBYKO signalas", (notice with { Kind = "received" }).Compose("BYKO"));
         Assert.Contains("pavėluotai", (notice with { Kind = "correction", DebykoReceived = true }).Compose("BYKO"));
+    }
+
+    [Theory]
+    [InlineData(true, false, "botas +; DEBYKO −")]
+    [InlineData(false, true, "botas −; DEBYKO +")]
+    [InlineData(true, null, "botas +; DEBYKO nežinoma")]
+    public void Aligned_comparison_uses_explicit_verdict_not_webhook_presence(bool local, bool? remote, string expected)
+    {
+        var bar = DateTimeOffset.Parse("2026-10-11T16:00:00Z");
+        var notice = new BykoV2SignalNotice("key", "aligned", "ETH/USD", "BYKO_BREAKOUT_LONG", bar,
+            local, false, remote, bar.AddSeconds(15), "input unavailable");
+        var text = notice.Compose("BYKO");
+        Assert.Contains(expected, text);
+        Assert.Contains("2026-10-11 16:00:15", text);
+        Assert.DoesNotContain("negautas per", text);
+        Assert.Equal(remote is null, text.Contains("Priežastis"));
     }
 
     private sealed class NoticeStore : IBykoV2VerdictStore

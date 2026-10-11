@@ -1106,7 +1106,17 @@ internal sealed class FuturesDecisionWorker(
             }
 
             var firedAt = signal.FiredAtUtc ?? signal.ReceivedAtUtc;
-            TryRecordDebykoShadowFiring(signalPair, rule, firedAt, signal);
+            var evaluation = DebykoEvaluationMetadata.Read(signal.PayloadJson);
+            if (config.BykoV2.DebykoAlignedDataEnabled
+                && (evaluation is null || evaluation.Mode != "live"
+                    || !config.BykoV2.DebykoRuleIds.TryGetValue(rule, out var expectedRule) || expectedRule != evaluation.RuleId
+                    || !config.BykoV2.DebykoRuleVersions.TryGetValue(rule, out var expectedVersion) || expectedVersion != evaluation.Version))
+            {
+                await _debykoSignalInbox.MarkIgnoredAsync(signal.Id, "missing or mismatched live rule/slice metadata", cancellationToken);
+                return;
+            }
+            var entryBar = evaluation?.BarEnd ?? firedAt;
+            TryRecordDebykoShadowFiring(signalPair, rule, entryBar, signal);
 
             if (config.Futures.UsesBykoV2EntrySignals)
             {
@@ -1174,7 +1184,9 @@ internal sealed class FuturesDecisionWorker(
                 return;
             }
 
-            var entryAtrPct = _bykoV2VerdictStore.EntryAtrPct(config.BotInstance.Id, instrument.Pair, rule, firedAt);
+            var entryAtrPct = config.BykoV2.DebykoAlignedDataEnabled && evaluation is not null
+                ? _bykoV2VerdictStore.AlignedEntryAtrPct(config.BotInstance.Id, instrument.Pair, evaluation)
+                : _bykoV2VerdictStore.EntryAtrPct(config.BotInstance.Id, instrument.Pair, rule, entryBar);
             if (entryAtrPct is not > 0m)
             {
                 await RetryOrIgnoreDebykoAsync(signal, "entry ATR snapshot unavailable", firedAt, cancellationToken);
@@ -1259,10 +1271,16 @@ internal sealed class FuturesDecisionWorker(
         await _runtimeLimitProvider.RefreshAsync(cancellationToken);
         if (config.RuntimeLimits.NewEntriesPaused)
         {
+            _bykoV2LocalSignalRunner?.CancelAlignedEvaluation();
             return;
         }
 
-        var signals = _bykoV2LocalSignalRunner.EvaluateLatest();
+        var signals = await _bykoV2LocalSignalRunner.EvaluateLatestAsync(cancellationToken);
+        if (config.BykoV2.DebykoAlignedDataEnabled)
+        {
+            signals = signals.Where(signal => _clock.UtcNow < signal.BarClosedAt.AddSeconds(
+                signal.Rule is BykoV2Rule.FlushLong or BykoV2Rule.FlushShort ? 60 : 900)).ToArray();
+        }
         if (!config.Futures.UsesBykoV2EntrySignals || signals.Count == 0)
         {
             return;
@@ -1352,6 +1370,11 @@ internal sealed class FuturesDecisionWorker(
         try
         {
             var notices = _bykoV2VerdictStore.PendingNotices(config.BotInstance.Id, _clock.UtcNow);
+            if (config.BykoV2.DebykoAlignedDataEnabled)
+            {
+                notices = notices.Where(notice => notice.Kind is "local" or "received")
+                    .Concat(_bykoV2LocalSignalRunner?.PendingAlignedNotices() ?? Array.Empty<BykoV2SignalNotice>()).ToArray();
+            }
             foreach (var batch in notices.GroupBy(notice => notice.Kind is "local" or "received" ? "signal" : "comparison")
                          .SelectMany(group => group.Chunk(3)))
             {
@@ -1463,6 +1486,12 @@ internal sealed class FuturesDecisionWorker(
     {
         try
         {
+            if (DebykoEvaluationMetadata.Read(signal.PayloadJson) is { } metadata)
+            {
+                _bykoV2VerdictStore.RecordDebykoAlignedFiring(config.BotInstance.Id, pair, rule,
+                    signal.FiredAtUtc ?? signal.ReceivedAtUtc, signal.FiringId ?? signal.EventId, signal.ReceivedAtUtc, metadata);
+                return;
+            }
             _bykoV2VerdictStore.RecordDebykoFiring(
                 config.BotInstance.Id,
                 pair,

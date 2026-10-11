@@ -1,3 +1,9 @@
+## 2026-10-11-debyko-aligned-entry-evaluation
+
+- Add opt-in owner-authenticated Agent result polling and independent DQL-compatible BYKO/PUKO market evaluation on the result's exact bar_end/data_as_of. Bind rule IDs and semantic versions; missing results, old versions and incomplete inputs remain unknown, never a negative webhook verdict.
+- Preserve original HTTP responses, receipt metadata, hashes and per-attempt comparisons in a four-hour diagnostic journal. Run market reads in the background so protective exits remain independent, back off invalid credentials, suppress stale local entry signals and cancel evaluation during zero-margin pause.
+- Link live webhook comparisons by explicit evaluation metadata rather than delivery-time heuristics. Preserve BYKO's DEBYKO-only real execution, PUKO's local-only paper execution and LUKO's behavior. The integration is disabled by default pending owner-key probes and coordinated live rule activation.
+
 ## 2026-10-11-v2-entry-atr-profit-protection
 
 - Persist the recorded entry-bar ATR ratio on local and DEBYKO V2 positions and fill diagnostics. Missing ATR blocks/retries entry rather than opening without trailing context; flush verdicts now record their ATR ratio too.

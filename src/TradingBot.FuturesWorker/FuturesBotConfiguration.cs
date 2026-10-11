@@ -43,6 +43,7 @@ internal sealed class FuturesBotConfiguration
     public FuturesExecutionPolicyOptions ExecutionPolicy { get; set; } = new();
     public FuturesEntryMirrorOptions EntryMirror { get; set; } = new();
     public BykoV2Options BykoV2 { get; set; } = new();
+    public DebykoDataOptions DebykoData { get; set; } = new();
 
     public TelegramNotificationOptions Telegram { get; set; } = new();
     public CorrelationRiskOptions CorrelationRisk { get; set; } = new();
@@ -173,6 +174,7 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_TPSL_TRAILING_STOP_PERCENT", value => config.TpSl.TrailingStopPercent = ParseDecimal(value, config.TpSl.TrailingStopPercent));
         SetIfPresent("TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED", value => config.Futures.LiveTradingEnabled = ParseBool(value, config.Futures.LiveTradingEnabled));
         SetIfPresent("TRADINGBOT_KRAKEN_FUTURES_API_KEY", value => config.Kraken.ApiKey = value);
+        SetIfPresent("TRADINGBOT_DEBYKO_API_KEY", value => config.DebykoData.ApiKey = value);
         SetIfPresent("TRADINGBOT_KRAKEN_FUTURES_API_SECRET", value => config.Kraken.ApiSecret = value);
         SetIfPresent("TRADINGBOT_FUTURES_MIN_LIQUIDATION_DISTANCE_PERCENT", value => config.Margin.MinLiquidationDistancePercent = ParseDecimal(value, config.Margin.MinLiquidationDistancePercent));
         SetIfPresent("TRADINGBOT_FUTURES_MAX_MARGIN_UTILIZATION_PERCENT", value => config.Margin.MaxAccountMarginUtilizationPercent = ParseDecimal(value, config.Margin.MaxAccountMarginUtilizationPercent));
@@ -803,9 +805,19 @@ internal static class FuturesEntrySignalSources
     public const string BykoV2 = "BykoV2";
 }
 
+internal sealed class DebykoDataOptions
+{
+    public string BaseUrl { get; set; } = "https://api.debyko.com";
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string ApiKey { get; set; } = string.Empty;
+}
+
 internal sealed class BykoV2Options
 {
     public bool Enabled { get; set; }
+    public bool DebykoAlignedDataEnabled { get; set; }
+    public Dictionary<string, string> DebykoRuleVersions { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, Guid> DebykoRuleIds { get; set; } = new();
     public bool LocalEvaluationEnabled { get; set; } = true;
     public List<string> Universe { get; set; } =
     [

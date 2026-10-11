@@ -112,7 +112,16 @@ static BykoV2LocalSignalRunner? CreateBykoV2LocalSignalRunner(
         ? new BykoV2LocalSignalRunner(
             config,
             new PostgresMarketDataStore(config.Database.ConnectionString),
-            verdictStore)
+            verdictStore,
+            alignedRunner: string.IsNullOrWhiteSpace(config.DebykoData.ApiKey) ? null : new BykoV2AlignedRunner(
+                config,
+                new DebykoMarketClient(new HttpClient
+                {
+                    BaseAddress = new Uri(config.DebykoData.BaseUrl),
+                    Timeout = TimeSpan.FromSeconds(config.Http.TimeoutSeconds)
+                }, config.DebykoData.ApiKey),
+                verdictStore,
+                new PostgresBykoV2AlignedStore(config.Database.ConnectionString)))
         : null;
 
 static IDryRunPortfolioStore CreatePortfolioStore(FuturesBotConfiguration config) =>

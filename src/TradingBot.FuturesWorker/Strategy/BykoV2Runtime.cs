@@ -20,21 +20,30 @@ internal interface IBykoV2VerdictStore
 {
     bool IsAvailable { get; }
     decimal? EntryAtrPct(string botInstanceId, string pair, string rule, DateTimeOffset firedAt) => null;
+    decimal? AlignedEntryAtrPct(string botInstanceId, string pair, DebykoEvaluationMetadata metadata) => null;
     bool Record(string botInstanceId, string pair, DateTimeOffset barClosedAt, BykoV2Verdict verdict, DateTimeOffset evaluatedAt, TimeSpan cooldown);
     void RecordDebykoFiring(string botInstanceId, string pair, string rule, DateTimeOffset firedAt, string? firingId, DateTimeOffset receivedAt);
+    void RecordDebykoAlignedFiring(string botInstanceId, string pair, string rule, DateTimeOffset firedAt, string firingId,
+        DateTimeOffset receivedAt, DebykoEvaluationMetadata metadata) =>
+        RecordDebykoFiring(botInstanceId, pair, rule, firedAt, firingId, receivedAt);
     IReadOnlyList<BykoV2SignalNotice> PendingNotices(string botInstanceId, DateTimeOffset now) => Array.Empty<BykoV2SignalNotice>();
     void MarkNoticeSent(string botInstanceId, string key) { }
 }
 
-internal sealed record BykoV2SignalNotice(string Key, string Kind, string Pair, string Rule, DateTimeOffset Bar, bool? BotVerdict, bool DebykoReceived)
+internal sealed record BykoV2SignalNotice(string Key, string Kind, string Pair, string Rule, DateTimeOffset Bar, bool? BotVerdict, bool DebykoReceived,
+    bool? DebykoVerdict = null, DateTimeOffset? DataAsOf = null, string? Reason = null)
 {
     public string Compose(string label, string emoji = "") => $"{emoji}{(Kind is "local" or "received" ? "🛜" : "ℹ️")} " + System.Net.WebUtility.HtmlEncode($"{label} · {Pair} · {Rule}\n" + (Kind switch
     {
         "local" => "Boto signalas",
         "received" => "DEBYKO signalas",
         "correction" => "Palyginimas: DEBYKO signalas gautas pavėluotai.",
+        "aligned" => $"Palyginimas: botas {VerdictText(BotVerdict)}; DEBYKO {VerdictText(DebykoVerdict)}."
+            + $"\nDuomenų laikas UTC: {DataAsOf:yyyy-MM-dd HH:mm:ss}"
+            + (Reason is not null && (BotVerdict is null || DebykoVerdict is null) ? $"\nPriežastis: {Reason}" : string.Empty),
         _ => $"Palyginimas: botas {(BotVerdict is null ? "nežinoma" : BotVerdict.Value ? "+" : "−")}; DEBYKO {(DebykoReceived ? "gautas" : "negautas per 5 min")}."
     }) + $"\nUTC: {Bar:yyyy-MM-dd HH:mm:ss}");
+    private static string VerdictText(bool? value) => value is null ? "nežinoma" : value.Value ? "+" : "−";
 }
 
 internal sealed class NullBykoV2VerdictStore : IBykoV2VerdictStore
@@ -47,7 +56,31 @@ internal sealed class NullBykoV2VerdictStore : IBykoV2VerdictStore
 internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IBykoV2VerdictStore
 {
     private bool _schemaReady;
+    private readonly object _schemaGate = new();
     public bool IsAvailable => !string.IsNullOrWhiteSpace(connectionString);
+
+    public decimal? AlignedEntryAtrPct(string botInstanceId, string pair, DebykoEvaluationMetadata metadata)
+    {
+        using var connection = Open();
+        using var exists = new NpgsqlCommand("select to_regclass('public.byko_v2_aligned_checks') is not null", connection);
+        if (exists.ExecuteScalar() is not true) return null;
+        using var command = new NpgsqlCommand("""
+            select (values_jsonb->>'atr_ratio')::numeric * 100
+            from byko_v2_aligned_checks
+            where bot_instance_id=@bot and pair=@pair and rule_id=@rule and version=@version
+              and bar_end=@bar and data_as_of=@slice and attempt=@attempt and final
+              and values_jsonb->>'atr_ratio' is not null
+            order by id desc limit 1
+            """, connection);
+        command.Parameters.AddWithValue("bot", botInstanceId);
+        command.Parameters.AddWithValue("pair", pair);
+        command.Parameters.AddWithValue("rule", metadata.RuleId);
+        command.Parameters.AddWithValue("version", metadata.Version);
+        command.Parameters.AddWithValue("bar", metadata.BarEnd.UtcDateTime);
+        command.Parameters.AddWithValue("slice", metadata.DataAsOf.UtcDateTime);
+        command.Parameters.AddWithValue("attempt", metadata.Attempt);
+        return command.ExecuteScalar() is decimal atr && atr > 0m ? atr : null;
+    }
 
     public decimal? EntryAtrPct(string botInstanceId, string pair, string rule, DateTimeOffset firedAt)
     {
@@ -293,8 +326,7 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
                 from byko_v2_debyko_firings
                 where bot_instance_id = @bot and pair = @pair and rule = @rule
                   and shadow_verdict_id is null
-                  and fired_at >= @bar
-                  and fired_at <= @bar + @lookback
+                  and (bar_end = @bar or (bar_end is null and fired_at >= @bar and fired_at <= @bar + @lookback))
                 order by fired_at asc
                 limit 1
                 for update
@@ -325,6 +357,14 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
     }
 
     private void EnsureSchema()
+    {
+        lock (_schemaGate)
+        {
+            EnsureSchemaCore();
+        }
+    }
+
+    private void EnsureSchemaCore()
     {
         if (_schemaReady)
         {
@@ -374,6 +414,11 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
             );
             create index if not exists ix_byko_v2_debyko_firings_match
                 on byko_v2_debyko_firings (bot_instance_id, pair, rule, fired_at desc);
+            alter table byko_v2_debyko_firings add column if not exists bar_end timestamptz;
+            alter table byko_v2_debyko_firings add column if not exists data_as_of timestamptz;
+            alter table byko_v2_debyko_firings add column if not exists rule_id uuid;
+            alter table byko_v2_debyko_firings add column if not exists version text;
+            alter table byko_v2_debyko_firings add column if not exists attempt integer;
 
             create table if not exists byko_v2_rule_state (
                 bot_instance_id text not null,
@@ -410,7 +455,7 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
                 from byko_v2_shadow_verdicts
                 where bot_instance_id = @bot and fired_edge and bot_evaluated_at >= @since
                 union all
-                select 'received:' || id, 'received', pair, rule, fired_at, null::boolean, true
+                select 'received:' || id, 'received', pair, rule, coalesce(bar_end,fired_at), null::boolean, true
                 from byko_v2_debyko_firings
                 where bot_instance_id = @bot and received_at >= @since and shadow_verdict_id is null
                 union all
@@ -429,7 +474,7 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
                         and n.sent_at < v.webhook_received_at
                   )
                 union all
-                select 'unmatched:' || id, 'comparison', pair, rule, fired_at, null::boolean, true
+                select 'unmatched:' || id, 'comparison', pair, rule, coalesce(bar_end,fired_at), null::boolean, true
                 from byko_v2_debyko_firings
                 where bot_instance_id = @bot and shadow_verdict_id is null
                   and received_at >= @since and received_at <= @deadline
@@ -453,6 +498,40 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
                 reader.IsDBNull(5) ? null : reader.GetBoolean(5), reader.GetBoolean(6)));
         }
         return notices;
+    }
+
+    public void RecordDebykoAlignedFiring(string botInstanceId, string pair, string rule, DateTimeOffset firedAt,
+        string firingId, DateTimeOffset receivedAt, DebykoEvaluationMetadata metadata)
+    {
+        EnsureSchema();
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var command = new NpgsqlCommand("""
+            insert into byko_v2_debyko_firings
+                (bot_instance_id,pair,rule,firing_key,fired_at,received_at,bar_end,data_as_of,rule_id,version,attempt)
+            values(@bot,@pair,@rule,@key,@fired,@received,@bar,@slice,@rule_id,@version,@attempt)
+            on conflict(bot_instance_id,firing_key) do nothing;
+            update byko_v2_shadow_verdicts set debyko_fired=true,debyko_firing_id=@key,
+                debyko_fired_at=@fired,webhook_received_at=@received
+                where bot_instance_id=@bot and pair=@pair and rule=@rule and bar_closed_at=@bar;
+            update byko_v2_debyko_firings f set shadow_verdict_id=v.id
+                from byko_v2_shadow_verdicts v
+                where f.bot_instance_id=@bot and f.firing_key=@key
+                  and v.bot_instance_id=@bot and v.pair=@pair and v.rule=@rule and v.bar_closed_at=@bar;
+            """, connection, transaction);
+        command.Parameters.AddWithValue("bot", botInstanceId);
+        command.Parameters.AddWithValue("pair", pair);
+        command.Parameters.AddWithValue("rule", rule);
+        command.Parameters.AddWithValue("key", firingId);
+        command.Parameters.AddWithValue("fired", firedAt.UtcDateTime);
+        command.Parameters.AddWithValue("received", receivedAt.UtcDateTime);
+        command.Parameters.AddWithValue("bar", metadata.BarEnd.UtcDateTime);
+        command.Parameters.AddWithValue("slice", metadata.DataAsOf.UtcDateTime);
+        command.Parameters.AddWithValue("rule_id", metadata.RuleId);
+        command.Parameters.AddWithValue("version", metadata.Version);
+        command.Parameters.AddWithValue("attempt", metadata.Attempt);
+        command.ExecuteNonQuery();
+        transaction.Commit();
     }
 
     public void MarkNoticeSent(string botInstanceId, string key)
@@ -479,9 +558,57 @@ internal sealed class BykoV2LocalSignalRunner(
     FuturesBotConfiguration config,
     IMarketDataStore marketDataStore,
     IBykoV2VerdictStore verdictStore,
-    IClock? clock = null)
+    IClock? clock = null,
+    BykoV2AlignedRunner? alignedRunner = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
+    private Task<IReadOnlyList<BykoV2LocalSignal>>? _alignedEvaluation;
+    private CancellationTokenSource? _alignedCancellation;
+    private DateTimeOffset _alignedRetryAt;
+
+    public void CancelAlignedEvaluation() => _alignedCancellation?.Cancel();
+
+    public Task<IReadOnlyList<BykoV2LocalSignal>> EvaluateLatestAsync(CancellationToken cancellationToken)
+    {
+        if (!config.BykoV2.Enabled || !config.BykoV2.LocalEvaluationEnabled || config.RuntimeLimits.NewEntriesPaused)
+        {
+            CancelAlignedEvaluation();
+            return Task.FromResult<IReadOnlyList<BykoV2LocalSignal>>(Array.Empty<BykoV2LocalSignal>());
+        }
+        if (!config.BykoV2.DebykoAlignedDataEnabled)
+            return Task.FromResult(EvaluateLatest());
+        if (_clock.UtcNow < _alignedRetryAt)
+            return Task.FromResult<IReadOnlyList<BykoV2LocalSignal>>(Array.Empty<BykoV2LocalSignal>());
+        if (alignedRunner is null)
+        {
+            Console.WriteLine("byko-v2-aligned: entry evaluation unavailable; owner API key is required.");
+            _alignedRetryAt = _clock.UtcNow.AddMinutes(5);
+            return Task.FromResult<IReadOnlyList<BykoV2LocalSignal>>(Array.Empty<BykoV2LocalSignal>());
+        }
+        // Slow historical HTTP reads must never delay the ten-second protective exit loop.
+        if (_alignedEvaluation is null)
+        {
+            _alignedCancellation?.Dispose();
+            _alignedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var token = _alignedCancellation.Token;
+            _alignedEvaluation = Task.Run(() => alignedRunner.EvaluateAsync(token), token);
+            return Task.FromResult<IReadOnlyList<BykoV2LocalSignal>>(Array.Empty<BykoV2LocalSignal>());
+        }
+        if (!_alignedEvaluation.IsCompleted)
+            return Task.FromResult<IReadOnlyList<BykoV2LocalSignal>>(Array.Empty<BykoV2LocalSignal>());
+        var completed = _alignedEvaluation;
+        _alignedEvaluation = null;
+        if (completed.IsFaulted)
+        {
+            // Observe the fault without leaking HTTP bodies/credentials or stopping protective exits.
+            Console.WriteLine($"byko-v2-aligned: entry evaluation failed ({completed.Exception!.GetBaseException().GetType().Name}).");
+            _alignedRetryAt = _clock.UtcNow.AddSeconds(10);
+            return Task.FromResult<IReadOnlyList<BykoV2LocalSignal>>(Array.Empty<BykoV2LocalSignal>());
+        }
+        return completed.IsCanceled ? Task.FromResult<IReadOnlyList<BykoV2LocalSignal>>(Array.Empty<BykoV2LocalSignal>()) : completed;
+    }
+
+    public IReadOnlyList<BykoV2SignalNotice> PendingAlignedNotices() => alignedRunner?.PendingNotices() ?? Array.Empty<BykoV2SignalNotice>();
 
     public IReadOnlyList<BykoV2LocalSignal> EvaluateLatest()
     {

@@ -23,7 +23,8 @@ internal sealed record BykoV2MarketFrame(
     decimal? Ask,
     decimal? Turnover24hUsd,
     decimal? Funding8hFraction,
-    BykoV2LiquidationWindow? Liquidations);
+    BykoV2LiquidationWindow? Liquidations,
+    IReadOnlyDictionary<string, bool?>? CandleGapFree = null);
 
 internal sealed record BykoV2Verdict(
     BykoV2Rule Rule,
