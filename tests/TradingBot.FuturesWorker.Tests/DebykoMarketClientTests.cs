@@ -302,11 +302,26 @@ public sealed class DebykoMarketClientTests
     }
     private sealed class Handler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handle) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Assert.Equal("Bearer", request.Headers.Authorization!.Scheme);
             Assert.Equal("test-secret", request.Headers.Authorization.Parameter);
-            return handle(request);
+            if (request.Content is { } content)
+            {
+                using var body = JsonDocument.Parse(await content.ReadAsStringAsync(cancellationToken));
+                foreach (var property in body.RootElement.EnumerateObject())
+                {
+                    if (property.Name is "from" or "to" or "as_of") Assert.EndsWith("Z", property.Value.GetString());
+                    if (property.Name == "at")
+                        Assert.All(property.Value.EnumerateArray(), value => Assert.EndsWith("Z", value.GetString()));
+                }
+            }
+            else
+            {
+                var query = Uri.UnescapeDataString(request.RequestUri!.Query);
+                Assert.EndsWith("Z", query.Split("bar_end=", StringSplitOptions.None)[1]);
+            }
+            return await handle(request);
         }
     }
 }

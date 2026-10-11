@@ -285,7 +285,7 @@ internal sealed class DebykoMarketClient : IDebykoMarketClient
         if (!condition) throw new InvalidDataException(reason);
     }
 
-    private static string Utc(DateTimeOffset instant) => instant.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+    internal static string Utc(DateTimeOffset instant) => instant.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
     private static string? Text(JsonElement element, string name) => element.TryGetProperty(name, out var value)
         && value.ValueKind != JsonValueKind.Null ? value.ToString() : null;
     private static DateTimeOffset Instant(JsonElement element, string name)

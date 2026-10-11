@@ -1,3 +1,7 @@
+## 2026-10-11-debyko-utc-wire-format
+
+- Emit all DEBYKO result and market-data timestamps with the required UTC Z suffix instead of +00:00; preserve instant precision, bar bounds and evaluation cutoffs.
+
 ## 2026-10-11-debyko-aligned-entry-evaluation
 
 - Add opt-in owner-authenticated Agent result polling and independent DQL-compatible BYKO/PUKO market evaluation on the result's exact bar_end/data_as_of. Bind rule IDs and semantic versions; missing results, old versions and incomplete inputs remain unknown, never a negative webhook verdict.
