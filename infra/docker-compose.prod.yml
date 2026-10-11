@@ -46,6 +46,7 @@ services:
     restart: unless-stopped
     env_file:
       - /opt/trading-bot/futures/live/.env
+      - /opt/trading-bot/futures/debyko.env
     depends_on:
       db-ready:
         condition: service_completed_successfully
@@ -78,6 +79,7 @@ services:
     restart: unless-stopped
     env_file:
       - /opt/trading-bot/futures/pukis-live/.env
+      - /opt/trading-bot/futures/debyko.env
     depends_on:
       db-ready:
         condition: service_completed_successfully

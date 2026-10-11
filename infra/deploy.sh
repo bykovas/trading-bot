@@ -80,6 +80,11 @@ mkdir -p \
   "${DATABASE_DIR}" \
   "${DATABASE_ENV_DIR}"
 
+# Keep the owner API key outside managed per-instance files (PUKO's is rewritten).
+if [ ! -f "${FUTURES_DIR}/debyko.env" ]; then
+  install -m 600 /dev/null "${FUTURES_DIR}/debyko.env"
+fi
+
 # The renderer runs as pwuser (uid 1000) in its image and has to be able to write
 # its cache; the directory is created here by root and handed over.
 chown 1000:1000 "${OG_CACHE_DIR}" 2>/dev/null || true
