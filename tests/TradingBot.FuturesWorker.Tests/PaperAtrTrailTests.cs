@@ -21,8 +21,11 @@ public sealed class PaperAtrTrailTests
         var policy = new TpSlOrchestrator(Config());
         Assert.Null(policy.Evaluate(position, 100m, 100m));
         Assert.Null(position.TrailingStopState);
+        Assert.NotNull(position.TakeProfitPrice);
         Assert.Null(policy.Evaluate(position, arm, arm));
         Assert.Equal("SIMULATED_OPEN", position.TrailingStopState);
+        Assert.Null(position.TakeProfitPrice);
+        Assert.Equal("CANCELLED", position.TpOrderState);
         Assert.Equal(0.75m, position.TrailingStopPercent);
         Assert.Null(policy.Evaluate(position, peak, peak));
         Assert.Equal("TRAILING_STOP", policy.Evaluate(position, retrace, retrace)?.Kind);
@@ -32,7 +35,7 @@ public sealed class PaperAtrTrailTests
     public void Missing_ATR_does_not_invent_trailing_protection()
     {
         var position = new PortfolioPosition { Side = "LONG", Origin = PositionOrigins.Bot, EntryPrice = 100m, StopDistancePct = 2m };
-        Assert.Null(new TpSlOrchestrator(Config()).Evaluate(position, 105m, 105m));
+        Assert.Equal("TAKE_PROFIT", new TpSlOrchestrator(Config()).Evaluate(position, 105m, 105m)?.Kind);
         Assert.Null(position.TrailingStopState);
     }
 

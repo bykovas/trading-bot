@@ -392,7 +392,7 @@ public sealed class FuturesVirtualPortfolioTests
     // and the +1R trail activation therefore sits at 100.60 (measured against the 0.6% stop,
     // not the legacy 1.75%/2%). AtrPct is carried so the trail can size its 1.5x ATR distance.
     [Fact]
-    public void Regime_d_entry_uses_the_atr_stop_and_places_no_fixed_take_profit()
+    public void Regime_d_entry_uses_the_atr_stop_and_keeps_tp_until_trailing()
     {
         var config = Config();
         config.Exits.AtrTrailingRegimeEnabled = true;
@@ -404,9 +404,9 @@ public sealed class FuturesVirtualPortfolioTests
         var position = Assert.Single(state.Positions);
         Assert.Equal(99.40m, position.StopLossPrice);        // plan's 0.6% ATR stop, not config 2%
         Assert.Equal(0.6m, position.StopDistancePct);
-        Assert.Null(position.TakeProfitPrice);               // no fixed take-profit
-        Assert.Null(position.TakeProfitDistancePct);
-        Assert.Null(position.ExchangeTakeProfitPrice);
+        Assert.Equal(103m, position.TakeProfitPrice);
+        Assert.Equal(3m, position.TakeProfitDistancePct);
+        Assert.NotNull(position.ExchangeTakeProfitPrice);
         Assert.Equal(0.5m, position.AtrPct);                 // ATR carried for the trail
 
         // +1R activation uses the real stop distance: 100 * (1 + 1.0 * 0.6%) = 100.60.

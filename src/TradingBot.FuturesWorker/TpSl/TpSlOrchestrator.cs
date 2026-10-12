@@ -46,6 +46,18 @@ internal sealed class TpSlOrchestrator(FuturesBotConfiguration config)
             return null;
         }
 
+        if (!config.Futures.LiveTradingEnabled && position.Origin == PositionOrigins.Bot
+            && position.TrailingStopState != "SIMULATED_OPEN" && position.TakeProfitPrice is null or <= 0m)
+        {
+            var distance = config.TpSl.WorkingTakeProfitPercent(position.FlippedEntry);
+            if (distance > 0m && position.EntryPrice > 0m)
+            {
+                position.TakeProfitPrice = position.EntryPrice * (1m + (isShort ? -1m : 1m) * distance / 100m);
+                position.TakeProfitDistancePct = distance;
+                position.TpOrderState = "SIMULATED_OPEN";
+            }
+        }
+
         if (!config.Futures.LiveTradingEnabled && config.Exits.AtrTrailingRegimeEnabled
             && position.Origin?.Equals(PositionOrigins.Bot, StringComparison.OrdinalIgnoreCase) == true
             && position.AtrPct is > 0m && position.StopDistancePct is > 0m
@@ -69,6 +81,11 @@ internal sealed class TpSlOrchestrator(FuturesBotConfiguration config)
                 position.TrailingActivatedAtUtc = DateTimeOffset.UtcNow;
                 position.PeakPnlPercent = profit;
                 position.TrailingInitialStopPrice ??= price * (1m + (isShort ? 1m : -1m) * position.TrailingStopPercent.Value / 100m);
+                position.TakeProfitPrice = null;
+                position.ExchangeTakeProfitPrice = null;
+                position.TakeProfitDistancePct = null;
+                position.TpOrderState = "CANCELLED";
+                position.SlOrderState = "CANCELLED";
                 active = true;
             }
             if (active && position.TrailingStopPercent is > 0m)

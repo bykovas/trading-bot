@@ -3,11 +3,7 @@ using Xunit;
 
 namespace TradingBot.FuturesWorker.Tests;
 
-// The Kraken-sync path rebuilds a bot position's TP/SL every cycle. Before the regime fix it
-// rebuilt both from the fixed StopLossPercent / TakeProfitPercent, silently re-arming a 1.75%
-// stop and a 3.5% take-profit on a regime-D position that was opened with an ATR stop and no TP.
-// These pin that reconcile now (a) keeps the ATR stop the position carries, (b) never resurrects
-// a fixed TP under the regime, and (c) still builds the fixed TP/SL when the regime is off.
+// Reconciliation preserves entry ATR risk while supplying backup TP until trailing is active.
 public sealed class ExitRegimeDReconcileTests
 {
     private static object InvokeImportedTpSl(FuturesBotConfiguration config, PortfolioPosition? existing, string side, decimal entryPrice)
@@ -24,7 +20,7 @@ public sealed class ExitRegimeDReconcileTests
         (string?)state.GetType().GetProperty(name)!.GetValue(state);
 
     [Fact]
-    public void Reconcile_keeps_the_atr_stop_and_does_not_resurrect_a_fixed_take_profit_under_regime_d()
+    public void Reconcile_keeps_the_atr_stop_and_restores_backup_tp_until_trailing()
     {
         var config = new FuturesBotConfiguration
         {
@@ -51,11 +47,10 @@ public sealed class ExitRegimeDReconcileTests
         // The stop stays the ATR stop the position was opened with - not rebuilt to 1.75%.
         Assert.Equal(99.40m, Field(state, "StopLossPrice"));
         Assert.Equal(0.6m, Field(state, "StopDistancePct"));
-        // No fixed take-profit is recreated, on the working or the exchange side.
-        Assert.Null(Field(state, "TakeProfitPrice"));
-        Assert.Null(Field(state, "TakeProfitDistancePct"));
-        Assert.Null(Field(state, "ExchangeTakeProfitPrice"));
-        Assert.Null(Text(state, "TpOrderState"));
+        Assert.Equal(103.5m, Field(state, "TakeProfitPrice"));
+        Assert.Equal(3.5m, Field(state, "TakeProfitDistancePct"));
+        Assert.NotNull(Field(state, "ExchangeTakeProfitPrice"));
+        Assert.Equal("SIMULATED_OPEN", Text(state, "TpOrderState"));
     }
 
     [Fact]

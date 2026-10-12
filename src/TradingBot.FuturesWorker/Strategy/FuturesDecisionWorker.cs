@@ -354,9 +354,7 @@ internal sealed class FuturesDecisionWorker(
                 // has to happen before tpSl.Evaluate looks at their state.
                 var armedTrail = await TryArmMaxHoldTrailAsync(held, marketState.Instrument, utc, cancellationToken);
 
-                // Exit regime D: arm the ATR trail once the trade is +R in profit (there is
-                // no fixed take-profit to hand off from). Same place as max-hold so the trail
-                // is in before tpSl.Evaluate reads the protective orders.
+                // Arm the ATR trail before checking the backup TP, retaining TP/SL on failure.
                 var armedRegimeTrail = await TryArmRegimeTrailAsync(held, marketState.Instrument, markPrice, cancellationToken);
 
                 // TP/SL first: hard exits outrank the strategy's held desire.
@@ -1577,6 +1575,7 @@ internal sealed class FuturesDecisionWorker(
             }
 
             portfolio.MarkToMarket(state, held.Pair, markPrice, utc);
+            await TryArmRegimeTrailAsync(held, marketState.Instrument, markPrice, cancellationToken);
             var trigger = tpSl.Evaluate(held, markPrice, marketState.Quote?.Last ?? marketState.LastPrice, marketState.Quote?.Bid, marketState.Quote?.Ask);
             FuturesFillResult? fill = null;
             if (trigger is not null)
@@ -2711,17 +2710,6 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var cancelled = new List<string>();
-        foreach (var order in new[] { protection.StopLossOrder, protection.TakeProfitOrder }.Where(order => order is not null).Cast<FuturesOpenOrder>())
-        {
-            var cancel = await broker.CancelOrderAsync(order.OrderId, cancellationToken);
-            if (!cancel.Accepted)
-            {
-                return $"{reasonPrefix}, but protective order cancel failed orderId={order.OrderId}: {cancel.Error ?? cancel.Status}; trailing not armed";
-            }
-
-            cancelled.Add(order.OrderId);
-        }
-
         var closeSide = CloseSide(position.Side);
         var configuredTrailingPercent = position.TrailingStopPercent is > 0m
             ? position.TrailingStopPercent.Value
@@ -2770,8 +2758,6 @@ internal sealed class FuturesDecisionWorker(
 
         if (trailing.Accepted)
         {
-            position.TpOrderState = "CANCELLED";
-            position.SlOrderState = "CANCELLED";
             position.TrailingStopState = "EXCHANGE_OPEN";
             position.TrailingStopPercent = trailingPercent;
             position.TrailingStopOrderId = trailing.OrderId;
@@ -2779,13 +2765,26 @@ internal sealed class FuturesDecisionWorker(
             position.TrailingInitialStopPrice ??= position.LastPrice > 0m
                 ? position.LastPrice * (1m + (position.Side == "SHORT" ? 1m : -1m) * trailingPercent / 100m)
                 : null;
+            // Keep the old protection until Kraken has accepted its replacement.
+            foreach (var order in new[] { protection.StopLossOrder, protection.TakeProfitOrder }.Where(order => order is not null).Cast<FuturesOpenOrder>())
+            {
+                var cancel = await broker.CancelOrderAsync(order.OrderId, cancellationToken);
+                if (cancel.Accepted)
+                {
+                    cancelled.Add(order.OrderId);
+                    if (order.OrderId == protection.TakeProfitOrder?.OrderId) position.TpOrderState = "CANCELLED";
+                    if (order.OrderId == protection.StopLossOrder?.OrderId) position.SlOrderState = "CANCELLED";
+                }
+                else
+                {
+                    Console.WriteLine($"futures-trailing-cleanup: FAILED orderId={order.OrderId}; trailing is active, old protection retained for retry");
+                }
+            }
             Console.WriteLine($"futures-trailing-arm: symbol={instrument.KrakenPair} side={position.Side} orderId={trailing.OrderId ?? "-"} distancePct={trailingPercent:0.###} cancelled=[{string.Join(",", cancelled)}]");
             return $"{reasonPrefix}; cancelled protective TP/SL and activated reduce-only trailing stop {trailingPercent:0.###}%";
         }
 
-        var restored = await RestoreProtectiveStopLossAsync(position, instrument, cancellationToken);
-        var restoreText = restored ? "protective SL restored" : "protective SL restore FAILED";
-        return $"{reasonPrefix}, but trailing stop failed: {trailing.Error ?? trailing.Status}; {restoreText}";
+        return $"{reasonPrefix}, but trailing stop failed: {trailing.Error ?? trailing.Status}; existing TP/SL retained";
     }
 
     private async Task TryActivateExternalTrailingStopAsync(
@@ -3536,31 +3535,23 @@ internal sealed class FuturesDecisionWorker(
 
         if (tpSl.TrailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true)
         {
-            return tpSl;
+            var cleaned = tpSl;
+            foreach (var order in new[] { existingStopLoss, existingTakeProfit }.Where(order => order is not null).Cast<FuturesOpenOrder>())
+            {
+                var cancel = await broker.CancelOrderAsync(order.OrderId, cancellationToken);
+                if (order.OrderId == existingTakeProfit?.OrderId)
+                    cleaned = cleaned with { TpOrderState = cancel.Accepted ? "CANCELLED" : "EXCHANGE_OPEN" };
+                if (order.OrderId == existingStopLoss?.OrderId)
+                    cleaned = cleaned with { SlOrderState = cancel.Accepted ? "CANCELLED" : "EXCHANGE_OPEN" };
+                if (!cancel.Accepted) Console.WriteLine($"futures-trailing-cleanup: FAILED orderId={order.OrderId}; retry on next reconcile");
+            }
+            return cleaned;
         }
 
         var closeSide = CloseSide(remote.Side);
         var triggerSource = config.TpSl.TriggerSource;
         var result = tpSl;
 
-        // Exit regime D runs no fixed take-profit. A TP order still on the book from before the
-        // regime would keep closing the position at the old target, so cancel it once and drop it
-        // from the state. New regime entries never reach here with a TP (ExchangeTakeProfitPrice is
-        // null), so this only ever clears a legacy order.
-        if (config.Exits.AtrTrailingRegimeEnabled && existingTakeProfit is not null)
-        {
-            var cancel = await broker.CancelOrderAsync(existingTakeProfit.OrderId, cancellationToken);
-            if (cancel.Accepted)
-            {
-                Console.WriteLine($"futures-regime-tp-cancel: symbol={instrument.KrakenPair} orderId={existingTakeProfit.OrderId} cleared (no fixed TP under regime D)");
-                result = result with { TpOrderState = null, TakeProfitOrderId = null, ExchangeTakeProfitPrice = null, TakeProfitPrice = null };
-                existingTakeProfit = null;
-            }
-            else
-            {
-                Console.WriteLine($"futures-regime-tp-cancel: FAILED symbol={instrument.KrakenPair} orderId={existingTakeProfit.OrderId} reason={cancel.Error ?? cancel.Status}");
-            }
-        }
 
         if (existingStopLoss is null && tpSl.ExchangeStopLossPrice is > 0m)
         {
@@ -3620,15 +3611,12 @@ internal sealed class FuturesDecisionWorker(
         FuturesOpenOrder? existingTrailingStop)
     {
         var isFlippedEntry = existing?.FlippedEntry == true;
-        // Exit regime D: keep the ATR stop the position was opened with (carried as StopDistancePct)
-        // and NEVER a fixed take-profit. Without this the sync loop rebuilds both from the legacy
-        // fixed percents every cycle and silently undoes the regime - re-arming a 1.75% stop and a
-        // 3.5% TP on a position the open path had deliberately given neither.
+        // Keep the entry ATR stop; restore backup TP until an exchange trail is active.
         var regimeD = config.Exits.AtrTrailingRegimeEnabled;
         var stopDistancePct = regimeD && existing?.StopDistancePct is > 0m
             ? existing.StopDistancePct.Value
             : config.TpSl.StopLossPercent;
-        var takeProfitDistancePct = regimeD ? 0m : config.TpSl.WorkingTakeProfitPercent(isFlippedEntry);
+        var takeProfitDistancePct = config.TpSl.WorkingTakeProfitPercent(isFlippedEntry);
         var configuredTrailingStopPercent = config.TpSl.WorkingTrailingStopPercent(isFlippedEntry);
         var trailingStopState = existingTrailingStop is not null
             ? "EXCHANGE_OPEN"
@@ -3652,8 +3640,7 @@ internal sealed class FuturesDecisionWorker(
         var stopLossOrderId = existingStopLoss?.OrderId ?? existing?.StopLossOrderId;
         var takeProfitOrderId = existingTakeProfit?.OrderId ?? existing?.TakeProfitOrderId;
 
-        // Under regime D takeProfitDistancePct is 0 by design (no fixed TP); that must NOT abort the
-        // stop-loss rebuild, so it is excluded from the bail-out. The stop still needs a distance.
+        // An invalid TP setting must not discard existing stop protection.
         if (!config.TpSl.Enabled || entryPrice <= 0m || stopDistancePct <= 0m || (!regimeD && takeProfitDistancePct <= 0m))
         {
             return new ImportedTpSlState(
@@ -3708,24 +3695,20 @@ internal sealed class FuturesDecisionWorker(
                 ? existing.ExchangeTakeProfitPrice.Value
                 : ExchangeProtectionPrice(entryPrice, side, isTakeProfit: true, takeProfitDistancePct);
 
-        // Regime D: no fixed take-profit exists on the position, so every TP field is forced null
-        // regardless of any stale exchange order. A stray TP order left from before the regime is
-        // cancelled in EnsureExchangeProtectionOrdersAsync, not resurrected here.
+        // Only an active exchange trail replaces the backup TP.
         return new ImportedTpSlState(
-            regimeD
-                ? null
-                : trailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true
+            trailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true
                     ? "CANCELLED"
                     : existingTakeProfit is not null ? "EXCHANGE_OPEN" : existing?.TpOrderState ?? "SIMULATED_OPEN",
             trailingStopState?.Equals("EXCHANGE_OPEN", StringComparison.OrdinalIgnoreCase) == true
                 ? "CANCELLED"
                 : existingStopLoss is not null ? "EXCHANGE_OPEN" : existing?.SlOrderState ?? "SIMULATED_OPEN",
             decimal.Round(stopLossPrice, 8),
-            regimeD ? null : decimal.Round(takeProfitPrice, 8),
+            trailingStopState == "EXCHANGE_OPEN" ? null : decimal.Round(takeProfitPrice, 8),
             effectiveStopDistancePct,
-            regimeD ? null : effectiveTakeProfitDistancePct,
+            trailingStopState == "EXCHANGE_OPEN" ? null : effectiveTakeProfitDistancePct,
             decimal.Round(exchangeStopLossPrice, 8),
-            regimeD ? null : decimal.Round(exchangeTakeProfitPrice, 8),
+            trailingStopState == "EXCHANGE_OPEN" ? null : decimal.Round(exchangeTakeProfitPrice, 8),
             config.TpSl.ExchangeProtectionMultiplierPercent,
             trailingStopState,
             trailingStopPercent,

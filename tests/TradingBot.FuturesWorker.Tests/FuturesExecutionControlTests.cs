@@ -7,6 +7,39 @@ namespace TradingBot.FuturesWorker.Tests;
 
 public sealed class FuturesExecutionControlTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Trailing_replacement_is_accepted_before_old_protection_is_cancelled(bool accepted)
+    {
+        var broker = new StubBroker
+        {
+            OpenOrders = [new("sl", "PF_ETHUSD", "sell", "stp", 1m, 98m, true),
+                new("tp", "PF_ETHUSD", "sell", "take_profit", 1m, 104m, true)],
+            TrailingResult = accepted ? new("placed", "trail", null) : FuturesOrderResult.Rejected("unavailable")
+        };
+        var config = new FuturesBotConfiguration();
+        var worker = new FuturesDecisionWorker(config, null!, null!, null!, null!, null!, null!, broker);
+        var position = new PortfolioPosition { Side = "LONG", Quantity = 1m, EntryPrice = 100m,
+            LastPrice = 103m, TpOrderState = "EXCHANGE_OPEN", SlOrderState = "EXCHANGE_OPEN" };
+        var method = typeof(FuturesDecisionWorker).GetMethod("ActivateTrailingStopAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        await (Task<string>)method.Invoke(worker, [position,
+            new InstrumentOptions { KrakenPair = "PF_ETHUSD" }, CancellationToken.None, "test", false, null])!;
+        Assert.Equal("trail", broker.ProtectionCalls[0]);
+        if (accepted)
+        {
+            Assert.Equal(["trail", "cancel:sl", "cancel:tp"], broker.ProtectionCalls);
+            Assert.Equal("EXCHANGE_OPEN", position.TrailingStopState);
+        }
+        else
+        {
+            Assert.Single(broker.ProtectionCalls);
+            Assert.Equal("EXCHANGE_OPEN", position.TpOrderState);
+            Assert.Equal("EXCHANGE_OPEN", position.SlOrderState);
+            Assert.Null(position.TrailingStopState);
+        }
+    }
+
     [Fact]
     public async Task Long_with_refreshed_quote_inside_deviation_submits_fok_limit_at_max_allowed_price()
     {
@@ -182,6 +215,9 @@ public sealed class FuturesExecutionControlTests
             Task.FromResult<IReadOnlyList<FuturesFill>>(Array.Empty<FuturesFill>());
 
         public bool IsConfigured => true;
+        public IReadOnlyList<FuturesOpenOrder> OpenOrders { get; init; } = [];
+        public FuturesOrderResult TrailingResult { get; init; } = new("placed", "trailing-1", null);
+        public List<string> ProtectionCalls { get; } = [];
         public FuturesTickerQuote? Ticker { get; init; }
         public FuturesOrderResult FokResult { get; init; } = FuturesOrderResult.Rejected("not configured");
         public int FokCallCount { get; private set; }
@@ -196,7 +232,7 @@ public sealed class FuturesExecutionControlTests
             Task.FromResult<IReadOnlyList<FuturesOpenPosition>>(Array.Empty<FuturesOpenPosition>());
 
         public Task<IReadOnlyList<FuturesOpenOrder>> GetOpenOrdersAsync(CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<FuturesOpenOrder>>(Array.Empty<FuturesOpenOrder>());
+            Task.FromResult(OpenOrders);
 
         public Task<FuturesTickerQuote?> GetTickerAsync(string symbol, CancellationToken cancellationToken) =>
             Task.FromResult(Ticker);
@@ -233,11 +269,17 @@ public sealed class FuturesExecutionControlTests
             decimal trailingStopPercent,
             string triggerSignal,
             bool reduceOnly,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new FuturesOrderResult("placed", "trailing-1", null));
+            CancellationToken cancellationToken)
+        {
+            ProtectionCalls.Add("trail");
+            return Task.FromResult(TrailingResult);
+        }
 
-        public Task<FuturesOrderResult> CancelOrderAsync(string orderId, CancellationToken cancellationToken) =>
-            Task.FromResult(new FuturesOrderResult("cancelled", orderId, null));
+        public Task<FuturesOrderResult> CancelOrderAsync(string orderId, CancellationToken cancellationToken)
+        {
+            ProtectionCalls.Add("cancel:" + orderId);
+            return Task.FromResult(new FuturesOrderResult("cancelled", orderId, null));
+        }
 
         public Task<bool> SetLeveragePreferenceAsync(string symbol, decimal maxLeverage, CancellationToken cancellationToken) =>
             Task.FromResult(true);

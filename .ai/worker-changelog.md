@@ -1,3 +1,8 @@
+## 2026-10-12-tp-before-trailing
+
+- Keep configured working and exchange backup TP alongside SL until trailing activation, including existing bot-owned real and paper positions. Reconciliation restores missing real TP; paper checks restore missing virtual TP before evaluating exits.
+- Submit and confirm acceptance of the replacement trailing order before cancelling TP/SL. Failed trailing activation leaves prior protection intact; failed cleanup is retried during reconciliation. Check ATR trailing activation in the fast exit loop as well. Activation thresholds and sizing are unchanged.
+
 ## 2026-10-12-trailing-chart-anchor
 
 - Persist the initial calculated stop at first successful live or simulated trailing activation, carry it through reconciliation and expose it for a fixed journal chart. Live values are indicative, not an exchange-reported trigger price. Existing activations without a captured anchor remain null; trading thresholds and orders are unchanged.
