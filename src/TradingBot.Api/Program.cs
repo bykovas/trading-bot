@@ -790,7 +790,8 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             -- Which trading book opened it: Momentum or Reversal. Null = Momentum
             -- (spot and legacy rows). Appended last so the ordinal read above is stable.
             strategy,
-            trailing_initial_stop_price
+            trailing_initial_stop_price,
+            peak_pnl_percent
         from portfolio_position_state position
         where (@bot_instance_id is null or position.bot_instance_id = @bot_instance_id)
         -- Newest first. Ordering by market value put the biggest position on top,
@@ -856,7 +857,8 @@ static async Task<IReadOnlyList<PortfolioPositionDto>> ReadPositions(NpgsqlConne
             !reader.IsDBNull(27) && reader.GetBoolean(27),
             !reader.IsDBNull(28) && reader.GetBoolean(28),
             reader.IsDBNull(29) ? null : reader.GetString(29),
-            TrailingInitialStopPrice: GetNullableDecimal(reader, 30)));
+            TrailingInitialStopPrice: GetNullableDecimal(reader, 30),
+            PeakPnlPercent: GetNullableDecimal(reader, 31)));
     }
 
     return positions;
@@ -3564,7 +3566,8 @@ internal sealed record PortfolioPositionDto(
     // and legacy rows, which predate the Reversal book).
     string? TradeStrategy,
     string? EntryTradeId = null,
-    decimal? TrailingInitialStopPrice = null);
+    decimal? TrailingInitialStopPrice = null,
+    decimal? PeakPnlPercent = null);
 
 internal sealed record PageRequest(int Limit, int Offset)
 {
