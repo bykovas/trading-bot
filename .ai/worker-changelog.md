@@ -1,3 +1,7 @@
+## 2026-10-12-trailing-chart-anchor
+
+- Persist the initial calculated stop at first successful live or simulated trailing activation, carry it through reconciliation and expose it for a fixed journal chart. Live values are indicative, not an exchange-reported trigger price. Existing activations without a captured anchor remain null; trading thresholds and orders are unchanged.
+
 ## 2026-10-12-dashboard-latency
 
 - Add partial timestamp indexes for pending signal-notice queries to avoid repeated full-history scans and database CPU contention. Signal selection and execution behavior are unchanged.

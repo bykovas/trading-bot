@@ -262,7 +262,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                    -- column inserted next to its sibling would silently shift every field
                    -- after it.
                    peak_pnl_at_utc,
-                   strategy
+                   strategy,
+                   trailing_initial_stop_price
             from portfolio_position_state
             where bot_instance_id = @bot_instance_id
             order by position_index
@@ -318,7 +319,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     FlippedEntry = !reader.IsDBNull(40) && reader.GetBoolean(40),
                     AdoptedWhileRunning = !reader.IsDBNull(41) && reader.GetBoolean(41),
                     PeakPnlAtUtc = GetNullableDateTimeOffset(reader, 42),
-                    Strategy = GetNullableString(reader, 43)
+                    Strategy = GetNullableString(reader, 43),
+                    TrailingInitialStopPrice = GetNullableDecimal(reader, 44)
                 });
             }
         }
@@ -928,6 +930,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
 
             alter table portfolio_position_state
                 add column if not exists strategy text;
+            alter table portfolio_position_state
+                add column if not exists trailing_initial_stop_price numeric;
 
             alter table portfolio_state_summary
                 add column if not exists cash_quote_value numeric,
@@ -1659,7 +1663,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     entry_channel,
                     strategy,
                     flipped_entry,
-                    adopted_while_running)
+                    adopted_while_running,
+                    trailing_initial_stop_price)
                 values (
                     @bot_instance_id,
                     @updated_at,
@@ -1707,7 +1712,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     @entry_channel,
                     @strategy,
                     @flipped_entry,
-                    @adopted_while_running)
+                    @adopted_while_running,
+                    @trailing_initial_stop_price)
                 """,
                 connection,
                 transaction);
@@ -1744,6 +1750,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             Add(command, "trailing_stop_percent", NpgsqlDbType.Numeric, position.TrailingStopPercent);
             Add(command, "trailing_stop_order_id", NpgsqlDbType.Text, position.TrailingStopOrderId);
             Add(command, "trailing_activated_at_utc", NpgsqlDbType.TimestampTz, Utc(position.TrailingActivatedAtUtc));
+            Add(command, "trailing_initial_stop_price", NpgsqlDbType.Numeric, position.TrailingInitialStopPrice);
             Add(command, "low_score_cycles", NpgsqlDbType.Integer, position.LowScoreCycles);
             Add(command, "leverage", NpgsqlDbType.Numeric, position.Leverage);
             Add(command, "initial_margin_eur", NpgsqlDbType.Numeric, position.InitialMarginEur);

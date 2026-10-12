@@ -4,6 +4,27 @@ namespace TradingBot.FuturesWorker.Tests;
 
 public sealed class MarginRiskAndTpSlTests
 {
+    [Fact]
+    public void Simulated_trailing_chart_anchor_is_captured_once_and_cloned()
+    {
+        var config = Config();
+        config.Exits.AtrTrailingRegimeEnabled = true;
+        config.Exits.TrailingActivationRMultiple = 1.5m;
+        config.Exits.TrailingAtrMultiple = 1.5m;
+        var position = new PortfolioPosition
+        {
+            Pair = "ETH/USD", Side = "LONG", EntryPrice = 100m,
+            Origin = "BOT", AtrPct = 1m, StopDistancePct = 2m, Quantity = 1m
+        };
+        var runner = new TpSlOrchestrator(config);
+        runner.Evaluate(position, 104m, 104m);
+        Assert.Equal(102.44m, position.TrailingInitialStopPrice);
+        Assert.NotNull(position.TrailingActivatedAtUtc);
+        runner.Evaluate(position, 106m, 106m);
+        Assert.Equal(102.44m, position.TrailingInitialStopPrice);
+        Assert.Equal(position.TrailingInitialStopPrice, position.Clone().TrailingInitialStopPrice);
+    }
+
     private static FuturesBotConfiguration Config() => new()
     {
         Futures = new FuturesOptions { AllowShorts = true, MaxLeverage = 2m, DefaultLeverage = 2m, MaxPositions = 1 },

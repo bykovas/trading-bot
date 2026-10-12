@@ -66,7 +66,9 @@ internal sealed class TpSlOrchestrator(FuturesBotConfiguration config)
                     ? (askPrice.Value - bidPrice.Value) / ((askPrice.Value + bidPrice.Value) / 2m) * 100m : 0m;
                 position.TrailingStopPercent = config.TpSl.EffectiveTrailingStopPercent(distance, spread);
                 position.TrailingStopState = "SIMULATED_OPEN";
+                position.TrailingActivatedAtUtc = DateTimeOffset.UtcNow;
                 position.PeakPnlPercent = profit;
+                position.TrailingInitialStopPrice ??= price * (1m + (isShort ? 1m : -1m) * position.TrailingStopPercent.Value / 100m);
                 active = true;
             }
             if (active && position.TrailingStopPercent is > 0m)

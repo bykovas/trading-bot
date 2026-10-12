@@ -146,6 +146,7 @@ public sealed class PortfolioPosition
     public string? StopLossOrderId { get; set; }
     public string? TakeProfitOrderId { get; set; }
     public DateTimeOffset? TrailingActivatedAtUtc { get; set; }
+    public decimal? TrailingInitialStopPrice { get; set; }
 
     // Consecutive decision cycles in which the current score sat at or below the
     // configured defensive score level. Reset to 0 whenever the score recovers.
@@ -228,6 +229,7 @@ public sealed class PortfolioPosition
         StopLossOrderId = StopLossOrderId,
         TakeProfitOrderId = TakeProfitOrderId,
         TrailingActivatedAtUtc = TrailingActivatedAtUtc,
+        TrailingInitialStopPrice = TrailingInitialStopPrice,
         LowScoreCycles = LowScoreCycles,
         Leverage = Leverage,
         InitialMarginEur = InitialMarginEur,

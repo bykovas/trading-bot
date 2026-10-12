@@ -2776,6 +2776,9 @@ internal sealed class FuturesDecisionWorker(
             position.TrailingStopPercent = trailingPercent;
             position.TrailingStopOrderId = trailing.OrderId;
             position.TrailingActivatedAtUtc = _clock.UtcNow;
+            position.TrailingInitialStopPrice ??= position.LastPrice > 0m
+                ? position.LastPrice * (1m + (position.Side == "SHORT" ? 1m : -1m) * trailingPercent / 100m)
+                : null;
             Console.WriteLine($"futures-trailing-arm: symbol={instrument.KrakenPair} side={position.Side} orderId={trailing.OrderId ?? "-"} distancePct={trailingPercent:0.###} cancelled=[{string.Join(",", cancelled)}]");
             return $"{reasonPrefix}; cancelled protective TP/SL and activated reduce-only trailing stop {trailingPercent:0.###}%";
         }
@@ -3401,6 +3404,7 @@ internal sealed class FuturesDecisionWorker(
                 StopLossOrderId = tpSl.StopLossOrderId,
                 TakeProfitOrderId = tpSl.TakeProfitOrderId,
                 TrailingActivatedAtUtc = tpSl.TrailingActivatedAtUtc,
+                TrailingInitialStopPrice = existing?.TrailingInitialStopPrice,
                 EntryChannel = existing?.EntryChannel,
                 FlippedEntry = existing?.FlippedEntry ?? false,
                 EntryAtr = existing?.EntryAtr,
