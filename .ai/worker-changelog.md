@@ -1,3 +1,7 @@
+## 2026-10-12-dashboard-latency
+
+- Add partial timestamp indexes for pending signal-notice queries to avoid repeated full-history scans and database CPU contention. Signal selection and execution behavior are unchanged.
+
 ## 2026-10-11-debyko-cross-bar-retries
 
 - Continue polling unfinished Agent attempts across a bar boundary instead of dropping the final minute-rule retry. Entry freshness uses the named data slice and configured signal age; expired results remain available for comparison but cannot open a position.

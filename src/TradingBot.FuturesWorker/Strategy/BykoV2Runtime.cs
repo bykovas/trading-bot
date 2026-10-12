@@ -398,6 +398,12 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
             );
             create index if not exists ix_byko_v2_shadow_verdicts_recent
                 on byko_v2_shadow_verdicts (bot_instance_id, bar_closed_at desc);
+            create index if not exists ix_byko_v2_shadow_notices_evaluated
+                on byko_v2_shadow_verdicts (bot_instance_id, bot_evaluated_at)
+                where fired_edge or debyko_fired;
+            create index if not exists ix_byko_v2_shadow_notices_received
+                on byko_v2_shadow_verdicts (bot_instance_id, webhook_received_at)
+                where debyko_fired;
 
             create table if not exists byko_v2_signal_notices (
                 bot_instance_id text not null,
@@ -419,6 +425,9 @@ internal sealed class PostgresBykoV2VerdictStore(string connectionString) : IByk
             );
             create index if not exists ix_byko_v2_debyko_firings_match
                 on byko_v2_debyko_firings (bot_instance_id, pair, rule, fired_at desc);
+            create index if not exists ix_byko_v2_debyko_notices_received
+                on byko_v2_debyko_firings (bot_instance_id, received_at)
+                where shadow_verdict_id is null;
             alter table byko_v2_debyko_firings add column if not exists bar_end timestamptz;
             alter table byko_v2_debyko_firings add column if not exists data_as_of timestamptz;
             alter table byko_v2_debyko_firings add column if not exists rule_id uuid;

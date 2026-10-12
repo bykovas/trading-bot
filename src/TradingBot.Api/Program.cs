@@ -4761,6 +4761,7 @@ internal static class CoinRates
     }
 
     private static readonly SemaphoreSlim Gate = new(1, 1);
+    private static long NextRefreshTicks;
 
     public static async Task EnsureTableAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
@@ -4795,26 +4796,17 @@ internal static class CoinRates
         {
             // One refresh at a time; concurrent pollers wait for the same result
             // rather than each hitting the rate limit.
-            if (await Gate.WaitAsync(0, cancellationToken))
+            if (now.UtcTicks >= Interlocked.Read(ref NextRefreshTicks) && await Gate.WaitAsync(0, cancellationToken))
             {
                 try
                 {
-                    var fresh = await FetchAsync(cancellationToken);
-                    if (fresh is not null)
-                    {
-                        await SaveAsync(connection, fresh, cancellationToken);
-                        stored = await LoadAsync(connection, cancellationToken);
-                    }
-                    else if (stored is not null)
-                    {
-                        // Touch nothing: keeping the old observed_at is what makes
-                        // the staleness visible on the page.
-                        Console.WriteLine("coin-rates: refresh failed, serving last known");
-                    }
+                    Interlocked.Exchange(ref NextRefreshTicks, now.Add(RefreshInterval).UtcTicks);
+                    _ = RefreshInBackgroundAsync(connectionString);
                 }
-                finally
+                catch
                 {
                     Gate.Release();
+                    throw;
                 }
             }
         }
@@ -4839,6 +4831,29 @@ internal static class CoinRates
             stored.BlockNumber,
             stored.ObservedAt.UtcDateTime,
             now - stored.ObservedAt > StaleAfter);
+    }
+
+    private static async Task RefreshInBackgroundAsync(string connectionString)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(55));
+            var fresh = await FetchAsync(timeout.Token);
+            if (fresh is not null)
+            {
+                await using var connection = new NpgsqlConnection(connectionString);
+                await connection.OpenAsync(timeout.Token);
+                await SaveAsync(connection, fresh, timeout.Token);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"coin-rates: background refresh failed ({ex.GetType().Name}); serving last known");
+        }
+        finally
+        {
+            Gate.Release();
+        }
     }
 
     private sealed record StoredRates(
