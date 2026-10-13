@@ -1413,6 +1413,17 @@ internal sealed class FuturesDecisionWorker(
         }
     }
 
+    private async Task<FuturesTickerQuote?> ReadExecutionTickerAsync(
+        InstrumentOptions instrument, CancellationToken cancellationToken)
+    {
+        if (debykoMarketClient is null)
+            return broker is null ? null : await broker.GetTickerAsync(instrument.KrakenPair, cancellationToken);
+        var state = (await debykoMarketClient.GetLiveStatesAsync([instrument], cancellationToken)).SingleOrDefault();
+        return state?.Quote is { } quote
+            ? new FuturesTickerQuote(instrument.KrakenPair, quote.Bid, quote.Ask, quote.Last, quote.MarkPrice, _clock.UtcNow)
+            : null;
+    }
+
     private async Task RetryOrIgnoreDebykoAsync(
         DebykoWebhookEvent signal,
         string reason,
@@ -2741,7 +2752,7 @@ internal sealed class FuturesDecisionWorker(
         {
             try
             {
-                var quote = await broker.GetTickerAsync(instrument.KrakenPair, cancellationToken);
+                var quote = await ReadExecutionTickerAsync(instrument, cancellationToken);
                 if (quote is not null && quote.Bid > 0m && quote.Ask >= quote.Bid)
                 {
                     var mid = (quote.Bid + quote.Ask) / 2m;
@@ -2834,7 +2845,7 @@ internal sealed class FuturesDecisionWorker(
             return;
         }
 
-        var ticker = await broker.GetTickerAsync(instrument.KrakenPair, cancellationToken);
+        var ticker = await ReadExecutionTickerAsync(instrument, cancellationToken);
         var isShort = position.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
         var closeablePrice = isShort
             ? ticker?.Ask ?? 0m
@@ -2996,7 +3007,7 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var side = desired == FuturesDesiredExposure.Short ? "sell" : "buy";
-        var preSubmit = await broker.GetTickerAsync(instrument.KrakenPair, cancellationToken);
+        var preSubmit = await ReadExecutionTickerAsync(instrument, cancellationToken);
         if (preSubmit is null)
         {
             var skipReason = $"live futures entry skipped: fresh pre-submit ticker unavailable for {instrument.KrakenPair}";
