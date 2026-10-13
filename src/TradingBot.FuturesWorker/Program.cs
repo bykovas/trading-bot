@@ -33,6 +33,18 @@ var (marketDataSource, universeProvider) = MarketDataSourceFactory.Create(
     config.MarketDataConsumer,
     config.Trading.TimeframeMinutes);
 
+IDebykoMarketClient? executionMarketClient = null;
+if (config.Futures.UsesDebykoEntrySignals)
+{
+    executionMarketClient = new DebykoMarketClient(new HttpClient
+    {
+        BaseAddress = new Uri(config.DebykoData.BaseUrl),
+        Timeout = TimeSpan.FromSeconds(config.Http.TimeoutSeconds)
+    }, config.DebykoData.ApiKey);
+    marketDataSource = new DebykoExecutionMarketDataSource(executionMarketClient);
+    universeProvider = new ConfiguredUniverseProvider(config.CandidateUniverse);
+}
+
 var store = CreatePortfolioStore(config);
 Console.WriteLine($"futures persistence: state={store.StateDescription} events={store.EventsDescription}");
 
@@ -71,7 +83,8 @@ var worker = new FuturesDecisionWorker(
     capacitySummaryReporter: capacitySummaryReporter,
     debykoSignalInbox: debykoSignalInbox,
     bykoV2LocalSignalRunner: bykoV2LocalSignalRunner,
-    bykoV2VerdictStore: bykoV2VerdictStore);
+    bykoV2VerdictStore: bykoV2VerdictStore,
+    debykoMarketClient: executionMarketClient);
 
 var retentionTask = store is PostgresDryRunPortfolioStore postgresStore
     ? postgresStore.RunNoOrderRetentionLoopAsync(TimeSpan.FromHours(4), cancellation.Token)

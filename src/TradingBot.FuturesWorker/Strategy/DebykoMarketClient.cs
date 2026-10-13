@@ -9,6 +9,8 @@ namespace TradingBot.FuturesWorker;
 
 internal interface IDebykoMarketClient
 {
+    Task<IReadOnlyList<InstrumentMarketState>> GetLiveStatesAsync(IReadOnlyList<InstrumentOptions> instruments, CancellationToken cancellationToken)
+        => throw new NotSupportedException("DEBYKO live snapshots unavailable");
     Task<DebykoBarResult> GetResultAsync(Guid ruleId, string instrument, DateTimeOffset barEnd, CancellationToken cancellationToken);
     Task<DebykoFrameRead> GetFrameAsync(string pair, DateTimeOffset barEnd, DateTimeOffset dataAsOf, CancellationToken cancellationToken,
         BykoV2Rule? rule = null, bool btcReference = false);
@@ -53,6 +55,50 @@ internal sealed class DebykoMarketClient : IDebykoMarketClient
         if (asset.Length == 0 || asset.Any(c => !char.IsAsciiLetterOrDigit(c)))
             throw new ArgumentException("Expected a USD pair or perpetual instrument", nameof(pair));
         return (asset == "XBT" ? "BTC" : asset) + "-PERP";
+    }
+
+    public async Task<IReadOnlyList<InstrumentMarketState>> GetLiveStatesAsync(
+        IReadOnlyList<InstrumentOptions> instruments, CancellationToken cancellationToken)
+    {
+        var enabled = instruments.Where(x => x.Enabled).ToArray();
+        if (enabled.Length == 0) return [];
+        var audit = await SendAsync("/v2/snapshots", new
+        {
+            where = $"venue = {Venue} and quote = USD and instrument in ({string.Join(",", enabled.Select(x => ToInstrument(x.Pair)))})",
+            layers = new[] { "ticker", "mark", "book", "funding" },
+            allow_stale = false, units = "published", number_format = "string"
+        }, cancellationToken);
+        using var document = JsonDocument.Parse(audit.RawBody);
+        var states = new List<InstrumentMarketState>();
+        foreach (var instrument in enabled)
+        {
+            var matches = document.RootElement.GetProperty("items").EnumerateArray()
+                .Where(x => Text(x, "instrument") == ToInstrument(instrument.Pair)
+                    && Text(x, "venue") == Venue && Text(x, "quote") == "USD").ToArray();
+            if (matches.Length != 1)
+            {
+                states.Add(new InstrumentMarketState { Instrument = instrument, Candles = [],
+                    DataWarning = "DEBYKO listing missing or ambiguous" });
+                continue;
+            }
+            var layers = matches[0].GetProperty("layers");
+            JsonElement? Present(string name) => layers.TryGetProperty(name, out var layer)
+                && Text(layer, "status") == "present" ? layer.GetProperty("values") : null;
+            var ticker = Present("ticker"); var mark = Present("mark"); var book = Present("book");
+            var last = ticker is { } t ? OptionalNumber(t, "last") : null;
+            var markPrice = mark is { } m ? OptionalNumber(m, "mark") : null;
+            var bid = book is { } b ? OptionalNumber(b, "bid") : null;
+            var ask = book is { } a ? OptionalNumber(a, "ask") : null;
+            var price = markPrice ?? last;
+            states.Add(new InstrumentMarketState
+            {
+                Instrument = instrument, Candles = [],
+                Quote = price is > 0 && bid is > 0 && ask >= bid
+                    ? new Quote(bid.Value, ask!.Value, last ?? price.Value, 0m, MarkPrice: markPrice) : null,
+                DataWarning = price is > 0 && bid is > 0 && ask >= bid ? null : "DEBYKO live price/book unavailable"
+            });
+        }
+        return states;
     }
 
     public async Task<DebykoBarResult> GetResultAsync(Guid ruleId, string instrument,

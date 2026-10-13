@@ -7,6 +7,43 @@ namespace TradingBot.FuturesWorker.Tests;
 
 public sealed class DebykoMarketClientTests
 {
+    [Theory]
+    [InlineData("present", true)]
+    [InlineData("stale", false)]
+    public async Task LiveExecutionSnapshotsAreBatchedAndFailClosed(string status, bool available)
+    {
+        var client = Client(async request =>
+        {
+            Assert.Equal("/v2/snapshots", request.RequestUri!.AbsolutePath);
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            Assert.False(body.RootElement.GetProperty("allow_stale").GetBoolean());
+            Assert.Contains("BTC-PERP,ETH-PERP", body.RootElement.GetProperty("where").GetString());
+            return Response(new { items = new[] { "BTC", "ETH" }.Select(asset => new
+            {
+                instrument = asset + "-PERP", venue = "KRAKEN-FUTURES", quote = "USD",
+                layers = new
+                {
+                    mark = new { status, values = new { mark = "100" } },
+                    ticker = new { status, values = new { last = "101" } },
+                    book = new { status, values = new { bid = "99", ask = "102" } }
+                }
+            }).ToArray() });
+        });
+        var states = await client.GetLiveStatesAsync(new[]
+        {
+            new TradingBot.Core.Common.InstrumentOptions { Pair = "BTC/USD" },
+            new TradingBot.Core.Common.InstrumentOptions { Pair = "ETH/USD" }
+        }, default);
+        Assert.Equal(2, states.Count);
+        foreach (var state in states)
+        {
+            Assert.Equal(available, state.Quote is not null);
+            Assert.Empty(state.Candles);
+            if (available) Assert.Equal(100m, state.Quote!.MarkPrice);
+            else Assert.NotNull(state.DataWarning);
+        }
+    }
+
     private static readonly DateTimeOffset End = DateTimeOffset.Parse("2026-10-10T12:07:00Z");
     private static readonly DateTimeOffset Cut = End.AddSeconds(15);
 

@@ -25,7 +25,8 @@ internal sealed class FuturesDecisionWorker(
     FuturesCapacitySummaryReporter? capacitySummaryReporter = null,
     IDebykoSignalInbox? debykoSignalInbox = null,
     BykoV2LocalSignalRunner? bykoV2LocalSignalRunner = null,
-    IBykoV2VerdictStore? bykoV2VerdictStore = null)
+    IBykoV2VerdictStore? bykoV2VerdictStore = null,
+    IDebykoMarketClient? debykoMarketClient = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly ITelegramNotifier _telegram = telegramNotifier
@@ -1182,9 +1183,24 @@ internal sealed class FuturesDecisionWorker(
                 return;
             }
 
-            var entryAtrPct = config.BykoV2.DebykoAlignedDataEnabled && evaluation is not null
-                ? _bykoV2VerdictStore.AlignedEntryAtrPct(config.BotInstance.Id, instrument.Pair, evaluation)
-                : _bykoV2VerdictStore.EntryAtrPct(config.BotInstance.Id, instrument.Pair, rule, entryBar);
+            decimal? entryAtrPct;
+            if (debykoMarketClient is not null && evaluation is not null)
+            {
+                var flush = rule.Contains("FLUSH", StringComparison.Ordinal);
+                var frame = await debykoMarketClient.GetFrameAsync(instrument.Pair, evaluation.BarEnd,
+                    evaluation.DataAsOf, cancellationToken,
+                    flush ? BykoV2Rule.FlushLong : BykoV2Rule.BreakoutLong);
+                var candles = flush ? frame.Frame?.OneMinute : frame.Frame?.FifteenMinute;
+                var atr = candles is null ? null : BykoV2DqlStrategy.Atr(candles, config.BykoV2.AtrPeriod);
+                entryAtrPct = atr is > 0 && candles![^1].Close > 0
+                    ? (decimal)atr.Value / candles[^1].Close * 100m : null;
+            }
+            else
+            {
+                entryAtrPct = config.BykoV2.DebykoAlignedDataEnabled && evaluation is not null
+                    ? _bykoV2VerdictStore.AlignedEntryAtrPct(config.BotInstance.Id, instrument.Pair, evaluation)
+                    : _bykoV2VerdictStore.EntryAtrPct(config.BotInstance.Id, instrument.Pair, rule, entryBar);
+            }
             if (entryAtrPct is not > 0m)
             {
                 await RetryOrIgnoreDebykoAsync(signal, "entry ATR snapshot unavailable", firedAt, cancellationToken);
@@ -2554,6 +2570,7 @@ internal sealed class FuturesDecisionWorker(
     // A store failure only skips hydration; it never blocks the worker.
     private void HydratePriceHistory()
     {
+        if (config.Futures.UsesDebykoEntrySignals) return;
         if (config.Strategy.PriceActionHydrationMinutes <= 0)
         {
             return;

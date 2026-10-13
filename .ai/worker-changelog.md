@@ -1,3 +1,9 @@
+## 2026-10-13-debyko-execution-data
+
+- DEBYKO-authority execution reads live prices and exit candles from DEBYKO, with no local market-data or Kraken public-market fallback. Keep local shadow evaluation independent; fetch entry ATR directly at the webhook's named bar/data slice instead of requiring a matching shadow database row. Missing inputs remain retryable and fail closed.
+- BYKO exit configuration is aligned with PUKO through database overrides only; PUKO and LUKO profiles remain unchanged. Position sizing and risk gates are unchanged.
+- Push account filters into both daily trading-load query branches, and add partial journal/flat-state indexes to prevent dashboard cache misses scanning unrelated accounts.
+
 ## 2026-10-12-tp-before-trailing
 
 - Keep configured working and exchange backup TP alongside SL until trailing activation, including existing bot-owned real and paper positions. Reconciliation restores missing real TP; paper checks restore missing virtual TP before evaluating exits.

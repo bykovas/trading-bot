@@ -2179,7 +2179,8 @@ static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>>
     var key = $"{botInstanceId}\n{timeZoneId}";
     var now = DateTimeOffset.UtcNow;
 
-    await DailyTradingLoadCache.Gate.WaitAsync(cancellationToken);
+    var gate = DailyTradingLoadCache.Gates.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+    await gate.WaitAsync(cancellationToken);
     try
     {
         if (DailyTradingLoadCache.Values.TryGetValue(key, out var cached)
@@ -2194,7 +2195,7 @@ static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>>
     }
     finally
     {
-        DailyTradingLoadCache.Gate.Release();
+        gate.Release();
     }
 }
 
@@ -2229,15 +2230,16 @@ static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>>
             join dry_run_cycle_facts cycle on cycle.cycle_id = action.cycle_id
             where action.action in ('WOULD_BUY', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT',
                                     'WOULD_SELL', 'WOULD_CLOSE')
+              and (@bot_instance_id is null or cycle.bot_instance_id = @bot_instance_id)
             union all
             select 'FLAT', utc, bot_instance_id,
                    (utc at time zone @time_zone)::date, '', '', 0, 0
             from dry_run_cycle_facts
             where positions_value_after_eur = 0
+              and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
               and not valuation_unsettled
               and cycle_id not like '%-backfill'
         ) event
-        where (@bot_instance_id is null or event.bot_instance_id = @bot_instance_id)
         order by event.utc, event.decision_index
         """,
         connection);
@@ -4352,8 +4354,8 @@ internal static class DashboardSchema
 
 internal static class DailyTradingLoadCache
 {
-    public static readonly SemaphoreSlim Gate = new(1, 1);
-    public static readonly Dictionary<string, (DateTimeOffset Utc, Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)> Value)> Values = new();
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> Gates = new();
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset Utc, Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)> Value)> Values = new();
 }
 
 internal static class DashboardDefaults
