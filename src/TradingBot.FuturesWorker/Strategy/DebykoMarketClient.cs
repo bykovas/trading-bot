@@ -9,6 +9,9 @@ namespace TradingBot.FuturesWorker;
 
 internal interface IDebykoMarketClient
 {
+    Task<DebykoFrameRead> GetExitFrameAsync(string pair, DateTimeOffset barEnd, DateTimeOffset dataAsOf,
+        int minutes, int count, CancellationToken cancellationToken)
+        => throw new NotSupportedException("DEBYKO exit candles unavailable");
     Task<IReadOnlyList<InstrumentMarketState>> GetLiveStatesAsync(IReadOnlyList<InstrumentOptions> instruments, CancellationToken cancellationToken)
         => throw new NotSupportedException("DEBYKO live snapshots unavailable");
     Task<DebykoBarResult> GetResultAsync(Guid ruleId, string instrument, DateTimeOffset barEnd, CancellationToken cancellationToken);
@@ -123,8 +126,18 @@ internal sealed class DebykoMarketClient : IDebykoMarketClient
             verdict, Text(root, "reason"), root.GetProperty("final").GetBoolean(), Text(root, "receipt_id"), [audit]);
     }
 
-    public async Task<DebykoFrameRead> GetFrameAsync(string pair, DateTimeOffset barEnd,
+    public Task<DebykoFrameRead> GetFrameAsync(string pair, DateTimeOffset barEnd,
         DateTimeOffset dataAsOf, CancellationToken cancellationToken, BykoV2Rule? rule = null, bool btcReference = false)
+        => GetFrameCoreAsync(pair, barEnd, dataAsOf, cancellationToken, rule, btcReference);
+
+    public Task<DebykoFrameRead> GetExitFrameAsync(string pair, DateTimeOffset barEnd, DateTimeOffset dataAsOf,
+        int minutes, int count, CancellationToken cancellationToken)
+        => GetFrameCoreAsync(pair, barEnd, dataAsOf, cancellationToken,
+            minutes == 1 ? BykoV2Rule.FlushLong : BykoV2Rule.BreakoutLong, true, count);
+
+    private async Task<DebykoFrameRead> GetFrameCoreAsync(string pair, DateTimeOffset barEnd,
+        DateTimeOffset dataAsOf, CancellationToken cancellationToken, BykoV2Rule? rule, bool btcReference,
+        int? executionCandleCount = null)
     {
         var instrument = ToInstrument(pair);
         var audits = new List<DebykoHttpAudit>();
@@ -133,7 +146,9 @@ internal sealed class DebykoMarketClient : IDebykoMarketClient
         try
         {
             var flush = rule is BykoV2Rule.FlushLong or BykoV2Rule.FlushShort;
-            var requests = rule is null
+            var requests = executionCandleCount is { } executionCount
+                ? new[] { (flush ? "1m" : "15m", flush ? 1 : 15, executionCount) }
+                : rule is null
                 ? new[] { ("1m", 1, 80), ("5m", 5, 20), ("15m", 15, 80), ("1h", 60, 240) }
                 : flush ? btcReference ? new[] { ("5m", 5, 13) } : new[] { ("1m", 1, 57) }
                 : new[] { ("15m", 15, btcReference ? 1 : 57), ("1h", 60, 203) };

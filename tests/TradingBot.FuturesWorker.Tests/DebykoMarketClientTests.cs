@@ -7,6 +7,36 @@ namespace TradingBot.FuturesWorker.Tests;
 
 public sealed class DebykoMarketClientTests
 {
+    [Fact]
+    public async Task ExitIndicatorsUse120ClosedBarsWithoutExtraMarketRequests()
+    {
+        var calls = 0;
+        var client = Client(async request =>
+        {
+            calls++;
+            Assert.Equal("/v2/candles", request.RequestUri!.AbsolutePath);
+            using var document = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            var query = document.RootElement;
+            Assert.Equal(120, query.GetProperty("limit").GetInt32());
+            Assert.Equal("15m", query.GetProperty("timeframe").GetString());
+            Assert.True(query.GetProperty("closed_only").GetBoolean());
+            var from = query.GetProperty("from").GetDateTimeOffset();
+            var to = query.GetProperty("to").GetDateTimeOffset();
+            return Response(new { data_as_of = Cut, from, to, timeframe = "15m", price_type = "trade", units = "published",
+                items = new[] { new { instrument = "BTC-PERP", venue = "KRAKEN-FUTURES", quote = "USD", status = "present",
+                    candles = Enumerable.Range(0, 120).Select(i => new
+                    {
+                        open_time = from.AddMinutes(15 * i), close_time = from.AddMinutes(15 * (i + 1)), received_at = Cut,
+                        status = "present", open = "100", high = "102", low = "99", close = "101", volume = "10", trade_count = 1
+                    }) } } });
+        });
+        var read = await client.GetExitFrameAsync("XBT/USD", End, Cut, 15, 120, default);
+        Assert.NotNull(read.Frame);
+        Assert.Equal(120, read.Frame.FifteenMinute.Count);
+        Assert.Equal(1, calls);
+        Assert.Null(read.Reason);
+    }
+
     [Theory]
     [InlineData("present", true)]
     [InlineData("stale", false)]

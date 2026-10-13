@@ -1,6 +1,6 @@
 namespace TradingBot.FuturesWorker;
 
-internal sealed class DebykoExecutionMarketDataSource(IDebykoMarketClient client) : IMarketDataSource
+internal sealed class DebykoExecutionMarketDataSource(IDebykoMarketClient client, int candleCount = 120) : IMarketDataSource
 {
     public Task<IReadOnlyList<InstrumentMarketState>> GetLightMarketStatesAsync(
         IReadOnlyList<InstrumentOptions> instruments, CancellationToken cancellationToken)
@@ -17,8 +17,7 @@ internal sealed class DebykoExecutionMarketDataSource(IDebykoMarketClient client
             var minutes = timeframeMinutes == 1 ? 1 : 15;
             var step = TimeSpan.FromMinutes(minutes).Ticks;
             var end = new DateTimeOffset(now.UtcTicks / step * step, TimeSpan.Zero);
-            var read = await client.GetFrameAsync(instrument.Pair, end, now, cancellationToken,
-                minutes == 1 ? BykoV2Rule.FlushLong : BykoV2Rule.BreakoutLong);
+            var read = await client.GetExitFrameAsync(instrument.Pair, end, now, minutes, candleCount, cancellationToken);
             states.Add(new InstrumentMarketState
             {
                 Instrument = instrument,
