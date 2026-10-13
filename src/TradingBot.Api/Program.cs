@@ -2189,6 +2189,12 @@ static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>>
     var now = DateTimeOffset.UtcNow;
 
     var gate = DailyTradingLoadCache.Gates.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+    if (DailyTradingLoadCache.Values.TryGetValue(key, out var previous))
+    {
+        if (now - previous.Utc >= DashboardDefaults.TradingLoadCacheFor && gate.Wait(0))
+            _ = RefreshDailyTradingLoadAsync(connection.Clone(), botInstanceId, timeZoneId, key, gate);
+        return previous.Value;
+    }
     await gate.WaitAsync(cancellationToken);
     try
     {
@@ -2201,6 +2207,27 @@ static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>>
         var value = await LoadDailyTradingLoad(connection, botInstanceId, timeZoneId, cancellationToken);
         DailyTradingLoadCache.Values[key] = (now, value);
         return value;
+    }
+    finally
+    {
+        gate.Release();
+    }
+}
+
+static async Task RefreshDailyTradingLoadAsync(NpgsqlConnection connection, string? botInstanceId,
+    string timeZoneId, string key, SemaphoreSlim gate)
+{
+    try
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var ownedConnection = connection;
+        await connection.OpenAsync(timeout.Token);
+        var value = await LoadDailyTradingLoad(connection, botInstanceId, timeZoneId, timeout.Token);
+        DailyTradingLoadCache.Values[key] = (DateTimeOffset.UtcNow, value);
+    }
+    catch (Exception error)
+    {
+        Console.WriteLine($"dashboard trading-load background refresh failed: {error.GetType().Name}");
     }
     finally
     {

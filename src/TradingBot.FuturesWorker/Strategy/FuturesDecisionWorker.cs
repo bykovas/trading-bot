@@ -269,7 +269,9 @@ internal sealed class FuturesDecisionWorker(
         // normal MaxActiveInstruments ranking, then missing force-included pairs
         // are appended so core markets do not crowd out fresh movers.
         var heldPairs = state.Positions.Select(position => position.Pair).ToHashSet();
-        var active = SelectActiveInstruments(
+        var active = config.Futures.UsesDebykoEntrySignals
+            ? universe.Where(instrument => heldPairs.Contains(instrument.Pair)).ToList()
+            : SelectActiveInstruments(
             lightStates,
             heldPairs,
             config.UniverseDiscovery.ForceInclude,
