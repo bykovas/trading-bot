@@ -9,7 +9,7 @@ WITH source AS (
 ), blocks AS (
     SELECT jsonb_object_agg(key, coalesce(values_jsonb->key, '{}'::jsonb)
         || coalesce(overrides_jsonb->key, '{}'::jsonb)) AS settings
-    FROM source CROSS JOIN (VALUES ('Exits'), ('TpSl'), ('Strategy'), ('Shorts')) AS keys(key)
+    FROM source CROSS JOIN (VALUES ('Exits'), ('TpSl'), ('Strategy'), ('Shorts'), ('ExecutionPolicy'), ('Regime')) AS keys(key)
 )
 UPDATE bot_instance_strategy_profiles p
 SET overrides_jsonb = p.overrides_jsonb || blocks.settings
@@ -20,7 +20,12 @@ SET overrides_jsonb = p.overrides_jsonb || blocks.settings
             'SignalReversalExitEnabled', coalesce(blocks.settings->'Exits'->'SignalReversalExitEnabled', 'true'::jsonb)))
     || jsonb_build_object('TpSl', blocks.settings->'TpSl'
         || jsonb_build_object('TrailingStopMinSpreadMultiple',
-            coalesce(blocks.settings->'TpSl'->'TrailingStopMinSpreadMultiple', '0'::jsonb))),
+            coalesce(blocks.settings->'TpSl'->'TrailingStopMinSpreadMultiple', '0'::jsonb)))
+    || jsonb_build_object('Shorts', blocks.settings->'Shorts'
+        || jsonb_build_object('RequireBtc4hDropPercent',
+            coalesce(blocks.settings->'Shorts'->'RequireBtc4hDropPercent', '0'::jsonb),
+            'MaxBtc24hRisePercentForShort',
+            coalesce(blocks.settings->'Shorts'->'MaxBtc24hRisePercentForShort', 'null'::jsonb))),
     updated_at = now(), updated_by = 'byko-puko-exit-parity-2026-10-13'
 FROM blocks
 WHERE p.bot_instance_id = 'futures-live';
