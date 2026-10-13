@@ -2192,7 +2192,7 @@ static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>>
     if (DailyTradingLoadCache.Values.TryGetValue(key, out var previous))
     {
         if (now - previous.Utc >= DashboardDefaults.TradingLoadCacheFor && gate.Wait(0))
-            _ = RefreshDailyTradingLoadAsync(connection.Clone(), botInstanceId, timeZoneId, key, gate);
+            _ = RefreshDailyTradingLoadAsync((NpgsqlConnection)((ICloneable)connection).Clone(), botInstanceId, timeZoneId, key, gate);
         return previous.Value;
     }
     await gate.WaitAsync(cancellationToken);
