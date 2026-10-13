@@ -186,7 +186,7 @@ app.MapGet("/api/positions", async (string? botInstanceId, CancellationToken can
 // worker health for every instance, the 30 closed-day equity series and today's
 // executed trades — so the page never has to fan out across /api/portfolio,
 // /api/bot-status and the megabyte-sized /api/trade-cycles payload.
-app.MapGet("/api/dashboard", async (string? botInstanceId, CancellationToken cancellationToken) =>
+app.MapGet("/api/dashboard", async (string? botInstanceId, HttpContext context, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -195,24 +195,33 @@ app.MapGet("/api/dashboard", async (string? botInstanceId, CancellationToken can
     }
 
     var bot = Clean(botInstanceId);
+    var timings = new List<string>();
+    async Task<T> Timed<T>(string name, Func<Task<T>> read)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var value = await read();
+        timings.Add($"{name};dur={watch.Elapsed.TotalMilliseconds.ToString("0.0", CultureInfo.InvariantCulture)}");
+        return value;
+    }
 
     try
     {
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        var summary = await ReadSummary(connection, bot, cancellationToken);
-        var positions = await ReadPositions(connection, bot, cancellationToken);
-        var entries = await ReadEntryContexts(connection, bot, positions, cancellationToken);
+        var summary = await Timed("summary", () => ReadSummary(connection, bot, cancellationToken));
+        var positions = await Timed("positions", () => ReadPositions(connection, bot, cancellationToken));
+        var entries = await Timed("entries", () => ReadEntryContexts(connection, bot, positions, cancellationToken));
         positions = positions
             .Select(position => entries.TryGetValue(position.Pair, out var entry)
                 ? position with { EntryTradeId = entry.TradeId }
                 : position)
             .ToList();
-        var workers = await ReadWorkers(connection, cancellationToken);
-        var equity = await ReadEquityDays(connection, bot, DashboardDefaults.EquityWindowDays, cancellationToken);
-        var today = await ReadTodayTrades(connection, bot, cancellationToken);
-        var rates = await CoinRates.ReadAsync(connectionString, connection, cancellationToken);
+        var workers = await Timed("workers", () => ReadWorkers(connection, cancellationToken));
+        var equity = await Timed("equity", () => ReadEquityDays(connection, bot, DashboardDefaults.EquityWindowDays, cancellationToken));
+        var today = await Timed("trades", () => ReadTodayTrades(connection, bot, cancellationToken));
+        var rates = await Timed("rates", () => CoinRates.ReadAsync(connectionString, connection, cancellationToken));
+        context.Response.Headers["Server-Timing"] = string.Join(", ", timings);
 
         return Results.Ok(new DashboardResponse(
             DateTimeOffset.UtcNow,
