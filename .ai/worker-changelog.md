@@ -1,3 +1,8 @@
+## 2026-10-15-puko-rule-scoped-preflight
+
+- Restrict PUKO's public contract registry and hourly contract audit to BykoV2.Universe, the same scope used by its local/aligned rule evaluators. Legacy CandidateUniverse entries no longer expand preflight or produce unrelated missing-contract Telegram warnings.
+- Preserve entry conditions, fees, position sizing and management of existing positions. Add a regression covering legacy AKT/HMSTR/OGN/MIRA candidates and hourly refresh; no exchange orders.
+
 ## 2026-10-15-puko-fee-validity-2h
 
 - Keep hourly public fee-schedule refresh attempts, but retain a successful PUKO fee rate for two hours. Failed refreshes do not extend its original validity; at exactly two hours the configured fallback applies. Add boundary assertions at one hour, 1:59:59 and 2:00:00. No deployment.

@@ -11,7 +11,7 @@ internal sealed class PukoReadOnlyChecks(
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly KrakenContractRegistry _registry = new(http, config.Kraken,
-        config.CandidateUniverse, config.BykoV2.Universe, clock);
+        [], config.BykoV2.Universe, clock);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, DateTimeOffset> _alerts = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<InstrumentOptions> _instruments = [];
@@ -68,7 +68,7 @@ internal sealed class PukoReadOnlyChecks(
                 _nextRefresh = _clock.UtcNow.AddMinutes(1);
                 await AlertAsync("*", "METADATA_UNAVAILABLE", cancellationToken);
             }
-            foreach (var pair in config.BykoV2.Universe.Concat(config.CandidateUniverse.Where(x => x.Enabled).Select(x => x.Pair)).Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (var pair in config.BykoV2.Universe.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 if (FuturesDecisionWorker.ResolveDebykoInstrument(DebykoMarketClient.ToInstrument(pair), selection.Instruments) is null)
                     await AlertAsync(pair, "CONTRACT_UNAVAILABLE", cancellationToken);
