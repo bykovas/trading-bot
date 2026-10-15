@@ -62,6 +62,29 @@ public sealed class PukoReadOnlyChecksTests
     }
 
     [Fact]
+    public async Task Legacy_candidates_never_expand_rule_contract_scope()
+    {
+        var (checks, config, clock, telegram) = Setup();
+        config.BykoV2.Universe = ["DOGE/USD"];
+        config.CandidateUniverse = [
+            new() { Pair = "AKT/USD", KrakenPair = "PF_AKTUSD", Enabled = true },
+            new() { Pair = "HMSTR/USD", KrakenPair = "PF_HMSTRUSD", Enabled = true },
+            new() { Pair = "OGN/USD", KrakenPair = "PF_OGNUSD", Enabled = true },
+            new() { Pair = "MIRA/USD", KrakenPair = "PF_MIRAUSD", Enabled = true },
+            new() { Pair = "BAD/USD", KrakenPair = "PF_BADUSD", Enabled = true }
+        ];
+
+        await checks.RefreshAsync(default);
+        clock.UtcNow = clock.UtcNow.AddHours(1);
+        await checks.RefreshAsync(default);
+
+        Assert.Empty(telegram.Messages);
+        var valid = await checks.CheckAsync(new() { Pair = "DOGE/USD", KrakenPair = "PF_DOGEUSD" },
+            FuturesDesiredExposure.Long, .1m, 50m, default);
+        Assert.Contains("local_preflight=OK", valid);
+    }
+
+    [Fact]
     public async Task Public_tier_is_explicit_and_expired_data_uses_labelled_fallback()
     {
         var (checks, config, clock, _) = Setup(failFeeRefresh: true);
