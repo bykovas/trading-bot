@@ -1,3 +1,9 @@
+## 2026-10-15-byko-contract-execution
+
+- BYKO keeps DEBYKO market data but obtains authoritative Kraken execution reference data separately. Discover rule instruments including DOGE, retain real symbols, and round limit prices/quantities to exact tick/lot grids. Missing or expired metadata blocks new entries rather than guessing precision; metadata refresh failures back off for 30 seconds.
+- Do not retry unchanged invalidSize/invalidPrice or below-lot entries. Invalidate contract metadata after permanent exchange validation errors, without replaying the old signal or increasing sizing. Add a read-only contract audit mode which never loads an account or submits an order.
+- No PUKO/LUKO strategy settings, sizing, portfolio or execution mode changes.
+
 ## 2026-10-13-debyko-execution-data
 
 - DEBYKO-authority execution reads live prices, pre-submit/trailing quotes and exit candles from DEBYKO, with no local market-data or Kraken public-market fallback. Keep local shadow evaluation independent; fetch entry ATR directly at the webhook's named bar/data slice instead of requiring a matching shadow database row. Missing inputs remain retryable and fail closed.

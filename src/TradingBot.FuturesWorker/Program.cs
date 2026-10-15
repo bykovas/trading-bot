@@ -1,7 +1,27 @@
 using TradingBot.FuturesWorker;
 
-using var sentry = SentryReliability.Initialize(Environment.GetEnvironmentVariable("TRADINGBOT_BOT_INSTANCE_ID"));
 var config = FuturesBotConfiguration.Load();
+if (args.Contains("--check-execution-contracts", StringComparer.Ordinal))
+{
+    using var metadataHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(config.Http.TimeoutSeconds) };
+    var metadata = new KrakenExecutionUniverseProvider(metadataHttp, config.Kraken, config.CandidateUniverse, config.BykoV2.Universe);
+    var selection = await metadata.GetUniverseAsync(CancellationToken.None);
+    var missing = 0;
+    foreach (var pair in config.BykoV2.Universe)
+    {
+        var instrument = FuturesDecisionWorker.ResolveDebykoInstrument(DebykoMarketClient.ToInstrument(pair), selection.Instruments);
+        if (instrument is null || !metadata.TryGetRules(instrument.KrakenPair, out var rules))
+        {
+            Console.WriteLine($"contract-check pair={pair} status=UNAVAILABLE");
+            missing++;
+        }
+        else Console.WriteLine(FormattableString.Invariant(
+            $"contract-check pair={pair} symbol={rules.Symbol} tick={rules.PriceTick} quantityStep={rules.QuantityStep} status=OK"));
+    }
+    Environment.ExitCode = missing == 0 && metadata.HasFreshMetadata ? 0 : 1;
+    return;
+}
+using var sentry = SentryReliability.Initialize(Environment.GetEnvironmentVariable("TRADINGBOT_BOT_INSTANCE_ID"));
 SentryReliability.SetInstance(config.BotInstance.Id);
 using var logging = FileLogging.Configure(config.Logging.Directory);
 
@@ -34,6 +54,7 @@ var (marketDataSource, universeProvider) = MarketDataSourceFactory.Create(
     config.Trading.TimeframeMinutes);
 
 IDebykoMarketClient? executionMarketClient = null;
+KrakenExecutionUniverseProvider? executionUniverse = null;
 if (config.Futures.UsesDebykoEntrySignals)
 {
     executionMarketClient = new DebykoMarketClient(new HttpClient
@@ -42,7 +63,9 @@ if (config.Futures.UsesDebykoEntrySignals)
         Timeout = TimeSpan.FromSeconds(config.Http.TimeoutSeconds)
     }, config.DebykoData.ApiKey);
     marketDataSource = new DebykoExecutionMarketDataSource(executionMarketClient);
-    universeProvider = new ConfiguredUniverseProvider(config.CandidateUniverse);
+    executionUniverse = new KrakenExecutionUniverseProvider(httpClient, config.Kraken,
+        config.CandidateUniverse, config.BykoV2.Universe);
+    universeProvider = executionUniverse;
 }
 
 var store = CreatePortfolioStore(config);
@@ -84,7 +107,8 @@ var worker = new FuturesDecisionWorker(
     debykoSignalInbox: debykoSignalInbox,
     bykoV2LocalSignalRunner: bykoV2LocalSignalRunner,
     bykoV2VerdictStore: bykoV2VerdictStore,
-    debykoMarketClient: executionMarketClient);
+    debykoMarketClient: executionMarketClient,
+    executionUniverse: executionUniverse);
 
 var retentionTask = store is PostgresDryRunPortfolioStore postgresStore
     ? postgresStore.RunNoOrderRetentionLoopAsync(TimeSpan.FromHours(4), cancellation.Token)

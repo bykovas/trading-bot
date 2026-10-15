@@ -26,7 +26,8 @@ internal sealed class FuturesDecisionWorker(
     IDebykoSignalInbox? debykoSignalInbox = null,
     BykoV2LocalSignalRunner? bykoV2LocalSignalRunner = null,
     IBykoV2VerdictStore? bykoV2VerdictStore = null,
-    IDebykoMarketClient? debykoMarketClient = null)
+    IDebykoMarketClient? debykoMarketClient = null,
+    KrakenExecutionUniverseProvider? executionUniverse = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly ITelegramNotifier _telegram = telegramNotifier
@@ -1140,6 +1141,11 @@ internal sealed class FuturesDecisionWorker(
             var portfolioBefore = state.Clone();
             var universeSelection = await ResolveUniverseAsync(state, cancellationToken);
             var universe = universeSelection.Instruments.Where(instrument => instrument.Enabled).ToList();
+            if (executionUniverse is not null && !executionUniverse.HasFreshMetadata)
+            {
+                await RetryOrIgnoreDebykoAsync(signal, "verified Kraken contract registry unavailable", firedAt, cancellationToken);
+                return;
+            }
             var instrument = ResolveDebykoInstrument(signal.Instrument, universe);
             if (instrument is null)
             {
@@ -1246,7 +1252,13 @@ internal sealed class FuturesDecisionWorker(
 
             if (!fill.PositionOpened)
             {
-                await RetryOrIgnoreDebykoAsync(signal, fill.Action.Reason, firedAt, cancellationToken);
+                if (IsPermanentEntryRejection(fill.Action.Reason)
+                    || fill.Action.HoldReasonCode == "LIVE_ORDER_SIZE_TOO_SMALL")
+                {
+                    if (IsPermanentEntryRejection(fill.Action.Reason)) executionUniverse?.Invalidate();
+                    await _debykoSignalInbox.MarkIgnoredAsync(signal.Id, fill.Action.Reason, cancellationToken);
+                }
+                else await RetryOrIgnoreDebykoAsync(signal, fill.Action.Reason, firedAt, cancellationToken);
                 return;
             }
 
@@ -1414,6 +1426,10 @@ internal sealed class FuturesDecisionWorker(
             Console.WriteLine($"byko-v2-signal-notices: failed: {error.Message}");
         }
     }
+
+    internal static bool IsPermanentEntryRejection(string reason) =>
+        reason.StartsWith("live futures entry rejected: invalidSize", StringComparison.OrdinalIgnoreCase)
+        || reason.StartsWith("live futures entry rejected: invalidPrice", StringComparison.OrdinalIgnoreCase);
 
     private async Task<FuturesTickerQuote?> ReadExecutionTickerAsync(
         InstrumentOptions instrument, CancellationToken cancellationToken)
@@ -3009,6 +3025,15 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var side = desired == FuturesDesiredExposure.Short ? "sell" : "buy";
+        KrakenContractRules? contract = null;
+        if (debykoMarketClient is not null
+            && (executionUniverse is null || !executionUniverse.TryGetRules(instrument.KrakenPair, out contract)))
+        {
+            var skipped = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage,
+                reason: $"live futures entry skipped: verified contract metadata unavailable for {instrument.KrakenPair}");
+            skipped.Action.HoldReasonCode = "LIVE_CONTRACT_METADATA_UNAVAILABLE";
+            return skipped;
+        }
         var preSubmit = await ReadExecutionTickerAsync(instrument, cancellationToken);
         if (preSubmit is null)
         {
@@ -3024,7 +3049,8 @@ internal sealed class FuturesDecisionWorker(
             ? referencePrice * (1m - maxDeviation / 100m)
             : referencePrice * (1m + maxDeviation / 100m);
         var priceDecimals = ResolvePriceDecimals(instrument, preSubmit, referencePrice);
-        var limitPrice = RoundLimitPrice(rawLimitPrice, desired, priceDecimals);
+        var limitPrice = contract?.RoundPrice(rawLimitPrice, desired == FuturesDesiredExposure.Short)
+            ?? RoundLimitPrice(rawLimitPrice, desired, priceDecimals);
 
         // Futures accounting and all USD-quoted perp prices use the same unit. Size
         // from the fresh executable quote instead of the stale decision mark so the
@@ -3032,7 +3058,7 @@ internal sealed class FuturesDecisionWorker(
         var executablePrice = desired == FuturesDesiredExposure.Short ? preSubmit.Bid : preSubmit.Ask;
         var rawSize = executablePrice <= 0m ? 0m : targetNotionalEur / executablePrice;
         var quantityDecimals = instrument.QuantityDecimals ?? 8;
-        var size = TruncateToDecimals(rawSize, quantityDecimals);
+        var size = contract?.RoundQuantity(rawSize) ?? TruncateToDecimals(rawSize, quantityDecimals);
 
         var quoteAlreadyWorse = desired == FuturesDesiredExposure.Short
             ? preSubmit.Bid < limitPrice
