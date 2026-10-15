@@ -166,15 +166,15 @@ public sealed class KrakenFuturesMarketDataSource(HttpClient httpClient, KrakenO
                 _metadataCache[symbol] = new FuturesInstrumentMetadata(
                     symbol,
                     GetString(item, "pair") ?? symbol,
-                    GetBool(item, "tradeable"),
-                    GetBool(item, "postOnly"),
+                    KrakenContractMetadata.Flag(item, "tradeable") && !KrakenContractMetadata.Flag(item, "suspended"),
+                    KrakenContractMetadata.Flag(item, "postOnly"),
                     new PairRules(
                         symbol,
                         GetBool(item, "tradeable") ? "online" : "not_tradeable",
                         0m,
                         GetDecimal(item, "contractSize"),
-                        GetInt(item, "contractValueTradePrecision"),
-                        TickDecimals(GetDecimal(item, "tickSize"))));
+                        KrakenContractMetadata.Precision(item) ?? 0,
+                        KrakenContractMetadata.DecimalPlaces(KrakenContractMetadata.Decimal(item, "tickSize"))));
             }
         }
         finally
@@ -453,8 +453,6 @@ public sealed class KrakenFuturesMarketDataSource(HttpClient httpClient, KrakenO
             _ => false
         };
 
-    private static int GetInt(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var property) && property.TryGetInt32(out var value) ? value : 0;
 
     private static long GetInt64(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var property) && property.TryGetInt64(out var value) ? value : 0;
@@ -485,17 +483,6 @@ public sealed class KrakenFuturesMarketDataSource(HttpClient httpClient, KrakenO
             _ => 0m
         };
 
-    private static int TickDecimals(decimal tickSize)
-    {
-        if (tickSize <= 0m)
-        {
-            return 0;
-        }
-
-        var text = tickSize.ToString("0.############################", CultureInfo.InvariantCulture);
-        var dot = text.IndexOf('.', StringComparison.Ordinal);
-        return dot < 0 ? 0 : text.Length - dot - 1;
-    }
 
     private sealed record FuturesInstrumentMetadata(
         string Symbol,

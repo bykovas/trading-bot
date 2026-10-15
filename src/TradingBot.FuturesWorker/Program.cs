@@ -71,7 +71,12 @@ if (config.Futures.UsesDebykoEntrySignals)
 var store = CreatePortfolioStore(config);
 Console.WriteLine($"futures persistence: state={store.StateDescription} events={store.EventsDescription}");
 
-var portfolio = new FuturesVirtualPortfolio(config, store);
+ITelegramNotifier telegramNotifier = config.Telegram.IsConfigured
+    ? new TelegramNotifier(config.Telegram)
+    : new NullTelegramNotifier();
+var pukoReadOnly = PukoReadOnlyChecks.Applies(config)
+    ? new PukoReadOnlyChecks(httpClient, config, telegramNotifier) : null;
+var portfolio = new FuturesVirtualPortfolio(config, store, readOnlyChecks: pukoReadOnly);
 var entryMirrorStore = CreateEntryMirrorStore(config);
 var debykoSignalInbox = CreateDebykoSignalInbox(config);
 var bykoV2VerdictStore = CreateBykoV2VerdictStore(config);
@@ -79,9 +84,6 @@ var bykoV2LocalSignalRunner = CreateBykoV2LocalSignalRunner(config, bykoV2Verdic
 var strategyProfileProvider = new FuturesStrategyProfileProvider(config, CreateBotStrategyProfileStore(config));
 var runtimeLimitProvider = new FuturesRuntimeLimitProvider(config, CreateBotConfigOverrideStore(config));
 var universePreferenceProvider = new FuturesUniversePreferenceProvider(config, CreateBotUniversePreferenceStore(config));
-ITelegramNotifier telegramNotifier = config.Telegram.IsConfigured
-    ? new TelegramNotifier(config.Telegram)
-    : new NullTelegramNotifier();
 var capacitySummaryReporter = new FuturesCapacitySummaryReporter(
     CreateFuturesCapacitySummaryStore(config),
     telegramNotifier,
@@ -108,11 +110,13 @@ var worker = new FuturesDecisionWorker(
     bykoV2LocalSignalRunner: bykoV2LocalSignalRunner,
     bykoV2VerdictStore: bykoV2VerdictStore,
     debykoMarketClient: executionMarketClient,
-    executionUniverse: executionUniverse);
+    executionUniverse: executionUniverse,
+    pukoReadOnly: pukoReadOnly);
 
 var retentionTask = store is PostgresDryRunPortfolioStore postgresStore
     ? postgresStore.RunNoOrderRetentionLoopAsync(TimeSpan.FromHours(4), cancellation.Token)
     : Task.CompletedTask;
+var pukoMaintenanceTask = pukoReadOnly?.RunMaintenanceAsync(cancellation.Token) ?? Task.CompletedTask;
 
 try
 {
@@ -123,7 +127,7 @@ finally
     cancellation.Cancel();
     try
     {
-        await retentionTask;
+        await Task.WhenAll(retentionTask, pukoMaintenanceTask);
     }
     catch (OperationCanceledException)
     {

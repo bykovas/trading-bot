@@ -8,7 +8,8 @@ namespace TradingBot.FuturesWorker;
 internal sealed class FuturesVirtualPortfolio(
     FuturesBotConfiguration config,
     IDryRunPortfolioStore store,
-    IClock? clock = null)
+    IClock? clock = null,
+    PukoReadOnlyChecks? readOnlyChecks = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
 
@@ -128,7 +129,9 @@ internal sealed class FuturesVirtualPortfolio(
         // Futures notional, collateral, prices, fees, and PnL all use USD. Generic
         // persistence properties retain their legacy *Eur names for compatibility.
         var quantity = fillPrice <= 0m ? 0m : notionalEur / fillPrice;
-        var fee = FuturesExecutionCostModel.FeeEur(notionalEur, config.Fees.TakerPct);
+        var feeRate = readOnlyChecks?.Fee();
+        var fee = FuturesExecutionCostModel.FeeEur(notionalEur, feeRate?.Percent ?? config.Fees.TakerPct);
+        if (feeRate is not null) reason += $"; fee_source={feeRate.Source}";
         var initialMargin = leverage <= 0m ? notionalEur : notionalEur / leverage;
 
         if (quantity <= 0m)
@@ -279,7 +282,9 @@ internal sealed class FuturesVirtualPortfolio(
         var slippage = markPrice * config.DryRun.SlippageBps / 10_000m;
         var fillPrice = position.Side == "SHORT" ? markPrice + slippage : markPrice - slippage;
         var grossExit = fillPrice * position.Quantity;
-        var fee = FuturesExecutionCostModel.FeeEur(grossExit, config.Fees.TakerPct);
+        var feeRate = readOnlyChecks?.Fee();
+        var fee = FuturesExecutionCostModel.FeeEur(grossExit, feeRate?.Percent ?? config.Fees.TakerPct);
+        if (feeRate is not null) reason += $"; fee_source={feeRate.Source}";
         var pnl = FuturesMath.UnrealizedPnlEur(position.Side, position.EntryPrice, fillPrice, position.Quantity);
 
         var before = Snapshot(state);
