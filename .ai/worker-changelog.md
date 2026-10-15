@@ -1,3 +1,16 @@
+## 2026-10-15-byko-contract-execution
+
+- BYKO keeps DEBYKO market data but obtains authoritative Kraken execution reference data separately. Discover rule instruments including DOGE, retain real symbols, and round limit prices/quantities to exact tick/lot grids. Missing or expired metadata blocks new entries rather than guessing precision; metadata refresh failures back off for 30 seconds.
+- Do not retry unchanged invalidSize/invalidPrice or below-lot entries. Invalidate contract metadata after permanent exchange validation errors, without replaying the old signal or increasing sizing. Add a read-only contract audit mode which never loads an account or submits an order.
+- No PUKO/LUKO strategy settings, sizing, portfolio or execution mode changes.
+
+## 2026-10-13-debyko-execution-data
+
+- DEBYKO-authority execution reads live prices, pre-submit/trailing quotes and exit candles from DEBYKO, with no local market-data or Kraken public-market fallback. Keep local shadow evaluation independent; fetch entry ATR directly at the webhook's named bar/data slice instead of requiring a matching shadow database row. Missing inputs remain retryable and fail closed.
+- BYKO exit configuration is aligned with PUKO through database overrides only; PUKO and LUKO profiles remain unchanged. Position sizing and risk gates are unchanged.
+- Limit DEBYKO-authority full exit-cycle candle reads to held pairs and the BTC context, using the same 120-bar exit indicator history as PUKO; the independent shadow runner continues its own universe evaluation.
+- Push account filters into both daily trading-load query branches, and add partial journal/flat-state indexes to prevent dashboard cache misses scanning unrelated accounts.
+
 ## 2026-10-12-tp-before-trailing
 
 - Keep configured working and exchange backup TP alongside SL until trailing activation, including existing bot-owned real and paper positions. Reconciliation restores missing real TP; paper checks restore missing virtual TP before evaluating exits.

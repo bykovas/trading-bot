@@ -25,7 +25,9 @@ internal sealed class FuturesDecisionWorker(
     FuturesCapacitySummaryReporter? capacitySummaryReporter = null,
     IDebykoSignalInbox? debykoSignalInbox = null,
     BykoV2LocalSignalRunner? bykoV2LocalSignalRunner = null,
-    IBykoV2VerdictStore? bykoV2VerdictStore = null)
+    IBykoV2VerdictStore? bykoV2VerdictStore = null,
+    IDebykoMarketClient? debykoMarketClient = null,
+    KrakenExecutionUniverseProvider? executionUniverse = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly ITelegramNotifier _telegram = telegramNotifier
@@ -268,7 +270,9 @@ internal sealed class FuturesDecisionWorker(
         // normal MaxActiveInstruments ranking, then missing force-included pairs
         // are appended so core markets do not crowd out fresh movers.
         var heldPairs = state.Positions.Select(position => position.Pair).ToHashSet();
-        var active = SelectActiveInstruments(
+        var active = config.Futures.UsesDebykoEntrySignals
+            ? universe.Where(instrument => heldPairs.Contains(instrument.Pair)).ToList()
+            : SelectActiveInstruments(
             lightStates,
             heldPairs,
             config.UniverseDiscovery.ForceInclude,
@@ -1137,6 +1141,11 @@ internal sealed class FuturesDecisionWorker(
             var portfolioBefore = state.Clone();
             var universeSelection = await ResolveUniverseAsync(state, cancellationToken);
             var universe = universeSelection.Instruments.Where(instrument => instrument.Enabled).ToList();
+            if (executionUniverse is not null && !executionUniverse.HasFreshMetadata)
+            {
+                await RetryOrIgnoreDebykoAsync(signal, "verified Kraken contract registry unavailable", firedAt, cancellationToken);
+                return;
+            }
             var instrument = ResolveDebykoInstrument(signal.Instrument, universe);
             if (instrument is null)
             {
@@ -1182,9 +1191,24 @@ internal sealed class FuturesDecisionWorker(
                 return;
             }
 
-            var entryAtrPct = config.BykoV2.DebykoAlignedDataEnabled && evaluation is not null
-                ? _bykoV2VerdictStore.AlignedEntryAtrPct(config.BotInstance.Id, instrument.Pair, evaluation)
-                : _bykoV2VerdictStore.EntryAtrPct(config.BotInstance.Id, instrument.Pair, rule, entryBar);
+            decimal? entryAtrPct;
+            if (debykoMarketClient is not null && evaluation is not null)
+            {
+                var flush = rule.Contains("FLUSH", StringComparison.Ordinal);
+                var frame = await debykoMarketClient.GetFrameAsync(instrument.Pair, evaluation.BarEnd,
+                    evaluation.DataAsOf, cancellationToken,
+                    flush ? BykoV2Rule.FlushLong : BykoV2Rule.BreakoutLong);
+                var candles = flush ? frame.Frame?.OneMinute : frame.Frame?.FifteenMinute;
+                var atr = candles is null ? null : BykoV2DqlStrategy.Atr(candles, config.BykoV2.AtrPeriod);
+                entryAtrPct = atr is > 0 && candles![^1].Close > 0
+                    ? (decimal)atr.Value / candles[^1].Close * 100m : null;
+            }
+            else
+            {
+                entryAtrPct = config.BykoV2.DebykoAlignedDataEnabled && evaluation is not null
+                    ? _bykoV2VerdictStore.AlignedEntryAtrPct(config.BotInstance.Id, instrument.Pair, evaluation)
+                    : _bykoV2VerdictStore.EntryAtrPct(config.BotInstance.Id, instrument.Pair, rule, entryBar);
+            }
             if (entryAtrPct is not > 0m)
             {
                 await RetryOrIgnoreDebykoAsync(signal, "entry ATR snapshot unavailable", firedAt, cancellationToken);
@@ -1228,7 +1252,13 @@ internal sealed class FuturesDecisionWorker(
 
             if (!fill.PositionOpened)
             {
-                await RetryOrIgnoreDebykoAsync(signal, fill.Action.Reason, firedAt, cancellationToken);
+                if (IsPermanentEntryRejection(fill.Action.Reason)
+                    || fill.Action.HoldReasonCode == "LIVE_ORDER_SIZE_TOO_SMALL")
+                {
+                    if (IsPermanentEntryRejection(fill.Action.Reason)) executionUniverse?.Invalidate();
+                    await _debykoSignalInbox.MarkIgnoredAsync(signal.Id, fill.Action.Reason, cancellationToken);
+                }
+                else await RetryOrIgnoreDebykoAsync(signal, fill.Action.Reason, firedAt, cancellationToken);
                 return;
             }
 
@@ -1395,6 +1425,21 @@ internal sealed class FuturesDecisionWorker(
         {
             Console.WriteLine($"byko-v2-signal-notices: failed: {error.Message}");
         }
+    }
+
+    internal static bool IsPermanentEntryRejection(string reason) =>
+        reason.StartsWith("live futures entry rejected: invalidSize", StringComparison.OrdinalIgnoreCase)
+        || reason.StartsWith("live futures entry rejected: invalidPrice", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<FuturesTickerQuote?> ReadExecutionTickerAsync(
+        InstrumentOptions instrument, CancellationToken cancellationToken)
+    {
+        if (debykoMarketClient is null)
+            return broker is null ? null : await broker.GetTickerAsync(instrument.KrakenPair, cancellationToken);
+        var state = (await debykoMarketClient.GetLiveStatesAsync([instrument], cancellationToken)).SingleOrDefault();
+        return state?.Quote is { } quote
+            ? new FuturesTickerQuote(instrument.KrakenPair, quote.Bid, quote.Ask, quote.Last, quote.MarkPrice, _clock.UtcNow)
+            : null;
     }
 
     private async Task RetryOrIgnoreDebykoAsync(
@@ -2554,6 +2599,7 @@ internal sealed class FuturesDecisionWorker(
     // A store failure only skips hydration; it never blocks the worker.
     private void HydratePriceHistory()
     {
+        if (config.Futures.UsesDebykoEntrySignals) return;
         if (config.Strategy.PriceActionHydrationMinutes <= 0)
         {
             return;
@@ -2724,7 +2770,7 @@ internal sealed class FuturesDecisionWorker(
         {
             try
             {
-                var quote = await broker.GetTickerAsync(instrument.KrakenPair, cancellationToken);
+                var quote = await ReadExecutionTickerAsync(instrument, cancellationToken);
                 if (quote is not null && quote.Bid > 0m && quote.Ask >= quote.Bid)
                 {
                     var mid = (quote.Bid + quote.Ask) / 2m;
@@ -2817,7 +2863,7 @@ internal sealed class FuturesDecisionWorker(
             return;
         }
 
-        var ticker = await broker.GetTickerAsync(instrument.KrakenPair, cancellationToken);
+        var ticker = await ReadExecutionTickerAsync(instrument, cancellationToken);
         var isShort = position.Side.Equals("SHORT", StringComparison.OrdinalIgnoreCase);
         var closeablePrice = isShort
             ? ticker?.Ask ?? 0m
@@ -2979,7 +3025,16 @@ internal sealed class FuturesDecisionWorker(
         }
 
         var side = desired == FuturesDesiredExposure.Short ? "sell" : "buy";
-        var preSubmit = await broker.GetTickerAsync(instrument.KrakenPair, cancellationToken);
+        KrakenContractRules? contract = null;
+        if (debykoMarketClient is not null
+            && (executionUniverse is null || !executionUniverse.TryGetRules(instrument.KrakenPair, out contract)))
+        {
+            var skipped = portfolio.Apply(state, pair, FuturesDesiredExposure.Flat, markPrice, 0m, leverage,
+                reason: $"live futures entry skipped: verified contract metadata unavailable for {instrument.KrakenPair}");
+            skipped.Action.HoldReasonCode = "LIVE_CONTRACT_METADATA_UNAVAILABLE";
+            return skipped;
+        }
+        var preSubmit = await ReadExecutionTickerAsync(instrument, cancellationToken);
         if (preSubmit is null)
         {
             var skipReason = $"live futures entry skipped: fresh pre-submit ticker unavailable for {instrument.KrakenPair}";
@@ -2994,7 +3049,8 @@ internal sealed class FuturesDecisionWorker(
             ? referencePrice * (1m - maxDeviation / 100m)
             : referencePrice * (1m + maxDeviation / 100m);
         var priceDecimals = ResolvePriceDecimals(instrument, preSubmit, referencePrice);
-        var limitPrice = RoundLimitPrice(rawLimitPrice, desired, priceDecimals);
+        var limitPrice = contract?.RoundPrice(rawLimitPrice, desired == FuturesDesiredExposure.Short)
+            ?? RoundLimitPrice(rawLimitPrice, desired, priceDecimals);
 
         // Futures accounting and all USD-quoted perp prices use the same unit. Size
         // from the fresh executable quote instead of the stale decision mark so the
@@ -3002,7 +3058,7 @@ internal sealed class FuturesDecisionWorker(
         var executablePrice = desired == FuturesDesiredExposure.Short ? preSubmit.Bid : preSubmit.Ask;
         var rawSize = executablePrice <= 0m ? 0m : targetNotionalEur / executablePrice;
         var quantityDecimals = instrument.QuantityDecimals ?? 8;
-        var size = TruncateToDecimals(rawSize, quantityDecimals);
+        var size = contract?.RoundQuantity(rawSize) ?? TruncateToDecimals(rawSize, quantityDecimals);
 
         var quoteAlreadyWorse = desired == FuturesDesiredExposure.Short
             ? preSubmit.Bid < limitPrice

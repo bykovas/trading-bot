@@ -186,7 +186,7 @@ app.MapGet("/api/positions", async (string? botInstanceId, CancellationToken can
 // worker health for every instance, the 30 closed-day equity series and today's
 // executed trades — so the page never has to fan out across /api/portfolio,
 // /api/bot-status and the megabyte-sized /api/trade-cycles payload.
-app.MapGet("/api/dashboard", async (string? botInstanceId, CancellationToken cancellationToken) =>
+app.MapGet("/api/dashboard", async (string? botInstanceId, HttpContext context, CancellationToken cancellationToken) =>
 {
     var connectionString = GetConnectionString(builder.Configuration);
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -195,24 +195,33 @@ app.MapGet("/api/dashboard", async (string? botInstanceId, CancellationToken can
     }
 
     var bot = Clean(botInstanceId);
+    var timings = new List<string>();
+    async Task<T> Timed<T>(string name, Func<Task<T>> read)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var value = await read();
+        timings.Add($"{name};dur={watch.Elapsed.TotalMilliseconds.ToString("0.0", CultureInfo.InvariantCulture)}");
+        return value;
+    }
 
     try
     {
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        var summary = await ReadSummary(connection, bot, cancellationToken);
-        var positions = await ReadPositions(connection, bot, cancellationToken);
-        var entries = await ReadEntryContexts(connection, bot, positions, cancellationToken);
+        var summary = await Timed("summary", () => ReadSummary(connection, bot, cancellationToken));
+        var positions = await Timed("positions", () => ReadPositions(connection, bot, cancellationToken));
+        var entries = await Timed("entries", () => ReadEntryContexts(connection, bot, positions, cancellationToken));
         positions = positions
             .Select(position => entries.TryGetValue(position.Pair, out var entry)
                 ? position with { EntryTradeId = entry.TradeId }
                 : position)
             .ToList();
-        var workers = await ReadWorkers(connection, cancellationToken);
-        var equity = await ReadEquityDays(connection, bot, DashboardDefaults.EquityWindowDays, cancellationToken);
-        var today = await ReadTodayTrades(connection, bot, cancellationToken);
-        var rates = await CoinRates.ReadAsync(connectionString, connection, cancellationToken);
+        var workers = await Timed("workers", () => ReadWorkers(connection, cancellationToken));
+        var equity = await Timed("equity", () => ReadEquityDays(connection, bot, DashboardDefaults.EquityWindowDays, cancellationToken));
+        var today = await Timed("trades", () => ReadTodayTrades(connection, bot, cancellationToken));
+        var rates = await Timed("rates", () => CoinRates.ReadAsync(connectionString, connection, cancellationToken));
+        context.Response.Headers["Server-Timing"] = string.Join(", ", timings);
 
         return Results.Ok(new DashboardResponse(
             DateTimeOffset.UtcNow,
@@ -2179,7 +2188,14 @@ static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>>
     var key = $"{botInstanceId}\n{timeZoneId}";
     var now = DateTimeOffset.UtcNow;
 
-    await DailyTradingLoadCache.Gate.WaitAsync(cancellationToken);
+    var gate = DailyTradingLoadCache.Gates.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+    if (DailyTradingLoadCache.Values.TryGetValue(key, out var previous))
+    {
+        if (now - previous.Utc >= DashboardDefaults.TradingLoadCacheFor && gate.Wait(0))
+            _ = RefreshDailyTradingLoadAsync((NpgsqlConnection)((ICloneable)connection).Clone(), botInstanceId, timeZoneId, key, gate);
+        return previous.Value;
+    }
+    await gate.WaitAsync(cancellationToken);
     try
     {
         if (DailyTradingLoadCache.Values.TryGetValue(key, out var cached)
@@ -2194,7 +2210,28 @@ static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>>
     }
     finally
     {
-        DailyTradingLoadCache.Gate.Release();
+        gate.Release();
+    }
+}
+
+static async Task RefreshDailyTradingLoadAsync(NpgsqlConnection connection, string? botInstanceId,
+    string timeZoneId, string key, SemaphoreSlim gate)
+{
+    try
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var ownedConnection = connection;
+        await connection.OpenAsync(timeout.Token);
+        var value = await LoadDailyTradingLoad(connection, botInstanceId, timeZoneId, timeout.Token);
+        DailyTradingLoadCache.Values[key] = (DateTimeOffset.UtcNow, value);
+    }
+    catch (Exception error)
+    {
+        Console.WriteLine($"dashboard trading-load background refresh failed: {error.GetType().Name}");
+    }
+    finally
+    {
+        gate.Release();
     }
 }
 
@@ -2229,15 +2266,16 @@ static async Task<Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)>>
             join dry_run_cycle_facts cycle on cycle.cycle_id = action.cycle_id
             where action.action in ('WOULD_BUY', 'WOULD_OPEN_LONG', 'WOULD_OPEN_SHORT',
                                     'WOULD_SELL', 'WOULD_CLOSE')
+              and (@bot_instance_id is null or cycle.bot_instance_id = @bot_instance_id)
             union all
             select 'FLAT', utc, bot_instance_id,
                    (utc at time zone @time_zone)::date, '', '', 0, 0
             from dry_run_cycle_facts
             where positions_value_after_eur = 0
+              and (@bot_instance_id is null or bot_instance_id = @bot_instance_id)
               and not valuation_unsettled
               and cycle_id not like '%-backfill'
         ) event
-        where (@bot_instance_id is null or event.bot_instance_id = @bot_instance_id)
         order by event.utc, event.decision_index
         """,
         connection);
@@ -4352,8 +4390,8 @@ internal static class DashboardSchema
 
 internal static class DailyTradingLoadCache
 {
-    public static readonly SemaphoreSlim Gate = new(1, 1);
-    public static readonly Dictionary<string, (DateTimeOffset Utc, Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)> Value)> Values = new();
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> Gates = new();
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset Utc, Dictionary<string, (decimal PeakMarginEur, int ClosedTrades)> Value)> Values = new();
 }
 
 internal static class DashboardDefaults
