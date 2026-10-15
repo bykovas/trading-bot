@@ -28,7 +28,9 @@ or BYKO fee tier is read.
 
 Public GET `/derivatives/api/v3/feeschedules` supplies percentage rates, not
 fractions. The greatest tier threshold at or below the configured volume wins.
-The cache expires after one hour. A stale/missing/invalid response falls back
+Refresh is attempted hourly; a successfully fetched rate remains valid for two
+hours so one failed hourly refresh does not immediately discard it. An expired
+or missing rate falls back
 to configured `Fees.TakerPct`, raises a warning and records `configured_fallback`.
 The current entry path is an immediate taker FOK; simulated closes are immediate
 taker executions too. A limit order is not automatically maker. Maker is only

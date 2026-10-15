@@ -1,3 +1,7 @@
+## 2026-10-15-puko-fee-validity-2h
+
+- Keep hourly public fee-schedule refresh attempts, but retain a successful PUKO fee rate for two hours. Failed refreshes do not extend its original validity; at exactly two hours the configured fallback applies. Add boundary assertions at one hour, 1:59:59 and 2:00:00. No deployment.
+
 ## 2026-10-15-puko-readonly-contracts-fees
 
 - Share Kraken contract registry, exact price/quantity grids and executable-contract flags in Core; retain BYKO's reference-data cache and fail-closed entry behavior. Discovery and market metadata now share suspended/post-only filtering and decimal parsing.

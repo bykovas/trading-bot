@@ -64,13 +64,19 @@ public sealed class PukoReadOnlyChecksTests
     [Fact]
     public async Task Public_tier_is_explicit_and_expired_data_uses_labelled_fallback()
     {
-        var (checks, config, clock, _) = Setup();
+        var (checks, config, clock, _) = Setup(failFeeRefresh: true);
         config.PukoReadOnly.FeeVolumeUsd = 1000m;
         await checks.RefreshAsync(default);
         Assert.Equal(.03m, checks.Fee().Percent); // Immediate FOK/IOC/market => taker.
         Assert.Equal(-.01m, checks.Fee(restedAndFilledLater: true).Percent);
         Assert.Contains("volumeUsd=1000", checks.Fee().Source);
         clock.UtcNow = clock.UtcNow.AddHours(1);
+        await checks.RefreshAsync(default);
+        Assert.Equal(.03m, checks.Fee().Percent);
+        Assert.Contains("kraken_public_assumed", checks.Fee().Source);
+        clock.UtcNow = clock.UtcNow.AddMinutes(59).AddSeconds(59);
+        Assert.Equal(.03m, checks.Fee().Percent);
+        clock.UtcNow = clock.UtcNow.AddSeconds(1);
         Assert.Equal(config.Fees.TakerPct, checks.Fee().Percent);
         Assert.Contains("configured_fallback", checks.Fee().Source);
     }
@@ -131,17 +137,20 @@ public sealed class PukoReadOnlyChecksTests
         PukoReadOnly = new() { FeeScheduleUid = "test" }
     };
 
-    private static (PukoReadOnlyChecks, FuturesBotConfiguration, TestClock, Notices) Setup()
+    private static (PukoReadOnlyChecks, FuturesBotConfiguration, TestClock, Notices) Setup(bool failFeeRefresh = false)
     {
         var config = Configuration();
         var clock = new TestClock();
         var telegram = new Notices();
+        var feeCalls = 0;
         var http = new HttpClient(new Handler(request =>
         {
             Assert.Equal(HttpMethod.Get, request.Method);
             Assert.Empty(request.Headers);
             var path = request.RequestUri!.AbsolutePath;
             Assert.True(path is "/derivatives/api/v3/instruments" or "/derivatives/api/v3/feeschedules");
+            if (path.EndsWith("feeschedules") && ++feeCalls > 1 && failFeeRefresh)
+                return new(HttpStatusCode.ServiceUnavailable);
             return new(HttpStatusCode.OK) { Content = new StringContent(path.EndsWith("instruments") ? Registry : Fees) };
         }));
         return (new(http, config, telegram, clock), config, clock, telegram);

@@ -95,7 +95,7 @@ internal sealed class PukoReadOnlyChecks(
                     _loadedSchedule = config.PukoReadOnly.FeeScheduleUid;
                     _loadedVolume = config.PukoReadOnly.FeeVolumeUsd;
                     _feesFetchedAt = _clock.UtcNow;
-                    _feesValidUntil = _feesFetchedAt.AddHours(1);
+                    _feesValidUntil = _feesFetchedAt.AddHours(2);
                 }
                 Console.WriteLine($"PUKO_FEE source={Fee().Source}");
             }
