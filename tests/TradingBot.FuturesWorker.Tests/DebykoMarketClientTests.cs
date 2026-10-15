@@ -47,7 +47,7 @@ public sealed class DebykoMarketClientTests
             Assert.Equal("/v2/snapshots", request.RequestUri!.AbsolutePath);
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             Assert.False(body.RootElement.GetProperty("allow_stale").GetBoolean());
-            Assert.Contains("BTC-PERP,ETH-PERP", body.RootElement.GetProperty("where").GetString());
+            Assert.Equal("venue = KRAKEN-FUTURES", body.RootElement.GetProperty("where").GetString());
             return Response(new { items = new[] { "BTC", "ETH" }.Select(asset => new
             {
                 instrument = asset + "-PERP", venue = "KRAKEN-FUTURES", quote = "USD",
@@ -72,6 +72,57 @@ public sealed class DebykoMarketClientTests
             if (available) Assert.Equal(100m, state.Quote!.MarkPrice);
             else Assert.NotNull(state.DataWarning);
         }
+    }
+
+    [Theory]
+    [InlineData(41)]
+    [InlineData(65)]
+    public async Task LiveSnapshotsUseOneVenueRequestAndLocallySelectEveryRequestedInstrument(int count)
+    {
+        var instruments = Enumerable.Range(0, count).Select(i =>
+            new TradingBot.Core.Common.InstrumentOptions { Pair = $"ASSET{i}/USD", Enabled = true }).ToArray();
+        static object Listing(string instrument, string venue, string quote) => new
+        {
+            instrument, venue, quote,
+            layers = new
+            {
+                mark = new { status = "present", values = new { mark = "100" } },
+                ticker = new { status = "present", values = new { last = "101" } },
+                book = new { status = "present", values = new { bid = "99", ask = "102" } }
+            }
+        };
+        var items = instruments.Reverse()
+            .Select(x => Listing(DebykoMarketClient.ToInstrument(x.Pair), "KRAKEN-FUTURES", "USD"))
+            .Concat(new[]
+            {
+                Listing("UNREQUESTED-PERP", "KRAKEN-FUTURES", "USD"),
+                Listing("ASSET0-PERP", "OTHER-VENUE", "USD"),
+                Listing("ASSET0-PERP", "KRAKEN-FUTURES", "USDT")
+            }).ToArray();
+        var calls = 0;
+        var client = Client(async request =>
+        {
+            calls++;
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("/v2/snapshots", request.RequestUri!.AbsolutePath);
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            Assert.Equal("venue = KRAKEN-FUTURES", body.RootElement.GetProperty("where").GetString());
+            Assert.Equal(new[] { "ticker", "mark", "book", "funding" },
+                body.RootElement.GetProperty("layers").EnumerateArray().Select(x => x.GetString()));
+            Assert.False(body.RootElement.GetProperty("allow_stale").GetBoolean());
+            return Response(new { items });
+        });
+
+        var states = await client.GetLiveStatesAsync(instruments, default);
+
+        Assert.Equal(1, calls);
+        Assert.Equal(instruments.Select(x => x.Pair), states.Select(x => x.Instrument.Pair));
+        Assert.All(states, state =>
+        {
+            Assert.NotNull(state.Quote);
+            Assert.Equal(100m, state.Quote.MarkPrice);
+            Assert.Null(state.DataWarning);
+        });
     }
 
     private static readonly DateTimeOffset End = DateTimeOffset.Parse("2026-10-10T12:07:00Z");

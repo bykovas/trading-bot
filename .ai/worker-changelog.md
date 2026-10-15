@@ -1,3 +1,8 @@
+## 2026-10-15-byko-snapshots-venue-scope
+
+- Request live DEBYKO snapshots once for `venue = KRAKEN-FUTURES`, then retain the existing local instrument/venue/USD selection. Do not encode the requested universe in a DQL IN-list, avoiding DQL_COMPLEXITY for 40+ instruments without batching or hardcoding a DQL limit.
+- Preserve requested instrument order, missing/stale/ambiguous handling, snapshot layers, universe selection, strategy and entry/exit logic. Add 41- and 65-instrument regression cases with unrelated listings; no deployment in this change.
+
 ## 2026-10-15-byko-contract-execution
 
 - BYKO keeps DEBYKO market data but obtains authoritative Kraken execution reference data separately. Discover rule instruments including DOGE, retain real symbols, and round limit prices/quantities to exact tick/lot grids. Missing or expired metadata blocks new entries rather than guessing precision; metadata refresh failures back off for 30 seconds.

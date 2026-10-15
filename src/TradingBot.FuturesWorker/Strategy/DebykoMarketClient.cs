@@ -67,7 +67,7 @@ internal sealed class DebykoMarketClient : IDebykoMarketClient
         if (enabled.Length == 0) return [];
         var audit = await SendAsync("/v2/snapshots", new
         {
-            where = $"venue = {Venue} and quote = USD and instrument in ({string.Join(",", enabled.Select(x => ToInstrument(x.Pair)))})",
+            where = $"venue = {Venue}",
             layers = new[] { "ticker", "mark", "book", "funding" },
             allow_stale = false, units = "published", number_format = "string"
         }, cancellationToken);
