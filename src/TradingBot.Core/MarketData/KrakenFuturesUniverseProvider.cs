@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 
 namespace TradingBot.Core.MarketData;
@@ -65,21 +64,19 @@ public sealed class KrakenFuturesUniverseProvider(
             if (string.IsNullOrWhiteSpace(symbol)
                 || !symbol.StartsWith("PF_", StringComparison.OrdinalIgnoreCase)
                 || !symbol.EndsWith("USD", StringComparison.OrdinalIgnoreCase)
-                || !GetBool(item, "tradeable")
-                || GetBool(item, "postOnly"))
+                || !KrakenContractMetadata.IsExecutable(item))
             {
                 continue;
             }
 
-            var pair = GetString(item, "pair");
             instruments.Add(new InstrumentOptions
             {
-                Pair = NormalizePair(symbol, pair),
+                Pair = KrakenContractMetadata.Pair(symbol),
                 KrakenPair = symbol,
                 Venue = "KrakenFutures",
                 Enabled = true,
-                QuantityDecimals = GetInt(item, "contractValueTradePrecision"),
-                PriceDecimals = TickDecimals(GetDecimal(item, "tickSize"))
+                QuantityDecimals = KrakenContractMetadata.Precision(item),
+                PriceDecimals = KrakenContractMetadata.DecimalPlaces(KrakenContractMetadata.Decimal(item, "tickSize"))
             });
         }
 
@@ -172,20 +169,6 @@ public sealed class KrakenFuturesUniverseProvider(
                 warning));
     }
 
-    private static string NormalizePair(string symbol, string? pair)
-    {
-        if (!string.IsNullOrWhiteSpace(pair) && pair.Contains('/'))
-        {
-            return pair;
-        }
-
-        var compact = symbol.StartsWith("PF_", StringComparison.OrdinalIgnoreCase)
-            ? symbol[3..]
-            : symbol;
-        return compact.EndsWith("USD", StringComparison.OrdinalIgnoreCase)
-            ? $"{compact[..^3]}/USD"
-            : compact;
-    }
 
     private static HashSet<string> BuildSet(IEnumerable<string> values) =>
         values.Where(value => !string.IsNullOrWhiteSpace(value))
@@ -197,63 +180,6 @@ public sealed class KrakenFuturesUniverseProvider(
             ? value.GetString()
             : null;
 
-    private static bool GetBool(JsonElement element, string propertyName)
-    {
-        if (!element.TryGetProperty(propertyName, out var value))
-        {
-            return false;
-        }
-
-        return value.ValueKind switch
-        {
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed) && parsed,
-            _ => false
-        };
-    }
-
-    private static int? GetInt(JsonElement element, string propertyName)
-    {
-        if (!element.TryGetProperty(propertyName, out var value))
-        {
-            return null;
-        }
-
-        return value.ValueKind switch
-        {
-            JsonValueKind.Number when value.TryGetInt32(out var number) => number,
-            JsonValueKind.String when int.TryParse(value.GetString(), out var number) => number,
-            _ => null
-        };
-    }
-
-    private static decimal GetDecimal(JsonElement element, string propertyName)
-    {
-        if (!element.TryGetProperty(propertyName, out var value))
-        {
-            return 0m;
-        }
-
-        return value.ValueKind switch
-        {
-            JsonValueKind.Number => value.GetDecimal(),
-            JsonValueKind.String when decimal.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var number) => number,
-            _ => 0m
-        };
-    }
-
-    private static int TickDecimals(decimal tickSize)
-    {
-        if (tickSize <= 0m)
-        {
-            return 0;
-        }
-
-        var text = tickSize.ToString("0.############################", CultureInfo.InvariantCulture);
-        var dot = text.IndexOf('.', StringComparison.Ordinal);
-        return dot < 0 ? 0 : text.Length - dot - 1;
-    }
 
     private static void ThrowIfErrorResult(JsonElement root, string endpoint)
     {

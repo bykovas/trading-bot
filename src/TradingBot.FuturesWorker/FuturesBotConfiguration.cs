@@ -30,6 +30,7 @@ internal sealed class FuturesBotConfiguration
     public FuturesOptions Futures { get; set; } = new();
     public MarginOptions Margin { get; set; } = new();
     public FuturesFeesOptions Fees { get; set; } = new();
+    public PukoReadOnlyOptions PukoReadOnly { get; set; } = new();
     public FundingOptions Funding { get; set; } = new();
     public FuturesEntryOptions Entry { get; set; } = new();
     public FuturesFreshnessOptions Freshness { get; set; } = new();
@@ -883,6 +884,13 @@ internal sealed class FuturesFeesOptions
 {
     public decimal MakerPct { get; set; } = 0.02m;
     public decimal TakerPct { get; set; } = 0.05m;
+}
+
+internal sealed class PukoReadOnlyOptions
+{
+    // An explicit simulation assumption, never inferred from another account's keys/tier.
+    public string FeeScheduleUid { get; set; } = "97ae0cc8-2964-43ea-91e9-d8e720b02b19";
+    public decimal FeeVolumeUsd { get; set; } = 0m;
 }
 
 internal sealed class FundingOptions

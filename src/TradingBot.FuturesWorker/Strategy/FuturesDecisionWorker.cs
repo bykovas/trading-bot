@@ -27,7 +27,8 @@ internal sealed class FuturesDecisionWorker(
     BykoV2LocalSignalRunner? bykoV2LocalSignalRunner = null,
     IBykoV2VerdictStore? bykoV2VerdictStore = null,
     IDebykoMarketClient? debykoMarketClient = null,
-    KrakenExecutionUniverseProvider? executionUniverse = null)
+    KrakenExecutionUniverseProvider? executionUniverse = null,
+    PukoReadOnlyChecks? pukoReadOnly = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
     private readonly ITelegramNotifier _telegram = telegramNotifier
@@ -111,6 +112,7 @@ internal sealed class FuturesDecisionWorker(
         Console.WriteLine($"futures limits: {config.RuntimeLimits.Describe()}, shorts={(config.Futures.AllowShorts ? "allowed" : "off")}, entrySource={config.Futures.EntrySignalSource}, flipLongEntries={config.Futures.FlipLongEntries}, ownSignalEntries={(config.Futures.OwnSignalEntriesEnabled ? "on" : "off")}, mirrorRole={MirrorRole}");
         Console.WriteLine($"futures exit checks: fastExit={config.Futures.FastExitCheckSeconds}s fullCycle={config.Worker.LoopIntervalSeconds}s aligned={config.Worker.AlignCyclesToClock}");
         HydratePriceHistory();
+        if (pukoReadOnly is not null) await pukoReadOnly.RefreshAsync(cancellationToken);
 
         // One-shot repair when the operator asks for it, before the first cycle so the
         // journal is whole by the time anything reads it.
@@ -1332,6 +1334,8 @@ internal sealed class FuturesDecisionWorker(
             candidate.Pair.Equals(selected.Pair, StringComparison.OrdinalIgnoreCase));
         if (instrument is null)
         {
+            if (pukoReadOnly is not null)
+                await pukoReadOnly.AlertAsync(selected.Pair, "ENTRY_INSTRUMENT_MISSING", cancellationToken);
             return;
         }
 
@@ -2981,6 +2985,19 @@ internal sealed class FuturesDecisionWorker(
     {
         if (!config.Futures.LiveTradingEnabled)
         {
+            if (pukoReadOnly is not null && desired != FuturesDesiredExposure.Flat
+                && !state.Positions.Any(x => x.Pair.Equals(pair, StringComparison.OrdinalIgnoreCase)))
+            {
+                try
+                {
+                    reason += "; " + await pukoReadOnly.CheckAsync(instrument, desired, markPrice, targetNotionalEur, cancellationToken);
+                }
+                catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    await pukoReadOnly.AlertAsync(pair, "PREFLIGHT_FAILED", cancellationToken);
+                    reason += "; local_preflight=FAILED paper_execution_unchanged";
+                }
+            }
             return portfolio.Apply(state, pair, desired, markPrice, targetNotionalEur, leverage, reduceOnly, reason, exitTriggerSource, entryPlan, flippedEntry);
         }
 

@@ -7,6 +7,17 @@ namespace TradingBot.FuturesWorker.Tests;
 
 public sealed class FuturesExecutionControlTests
 {
+    [Fact]
+    public async Task Paper_entry_and_exit_never_call_the_order_broker_even_when_local_preflight_fails()
+    {
+        var broker = new StubBroker { ForbidOrders = true };
+        var (fill, _, _) = await ExecuteEntryAsync(broker, 3.49456893782m, live: false);
+        Assert.True(fill.PositionOpened);
+        Assert.Equal(0, broker.FokCallCount);
+        Assert.Equal(0, broker.CloseCallCount);
+        Assert.Empty(broker.ProtectionCalls);
+        Assert.Contains("local_preflight=METADATA_UNAVAILABLE", fill.Action.Reason);
+    }
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -146,13 +157,14 @@ public sealed class FuturesExecutionControlTests
 
     private static async Task<(FuturesFillResult Fill, StubBroker Broker, PortfolioState State)> ExecuteEntryAsync(
         StubBroker broker,
-        decimal signalPrice)
+        decimal signalPrice,
+        bool live = true)
     {
         var config = new FuturesBotConfiguration
         {
             Futures = new FuturesOptions
             {
-                LiveTradingEnabled = true,
+                LiveTradingEnabled = live,
                 TargetMarginUsd = 10m,
                 DefaultLeverage = 10m,
                 MaxLeverage = 10m
@@ -165,7 +177,10 @@ public sealed class FuturesExecutionControlTests
         };
         InvokeNormalize(config);
         var store = new NullStore();
-        var portfolio = new FuturesVirtualPortfolio(config, store);
+        var readOnly = live ? null : new PukoReadOnlyChecks(
+            new HttpClient(new OfflineHandler()), config, new NullTelegramNotifier());
+        if (readOnly is not null) await readOnly.RefreshAsync(default);
+        var portfolio = new FuturesVirtualPortfolio(config, store, readOnlyChecks: readOnly);
         var state = portfolio.Load();
         var worker = new FuturesDecisionWorker(
             config,
@@ -175,7 +190,8 @@ public sealed class FuturesExecutionControlTests
             new MarginRiskManager(config),
             portfolio,
             new TpSlOrchestrator(config),
-            broker);
+            broker,
+            pukoReadOnly: readOnly);
         var method = typeof(FuturesDecisionWorker).GetMethod("ApplyOrExecuteLiveAsync", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
         var task = (Task<FuturesFillResult>)method.Invoke(worker, new object?[]
@@ -196,7 +212,19 @@ public sealed class FuturesExecutionControlTests
             false
         })!;
 
-        return (await task, broker, state);
+        var result = await task;
+        if (!live)
+        {
+            var close = (Task<FuturesFillResult>)method.Invoke(worker, new object?[]
+            {
+                state, "RIVER/USD", FuturesDesiredExposure.Flat, 3.49456893782m,
+                0m, 10m, true, "paper exit", null,
+                new InstrumentOptions { Pair = "RIVER/USD", KrakenPair = "PF_RIVERUSD" },
+                null, CancellationToken.None, null, false
+            })!;
+            Assert.True((await close).PositionClosed);
+        }
+        return (result, broker, state);
     }
 
     private static void InvokeNormalize(FuturesBotConfiguration config)
@@ -208,6 +236,8 @@ public sealed class FuturesExecutionControlTests
 
     private sealed class StubBroker : IFuturesBroker
     {
+        public bool ForbidOrders { get; init; }
+        private void CheckOrders() { if (ForbidOrders) throw new InvalidOperationException("Paper must not call order broker"); }
         public Task<IReadOnlyList<PortfolioCashEvent>> GetCashEventsAsync(DateTimeOffset since, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<PortfolioCashEvent>>(Array.Empty<PortfolioCashEvent>());
 
@@ -239,12 +269,14 @@ public sealed class FuturesExecutionControlTests
 
         public Task<FuturesOrderResult> SendOrderAsync(string symbol, string side, decimal size, bool reduceOnly, decimal leverage, CancellationToken cancellationToken)
         {
+            CheckOrders();
             CloseCallCount++;
             return Task.FromResult(new FuturesOrderResult("placed", "close-1", null));
         }
 
         public Task<FuturesOrderResult> SendFillOrKillLimitOrderAsync(string symbol, string side, decimal size, decimal limitPrice, bool reduceOnly, CancellationToken cancellationToken)
         {
+            CheckOrders();
             FokCallCount++;
             LastSize = size;
             LastLimitPrice = limitPrice;
@@ -271,12 +303,14 @@ public sealed class FuturesExecutionControlTests
             bool reduceOnly,
             CancellationToken cancellationToken)
         {
+            CheckOrders();
             ProtectionCalls.Add("trail");
             return Task.FromResult(TrailingResult);
         }
 
         public Task<FuturesOrderResult> CancelOrderAsync(string orderId, CancellationToken cancellationToken)
         {
+            CheckOrders();
             ProtectionCalls.Add("cancel:" + orderId);
             return Task.FromResult(new FuturesOrderResult("cancelled", orderId, null));
         }
@@ -286,6 +320,15 @@ public sealed class FuturesExecutionControlTests
 
         public Task CancelAllAfterAsync(int timeoutSeconds, CancellationToken cancellationToken) =>
             Task.CompletedTask;
+    }
+
+    private sealed class OfflineHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
+        }
     }
 
     private sealed class NullStore : IDryRunPortfolioStore
