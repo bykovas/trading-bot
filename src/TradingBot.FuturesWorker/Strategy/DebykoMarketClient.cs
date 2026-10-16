@@ -139,6 +139,10 @@ internal sealed class DebykoMarketClient : IDebykoMarketClient
         DateTimeOffset dataAsOf, CancellationToken cancellationToken, BykoV2Rule? rule, bool btcReference,
         int? executionCandleCount = null)
     {
+        // DEBYKO publishes instants at millisecond precision. Floor the local exit
+        // clock before requesting a slice, keeping exact identity checks intact.
+        if (executionCandleCount is not null)
+            dataAsOf = DateTimeOffset.FromUnixTimeMilliseconds(dataAsOf.ToUnixTimeMilliseconds());
         var instrument = ToInstrument(pair);
         var audits = new List<DebykoHttpAudit>();
         if (dataAsOf < barEnd) return new(null, "data_as_of precedes bar_end", audits);

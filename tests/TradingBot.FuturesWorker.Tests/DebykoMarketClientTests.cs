@@ -7,8 +7,10 @@ namespace TradingBot.FuturesWorker.Tests;
 
 public sealed class DebykoMarketClientTests
 {
-    [Fact]
-    public async Task ExitIndicatorsUse120ClosedBarsWithoutExtraMarketRequests()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(4567)]
+    public async Task ExitIndicatorsUse120ClosedBarsWithoutExtraMarketRequests(int subMillisecondTicks)
     {
         var calls = 0;
         var client = Client(async request =>
@@ -20,6 +22,7 @@ public sealed class DebykoMarketClientTests
             Assert.Equal(120, query.GetProperty("limit").GetInt32());
             Assert.Equal("15m", query.GetProperty("timeframe").GetString());
             Assert.True(query.GetProperty("closed_only").GetBoolean());
+            Assert.Equal(Cut, query.GetProperty("as_of").GetDateTimeOffset());
             var from = query.GetProperty("from").GetDateTimeOffset();
             var to = query.GetProperty("to").GetDateTimeOffset();
             return Response(new { data_as_of = Cut, from, to, timeframe = "15m", price_type = "trade", units = "published",
@@ -30,7 +33,7 @@ public sealed class DebykoMarketClientTests
                         status = "present", open = "100", high = "102", low = "99", close = "101", volume = "10", trade_count = 1
                     }) } } });
         });
-        var read = await client.GetExitFrameAsync("XBT/USD", End, Cut, 15, 120, default);
+        var read = await client.GetExitFrameAsync("XBT/USD", End, Cut.AddTicks(subMillisecondTicks), 15, 120, default);
         Assert.NotNull(read.Frame);
         Assert.Equal(120, read.Frame.FifteenMinute.Count);
         Assert.Equal(1, calls);
