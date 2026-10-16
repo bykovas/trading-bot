@@ -18,6 +18,8 @@ internal sealed class DebykoExecutionMarketDataSource(IDebykoMarketClient client
             var step = TimeSpan.FromMinutes(minutes).Ticks;
             var end = new DateTimeOffset(now.UtcTicks / step * step, TimeSpan.Zero);
             var read = await client.GetExitFrameAsync(instrument.Pair, end, now, minutes, candleCount, cancellationToken);
+            if (read.Frame is null)
+                Console.WriteLine($"debyko-exit-frame unavailable pair={instrument.Pair} reason={read.Reason}");
             states.Add(new InstrumentMarketState
             {
                 Instrument = instrument,

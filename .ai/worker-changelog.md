@@ -1,3 +1,8 @@
+## 2026-10-16-byko-exit-slice-precision
+
+- Floor locally generated exit candle as_of times to DEBYKO's published millisecond precision before the request. Preserve exact response identity validation; previously sub-millisecond clock ticks rejected valid candles and silently bypassed BYKO's normal signal-reversal exit scoring.
+- Log unavailable DEBYKO exit frames with pair and reason. Add regression coverage for sub-millisecond execution timestamps; preserve rule evaluation slices, PUKO/LUKO inputs, entry authority, sizing and exit thresholds.
+
 ## 2026-10-15-puko-rule-scoped-preflight
 
 - Restrict PUKO's public contract registry and hourly contract audit to BykoV2.Universe, the same scope used by its local/aligned rule evaluators. Legacy CandidateUniverse entries no longer expand preflight or produce unrelated missing-contract Telegram warnings.
