@@ -1,3 +1,9 @@
+## 2026-10-17-puko-management-data-parity
+
+- Route only PUKO's held-position candles through DEBYKO, using the same Core candle source as BYKO. Keep quotes, entry authority, entry candidates, universe, strategy thresholds and live execution unchanged; LUKO retains its existing data source.
+- Centralize the management candle window in Core: 120 closed bars, existing 1m/15m selection, UTC bar boundary and millisecond as_of. One PositionManagementData.CandlePriceType option defaults to trade; rule-evaluation requests remain trade independently of this option. No shared-database fallback for held pairs.
+- Add offline request/routing and step-by-step decision-policy parity tests for long/short stop-loss, take-profit, trailing and reversal, plus boundary, failure and position-close routing coverage. Document remaining live/paper input and lifecycle differences without changing them. No deployment.
+
 ## 2026-10-16-byko-exit-slice-precision
 
 - Floor locally generated exit candle as_of times to DEBYKO's published millisecond precision before the request. Preserve exact response identity validation; previously sub-millisecond clock ticks rejected valid candles and silently bypassed BYKO's normal signal-reversal exit scoring.
