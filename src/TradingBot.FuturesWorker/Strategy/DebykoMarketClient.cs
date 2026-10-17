@@ -35,7 +35,7 @@ internal sealed record DebykoFrameRead(BykoV2MarketFrame? Frame, string? Reason,
     public IReadOnlyList<string> RawBodies => Responses.Select(response => JsonSerializer.Serialize(response)).ToArray();
 }
 
-internal sealed class DebykoMarketClient : IDebykoMarketClient
+internal sealed class DebykoMarketClient : IDebykoMarketClient, IDebykoPositionMarketClient
 {
     private readonly HttpClient http;
     private readonly string apiKey;
@@ -135,14 +135,24 @@ internal sealed class DebykoMarketClient : IDebykoMarketClient
         => GetFrameCoreAsync(pair, barEnd, dataAsOf, cancellationToken,
             minutes == 1 ? BykoV2Rule.FlushLong : BykoV2Rule.BreakoutLong, true, count);
 
+    public async Task<PositionCandleRead> GetPositionCandlesAsync(string pair, PositionCandleWindow window,
+        string priceType, CancellationToken cancellationToken)
+    {
+        var read = await GetFrameCoreAsync(pair, window.End, window.AsOf, cancellationToken,
+            window.Minutes == 1 ? BykoV2Rule.FlushLong : BykoV2Rule.BreakoutLong, true,
+            PositionCandleWindow.HistoryBars, priceType);
+        return new((window.Minutes == 1 ? read.Frame?.OneMinute : read.Frame?.FifteenMinute) ?? [], read.Reason);
+    }
+
     private async Task<DebykoFrameRead> GetFrameCoreAsync(string pair, DateTimeOffset barEnd,
         DateTimeOffset dataAsOf, CancellationToken cancellationToken, BykoV2Rule? rule, bool btcReference,
-        int? executionCandleCount = null)
+        int? executionCandleCount = null, string executionPriceType = "trade")
     {
         // DEBYKO publishes instants at millisecond precision. Floor the local exit
         // clock before requesting a slice, keeping exact identity checks intact.
         if (executionCandleCount is not null)
-            dataAsOf = DateTimeOffset.FromUnixTimeMilliseconds(dataAsOf.ToUnixTimeMilliseconds());
+            dataAsOf = PositionCandleWindow.NormalizeAsOf(dataAsOf);
+        var priceType = executionCandleCount is null ? "trade" : executionPriceType;
         var instrument = ToInstrument(pair);
         var audits = new List<DebykoHttpAudit>();
         if (dataAsOf < barEnd) return new(null, "data_as_of precedes bar_end", audits);
@@ -168,14 +178,14 @@ internal sealed class DebykoMarketClient : IDebykoMarketClient
                 var audit = await SendAsync("/v2/candles", new
                 {
                     where, timeframe, from = Utc(start), to = Utc(end), as_of = Utc(dataAsOf), limit = count,
-                    units = "published", number_format = "string", price_type = "trade", closed_only = true, include_gaps = true
+                    units = "published", number_format = "string", price_type = priceType, closed_only = true, include_gaps = true
                 }, cancellationToken);
                 audits.Add(audit);
                 using var document = JsonDocument.Parse(audit.RawBody);
                 var root = document.RootElement;
                 Require(Instant(root, "data_as_of") == dataAsOf.ToUniversalTime()
                     && Instant(root, "from") == start && Instant(root, "to") == end
-                    && Text(root, "timeframe") == timeframe && Text(root, "price_type") == "trade"
+                    && Text(root, "timeframe") == timeframe && Text(root, "price_type") == priceType
                     && Text(root, "units") == "published", "candle response bounds or units mismatch");
                 var item = Listing(root, instrument);
                 var rows = item.GetProperty("candles");

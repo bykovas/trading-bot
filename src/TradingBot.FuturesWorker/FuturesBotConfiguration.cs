@@ -45,6 +45,7 @@ internal sealed class FuturesBotConfiguration
     public FuturesEntryMirrorOptions EntryMirror { get; set; } = new();
     public BykoV2Options BykoV2 { get; set; } = new();
     public DebykoDataOptions DebykoData { get; set; } = new();
+    public PositionManagementDataOptions PositionManagementData { get; set; } = new();
 
     public TelegramNotificationOptions Telegram { get; set; } = new();
     public CorrelationRiskOptions CorrelationRisk { get; set; } = new();
@@ -91,6 +92,7 @@ internal sealed class FuturesBotConfiguration
         SetIfPresent("TRADINGBOT_BOT_INSTANCE_ID", value => config.BotInstance.Id = value);
         SetIfPresent("TRADINGBOT_BOT_INSTANCE_NAME", value => config.BotInstance.Name = value);
         SetIfPresent("TRADINGBOT_MARKET_DATA_MODE", value => config.Kraken.MarketDataMode = value);
+        SetIfPresent("TRADINGBOT_POSITION_CANDLE_PRICE_TYPE", value => config.PositionManagementData.CandlePriceType = value);
         SetIfPresent("TRADINGBOT_KRAKEN_BASE_URL", value => config.Kraken.BaseUrl = value);
         SetIfPresent("TRADINGBOT_LOOP_INTERVAL_SECONDS", value => config.Worker.LoopIntervalSeconds = ParseInt(value, config.Worker.LoopIntervalSeconds));
         SetIfPresent("TRADINGBOT_RUN_ONCE", value => config.Worker.RunOnce = ParseBool(value, config.Worker.RunOnce));

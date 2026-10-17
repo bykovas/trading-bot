@@ -55,14 +55,21 @@ var (marketDataSource, universeProvider) = MarketDataSourceFactory.Create(
 
 IDebykoMarketClient? executionMarketClient = null;
 KrakenExecutionUniverseProvider? executionUniverse = null;
-if (config.Futures.UsesDebykoEntrySignals)
+DebykoPositionMarketDataSource? positionMarketData = null;
+if (config.Futures.UsesDebykoEntrySignals || config.Futures.UsesBykoV2EntrySignals)
 {
-    executionMarketClient = new DebykoMarketClient(new HttpClient
+    var client = new DebykoMarketClient(new HttpClient
     {
         BaseAddress = new Uri(config.DebykoData.BaseUrl),
         Timeout = TimeSpan.FromSeconds(config.Http.TimeoutSeconds)
     }, config.DebykoData.ApiKey);
-    marketDataSource = new DebykoExecutionMarketDataSource(executionMarketClient);
+    positionMarketData = new DebykoPositionMarketDataSource(client, config.PositionManagementData);
+    if (config.Futures.UsesDebykoEntrySignals)
+        executionMarketClient = client;
+}
+if (config.Futures.UsesDebykoEntrySignals)
+{
+    marketDataSource = positionMarketData!;
     executionUniverse = new KrakenExecutionUniverseProvider(httpClient, config.Kraken,
         config.CandidateUniverse, config.BykoV2.Universe);
     universeProvider = executionUniverse;
@@ -77,6 +84,9 @@ ITelegramNotifier telegramNotifier = config.Telegram.IsConfigured
 var pukoReadOnly = PukoReadOnlyChecks.Applies(config)
     ? new PukoReadOnlyChecks(httpClient, config, telegramNotifier) : null;
 var portfolio = new FuturesVirtualPortfolio(config, store, readOnlyChecks: pukoReadOnly);
+if (config.Futures.UsesBykoV2EntrySignals)
+    marketDataSource = new HeldPositionMarketDataSource(marketDataSource, positionMarketData!,
+        () => portfolio.Load().Positions.Select(x => x.Pair).ToHashSet(StringComparer.OrdinalIgnoreCase));
 var entryMirrorStore = CreateEntryMirrorStore(config);
 var debykoSignalInbox = CreateDebykoSignalInbox(config);
 var bykoV2VerdictStore = CreateBykoV2VerdictStore(config);
