@@ -15,10 +15,12 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="TradingBot.FuturesWorker.Tests" />
+    <InternalsVisibleTo Include="TradingBot.ArenaReporter" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\TradingBot.Core\TradingBot.Core.csproj" />
+    <ProjectReference Include="..\TradingBot.Arena\TradingBot.Arena.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -3,6 +3,34 @@ using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using TradingBot.Arena;
 
+if (args.Length == 3 && args[0] == "replay-trades")
+{
+    string dir = PrivateFiles.DirectoryOutsideRepository(Path.GetDirectoryName(Path.GetFullPath(args[1]))!);
+    var plan = JsonSerializer.Deserialize<ArenaImportPlan>(await File.ReadAllTextAsync(args[1])) ?? throw new InvalidDataException("Missing approved plan.");
+    var contract = new ArenaContract(await File.ReadAllTextAsync(Path.Combine(dir, "openapi.json")));
+    var registry = JsonSerializer.Deserialize<ArenaRegistryListing[]>(await File.ReadAllTextAsync(Path.Combine(dir, "registry.json")))!;
+    if (args[2] != plan.Digest || contract.SchemaHash != plan.SchemaHash || ArenaSubmission.RegistryHash(registry) != plan.RegistryHash)
+        throw new InvalidDataException("Approved identity/contract digest changed; no write.");
+    var errors = contract.Validate(plan.Profile, plan.Trades, plan.Positions, registry, DateTimeOffset.UtcNow);
+    if (errors.Count != 0) throw new InvalidDataException(string.Join("; ", errors));
+    _ = ArenaContract.Batches(plan.Trades); // Validate all batches before the first HTTP write.
+    string key = Environment.GetEnvironmentVariable("DEBYKO_ARENA_KEY") is { Length: > 0 } value ? value : throw new InvalidOperationException("Protected DEBYKO_ARENA_KEY is required.");
+    using var replayHttp = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
+    var client = new ArenaSubmission(replayHttp, key);
+    int total = 0;
+    foreach (byte[] batch in ArenaContract.Batches(plan.Trades))
+    {
+        var rows = JsonNode.Parse(batch)!.AsArray().OfType<JsonObject>().ToArray();
+        var receipt = await client.TradesAsync(rows, default);
+        await using (var file = PrivateFiles.CreateNew(Path.Combine(dir, "replay-" + Guid.NewGuid().ToString("N") + ".json")))
+            await JsonSerializer.SerializeAsync(file, new { PlanDigest = plan.Digest, Receipt = receipt });
+        if (receipt.Status != 200 || receipt.Accepted != 0 || receipt.Updated != 0) throw new InvalidDataException("Imported-history replay was not a no-op; stop and inspect the durable receipt.");
+        total += receipt.Submitted;
+        Console.WriteLine($"Arena closed-history replay: HTTP200 submitted={receipt.Submitted} accepted=0 updated=0");
+    }
+    Console.WriteLine($"Verified {total} imported native trade IDs; profile and positions were not sent. No worker activation.");
+    return 0;
+}
 if (args.Length == 4 && args[0] == "send")
 {
     string dir = PrivateFiles.DirectoryOutsideRepository(Path.GetDirectoryName(Path.GetFullPath(args[1]))!);

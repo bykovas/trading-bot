@@ -173,6 +173,8 @@ public sealed class PortfolioPosition
     // DipBounce. Null for legacy positions and spot rows. Carried to the close
     // action so realized-PnL-per-channel is queryable in SQL.
     public string? EntryChannel { get; set; }
+    // Immutable opening webhook identity; reporting only, never a signal to execute.
+    public string? DebykoFiringId { get; set; }
 
     // Which STRATEGY opened this position: Momentum (the original scorer path) or
     // Reversal (the event-based fade of a sharp move). Orthogonal to EntryChannel -
@@ -241,6 +243,7 @@ public sealed class PortfolioPosition
         SlOrderState = SlOrderState,
         Origin = Origin,
         EntryChannel = EntryChannel,
+        DebykoFiringId = DebykoFiringId,
         Strategy = Strategy,
         FlippedEntry = FlippedEntry,
         AdoptedWhileRunning = AdoptedWhileRunning

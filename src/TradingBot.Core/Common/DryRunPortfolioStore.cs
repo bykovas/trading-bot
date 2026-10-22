@@ -263,7 +263,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                    -- after it.
                    peak_pnl_at_utc,
                    strategy,
-                   trailing_initial_stop_price
+                   trailing_initial_stop_price,
+                   debyko_firing_id
             from portfolio_position_state
             where bot_instance_id = @bot_instance_id
             order by position_index
@@ -320,7 +321,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     AdoptedWhileRunning = !reader.IsDBNull(41) && reader.GetBoolean(41),
                     PeakPnlAtUtc = GetNullableDateTimeOffset(reader, 42),
                     Strategy = GetNullableString(reader, 43),
-                    TrailingInitialStopPrice = GetNullableDecimal(reader, 44)
+                    TrailingInitialStopPrice = GetNullableDecimal(reader, 44),
+                    DebykoFiringId = GetNullableString(reader, 45)
                 });
             }
         }
@@ -914,6 +916,8 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                 adopted_while_running boolean not null default false,
                 primary key (bot_instance_id, position_index)
             );
+
+            alter table portfolio_position_state add column if not exists debyko_firing_id text;
 
             create index if not exists ix_portfolio_position_state_pair on portfolio_position_state (bot_instance_id, pair);
             create index if not exists ix_portfolio_position_state_origin on portfolio_position_state (bot_instance_id, origin);
@@ -1661,6 +1665,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     sl_order_state,
                     origin,
                     entry_channel,
+                    debyko_firing_id,
                     strategy,
                     flipped_entry,
                     adopted_while_running,
@@ -1710,6 +1715,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
                     @sl_order_state,
                     @origin,
                     @entry_channel,
+                    @debyko_firing_id,
                     @strategy,
                     @flipped_entry,
                     @adopted_while_running,
@@ -1762,6 +1768,7 @@ public sealed class PostgresDryRunPortfolioStore(string connectionString, string
             Add(command, "sl_order_state", NpgsqlDbType.Text, position.SlOrderState);
             Add(command, "origin", NpgsqlDbType.Text, position.Origin);
             Add(command, "entry_channel", NpgsqlDbType.Text, position.EntryChannel);
+            Add(command, "debyko_firing_id", NpgsqlDbType.Text, position.DebykoFiringId);
             Add(command, "strategy", NpgsqlDbType.Text, position.Strategy);
             Add(command, "flipped_entry", NpgsqlDbType.Boolean, position.FlippedEntry);
             Add(command, "adopted_while_running", NpgsqlDbType.Boolean, position.AdoptedWhileRunning);

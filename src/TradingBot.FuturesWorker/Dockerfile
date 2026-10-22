@@ -9,15 +9,20 @@ ARG TRADINGBOT_WORKER_STRATEGY_VERSION=local
 ARG TRADINGBOT_WORKER_CHANGE_SET=local
 
 COPY src/TradingBot.Core/TradingBot.Core.csproj src/TradingBot.Core/
+COPY src/TradingBot.Arena/TradingBot.Arena.csproj src/TradingBot.Arena/
 COPY src/TradingBot.FuturesWorker/TradingBot.FuturesWorker.csproj src/TradingBot.FuturesWorker/
-RUN dotnet restore src/TradingBot.FuturesWorker/TradingBot.FuturesWorker.csproj
+COPY src/TradingBot.ArenaReporter/TradingBot.ArenaReporter.csproj src/TradingBot.ArenaReporter/
+RUN dotnet restore src/TradingBot.ArenaReporter/TradingBot.ArenaReporter.csproj
 
 COPY src/TradingBot.Core/ src/TradingBot.Core/
+COPY src/TradingBot.Arena/ src/TradingBot.Arena/
 COPY src/TradingBot.FuturesWorker/ src/TradingBot.FuturesWorker/
+COPY src/TradingBot.ArenaReporter/ src/TradingBot.ArenaReporter/
 RUN dotnet publish src/TradingBot.FuturesWorker/TradingBot.FuturesWorker.csproj \
     -c Release \
     -o /app \
     --no-restore
+RUN dotnet publish src/TradingBot.ArenaReporter/TradingBot.ArenaReporter.csproj -c Release -o /app --no-restore
 
 FROM mcr.microsoft.com/dotnet/runtime:8.0 AS runtime
 WORKDIR /app

@@ -1239,6 +1239,7 @@ internal sealed class FuturesDecisionWorker(
             if (opened is not null && fill.PositionOpened)
             {
                 opened.EntryChannel = rule;
+                opened.DebykoFiringId = signal.FiringId;
                 opened.Strategy = "BYKO_V2";
                 opened.AtrPct = entryAtrPct;
                 fill.Action.AtrPct = entryAtrPct;
@@ -3478,6 +3479,8 @@ internal sealed class FuturesDecisionWorker(
                 TrailingActivatedAtUtc = tpSl.TrailingActivatedAtUtc,
                 TrailingInitialStopPrice = existing?.TrailingInitialStopPrice,
                 EntryChannel = existing?.EntryChannel,
+                DebykoFiringId = existing is not null && existing.Side.Equals(remote.Side, StringComparison.OrdinalIgnoreCase)
+                    && existing.EntryPrice == remote.EntryPrice ? existing.DebykoFiringId : null,
                 FlippedEntry = existing?.FlippedEntry ?? false,
                 EntryAtr = existing?.EntryAtr,
                 RoundTripCostEstimatePct = existing?.RoundTripCostEstimatePct,

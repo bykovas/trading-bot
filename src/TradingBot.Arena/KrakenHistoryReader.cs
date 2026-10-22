@@ -102,10 +102,13 @@ public sealed class KrakenHistoryReader
         string account = identity["accountUid"]?.GetValue<string>() ?? throw new InvalidDataException("Missing account identity.");
         return account;
     }
-    public async Task<HistoryCapture> CaptureAsync(CancellationToken ct)
+    public Task<HistoryCapture> CaptureAsync(CancellationToken ct) => CaptureAsync(null, ct);
+    public async Task<HistoryCapture> CaptureAsync(HistoryCapture? previous, CancellationToken ct)
     {
         string account = await CheckIdentityAsync(ct);
         DateTimeOffset cutoff = _clock.GetUtcNow();
+        if (previous is not null && (!previous.Complete || previous.AccountUid != account || previous.CapturedAt > cutoff))
+            throw new InvalidDataException("Previous source checkpoint is incomplete, from another account or the future.");
         long bytes = 0;
         JsonObject Keep(JsonObject row)
         {
@@ -113,13 +116,16 @@ public sealed class KrakenHistoryReader
             if (bytes > 64 * 1024 * 1024) throw new InvalidDataException("Capture exceeds the 64 MiB safety bound; no partial import is permitted.");
             return row.DeepClone().AsObject();
         }
-        List<JsonObject> executions = []; HashSet<string> ids = new(StringComparer.Ordinal), tokens = new(StringComparer.Ordinal);
+        var oldExecutions = (previous?.Executions ?? []).ToDictionary(r => r["uid"]!.ToString(), StringComparer.Ordinal);
+        List<JsonObject> executions = oldExecutions.Values.Select(Keep).ToList();
+        HashSet<string> ids = new(StringComparer.Ordinal), tokens = new(StringComparer.Ordinal);
         string? next = null;
         for (int page = 0; ; page++)
         {
             if (page >= 1000) throw new InvalidDataException("History safety bound reached; capture is incomplete, never import it.");
             await _delay(TimeSpan.FromSeconds(12), ct);
             Dictionary<string, string> query = new() { ["count"] = "1000", ["sort"] = "asc", ["before"] = cutoff.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture) };
+            if (previous is not null) query["since"] = previous.CapturedAt.AddHours(-24).ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
             if (next is not null) query["continuation_token"] = next;
             var (body, token) = await GetAsync("/api/history/v3/executions", query, ct);
             CheckAccount(body, account);
@@ -129,18 +135,22 @@ public sealed class KrakenHistoryReader
                 var row = e as JsonObject ?? throw new InvalidDataException("Malformed execution history row.");
                 string id = row["uid"]?.GetValue<string>() ?? throw new InvalidDataException("Execution event has no UID.");
                 if (!ids.Add(id)) throw new InvalidDataException("Repeated execution event; pagination is not proven complete.");
-                executions.Add(Keep(row));
+                if (oldExecutions.TryGetValue(id, out var saved))
+                { if (!JsonNode.DeepEquals(saved, row)) throw new InvalidDataException("A native execution changed under an existing identity."); }
+                else executions.Add(Keep(row));
             }
             if (token is null) break;
             if (!tokens.Add(token) || elements.Count == 0) throw new InvalidDataException("Non-progressing execution pagination.");
             next = token;
         }
-        List<JsonObject> positions = []; ids.Clear(); tokens.Clear(); next = null;
+        var oldPositions = (previous?.PositionUpdates ?? []).ToDictionary(ArenaContract.Digest, StringComparer.Ordinal);
+        List<JsonObject> positions = oldPositions.Values.Select(Keep).ToList(); ids.Clear(); tokens.Clear(); next = null;
         for (int page = 0; ; page++)
         {
             if (page >= 1000) throw new InvalidDataException("Position history safety bound reached; capture is incomplete.");
             await _delay(TimeSpan.FromSeconds(12), ct);
             Dictionary<string, string> query = new() { ["count"] = "1000", ["sort"] = "asc", ["before"] = cutoff.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture) };
+            if (previous is not null) query["since"] = previous.CapturedAt.AddHours(-24).ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
             if (next is not null) query["continuation_token"] = next;
             var (body, token) = await GetAsync("/api/history/v3/positions", query, ct);
             CheckAccount(body, account);
@@ -152,7 +162,7 @@ public sealed class KrakenHistoryReader
                 if (row["timestamp"] is null || row["event"]?["PositionUpdate"] is not JsonObject) throw new InvalidDataException("Malformed position update.");
                 string id = ArenaContract.Digest(row);
                 if (!ids.Add(id)) throw new InvalidDataException("Repeated position event.");
-                positions.Add(Keep(row));
+                if (!oldPositions.ContainsKey(id)) positions.Add(Keep(row));
             }
             if (token is null) break;
             if (!tokens.Add(token) || elements.Count == 0) throw new InvalidDataException("Non-progressing position pagination.");
@@ -160,12 +170,15 @@ public sealed class KrakenHistoryReader
         }
         // No artificial window start: positions closed in the import window may have opened earlier.
         // ID pagination is inclusive. 'before' is milliseconds, NOT an account-log ID.
-        List<JsonObject> ledger = []; long? upperId = null; ids.Clear();
+        var oldLedger = (previous?.Ledger ?? []).ToDictionary(r => r["id"]!.ToString(), StringComparer.Ordinal);
+        List<JsonObject> ledger = oldLedger.Values.Select(Keep).ToList(); long? upperId = null; ids.Clear();
+        long lowerId = oldLedger.Count == 0 ? 1 : oldLedger.Keys.Select(id => long.Parse(id, CultureInfo.InvariantCulture)).Max() + 1;
         for (int page = 0; ; page++)
         {
             if (page >= 2000) throw new InvalidDataException("Ledger safety bound reached; capture is incomplete, never import it.");
             await _delay(TimeSpan.FromSeconds(12), ct);
             Dictionary<string, string> query = new() { ["count"] = "500", ["sort"] = "desc", ["before"] = cutoff.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture) };
+            if (previous is not null) query["from"] = lowerId.ToString(CultureInfo.InvariantCulture);
             if (upperId is { } upper) query["to"] = upper.ToString(CultureInfo.InvariantCulture);
             var (body, _) = await GetAsync("/api/history/v3/account-log", query, ct);
             CheckAccount(body, account);
@@ -175,10 +188,10 @@ public sealed class KrakenHistoryReader
             {
                 var row = e as JsonObject ?? throw new InvalidDataException("Malformed ledger row.");
                 long id = long.Parse(row["id"]?.ToString() ?? "", CultureInfo.InvariantCulture);
-                if (id < 1 || upperId is { } limit && id > limit || !ids.Add(id.ToString(CultureInfo.InvariantCulture))) throw new InvalidDataException("Ledger pagination repeated or exceeded its ID bound.");
+                if (id < lowerId || upperId is { } limit && id > limit || !ids.Add(id.ToString(CultureInfo.InvariantCulture))) throw new InvalidDataException("Ledger pagination repeated or exceeded its ID bound.");
                 minimum = Math.Min(minimum, id); ledger.Add(Keep(row));
             }
-            if (rows.Count == 0 || minimum == 1) break;
+            if (rows.Count == 0 || minimum == lowerId) break;
             upperId = minimum - 1; // Ask until an empty page; never infer completeness from a short server-capped page.
         }
         await _delay(TimeSpan.FromSeconds(12), ct);

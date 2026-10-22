@@ -44,6 +44,16 @@ public sealed class KrakenEvidenceTests
         Assert.Equal(.12m, Assert.Single(result.Fills).Fees);
     }
     [Fact]
+    public void LateDistinctUsdBookingCorrectsFeesAndSignedFunding_WithoutCountingPositionRows()
+    {
+        var capture = Capture(); capture.Ledger[0]["id"] = 1;
+        var late = capture.Ledger[0].DeepClone().AsObject(); late["id"] = 2; late["fee"] = "-.02"; late["realized_funding"] = ".01";
+        var adjusted = KrakenEvidence.Normalize(capture with { Ledger = [capture.Ledger[0], late] }).Fills.Single();
+        Assert.Equal(.10m, adjusted.Fees); Assert.Equal(-.02m, adjusted.RealizedFunding); Assert.Equal("fill-a", adjusted.Id);
+        late["id"] = 1;
+        Assert.Throws<InvalidDataException>(() => KrakenEvidence.Normalize(capture with { Ledger = [capture.Ledger[0], late] }));
+    }
+    [Fact]
     public void Signed_funding_comes_from_its_booked_cash_row_inside_the_holding_period()
     {
         var capture = Capture();

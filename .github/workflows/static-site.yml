@@ -47,7 +47,7 @@ jobs:
           {
             echo "UI_IMAGE_TAG=$(tag_for Dockerfile nginx public "$CI")"
             echo "API_IMAGE_TAG=$(tag_for src/TradingBot.Api src/TradingBot.Core "$CI")"
-            echo "FUTURES_WORKER_IMAGE_TAG=$(tag_for src/TradingBot.FuturesWorker src/TradingBot.Core "$CI")"
+            echo "FUTURES_WORKER_IMAGE_TAG=$(tag_for src/TradingBot.FuturesWorker src/TradingBot.Core src/TradingBot.Arena src/TradingBot.ArenaReporter "$CI")"
             echo "MARKET_DATA_WORKER_IMAGE_TAG=$(tag_for src/TradingBot.MarketDataWorker src/TradingBot.Core "$CI")"
             # equity-day.js is in both lists on purpose: it is one file shared by the
             # page and the card renderer, and a change to it moves both.
