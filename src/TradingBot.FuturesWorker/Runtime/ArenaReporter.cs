@@ -79,8 +79,8 @@ internal sealed class ArenaReporter : IDisposable
             {
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 wait.CancelAfter(delay);
-                try { await wake.Reader.ReadAsync(wait.Token); } catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
-                while (wake.Reader.TryRead(out _)) { }
+                try { await wake.Reader.ReadAsync(wait.Token); } catch (OperationCanceledException) when (!ct.IsCancellationRequested) { /* Heartbeat deadline, not shutdown. */ }
+                while (wake.Reader.TryRead(out _)) { /* Coalesce wakes; the next read is current native state. */ }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
         }
@@ -281,16 +281,23 @@ internal sealed class ArenaNativeSource : IArenaFeedSource, IDisposable
             WHERE c.bot_instance_id=$1 AND (a.exchange_order_id IS NOT NULL OR a.reason LIKE '%live Kraken Futures%accepted id=%') ORDER BY c.utc,a.decision_index LIMIT 100001
             """, connection, tx);
         command.Parameters.AddWithValue(_config.BotInstance.Id);
-        JsonArray actions = [];
-        await using (var reader = await command.ExecuteReaderAsync(ct)) while (await reader.ReadAsync(ct)) actions.Add(JsonNode.Parse(reader.GetString(0))!);
-        if (actions.Count > 100000) throw new InvalidDataException("Bot ownership journal bound reached; do not truncate it.");
+        var actions = await ReadJournalRowsAsync(command, value => JsonNode.Parse(value), "ownership", ct);
         await using var signals = new NpgsqlCommand("SELECT firing_id FROM debyko_webhook_events WHERE bot_instance_id=$1 AND firing_id IS NOT NULL ORDER BY id LIMIT 100001", connection, tx);
         signals.Parameters.AddWithValue(_config.BotInstance.Id);
-        JsonArray rows = [];
-        await using (var reader = await signals.ExecuteReaderAsync(ct)) while (await reader.ReadAsync(ct)) rows.Add(new JsonObject { ["firing_id"] = reader.GetString(0) });
-        if (rows.Count > 100000) throw new InvalidDataException("Signal journal bound reached; do not truncate it.");
+        var rows = await ReadJournalRowsAsync(signals, value => new JsonObject { ["firing_id"] = value }, "signals", ct);
         await tx.CommitAsync(ct);
         return new() { ["actions"] = actions, ["signals"] = rows };
+    }
+    private static async Task<JsonArray> ReadJournalRowsAsync(NpgsqlCommand command, Func<string, JsonNode?> parse, string kind, CancellationToken ct)
+    {
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        var rows = new List<JsonNode>();
+        for (int count = 0; await reader.ReadAsync(ct); count++)
+        {
+            if (count >= 100000) throw new InvalidDataException($"Arena {kind} journal exceeds its bound; do not truncate it.");
+            rows.Add(parse(reader.GetString(0)) ?? throw new InvalidDataException($"Invalid {kind} journal row."));
+        }
+        return new JsonArray(rows.ToArray());
     }
     public void Dispose() => _database.Dispose();
 }

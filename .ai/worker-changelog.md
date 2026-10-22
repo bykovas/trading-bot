@@ -3,6 +3,7 @@
 - Add an optional, separate process and memory-limited Arena reporter using the account key from the protected environment; bounded durable reporting state, native Kraken economics, imported trade identities, late-cost corrections and fresh position heartbeats. Its separate reporting-only executable never constructs a trading worker or broker; reporting exceptions never alter decisions, risk, sizing, broker calls or execution.
 - Carry the opening DEBYKO firing_id on the actual persisted position and clone; preserve all existing runtime/cycle metadata. No deployment: Denis reviews and merges Part C.
 - Preserve that firing through native reconciliation of the same side/entry; a changed side or entry does not inherit an unrelated opening firing. This is reporting metadata only.
+- Enforce the reporting journal cap with an explicit row counter and retain full failure context; cancellation/coalescing are documented normal control flow.
 
 ## 2026-10-17-puko-management-data-parity
 
