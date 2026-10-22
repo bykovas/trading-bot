@@ -1,3 +1,8 @@
+## 2026-10-22-arena-indexed-journal
+
+- Restrict the separate Arena reporter's journal read to the five executed trade action types, matching the existing indexed trade predicates and importer evidence scope. This avoids scanning large HOLD/analysis reasons under the reporting connection's unchanged 10-second timeout.
+- Preserve the complete historical time span, native identities, recorded economics/leverage/signals and protective-order proof. No broker, decision, risk, sizing or trading-loop behavior changes.
+
 ## 2026-10-22-byko-arena-reporting
 
 - Add an optional, separate process and memory-limited Arena reporter using the account key from the protected environment; bounded durable reporting state, native Kraken economics, imported trade identities, late-cost corrections and fresh position heartbeats. Its separate reporting-only executable never constructs a trading worker or broker; reporting exceptions never alter decisions, risk, sizing, broker calls or execution.
