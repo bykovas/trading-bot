@@ -48,6 +48,18 @@ public sealed class KrakenHistoryReaderTests
         Assert.DoesNotContain(Key, System.Text.Json.JsonSerializer.Serialize(capture));
     }
     [Fact]
+    public async Task IncrementalCaptureUsesDocumentedTimestampAndInclusiveIDBounds_AndRetainsOriginalOpenHistory()
+    {
+        var first = new Fake(Json(Identity()), Json(Events("{\"uid\":\"event-1\"}")), Json(Events("")), Json(Ledger("{\"id\":1}")), Json(Open));
+        var previous = await Reader(first).CaptureAsync(default);
+        var next = new Fake(Json(Identity()), Json(Events("{\"uid\":\"event-1\"},{\"uid\":\"event-2\"}")), Json(Events("")), Json(Ledger("{\"id\":2}")), Json(Open));
+        var capture = await Reader(next).CaptureAsync(previous, default);
+        Assert.Equal(2, capture.Executions.Count); Assert.Equal(2, capture.Ledger.Count);
+        Assert.Contains("since=", next.Requests[1].Uri.Query); Assert.Contains("since=", next.Requests[2].Uri.Query);
+        Assert.Contains("from=2", next.Requests[3].Uri.Query);
+        Assert.Equal(previous.Executions[0].ToJsonString(), capture.Executions[0].ToJsonString());
+    }
+    [Fact]
     public async Task Explicit_existing_key_mode_is_GET_only_and_does_not_advance_working_key_nonce()
     {
         var fake = new Fake(Json(Identity("FULL_ACCESS")), Json(Events("")), Json(Events("")), Json(Ledger("")), Json(Open));

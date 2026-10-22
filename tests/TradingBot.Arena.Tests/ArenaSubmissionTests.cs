@@ -77,6 +77,15 @@ public sealed class ArenaSubmissionTests
         Assert.Single(fake.Requests); Assert.Contains("400", error.Message); Assert.DoesNotContain(Key, error.Message);
     }
     [Fact]
+    public async Task PositionRateLimitDoesNotReplayAnOldSnapshot_AndExposesRetryAfter()
+    {
+        var limited = Response(429); limited.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(90));
+        var fake = new Fake(limited, Response(202)); List<TimeSpan> waits = [];
+        var client = new ArenaSubmission(new HttpClient(fake), Key, Origin, delay: (wait, _) => { waits.Add(wait); return Task.CompletedTask; });
+        var error = await Assert.ThrowsAsync<ArenaHttpException>(() => client.PositionsAsync(new JsonObject { ["account"] = "live", ["positions"] = new JsonArray() }, default));
+        Assert.Equal(TimeSpan.FromSeconds(90), error.RetryAfter); Assert.Single(fake.Requests); Assert.Empty(waits);
+    }
+    [Fact]
     public async Task Retry_after_is_honoured_and_identical_resend_may_be_a_noop()
     {
         var limited = Response(429); limited.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(30));

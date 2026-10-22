@@ -42,10 +42,13 @@ public static class KrakenEvidence
             if (!needed.Contains(fill.Id)) continue;
             var ledger = costs[fill.Id].Where(l => l["contract"]?.ToString().Equals(fill.Symbol, StringComparison.OrdinalIgnoreCase) == true
                 && l["asset"]?.ToString().Equals("usd", StringComparison.OrdinalIgnoreCase) == true).ToArray();
-            if (ledger.Length != 1) throw new InvalidDataException($"Execution {fill.Id}: booked USD costs are missing or ambiguous; import is blocked.");
-            var cost = ledger[0]; RequireUsd(cost);
-            fills[i] = fill with { Fees = Number(cost, "fee") + OptionalNumber(cost, "liquidation_fee") + OptionalNumber(cost, "conversion_fee"),
-                RealizedFunding = OptionalNumber(cost, "realized_funding") };
+            if (ledger.Length == 0 || ledger.Length > 1 && (ledger.Any(l => l["id"] is null)
+                || ledger.Select(l => l["id"]!.ToString()).Distinct(StringComparer.Ordinal).Count() != ledger.Length))
+                throw new InvalidDataException($"Execution {fill.Id}: booked USD costs are missing or ambiguous; import is blocked.");
+            // Separate immutable USD account-log IDs are distinct bookings (including a later fee correction), not duplicate position-ledger rows.
+            foreach (var cost in ledger) RequireUsd(cost);
+            fills[i] = fill with { Fees = ledger.Sum(cost => Number(cost, "fee") + OptionalNumber(cost, "liquidation_fee") + OptionalNumber(cost, "conversion_fee")),
+                RealizedFunding = ledger.Sum(cost => OptionalNumber(cost, "realized_funding")) };
         }
         var funding = new List<VenueFunding>();
         foreach (var row in capture.Ledger.Where(l => l["execution"] is null && l["contract"] is not null))

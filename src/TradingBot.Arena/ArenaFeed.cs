@@ -106,15 +106,21 @@ public sealed class ArenaFeed(IArenaFeedSource source, IArenaFeedTransport trans
             {
                 string delivered = ArenaContract.Digest(JsonNode.Parse(trade.Payload)!);
                 // A 200 on the first ever local attempt is an imported/external receipt of unknown age. Do not guess its correction deadline.
-                bool external = !trade.Received && trade.Attempts == 1 && receipt!.Status == 200;
-                state.Trades[trade.TradeId] = current with { Received = true, DeliveredHash = delivered,
-                    FirstAttempt = external ? _time.GetUtcNow().AddHours(-24) : current.FirstAttempt, NextAttempt = _time.GetUtcNow() };
+                bool external = !trade.Received && trade.Attempts == 1 && receipt!.Accepted == 0;
+                state.Trades[trade.TradeId] = current with
+                {
+                    Received = true,
+                    DeliveredHash = delivered,
+                    FirstAttempt = external ? _time.GetUtcNow().AddHours(-24) : current.FirstAttempt,
+                    NextAttempt = _time.GetUtcNow()
+                };
                 log($"Arena /v1/trades HTTP {receipt!.Status}: submitted={receipt.Submitted} accepted={receipt.Accepted} updated={receipt.Updated}");
             }
             else
             {
                 bool terminal = failure is ArenaHttpException http && (int)http.Status is >= 400 and < 500 && http.Status != HttpStatusCode.TooManyRequests;
                 var delay = TimeSpan.FromSeconds(Math.Min(300, Math.Pow(2, Math.Min(trade.Attempts, 8))));
+                if (failure is ArenaHttpException { RetryAfter: { } after } && after > delay) delay = after;
                 state.Trades[trade.TradeId] = current with { Rejected = terminal, NextAttempt = _time.GetUtcNow() + delay };
                 log($"Arena reporting trade failure; terminal={terminal}: {failure}");
             }

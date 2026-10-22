@@ -6,9 +6,10 @@ using System.Text.Json.Nodes;
 namespace TradingBot.Arena;
 
 public sealed record ArenaReceipt(string Path, int Status, int Accepted, int Updated, int Submitted);
-public sealed class ArenaHttpException(HttpStatusCode status, string message) : InvalidOperationException(message)
+public sealed class ArenaHttpException(HttpStatusCode status, string message, TimeSpan? retryAfter = null) : InvalidOperationException(message)
 {
     public HttpStatusCode Status { get; } = status;
+    public TimeSpan? RetryAfter { get; } = retryAfter;
 }
 public sealed record ArenaImportPlan(JsonObject Profile, IReadOnlyList<JsonObject> Trades, JsonObject Positions,
     string SourceHash, string SchemaHash, string RegistryHash)
@@ -73,8 +74,8 @@ public sealed class ArenaSubmission : IArenaFeedTransport
     }
     public Task<ArenaReceipt> PositionsAsync(JsonObject positions, CancellationToken ct) =>
         SendAsync(HttpMethod.Post, "/v1/positions", Body(positions), positions["positions"]?.AsArray().Count
-            ?? throw new InvalidDataException("A complete positions array is required, including while flat."), ct);
-    private async Task<ArenaReceipt> SendAsync(HttpMethod method, string path, byte[] body, int count, CancellationToken ct)
+            ?? throw new InvalidDataException("A complete positions array is required, including while flat."), ct, retryTransient: false);
+    private async Task<ArenaReceipt> SendAsync(HttpMethod method, string path, byte[] body, int count, CancellationToken ct, bool retryTransient = true)
     {
         for (int attempt = 0; attempt <= 4; attempt++)
         {
@@ -82,7 +83,7 @@ public sealed class ArenaSubmission : IArenaFeedTransport
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _key);
             request.Content = new ByteArrayContent(body); request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-            if ((response.StatusCode == HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500) && attempt < 4)
+            if (retryTransient && (response.StatusCode == HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500) && attempt < 4)
             {
                 var wait = response.Headers.RetryAfter?.Delta ?? (response.Headers.RetryAfter?.Date - _clock.GetUtcNow()) ?? TimeSpan.FromSeconds(Math.Pow(2, attempt + 1));
                 await _delay(wait > TimeSpan.Zero ? wait : TimeSpan.FromSeconds(1), ct); continue;
@@ -92,7 +93,8 @@ public sealed class ArenaSubmission : IArenaFeedTransport
             while (length < prefix.Length && (read = await stream.ReadAsync(prefix.AsMemory(length), ct)) > 0) length += read;
             string text = System.Text.Encoding.UTF8.GetString(prefix, 0, length).Replace(_key, "[key]", StringComparison.Ordinal);
             if (response.StatusCode is not (HttpStatusCode.OK or HttpStatusCode.Accepted))
-                throw new ArenaHttpException(response.StatusCode, $"Arena {method} {path}: HTTP {(int)response.StatusCode}: {text[..Math.Min(500, text.Length)]}");
+                throw new ArenaHttpException(response.StatusCode, $"Arena {method} {path}: HTTP {(int)response.StatusCode}: {text[..Math.Min(500, text.Length)]}",
+                    response.Headers.RetryAfter?.Delta ?? (response.Headers.RetryAfter?.Date - _clock.GetUtcNow()));
             if (length == prefix.Length) throw new InvalidDataException("Arena receipt exceeds its safety bound; do not continue blindly.");
             var json = JsonNode.Parse(text)?.AsObject() ?? throw new InvalidDataException("Missing Arena receipt.");
             int accepted = json["accepted"]?.GetValue<int>() ?? throw new InvalidDataException("Missing accepted count.");

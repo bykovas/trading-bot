@@ -75,7 +75,9 @@ public sealed class ArenaFeedTests
         Assert.Equal(1, transport.Sends);
     }
     [Theory]
-    [InlineData(400)] [InlineData(401)] [InlineData(409)]
+    [InlineData(400)]
+    [InlineData(401)]
+    [InlineData(409)]
     public async Task ClientErrorsAreNeverRetried(int status)
     {
         var source = new Source(); var store = new Store(); var clock = new Clock();
@@ -98,6 +100,16 @@ public sealed class ArenaFeedTests
         await new ArenaFeed(source, transport, store, _ => { }, clock).DispatchAsync(default);
         Assert.Equal(2, transport.Sends);
         Assert.True((await store.LoadAsync(default)).Trades.Values.Single().Received);
+    }
+    [Fact]
+    public async Task Exhausted429StillHonoursLastRetryAfter()
+    {
+        var source = new Source(); var store = new Store(); var clock = new Clock();
+        var transport = new Transport { Send = () => throw new ArenaHttpException(HttpStatusCode.TooManyRequests, "throttled", TimeSpan.FromMinutes(2)) };
+        var feed = new ArenaFeed(source, transport, store, _ => { }, clock);
+        await feed.ReconcileAsync(default); await feed.DispatchAsync(default); clock.Now += TimeSpan.FromSeconds(119);
+        await feed.DispatchAsync(default); Assert.Equal(1, transport.Sends);
+        clock.Now += TimeSpan.FromSeconds(1); transport.Send = null; await feed.DispatchAsync(default); Assert.Equal(2, transport.Sends);
     }
     [Fact]
     public async Task NewCostsDuringInflightResponseAreNotLost()
@@ -127,6 +139,14 @@ public sealed class ArenaFeedTests
     {
         var source = new Source { Rows = [Row(), Row()] }; var store = new Store(); var transport = new Transport();
         var feed = new ArenaFeed(source, transport, store, _ => { });
+        await Assert.ThrowsAsync<InvalidDataException>(() => feed.ReconcileAsync(default));
+        Assert.Empty((await store.LoadAsync(default)).Trades);
+    }
+    [Fact]
+    public async Task FullOutboxRetainsThePreviousCheckpoint_InsteadOfDroppingPositions()
+    {
+        var source = new Source { Rows = Enumerable.Range(0, 1001).Select(i => new JsonObject { ["trade_id"] = "native-" + i }).ToArray() };
+        var store = new Store(); var feed = new ArenaFeed(source, new Transport(), store, _ => { });
         await Assert.ThrowsAsync<InvalidDataException>(() => feed.ReconcileAsync(default));
         Assert.Empty((await store.LoadAsync(default)).Trades);
     }
