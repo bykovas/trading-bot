@@ -29,13 +29,13 @@ public sealed class ArenaSubmission
     }
     public async Task<IReadOnlyList<ArenaReceipt>> ImportAsync(ArenaImportPlan plan, string approvedDigest, ArenaContract contract,
         IReadOnlyList<ArenaRegistryListing> registry, Func<JsonObject, CancellationToken, Task<DateTimeOffset>> verifyCurrentSnapshot,
-        Func<ArenaReceipt, CancellationToken, Task> checkpoint, CancellationToken ct)
+        Func<ArenaReceipt, CancellationToken, Task> checkpoint, CancellationToken ct, bool profileAlreadyRecorded = false)
     {
         if (approvedDigest != plan.Digest) throw new InvalidOperationException("The owner-approved payload digest does not match; no writes.");
         if (contract.SchemaHash != plan.SchemaHash || plan.RegistryHash != RegistryHash(registry)) throw new InvalidDataException("Recorded contracts changed; revalidate and approve before writes.");
         var errors = contract.Validate(plan.Profile, plan.Trades, plan.Positions, registry, _clock.GetUtcNow());
         if (errors.Count != 0) throw new InvalidDataException("Whole-import preflight failed before any write: " + string.Join("; ", errors));
-        var batches = ArenaContract.Batches(plan.Trades); // Size-check every batch before profile or any trade is written.
+        var batches = ArenaContract.Batches(plan.Trades, maximumTrades: 1); // Size-check every batch before profile or any trade is written.
         byte[] profile = Body(plan.Profile), positions = Body(plan.Positions);
         var snapshotAt = await verifyCurrentSnapshot(plan.Positions, ct);
         if (snapshotAt > _clock.GetUtcNow() || _clock.GetUtcNow() - snapshotAt > TimeSpan.FromSeconds(60)) throw new InvalidDataException("Open-position evidence is stale; refresh before any import write.");
@@ -45,7 +45,8 @@ public sealed class ArenaSubmission
             var receipt = await SendAsync(method, path, body, count, ct);
             receipts.Add(receipt); await checkpoint(receipt, ct); // If durable checkpoint fails, stop before the next write.
         }
-        await Send(HttpMethod.Put, "/v1/profile", profile, 1);
+        // A successful, digest-bound profile receipt is resumable: capital guards correctly reject a new backdated declaration after trades exist.
+        if (!profileAlreadyRecorded) await Send(HttpMethod.Put, "/v1/profile", profile, 1);
         foreach (var batch in batches) await Send(HttpMethod.Post, "/v1/trades", batch, JsonNode.Parse(batch)!.AsArray().Count);
         // Retries may take time; never send a formerly fresh open snapshot as though it were current.
         snapshotAt = await verifyCurrentSnapshot(plan.Positions, ct);

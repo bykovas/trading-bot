@@ -51,6 +51,24 @@ public sealed class ArenaSubmissionTests
         Assert.Equal("PUT", fake.Requests[0].Method); Assert.Equal(receipts, checkpoints);
     }
     [Fact]
+    public async Task A_recorded_profile_is_not_redeclared_when_resuming_after_a_trade_timeout()
+    {
+        var fake = new Fake(Response(200, "{\"accepted\":0,\"updated\":0}"), Response(202, "{\"accepted\":0,\"updated\":0}"));
+        var contract = Contract(); var plan = Plan(contract); var client = new ArenaSubmission(new HttpClient(fake), Key, Origin);
+        await client.ImportAsync(plan, plan.Digest, contract, Registry, Current, Checkpoint, default, profileAlreadyRecorded: true);
+        Assert.Equal(new[] { "/v1/trades", "/v1/positions" }, fake.Requests.Select(r => r.Path));
+    }
+    [Fact]
+    public async Task History_is_submitted_one_position_per_request_without_trimming_the_plan()
+    {
+        var fake = new Fake(Response(202), Response(202), Response(202, "{\"accepted\":0,\"updated\":0}"));
+        var contract = Contract(); var original = Plan(contract); var second = original.Trades[0].DeepClone().AsObject(); second["trade_id"] = "kraken-PF_XBTUSD-second";
+        var plan = original with { Trades = [original.Trades[0], second] }; var client = new ArenaSubmission(new HttpClient(fake), Key, Origin);
+        var receipts = await client.ImportAsync(plan, plan.Digest, contract, Registry, Current, Checkpoint, default, profileAlreadyRecorded: true);
+        Assert.Equal(2, receipts.Where(r => r.Path == "/v1/trades").Sum(r => r.Accepted));
+        Assert.All(fake.Requests.Where(r => r.Path == "/v1/trades"), r => Assert.Single(JsonNode.Parse(r.Body)!.AsArray()));
+    }
+    [Fact]
     public async Task A_400_is_not_retried_and_known_key_is_redacted()
     {
         var fake = new Fake(Response(400, Key + " invalid")); var contract = Contract(); var plan = Plan(contract);

@@ -134,13 +134,14 @@ public sealed class ArenaContract
         };
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Sort(node)!.ToJsonString()))).ToLowerInvariant();
     }
-    public static IReadOnlyList<byte[]> Batches(IReadOnlyList<JsonObject> trades)
+    public static IReadOnlyList<byte[]> Batches(IReadOnlyList<JsonObject> trades, int maximumTrades = 100)
     {
+        if (maximumTrades is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(maximumTrades));
         List<byte[]> result = []; var batch = new JsonArray();
         foreach (var trade in trades)
         {
             batch.Add(trade.DeepClone()); byte[] body = JsonSerializer.SerializeToUtf8Bytes(batch);
-            if (batch.Count > 100 || body.Length > 65536)
+            if (batch.Count > maximumTrades || body.Length > 65536)
             {
                 batch.RemoveAt(batch.Count - 1);
                 if (batch.Count == 0) throw new InvalidDataException("A single trade exceeds 64 KiB; fills/window cannot be shortened.");

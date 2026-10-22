@@ -24,10 +24,16 @@ if (args.Length == 4 && args[0] == "send")
     async Task Checkpoint(ArenaReceipt receipt, CancellationToken ct)
     {
         string file = Path.Combine(dir, "receipt-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + "-" + Guid.NewGuid().ToString("N") + ".json");
-        await using var stream = PrivateFiles.CreateNew(file); await JsonSerializer.SerializeAsync(stream, receipt, cancellationToken: ct);
+        await using var stream = PrivateFiles.CreateNew(file); await JsonSerializer.SerializeAsync(stream, new { PlanDigest = plan.Digest, Receipt = receipt }, cancellationToken: ct);
         Console.WriteLine($"Arena {receipt.Path}: HTTP {receipt.Status}, submitted={receipt.Submitted}, accepted={receipt.Accepted}, updated={receipt.Updated}");
     }
-    _ = await client.ImportAsync(plan, args[2], contract, registry, Verify, Checkpoint, CancellationToken.None);
+    bool profileRecorded = Directory.EnumerateFiles(dir, "receipt-*.json").Any(file =>
+    {
+        var saved = JsonNode.Parse(File.ReadAllText(file));
+        return saved?["PlanDigest"]?.ToString() == plan.Digest && saved?["Receipt"]?["Path"]?.ToString() == "/v1/profile"
+            && saved?["Receipt"]?["Status"]?.GetValue<int>() == 202 && saved?["Receipt"]?["Accepted"]?.GetValue<int>() == 1;
+    });
+    _ = await client.ImportAsync(plan, args[2], contract, registry, Verify, Checkpoint, CancellationToken.None, profileAlreadyRecorded: profileRecorded);
     Console.WriteLine("Send completed. Verify Arena's public record/tape/signal/curve before closing issue #22. No automatic trading-bot deployment.");
     return 0;
 }
