@@ -4,7 +4,7 @@
 
 Part A is deployed. Part B's owner-approved import is complete: 11 positions / 34 native fills, 11 verified signals, 15 tape-matched fills (4 fully tape trades), declared capital 6 USD effective 11 October. The public omenas curve is −59.48%, matching the independent Kraken-booking calculation. Five manual/mixed cycles were excluded. The single imported open snapshot correctly expires after 180 seconds until this reporter is activated.
 
-PR #25 is stacked on the shared importer library in PR #24. Merge #24 first, then rebase/retarget #25 onto main and rerun CI. **Denis merges Part C. This task does not deploy/restart trading or activate the reporter.**
+PR #24 is merged and its main deployment succeeded. PR #25 has been rebased onto that main for a fresh full CI run. On 22 October Denis explicitly authorized Codex to merge both PRs, deploy the reporter, and verify automatic trades/position reporting in production. Activation follows a green current branch and a successful main deployment; it does not require another approval.
 
 The production compose adds `arena-reporter` using the same versioned image but a **separate executable**, `TradingBot.ArenaReporter.dll`. It has its own process, HTTP clients, database pool (maximum 2 connections), 512 MiB memory limit, half a CPU and persistent state. An old image without the reporting executable fails closed; it cannot fall through to the trading entry point. The trading Worker never calls the reporter. Its only behavioral addition is saving the opening webhook `firing_id` on the actual position, including normalized PostgreSQL persistence and clones. Decisions, risk, sizing, orders and existing cycle/version metadata are unchanged.
 
