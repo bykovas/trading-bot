@@ -8,10 +8,10 @@ jobs:
         run: |
           echo "=== BYKO exact error/exception lines 36h ==="
           docker logs --since 36h trading-bot-futures-worker-live 2>&1 | grep -iE "\berror\b|exception|unhandled|fatal|traceback|stack trace|refused|unauthorized|forbidden|nonce|rate limit" | grep -viE "reason=|blocked=|_ERROR_|no futures" | tail -30 || echo "(none)"
-          echo "=== LUKO exact error/exception lines 36h ==="
-          docker logs --since 36h trading-bot-lukas-futures-worker-live 2>&1 | grep -iE "\berror\b|exception|unhandled|fatal|refused|unauthorized|forbidden|nonce|rate limit" | grep -viE "reason=|blocked=|no futures" | tail -30 || echo "(none)"
+          echo "=== PUKO exact error/exception lines 36h ==="
+          docker logs --since 36h trading-bot-pukis-futures-worker-live 2>&1 | grep -iE "\berror\b|exception|unhandled|fatal|refused|unauthorized|forbidden|nonce|rate limit" | grep -viE "reason=|blocked=|no futures" | tail -30 || echo "(none)"
           echo "=== restart counts ==="
-          docker inspect -f '{{.Name}} restarts={{.RestartCount}} started={{.State.StartedAt}} exit={{.State.ExitCode}}' trading-bot-futures-worker-live trading-bot-lukas-futures-worker-live trading-bot-market-data-worker
+          docker inspect -f '{{.Name}} restarts={{.RestartCount}} started={{.State.StartedAt}} exit={{.State.ExitCode}}' trading-bot-futures-worker-live trading-bot-pukis-futures-worker-live trading-bot-market-data-worker
       - name: order submissions 36h
         run: |
           echo "=== any order attempts / rejections ==="
@@ -20,7 +20,7 @@ jobs:
         run: |
           docker logs --since 30m trading-bot-futures-worker-live 2>&1 | grep -iE "EXPERIMENT_SHORT_BTC_RISING|btc_regime|btc 24h" | tail -3
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
-            "select distinct on (f.bot_instance_id) f.bot_instance_id, c.utc, f.portfolio_value_after_eur from dry_run_cycle_facts f join dry_run_cycles c using (cycle_id) where f.bot_instance_id like 'futures-l%' order by f.bot_instance_id, c.utc desc"
+            "select distinct on (f.bot_instance_id) f.bot_instance_id, c.utc, f.portfolio_value_after_eur from dry_run_cycle_facts f join dry_run_cycles c using (cycle_id) where f.bot_instance_id in ('futures-live','futures-pukis-live') order by f.bot_instance_id, c.utc desc"
           echo "--- entries per day last 5d ---"
           docker exec trading-bot-db psql -U tradingbot -d tradingbot -A -F '|' -c \
             "select f.bot_instance_id, date(f.utc) d, count(*) filter (where a.action like 'WOULD_OPEN%') opens, count(*) filter (where a.action='WOULD_CLOSE') closes from dry_run_actions a join dry_run_decision_facts f using (cycle_id, decision_index) where f.utc >= now() - interval '5 days' and a.fill_price > 0 group by 1,2 order by 2 desc,1"

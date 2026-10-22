@@ -351,22 +351,25 @@ public sealed class FuturesInstanceConfigurationTests
     }
 
     [Fact]
-    public void Lukas_deployment_uses_an_isolated_container_runtime_and_secret_mapping()
+    public void Production_deployment_keeps_Byko_and_Puko_and_retires_Luko()
     {
         var root = FindRepositoryRoot();
         var compose = File.ReadAllText(Path.Combine(root, "infra", "docker-compose.prod.yml"));
         var deploy = File.ReadAllText(Path.Combine(root, "infra", "deploy.sh"));
         var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "static-site.yml"));
 
-        Assert.Contains("container_name: trading-bot-lukas-futures-worker-live", compose);
-        Assert.Contains("/opt/trading-bot/futures/lukas-live/.env", compose);
-        Assert.Contains("/opt/trading-bot/futures/lukas-live/appsettings.json", compose);
-        Assert.Contains("TRADINGBOT_BOT_INSTANCE_ID=futures-lukas-live", deploy);
-        Assert.Contains("${TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY:-}", deploy);
-        Assert.Contains("${TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET:-}", deploy);
+        Assert.DoesNotContain("futures-worker-lukas-live:", compose);
+        Assert.DoesNotContain("/opt/trading-bot/futures/lukas-live/", compose);
+        Assert.DoesNotContain("TRADINGBOT_LUKAS_", deploy);
+        Assert.DoesNotContain("TRADINGBOT_LUKAS_", workflow);
+        Assert.DoesNotContain("src/TradingBot.FuturesWorker/appsettings.lukas.json", workflow);
+        Assert.DoesNotContain("where bot_instance_id = 'futures-lukas-live'", deploy);
+        Assert.Contains("docker rm -f trading-bot-lukas-futures-worker-live", deploy);
+        Assert.Contains("container_name: trading-bot-futures-worker-live", compose);
+        Assert.Contains("/opt/trading-bot/futures/live/.env", compose);
+        Assert.Contains("container_name: trading-bot-arena-reporter", compose);
+        Assert.Contains("TradingBot.ArenaReporter.dll", compose);
         Assert.DoesNotContain("TRADINGBOT_FUTURES_FLIP_LONG_ENTRIES", deploy);
-        Assert.Contains("secrets.TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY", workflow);
-        Assert.Contains("secrets.TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET", workflow);
 
         Assert.Contains("container_name: trading-bot-pukis-futures-worker-live", compose);
         Assert.Contains("/opt/trading-bot/futures/pukis-live/.env", compose);
