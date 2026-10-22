@@ -36,4 +36,15 @@ public sealed class BotJournalEvidenceTests
         var proof = Assert.Single(BotJournalEvidence.Read(Journal($"live Kraken Futures FOK accepted id={Id} status=placed; DEBYKO BYKO_BREAKOUT_LONG firing signal1", knownFiring: false), ""));
         Assert.Null(proof.Annotation.FiringId);
     }
+    [Fact]
+    public void Expired_log_can_be_corroborated_by_exact_trailing_journal_and_native_bot_client_ID()
+    {
+        var journal = Journal("EXCHANGE_TRAILING_STOP: closed by exchange", "EXCHANGE_FILLS");
+        var action = journal["actions"]![0]!.AsObject(); action["exchange_order_id"] = Id; action["exit_reason_code"] = "EXCHANGE_TRAILING_STOP";
+        var execution = new JsonObject { ["event"] = new JsonObject { ["execution"] = new JsonObject { ["execution"] = new JsonObject
+            { ["order"] = new JsonObject { ["uid"] = Id, ["clientId"] = "tb-0123456789abcdef0123456789abcdef" } } } } };
+        Assert.Single(BotJournalEvidence.Read(journal, "", [execution]));
+        action["exit_reason_code"] = "EXCHANGE_CLOSE";
+        Assert.Empty(BotJournalEvidence.Read(journal, "", [execution]));
+    }
 }

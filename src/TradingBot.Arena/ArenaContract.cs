@@ -108,14 +108,19 @@ public sealed class ArenaContract
     }
     private static decimal? Decimal(JsonObject row, string name, List<string> errors, string path, bool required = false)
     {
-        if (row[name] is null) { if (required) errors.Add(path + "." + name + ": required"); return null; }
-        if (decimal.TryParse(row[name]!.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) return value;
-        errors.Add(path + "." + name + ": invalid decimal"); return null;
+        if (row[name] is null)
+        {
+            if (required) errors.Add(path + "." + name + ": required");
+            return null;
+        }
+        try { return KrakenEvidence.ExactDecimal(row[name]!.ToString()); }
+        catch (Exception ex) when (ex is InvalidDataException or FormatException or OverflowException)
+        { errors.Add(path + "." + name + ": invalid exact decimal"); return null; }
     }
     private static DateTimeOffset Instant(JsonObject row, string name, List<string> errors, string path, DateTimeOffset now, bool allowFuture = false)
     {
         string text = row[name]?.ToString() ?? "";
-        bool zone = text.EndsWith('Z') || System.Text.RegularExpressions.Regex.IsMatch(text, @"[+-]\d{2}:\d{2}$");
+        bool zone = text.EndsWith('Z') || System.Text.RegularExpressions.Regex.IsMatch(text, @"[+-]\d{2}:\d{2}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
         if (zone && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var value) && value.Year >= 1970 && (allowFuture || value <= now)) return value;
         errors.Add(path + "." + name + ": invalid_time"); return DateTimeOffset.MinValue;
     }

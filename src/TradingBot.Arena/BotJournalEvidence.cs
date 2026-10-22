@@ -6,22 +6,34 @@ namespace TradingBot.Arena;
 public sealed record BotOrderEvidence(string OrderId, string PairOrSymbol, string Proof, JournalAnnotation Annotation);
 public static partial class BotJournalEvidence
 {
-    [GeneratedRegex(@"live Kraken Futures (?:FOK |post-only )?(?:order )?accepted id=(?<id>[0-9a-fA-F-]{36})(?:\s|$)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"live Kraken Futures (?:FOK |post-only )?(?:order )?accepted id=(?<id>[0-9a-fA-F-]{36})(?:\s|$)", RegexOptions.CultureInvariant, 1000)]
     private static partial Regex AcceptedOrder();
-    [GeneratedRegex(@"DEBYKO (?<rule>[A-Z0-9_]+) firing (?<id>[a-zA-Z0-9_-]+)(?:\s|$)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"DEBYKO (?<rule>[A-Z0-9_]+) firing (?<id>[a-zA-Z0-9_-]+)(?:\s|$)", RegexOptions.CultureInvariant, 1000)]
     private static partial Regex Signal();
-    [GeneratedRegex(@"futures-(?:trailing-arm|tpsl-arm|trailing-rollback): (?:restored stop_loss )?symbol=(?<symbol>[A-Z0-9_]+) .*?orderId=(?<id>[0-9a-fA-F-]{36})(?:\s|$)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"futures-(?:trailing-arm|tpsl-arm|trailing-rollback): (?:restored stop_loss )?symbol=(?<symbol>[A-Z0-9_]+) .*?orderId=(?<id>[0-9a-fA-F-]{36})(?:\s|$)", RegexOptions.CultureInvariant, 1000)]
     private static partial Regex ProtectiveOrder();
-    public static IReadOnlyList<BotOrderEvidence> Read(JsonObject journal, string protectedOrderLog)
+    public static IReadOnlyList<BotOrderEvidence> Read(JsonObject journal, string protectedOrderLog, IReadOnlyList<JsonObject>? executions = null)
     {
         var verifiedFirings = (journal["signals"] as JsonArray ?? []).OfType<JsonObject>()
             .Where(s => s["firing_id"] is not null).Select(s => s["firing_id"]!.ToString()).ToHashSet(StringComparer.Ordinal);
+        var nativeOrders = (executions ?? []).Select(e => e["event"]?["execution"]?["execution"]?["order"] as JsonObject)
+            .Where(o => o is not null).GroupBy(o => o!["uid"]!.ToString(), StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First()!, StringComparer.Ordinal);
         var result = new List<BotOrderEvidence>();
         foreach (var action in (journal["actions"] as JsonArray ?? []).OfType<JsonObject>())
         {
             string reason = action["reason"]?.ToString() ?? "";
             var accepted = AcceptedOrder().Match(reason);
-            if (!accepted.Success) continue; // EXCHANGE_CLOSE(_BACKFILLED) does not prove who placed the order.
+            if (!accepted.Success)
+            {
+                // ClosureReason emits these only for an exact match to the bot's stored trailing-stop order ID.
+                // A venue-returned tb-UUID client ID corroborates the journal even when the old container log has expired.
+                string? closeId = action["exchange_order_id"]?.ToString();
+                if (action["exit_reason_code"]?.ToString() is "EXCHANGE_TRAILING_STOP" or "EXCHANGE_MAX_HOLD_RELEASE"
+                    && closeId is not null && nativeOrders.TryGetValue(closeId, out var native)
+                    && System.Text.RegularExpressions.Regex.IsMatch(native["clientId"]?.ToString() ?? "", "^tb-[0-9a-f]{32}$", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
+                    result.Add(new(closeId, action["pair"]!.ToString(), "matched_bot_trailing_stop_journal_and_native_client_id", new(closeId, ExitReason: "sl")));
+                continue; // EXCHANGE_CLOSE(_BACKFILLED) does not prove who placed the order.
+            }
             string id = accepted.Groups["id"].Value;
             var recorded = (action["fills"] as JsonArray ?? []).OfType<JsonObject>().Where(f => f["order_id"]?.ToString() == id
                 && f["source"]?.ToString() is "EXCHANGE_ORDER_RESULT" or "EXCHANGE_ORDER_ACCEPTED_MODELED").Any();

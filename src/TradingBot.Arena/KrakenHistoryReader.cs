@@ -86,13 +86,25 @@ public sealed class KrakenHistoryReader
         }
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
-    public async Task<HistoryCapture> CaptureAsync(CancellationToken ct)
+    public async Task<(JsonObject Body, DateTimeOffset ReceivedAt)> CurrentOpenPositionsAsync(CancellationToken ct)
+    {
+        _ = await CheckIdentityAsync(ct);
+        var (body, _) = await GetAsync("/derivatives/api/v3/openpositions", [], ct);
+        if (body["openPositions"] is not JsonArray) throw new InvalidDataException("Missing current open positions.");
+        return (body, _clock.GetUtcNow());
+    }
+    private async Task<string> CheckIdentityAsync(CancellationToken ct)
     {
         var (identity, _) = await GetAsync("/api/auth/v1/api-keys/v3/check", [], ct);
         string? permission = identity["permissions"]?["general"]?.GetValue<string>();
         if (_existingKeyReadOnly ? permission is not ("READ_ONLY" or "FULL_ACCESS") : permission != "READ_ONLY" || identity["permissions"]?["transfer"]?.GetValue<string>() != "NO_ACCESS")
             throw new InvalidOperationException("Default capture requires general=READ_ONLY, transfer=NO_ACCESS. Existing-key GET-only mode must be selected explicitly and never grants order/transfer access.");
         string account = identity["accountUid"]?.GetValue<string>() ?? throw new InvalidDataException("Missing account identity.");
+        return account;
+    }
+    public async Task<HistoryCapture> CaptureAsync(CancellationToken ct)
+    {
+        string account = await CheckIdentityAsync(ct);
         DateTimeOffset cutoff = _clock.GetUtcNow();
         long bytes = 0;
         JsonObject Keep(JsonObject row)
