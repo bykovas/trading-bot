@@ -58,6 +58,39 @@ echo "  pukis  = trading-bot-pukis-futures-worker-live (paused until configured 
 echo "  market-data= ${MARKET_DATA_WORKER_IMAGE_NAME}:${MARKET_DATA_WORKER_IMAGE_TAG}"
 echo "  og     = ${OG_IMAGE_NAME}:${OG_IMAGE_TAG}"
 
+# Avoid even the legacy PUKO seed/stop when the only change is the static UI.
+try_deploy_ui_only() {
+  local old_image name expected actual
+  [[ "${TRADINGBOT_FORCE_FULL_DEPLOY:-false}" != true ]] || return 1
+  old_image="$(docker inspect --format '{{.Config.Image}}' trading-bot-ui 2>/dev/null)" || return 1
+  [[ "$old_image" == "${UI_IMAGE_NAME}:"* && "$old_image" != "${UI_IMAGE_NAME}:${UI_IMAGE_TAG}" ]] || return 1
+  cmp -s infra/docker-compose.prod.yml "$COMPOSE_FILE" || return 1
+  cmp -s infra/traefik/trading-bot.yml "$TRAEFIK_DYNAMIC_FILE" || return 1
+  cmp -s "$FUTURES_APPSETTINGS_SOURCE" "$FUTURES_LIVE_APPSETTINGS" || return 1
+  cmp -s "$FUTURES_PUKIS_APPSETTINGS_SOURCE" "$FUTURES_PUKIS_LIVE_APPSETTINGS" || return 1
+  cmp -s "$MARKET_DATA_APPSETTINGS_SOURCE" "$MARKET_DATA_APPSETTINGS" || return 1
+  for name in trading-bot-api trading-bot-futures-worker-live trading-bot-pukis-futures-worker-live trading-bot-arena-reporter trading-bot-market-data-worker trading-bot-og; do
+    case "$name" in
+      trading-bot-api) expected="${API_IMAGE_NAME}:${API_IMAGE_TAG}" ;;
+      trading-bot-market-data-worker) expected="${MARKET_DATA_WORKER_IMAGE_NAME}:${MARKET_DATA_WORKER_IMAGE_TAG}" ;;
+      trading-bot-og) expected="${OG_IMAGE_NAME}:${OG_IMAGE_TAG}" ;;
+      *) expected="${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG}" ;;
+    esac
+    actual="$(docker inspect --format '{{.Config.Image}}' "$name" 2>/dev/null)" || return 1
+    [[ "$actual" == "$expected" ]] || return 1
+  done
+  echo "Verified UI-only deployment: no worker stop, seed, environment rewrite or API restart."
+  printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin || exit 1
+  docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" pull ui || exit 1
+  docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d --no-deps ui || exit 1
+  docker exec trading-bot-ui nginx -t || exit 1
+  docker exec trading-bot-ui wget -q -O /dev/null --header='Host: blynai.meetluko.eu' http://127.0.0.1/ || exit 1
+  echo "UI-only deployment healthy."
+}
+if try_deploy_ui_only; then
+  exit 0
+fi
+
 mkdir -p \
   "${DEPLOY_DIR}" \
   "${TRAEFIK_DYNAMIC_DIR}" \
