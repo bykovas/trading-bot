@@ -10,18 +10,14 @@ API_DIR="${DEPLOY_DIR}/api"
 API_ENV_FILE="${API_DIR}/.env"
 FUTURES_DIR="${DEPLOY_DIR}/futures"
 FUTURES_LIVE_DIR="${FUTURES_DIR}/live"
-FUTURES_LUKAS_LIVE_DIR="${FUTURES_DIR}/lukas-live"
 FUTURES_PUKIS_LIVE_DIR="${FUTURES_DIR}/pukis-live"
 FUTURES_VIRTUAL_DIR="${FUTURES_DIR}/virtual"
 FUTURES_APPSETTINGS_SOURCE="src/TradingBot.FuturesWorker/appsettings.json"
-FUTURES_LUKAS_APPSETTINGS_SOURCE="src/TradingBot.FuturesWorker/appsettings.lukas.json"
 FUTURES_PUKIS_APPSETTINGS_SOURCE="src/TradingBot.FuturesWorker/appsettings.pukis.json"
 FUTURES_LIVE_APPSETTINGS="${FUTURES_LIVE_DIR}/appsettings.json"
-FUTURES_LUKAS_LIVE_APPSETTINGS="${FUTURES_LUKAS_LIVE_DIR}/appsettings.json"
 FUTURES_PUKIS_LIVE_APPSETTINGS="${FUTURES_PUKIS_LIVE_DIR}/appsettings.json"
 FUTURES_VIRTUAL_APPSETTINGS="${FUTURES_VIRTUAL_DIR}/appsettings.json"
 FUTURES_LIVE_ENV_FILE="${FUTURES_LIVE_DIR}/.env"
-FUTURES_LUKAS_LIVE_ENV_FILE="${FUTURES_LUKAS_LIVE_DIR}/.env"
 FUTURES_PUKIS_LIVE_ENV_FILE="${FUTURES_PUKIS_LIVE_DIR}/.env"
 FUTURES_VIRTUAL_ENV_FILE="${FUTURES_VIRTUAL_DIR}/.env"
 DATABASE_DIR="${DEPLOY_DIR}/database"
@@ -58,7 +54,6 @@ echo "Deploying stack '${PROJECT_NAME}' to ${DEPLOY_DIR}"
 echo "  ui     = ${UI_IMAGE_NAME}:${UI_IMAGE_TAG}"
 echo "  api    = ${API_IMAGE_NAME}:${API_IMAGE_TAG}"
 echo "  futures= ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG}"
-echo "  lukas  = trading-bot-lukas-futures-worker-live"
 echo "  pukis  = trading-bot-pukis-futures-worker-live (paused until configured in the UI)"
 echo "  market-data= ${MARKET_DATA_WORKER_IMAGE_NAME}:${MARKET_DATA_WORKER_IMAGE_TAG}"
 echo "  og     = ${OG_IMAGE_NAME}:${OG_IMAGE_TAG}"
@@ -69,8 +64,6 @@ mkdir -p \
   "${API_DIR}" \
   "${FUTURES_LIVE_DIR}/data" \
   "${FUTURES_LIVE_DIR}/logs" \
-  "${FUTURES_LUKAS_LIVE_DIR}/data" \
-  "${FUTURES_LUKAS_LIVE_DIR}/logs" \
   "${FUTURES_PUKIS_LIVE_DIR}/data" \
   "${FUTURES_PUKIS_LIVE_DIR}/logs" \
   "${FUTURES_VIRTUAL_DIR}/data" \
@@ -92,9 +85,8 @@ cp infra/docker-compose.prod.yml "${COMPOSE_FILE}"
 cp infra/traefik/trading-bot.yml "${TRAEFIK_DYNAMIC_FILE}"
 
 # Appsettings files are repository-owned and refreshed on every deploy. The primary
-# live and virtual workers share the default profile, but entry mirroring activates
-# only in live mode. Lukas publishes normal entries; primary live follows them with
-# the opposite side. Runtime identity and secrets belong in .env files.
+# live and archived virtual workers share the default profile. Active production
+# trading workers are BYKO and PUKO only. Runtime identity and secrets belong in .env files.
 #
 # install_config overwrites the destination even when the existing file is owned by
 # another user (e.g. a live appsettings.json created root-owned by an earlier
@@ -107,10 +99,8 @@ install_config() {
   cp "${src}" "${dest}"
 }
 
-echo "Updating futures live appsettings from repository config (mirror follower in live mode)"
+echo "Updating BYKO futures live appsettings from repository config"
 install_config "${FUTURES_APPSETTINGS_SOURCE}" "${FUTURES_LIVE_APPSETTINGS}"
-echo "Updating Lukas futures live appsettings from repository config"
-install_config "${FUTURES_LUKAS_APPSETTINGS_SOURCE}" "${FUTURES_LUKAS_LIVE_APPSETTINGS}"
 echo "Updating Pukis futures live appsettings from repository config"
 install_config "${FUTURES_PUKIS_APPSETTINGS_SOURCE}" "${FUTURES_PUKIS_LIVE_APPSETTINGS}"
 echo "Updating futures virtual appsettings from repository config"
@@ -139,17 +129,8 @@ else
   echo "Futures live trading disabled (TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED='${TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED:-}' is not 'true')"
 fi
 
-if [ "$(printf '%s' "${TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
-  FUTURES_LUKAS_LIVE_TRADING_FLAG="true"
-  : "${TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY:?TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY is required when Lukas futures live trading is enabled}"
-  : "${TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET:?TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET is required when Lukas futures live trading is enabled}"
-  COMPOSE_PROFILES="lukas-live"
-  echo "!!! TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED=true from PROD environment: deploying Lukas FUTURES LIVE trading ON !!!"
-else
-  FUTURES_LUKAS_LIVE_TRADING_FLAG="false"
-  COMPOSE_PROFILES=""
-  echo "Lukas futures live trading disabled (TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED='${TRADINGBOT_LUKAS_FUTURES_LIVE_TRADING_ENABLED:-}' is not 'true')"
-fi
+# No optional live-worker profiles: retired LUKO must not be resurrected by a stale variable.
+COMPOSE_PROFILES=""
 
 echo "Writing API environment to ${API_ENV_FILE}"
 umask 077
@@ -212,27 +193,6 @@ else
     printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
   } > "${FUTURES_LIVE_ENV_FILE}"
 fi
-
-# Lukas has a managed, isolated runtime environment. Rewriting this file on every
-# deploy rotates only his account credentials and prevents stale primary-account
-# credentials from surviving in the dedicated worker.
-echo "Writing Lukas futures live environment to ${FUTURES_LUKAS_LIVE_ENV_FILE}"
-{
-  printf 'TRADINGBOT_BOT_INSTANCE_ID=futures-lukas-live\n'
-  printf 'TRADINGBOT_BOT_INSTANCE_NAME=Lukas live futures worker\n'
-  printf 'TRADINGBOT_DATABASE_ENABLED=true\n'
-  printf 'TRADINGBOT_DATABASE_CONNECTION_STRING=Host=database;Port=5432;Database=tradingbot;Username=tradingbot;Password=%s\n' "${TRADINGBOT_DB_PASSWORD:-}"
-  printf 'TRADINGBOT_MARKET_DATA_MODE=database\n'
-  printf 'TRADINGBOT_MARKET_DATA_FALLBACK_ENABLED=true\n'
-  printf 'TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED=%s\n' "${FUTURES_LUKAS_LIVE_TRADING_FLAG}"
-  printf 'TRADINGBOT_KRAKEN_FUTURES_API_KEY=%s\n' "${TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_KEY:-}"
-  printf 'TRADINGBOT_KRAKEN_FUTURES_API_SECRET=%s\n' "${TRADINGBOT_LUKAS_KRAKEN_FUTURES_API_SECRET:-}"
-  # Only this worker announces entries, so only this worker gets the token. The chat id
-  # is not here: it is not a credential and lives in appsettings, in the open.
-  printf 'TRADINGBOT_TELEGRAM_BOT_TOKEN=%s\n' "${TRADINGBOT_TELEGRAM_BOT_TOKEN:-}"
-  printf 'SENTRY_DSN=%s\n' "${SENTRY_DSN:-}"
-  printf 'TRADINGBOT_LOG_DIRECTORY=/app/logs\n'
-} > "${FUTURES_LUKAS_LIVE_ENV_FILE}"
 
 # PUKO is the local BYKO-v2 paper arm. Zero database margin pauses all evaluation;
 # raising it later enables only virtual fills against its manual USD 60 portfolio.
@@ -614,12 +574,11 @@ echo "Seeding Pukis paused futures instance in Postgres."
 seed_pukis_instance
 
 echo "Starting application services after database readiness."
-if [ "${FUTURES_LUKAS_LIVE_TRADING_FLAG}" != "true" ]; then
-  docker rm -f trading-bot-lukas-futures-worker-live >/dev/null 2>&1 || true
-fi
+# Owner retired LUKO; remove a stale container during upgrades, never start it.
+docker rm -f trading-bot-lukas-futures-worker-live >/dev/null 2>&1 || true
 
 # Compose leaves containers of disabled profiles alone, so the paper workers are
-# removed explicitly - the same way the Lukas worker is when his flag is off.
+# removed explicitly, just like the retired LUKO container above.
 # Without this they would keep running on the previous image forever.
 for PAPER_WORKER in \
   trading-bot-futures-worker-virtual; do
@@ -660,9 +619,6 @@ WORKER_CONTAINERS=(
   trading-bot-futures-worker-live
   trading-bot-pukis-futures-worker-live
 )
-if [ "${FUTURES_LUKAS_LIVE_TRADING_FLAG}" = "true" ]; then
-  WORKER_CONTAINERS+=(trading-bot-lukas-futures-worker-live)
-fi
 
 for WORKER_CONTAINER in "${WORKER_CONTAINERS[@]}"; do
   WORKER_RUNNING="$(docker inspect -f '{{.State.Running}}' "${WORKER_CONTAINER}" 2>/dev/null || echo false)"
