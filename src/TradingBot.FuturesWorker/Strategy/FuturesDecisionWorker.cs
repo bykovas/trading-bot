@@ -3479,6 +3479,8 @@ internal sealed class FuturesDecisionWorker(
                 TrailingActivatedAtUtc = tpSl.TrailingActivatedAtUtc,
                 TrailingInitialStopPrice = existing?.TrailingInitialStopPrice,
                 EntryChannel = existing?.EntryChannel,
+                DebykoFiringId = existing is not null && existing.Side.Equals(remote.Side, StringComparison.OrdinalIgnoreCase)
+                    && existing.EntryPrice == remote.EntryPrice ? existing.DebykoFiringId : null,
                 FlippedEntry = existing?.FlippedEntry ?? false,
                 EntryAtr = existing?.EntryAtr,
                 RoundTripCostEstimatePct = existing?.RoundTripCostEstimatePct,

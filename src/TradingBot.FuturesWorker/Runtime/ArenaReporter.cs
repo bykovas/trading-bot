@@ -27,7 +27,9 @@ internal sealed class ArenaReporter : IDisposable
         directory = Environment.GetEnvironmentVariable("DEBYKO_ARENA_STATE_DIRECTORY") ?? directory;
         Directory.CreateDirectory(directory);
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        _owner = new FileStream(Path.Combine(directory, "reporter.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var lockOptions = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows()) lockOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        _owner = new FileStream(Path.Combine(directory, "reporter.lock"), lockOptions);
         _source = new(config, _krakenHttp, directory);
         _feed = new(_source, new ArenaSubmission(_arenaHttp, key), new ArenaFileStore(directory), Log);
     }
@@ -192,7 +194,7 @@ internal sealed class ArenaNativeSource : IArenaFeedSource, IDisposable
         var observed = await Reader().CurrentOpenPositionsAsync(ct); Account(observed.AccountUid);
         var instruments = (await _universe.GetUniverseAsync(ct)).Instruments;
         if (!ReferenceEquals(held, Volatile.Read(ref _held))) throw new InvalidDataException("Position changed during native read; next change wakeup obtains a new snapshot.");
-        var botHeld = held.Where(p => p.Origin == PositionOrigins.Bot && p.Quantity != 0).Select(p =>
+        var botHeld = held.Where(p => p.Origin?.Equals(PositionOrigins.Bot, StringComparison.OrdinalIgnoreCase) == true && p.Quantity != 0).Select(p =>
             new ArenaHeldPosition(instruments.SingleOrDefault(i => i.Pair.Equals(p.Pair, StringComparison.OrdinalIgnoreCase))?.KrakenPair
                 ?? throw new InvalidDataException("No native contract mapping for held bot position."),
                 p.Side.ToLowerInvariant(), p.Quantity, p.EntryPrice,

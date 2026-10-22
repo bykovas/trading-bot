@@ -47,7 +47,7 @@ public sealed class ArenaSubmission : IArenaFeedTransport
         var receipts = new List<ArenaReceipt>();
         async Task Send(HttpMethod method, string path, byte[] body, int count)
         {
-            var receipt = await SendAsync(method, path, body, count, ct);
+            var receipt = await SendAsync(method, path, body, count, ct, retryTransient: path != "/v1/positions");
             receipts.Add(receipt); await checkpoint(receipt, ct); // If durable checkpoint fails, stop before the next write.
         }
         // A successful, digest-bound profile receipt is resumable: capital guards correctly reject a new backdated declaration after trades exist.
