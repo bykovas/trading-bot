@@ -68,10 +68,15 @@ internal sealed class PukoReadOnlyChecks(
                 _nextRefresh = _clock.UtcNow.AddMinutes(1);
                 await AlertAsync("*", "METADATA_UNAVAILABLE", cancellationToken);
             }
-            foreach (var pair in config.BykoV2.Universe.Distinct(StringComparer.OrdinalIgnoreCase))
+            else
             {
-                if (FuturesDecisionWorker.ResolveDebykoInstrument(DebykoMarketClient.ToInstrument(pair), selection.Instruments) is null)
-                    await AlertAsync(pair, "CONTRACT_UNAVAILABLE", cancellationToken);
+                // A failed registry read cannot prove that any individual contract is absent.
+                // Preserve the venue-wide metadata warning and retry; audit pairs only against fresh data.
+                foreach (var pair in config.BykoV2.Universe.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    if (FuturesDecisionWorker.ResolveDebykoInstrument(DebykoMarketClient.ToInstrument(pair), selection.Instruments) is null)
+                        await AlertAsync(pair, "CONTRACT_UNAVAILABLE", cancellationToken);
+                }
             }
             try
             {

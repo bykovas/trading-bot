@@ -1,3 +1,8 @@
+## 2026-10-22-puko-metadata-alerts
+
+- Do not report individual Kraken contracts unavailable when PUKO's read-only metadata fetch failed. Emit the existing metadata warning and retain its retry, fee fallback, and per-pair checks against fresh metadata.
+- Add offline cold-start failure, expired-cache recovery and HTTP/transport failure regressions. Preserve all paper fills, sizing, strategy, live execution and automatic runtime metadata.
+
 ## 2026-10-22-arena-indexed-journal
 
 - Restrict the separate Arena reporter's journal read to the five executed trade action types, matching the existing indexed trade predicates and importer evidence scope. This avoids scanning large HOLD/analysis reasons under the reporting connection's unchanged 10-second timeout.
