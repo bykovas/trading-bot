@@ -68,6 +68,16 @@ public sealed class KrakenHistoryReaderTests
         Assert.Equal(2, capture.PositionUpdates!.Count);
         Assert.Contains("continuation_token=position-token", fake.Requests[3].Uri.Query);
     }
+    [Fact]
+    public async Task Fresh_snapshot_rechecks_key_identity_and_never_reads_history_or_trades()
+    {
+        var fake = new Fake(Json(Identity("FULL_ACCESS")), Json(Open));
+        var reader = new KrakenHistoryReader(new HttpClient(fake), Key, Secret, new Uri("http://127.0.0.1:49152"), existingKeyReadOnly: true);
+        var snapshot = await reader.CurrentOpenPositionsAsync(default);
+        Assert.Equal(Account, snapshot.AccountUid); Assert.Equal(2, fake.Requests.Count);
+        Assert.All(fake.Requests, r => Assert.Equal(HttpMethod.Get, r.Method));
+        Assert.All(fake.HasNonce, n => Assert.False(n));
+    }
     [Theory]
     [InlineData("FULL_ACCESS")]
     [InlineData("NO_ACCESS")]

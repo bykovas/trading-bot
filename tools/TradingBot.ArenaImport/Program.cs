@@ -16,6 +16,8 @@ if (args.Length == 4 && args[0] == "send")
     {
         PrivateFiles.DirectoryOutsideRepository(Path.GetDirectoryName(Path.GetFullPath(args[3]))!);
         var native = JsonNode.Parse(File.ReadAllText(args[3]))!.AsObject();
+        var original = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "capture.json")))!.AsObject();
+        if (native["account_uid"]?.ToString() != original["AccountUid"]?.ToString()) throw new InvalidDataException("Fresh snapshot belongs to a different Kraken account.");
         ArenaSnapshotCheck.Matches(native["body"]!.AsObject(), expected);
         return Task.FromResult(DateTimeOffset.Parse(native["received_at"]!.ToString(), System.Globalization.CultureInfo.InvariantCulture));
     }
@@ -93,7 +95,7 @@ if (args[0] == "snapshot-existing-key-readonly")
 {
     var snapshot = await reader.CurrentOpenPositionsAsync(CancellationToken.None);
     await using var output = PrivateFiles.CreateNew(args[1]);
-    await JsonSerializer.SerializeAsync(output, new JsonObject { ["body"] = snapshot.Body, ["received_at"] = snapshot.ReceivedAt.ToString("O") });
+    await JsonSerializer.SerializeAsync(output, new JsonObject { ["account_uid"] = snapshot.AccountUid, ["body"] = snapshot.Body, ["received_at"] = snapshot.ReceivedAt.ToString("O") });
     Console.WriteLine("Fresh read-only native open snapshot saved; no Arena write.");
     return 0;
 }

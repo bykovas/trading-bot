@@ -86,12 +86,12 @@ public sealed class KrakenHistoryReader
         }
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
-    public async Task<(JsonObject Body, DateTimeOffset ReceivedAt)> CurrentOpenPositionsAsync(CancellationToken ct)
+    public async Task<(string AccountUid, JsonObject Body, DateTimeOffset ReceivedAt)> CurrentOpenPositionsAsync(CancellationToken ct)
     {
-        _ = await CheckIdentityAsync(ct);
+        string account = await CheckIdentityAsync(ct);
         var (body, _) = await GetAsync("/derivatives/api/v3/openpositions", [], ct);
         if (body["openPositions"] is not JsonArray) throw new InvalidDataException("Missing current open positions.");
-        return (body, _clock.GetUtcNow());
+        return (account, body, _clock.GetUtcNow());
     }
     private async Task<string> CheckIdentityAsync(CancellationToken ct)
     {
