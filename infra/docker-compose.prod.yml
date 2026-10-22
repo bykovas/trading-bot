@@ -56,6 +56,30 @@ services:
       - /opt/trading-bot/futures/live/data:/app/data
       - /opt/trading-bot/futures/live/logs:/app/logs
 
+  arena-reporter:
+    container_name: trading-bot-arena-reporter
+    image: ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG:-latest}
+    entrypoint: ["dotnet", "TradingBot.ArenaReporter.dll"]
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 128
+    env_file:
+      - /opt/trading-bot/futures/live/.env
+      - /opt/trading-bot/futures/debyko.env
+      # Protected account-owned Arena key; deploy.sh never rewrites this file. Absence disables reporting.
+      - path: /opt/trading-bot/futures/live/arena.env
+        required: false
+    environment:
+      DEBYKO_ARENA_STATE_DIRECTORY: /app/data/arena
+    depends_on:
+      futures-worker-live:
+        condition: service_started
+    volumes:
+      - /opt/trading-bot/futures/live/appsettings.json:/app/appsettings.json:ro
+      - /opt/trading-bot/futures/live/arena-state:/app/data/arena
+      - /opt/trading-bot/futures/live/logs:/app/logs:ro
+
   futures-worker-lukas-live:
     container_name: trading-bot-lukas-futures-worker-live
     image: ${FUTURES_WORKER_IMAGE_NAME}:${FUTURES_WORKER_IMAGE_TAG:-latest}

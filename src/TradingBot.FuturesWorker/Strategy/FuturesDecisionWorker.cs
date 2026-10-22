@@ -1239,6 +1239,7 @@ internal sealed class FuturesDecisionWorker(
             if (opened is not null && fill.PositionOpened)
             {
                 opened.EntryChannel = rule;
+                opened.DebykoFiringId = signal.FiringId;
                 opened.Strategy = "BYKO_V2";
                 opened.AtrPct = entryAtrPct;
                 fill.Action.AtrPct = entryAtrPct;

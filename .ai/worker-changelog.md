@@ -1,3 +1,8 @@
+## 2026-10-22-byko-arena-reporting
+
+- Add an optional, separate process and memory-limited Arena reporter using the account key from the protected environment; bounded durable reporting state, native Kraken economics, imported trade identities, late-cost corrections and fresh position heartbeats. Its separate reporting-only executable never constructs a trading worker or broker; reporting exceptions never alter decisions, risk, sizing, broker calls or execution.
+- Carry the opening DEBYKO firing_id on the actual persisted position and clone; preserve all existing runtime/cycle metadata. No deployment: Denis reviews and merges Part C.
+
 ## 2026-10-17-puko-management-data-parity
 
 - Route only PUKO's held-position candles through DEBYKO, using the same Core candle source as BYKO. Keep quotes, entry authority, entry candidates, universe, strategy thresholds and live execution unchanged; LUKO retains its existing data source.
