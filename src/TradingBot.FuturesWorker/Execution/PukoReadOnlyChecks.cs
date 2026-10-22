@@ -72,11 +72,7 @@ internal sealed class PukoReadOnlyChecks(
             {
                 // A failed registry read cannot prove that any individual contract is absent.
                 // Preserve the venue-wide metadata warning and retry; audit pairs only against fresh data.
-                foreach (var pair in config.BykoV2.Universe.Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    if (FuturesDecisionWorker.ResolveDebykoInstrument(DebykoMarketClient.ToInstrument(pair), selection.Instruments) is null)
-                        await AlertAsync(pair, "CONTRACT_UNAVAILABLE", cancellationToken);
-                }
+                await AuditContractsAsync(selection.Instruments, cancellationToken);
             }
             try
             {
@@ -111,6 +107,15 @@ internal sealed class PukoReadOnlyChecks(
             }
         }
         finally { _gate.Release(); }
+    }
+
+    private async Task AuditContractsAsync(IReadOnlyList<InstrumentOptions> instruments, CancellationToken cancellationToken)
+    {
+        foreach (var pair in config.BykoV2.Universe.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (FuturesDecisionWorker.ResolveDebykoInstrument(DebykoMarketClient.ToInstrument(pair), instruments) is null)
+                await AlertAsync(pair, "CONTRACT_UNAVAILABLE", cancellationToken);
+        }
     }
 
     public async Task<string> CheckAsync(InstrumentOptions instrument, FuturesDesiredExposure desired,
