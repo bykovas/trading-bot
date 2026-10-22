@@ -7,7 +7,7 @@ Owner decision, 22 October 2026: active trading workers are **BYKO** (`futures-l
 - `trading-bot-lukas-futures-worker-live` was stopped and removed without deleting volumes or placing/cancelling any Kraken order.
 - The production Compose service, optional live profile, deployment environment/credential bindings, configuration copy and health/startup paths have been removed. The old PROD enable variable was set false as immediate containment; even a stale true value cannot start a service that no longer exists.
 - The deployment retains only an idempotent removal of a stray old container. CI renders the production topology with default and legacy flags and rejects any reintroduced LUKO service.
-- Diagnostics cover BYKO and PUKO. Historical database records, the old sample profile and the original PUKO strategy-profile provenance are retained; none starts LUKO or changes PUKO's current selected profile.
+- Diagnostics cover BYKO and PUKO. Historical database records, the old sample profile and the original PUKO strategy-profile provenance are retained. New PUKO installations use its own repository fallback; deployment never reads LUKO's selected profile. Existing PUKO selections are preserved by ON CONFLICT DO NOTHING.
 
 ## CryptoSmith X
 

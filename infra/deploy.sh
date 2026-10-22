@@ -467,32 +467,17 @@ insert into bot_instance_strategy_profiles (
     created_by,
     updated_by
 )
-select
+-- Keep an existing PUKO selection intact. New installations use PUKO's own
+-- repository fallback profile; retired LUKO is never consulted during deployment.
+values (
     'futures-pukis-live',
-    source.profile_id,
-    source.profile_revision,
-    source.overrides_jsonb,
-    source.is_active,
+    'd6d42f9b-3c57-4e85-9294-ef60962c5de1',
+    1,
+    '{}'::jsonb,
+    true,
     'deploy',
     'deploy'
-from (
-    select profile_id, profile_revision, overrides_jsonb, is_active
-    from bot_instance_strategy_profiles
-    where bot_instance_id = 'futures-lukas-live'
-
-    union all
-
-    select
-        'd6d42f9b-3c57-4e85-9294-ef60962c5de1'::uuid,
-        1,
-        '{}'::jsonb,
-        true
-    where not exists (
-        select 1
-        from bot_instance_strategy_profiles
-        where bot_instance_id = 'futures-lukas-live'
-    )
-) source
+)
 on conflict (bot_instance_id) do nothing;
 
 create table if not exists bot_instance_seed_migrations (
