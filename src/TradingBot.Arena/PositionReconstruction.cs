@@ -8,7 +8,7 @@ public sealed record VenueFill(string Id, string OrderId, string PositionKey, st
     string Side, decimal Quantity, decimal Price, decimal OldPosition, decimal NewPosition, decimal Fees, decimal RealizedFunding,
     long Sequence, decimal? Leverage = null);
 public sealed record VenueFunding(string Id, string PositionKey, string Symbol, DateTimeOffset Time, decimal Amount);
-public sealed record JournalAnnotation(string OrderId, string? FiringId = null, string? Rule = null, string? ExitReason = null);
+public sealed record JournalAnnotation(string OrderId, string? FiringId = null, string? Rule = null, string? ExitReason = null, decimal? Leverage = null);
 public sealed record PositionLeg(string Id, string OrderId, DateTimeOffset Time, string Side, decimal Quantity, decimal Price);
 public sealed record ReconstructedPosition(string TradeId, string PositionKey, string Symbol, string Side, DateTimeOffset OpenedAt,
     DateTimeOffset? ClosedAt, decimal Size, decimal Entry, decimal? Exit, decimal Fees, decimal Funding, decimal? Leverage,
@@ -78,8 +78,9 @@ public static class PositionReconstruction
             g => g.Distinct().Count() == 1 ? g.First() : throw new InvalidDataException("Ambiguous journal annotation for a venue order."), StringComparer.Ordinal);
         var active = new Dictionary<(string Symbol, string Position), Cycle>(); List<Cycle> completed = [];
         HashSet<string> seen = new(StringComparer.Ordinal); DateTimeOffset previous = DateTimeOffset.MinValue;
-        foreach (var fill in fills.OrderBy(f => f.Time).ThenBy(f => f.Sequence))
+        foreach (var sourceFill in fills.OrderBy(f => f.Time).ThenBy(f => f.Sequence))
         {
+            var fill = sourceFill with { Leverage = sourceFill.Leverage ?? annotations.GetValueOrDefault(sourceFill.OrderId)?.Leverage };
             if (!seen.Add(fill.Id) || string.IsNullOrWhiteSpace(fill.Id) || string.IsNullOrWhiteSpace(fill.PositionKey) || string.IsNullOrWhiteSpace(fill.OrderId))
                 throw new InvalidDataException("A fill identity, position scope or order is missing/duplicated.");
             if (!fill.Symbol.StartsWith("PF_", StringComparison.Ordinal) || !fill.Symbol.EndsWith("USD", StringComparison.Ordinal))

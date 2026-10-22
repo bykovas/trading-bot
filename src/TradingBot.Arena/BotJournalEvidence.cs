@@ -45,8 +45,11 @@ public static partial class BotJournalEvidence
                 "SELL_TAKE_PROFIT" or "BUY_TAKE_PROFIT" => "tp",
                 _ => reason.Contains("signal reversal close", StringComparison.Ordinal) ? "signal" : null
             };
+            decimal? leverage = action["leverage"] is not null ? KrakenEvidence.Number(action, "leverage")
+                : action["requested_leverage"] is not null ? KrakenEvidence.Number(action, "requested_leverage") : null;
+            if (leverage <= 0) throw new InvalidDataException("Journal leverage must be positive; do not substitute a current default.");
             result.Add(new(id, action["pair"]?.ToString() ?? throw new InvalidDataException("Order proof has no pair."), "accepted_order_journal",
-                new(id, firing, signal.Success ? signal.Groups["rule"].Value : null, exit)));
+                new(id, firing, signal.Success ? signal.Groups["rule"].Value : null, exit, leverage)));
         }
         foreach (string line in protectedOrderLog.Split('\n'))
         {
@@ -64,7 +67,9 @@ public static partial class BotJournalEvidence
                 if (values.Length > 1) throw new InvalidDataException("Conflicting journal evidence for one order.");
                 return values.SingleOrDefault();
             }
-            return first with { Annotation = new(first.OrderId, One(e => e.Annotation.FiringId), One(e => e.Annotation.Rule), One(e => e.Annotation.ExitReason)) };
+            var leverages = group.Select(e => e.Annotation.Leverage).Where(v => v is not null).Distinct().ToArray();
+            if (leverages.Length > 1) throw new InvalidDataException("Conflicting historical journal leverage.");
+            return first with { Annotation = new(first.OrderId, One(e => e.Annotation.FiringId), One(e => e.Annotation.Rule), One(e => e.Annotation.ExitReason), leverages.SingleOrDefault()) };
         }).ToArray();
     }
 }

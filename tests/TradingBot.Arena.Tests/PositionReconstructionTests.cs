@@ -63,6 +63,13 @@ public sealed class PositionReconstructionTests
         Assert.Null(Assert.Single(result.Closed).Payload()["leverage"]);
     }
     [Fact]
+    public void Owner_approved_historical_journal_leverage_is_preserved_when_venue_does_not_report_it()
+    {
+        var result = Build([Fill("a", 0, 0, 1, 100, "buy", leverage: null), Fill("b", 2, 1, 1, 110, "sell", leverage: null)],
+            journal: [new("order-a", Leverage: 10)]);
+        Assert.Equal("10", Assert.Single(result.Closed).Payload()["leverage"]!.ToString());
+    }
+    [Fact]
     public void Duplicate_fill_and_funding_ids_or_ambiguous_funding_are_errors()
     {
         var f = Fill("a", 0, 0, 1, 100, "buy");

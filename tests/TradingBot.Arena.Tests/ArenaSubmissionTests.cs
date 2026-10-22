@@ -27,7 +27,7 @@ public sealed class ArenaSubmissionTests
     private static ArenaImportPlan Plan(ArenaContract contract)
     {
         var p = new JsonObject { ["handle"] = "omenas", ["declared_capital"] = "100", ["capital_ccy"] = "USD", ["effective_from"] = "2026-10-11T00:00:00Z" };
-        var t = JsonNode.Parse("{\"trade_id\":\"kraken-PF_XBTUSD-first\",\"venue\":\"KRAKEN-FUTURES\",\"instrument\":\"PF_XBTUSD\",\"side\":\"long\",\"account\":\"live\",\"opened_at\":\"2026-10-11T00:00:00Z\",\"closed_at\":\"2026-10-11T01:00:00Z\",\"entry_price\":\"100\",\"exit_price\":\"110\",\"size\":\"1\",\"size_unit\":\"base\",\"label\":\"BYKO\"}")!.AsObject();
+        var t = JsonNode.Parse("{\"trade_id\":\"kraken-PF_XBTUSD-first\",\"venue\":\"KRAKEN-FUTURES\",\"instrument\":\"PF_XBTUSD\",\"side\":\"long\",\"account\":\"live\",\"opened_at\":\"2026-10-11T00:00:00Z\",\"closed_at\":\"2026-10-11T01:00:00Z\",\"entry_price\":\"100\",\"exit_price\":\"110\",\"size\":\"1\",\"size_unit\":\"base\",\"leverage\":\"10\",\"fees\":\".1\",\"funding\":\"0\",\"label\":\"BYKO\"}")!.AsObject();
         return new(p, [t], new() { ["account"] = "live", ["positions"] = new JsonArray() }, "source-hash", contract.SchemaHash, ArenaSubmission.RegistryHash(Registry));
     }
     private static Task<DateTimeOffset> Current(JsonObject _, CancellationToken ct) => Task.FromResult(DateTimeOffset.UtcNow);

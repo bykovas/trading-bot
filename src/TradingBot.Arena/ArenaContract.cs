@@ -80,9 +80,10 @@ public sealed class ArenaContract
             if (listings.Length != 1 || listings[0].Multiplier is not 1) errors.Add(path + ": unknown/ambiguous/non-base registry listing");
             decimal? entry = Decimal(row, "entry_price", errors, path, true), size = Decimal(row, "size", errors, path, true);
             decimal? exit = open ? entry : Decimal(row, "exit_price", errors, path, true);
-            foreach (var name in new[] { "leverage", "margin" }) if (row[name] is not null && Decimal(row, name, errors, path) is not > 0) errors.Add(path + "." + name + ": must be positive");
+            if (Decimal(row, "leverage", errors, path, true) is not > 0) errors.Add(path + ".leverage: owner requires historical journal leverage");
+            foreach (var name in new[] { "margin" }) if (row[name] is not null && Decimal(row, name, errors, path) is not > 0) errors.Add(path + "." + name + ": must be positive");
             if (entry <= 0 || exit <= 0 || size <= 0) errors.Add(path + ": prices and size must be positive");
-            decimal? fee = Decimal(row, "fees", errors, path), funding = Decimal(row, "funding", errors, path);
+            decimal? fee = Decimal(row, "fees", errors, path, !open), funding = Decimal(row, "funding", errors, path, !open);
             if (fee < 0) errors.Add(path + ".fees: rebates cannot be disguised as a positive cost");
             if (row["exit_reason"]?.ToString() is { } reason && !new[] { "tp", "sl", "signal", "manual", "liquidation" }.Contains(reason)) errors.Add(path + ".exit_reason: unsupported");
             try

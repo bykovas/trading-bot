@@ -47,4 +47,11 @@ public sealed class BotJournalEvidenceTests
         action["exit_reason_code"] = "EXCHANGE_CLOSE";
         Assert.Empty(BotJournalEvidence.Read(journal, "", [execution]));
     }
+    [Fact]
+    public void Historical_journal_leverage_is_used_not_a_current_config_guess()
+    {
+        var journal = Journal($"live Kraken Futures FOK accepted id={Id} status=placed");
+        journal["actions"]![0]!["leverage"] = 10;
+        Assert.Equal(10, Assert.Single(BotJournalEvidence.Read(journal, "")).Annotation.Leverage);
+    }
 }

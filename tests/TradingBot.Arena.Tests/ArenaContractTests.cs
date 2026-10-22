@@ -14,7 +14,7 @@ public sealed class ArenaContractTests
     {
         ["trade_id"] = id, ["account"] = "live", ["venue"] = "KRAKEN-FUTURES", ["instrument"] = "PF_XBTUSD", ["side"] = "long",
         ["opened_at"] = "2026-10-10T23:00:00Z", ["closed_at"] = "2026-10-11T01:00:00Z", ["entry_price"] = "100", ["exit_price"] = "110",
-        ["size"] = "1", ["size_unit"] = "base", ["fees"] = ".1", ["funding"] = "-.01", ["label"] = "BYKO",
+        ["leverage"] = "10", ["size"] = "1", ["size_unit"] = "base", ["fees"] = ".1", ["funding"] = "-.01", ["label"] = "BYKO",
         ["fills"] = new JsonArray(new JsonObject { ["fill_id"] = "fill-1", ["time"] = "2026-10-10T23:00:00Z", ["price"] = "100", ["size"] = "1", ["side"] = "buy" })
     };
     private static JsonObject Positions() => new() { ["account"] = "live", ["positions"] = new JsonArray() };
@@ -46,6 +46,14 @@ public sealed class ArenaContractTests
     {
         var profile = Profile(); profile["effective_from"] = "2026-10-22T00:00:00Z";
         Assert.Contains(Contract().Validate(profile, [Trade()], Positions(), Registry, Now), e => e.Contains("different percentage basis"));
+    }
+    [Fact]
+    public void Owner_required_journal_leverage_and_complete_booked_costs_cannot_be_removed()
+    {
+        var trade = Trade(); trade.Remove("leverage"); trade.Remove("fees");
+        var errors = Contract().Validate(Profile(), [trade], Positions(), Registry, Now);
+        Assert.Contains(errors, e => e.Contains("historical journal leverage"));
+        Assert.Contains(errors, e => e.Contains("fees: required"));
     }
     [Fact]
     public void No_external_schema_refs_are_resolved()
