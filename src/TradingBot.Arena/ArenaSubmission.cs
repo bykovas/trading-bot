@@ -6,6 +6,10 @@ using System.Text.Json.Nodes;
 namespace TradingBot.Arena;
 
 public sealed record ArenaReceipt(string Path, int Status, int Accepted, int Updated, int Submitted);
+public sealed class ArenaHttpException(HttpStatusCode status, string message) : InvalidOperationException(message)
+{
+    public HttpStatusCode Status { get; } = status;
+}
 public sealed record ArenaImportPlan(JsonObject Profile, IReadOnlyList<JsonObject> Trades, JsonObject Positions,
     string SourceHash, string SchemaHash, string RegistryHash)
 {
@@ -13,7 +17,7 @@ public sealed record ArenaImportPlan(JsonObject Profile, IReadOnlyList<JsonObjec
 }
 
 /// <summary>Only Arena endpoints; callers provide environment credentials and a fully approved, offline-validated plan.</summary>
-public sealed class ArenaSubmission
+public sealed class ArenaSubmission : IArenaFeedTransport
 {
     private readonly HttpClient _http;
     private readonly string _key;
@@ -61,6 +65,15 @@ public sealed class ArenaSubmission
         return value;
     }
     public static string RegistryHash(IReadOnlyList<ArenaRegistryListing> registry) => ArenaContract.Digest(JsonSerializer.SerializeToNode(registry.OrderBy(r => r.Symbol, StringComparer.Ordinal).ThenBy(r => r.ListedAt).ToArray())!);
+    public async Task<ArenaReceipt> TradesAsync(IReadOnlyList<JsonObject> trades, CancellationToken ct)
+    {
+        var batches = ArenaContract.Batches(trades);
+        if (batches.Count != 1) throw new InvalidDataException("Reporting dispatch requires one bounded batch.");
+        return await SendAsync(HttpMethod.Post, "/v1/trades", batches[0], trades.Count, ct);
+    }
+    public Task<ArenaReceipt> PositionsAsync(JsonObject positions, CancellationToken ct) =>
+        SendAsync(HttpMethod.Post, "/v1/positions", Body(positions), positions["positions"]?.AsArray().Count
+            ?? throw new InvalidDataException("A complete positions array is required, including while flat."), ct);
     private async Task<ArenaReceipt> SendAsync(HttpMethod method, string path, byte[] body, int count, CancellationToken ct)
     {
         for (int attempt = 0; attempt <= 4; attempt++)
@@ -79,7 +92,7 @@ public sealed class ArenaSubmission
             while (length < prefix.Length && (read = await stream.ReadAsync(prefix.AsMemory(length), ct)) > 0) length += read;
             string text = System.Text.Encoding.UTF8.GetString(prefix, 0, length).Replace(_key, "[key]", StringComparison.Ordinal);
             if (response.StatusCode is not (HttpStatusCode.OK or HttpStatusCode.Accepted))
-                throw new InvalidOperationException($"Arena {method} {path}: HTTP {(int)response.StatusCode}: {text[..Math.Min(500, text.Length)]}");
+                throw new ArenaHttpException(response.StatusCode, $"Arena {method} {path}: HTTP {(int)response.StatusCode}: {text[..Math.Min(500, text.Length)]}");
             if (length == prefix.Length) throw new InvalidDataException("Arena receipt exceeds its safety bound; do not continue blindly.");
             var json = JsonNode.Parse(text)?.AsObject() ?? throw new InvalidDataException("Missing Arena receipt.");
             int accepted = json["accepted"]?.GetValue<int>() ?? throw new InvalidDataException("Missing accepted count.");

@@ -73,7 +73,7 @@ public sealed class ArenaSubmissionTests
     {
         var fake = new Fake(Response(400, Key + " invalid")); var contract = Contract(); var plan = Plan(contract);
         var client = new ArenaSubmission(new HttpClient(fake), Key, Origin);
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => client.ImportAsync(plan, plan.Digest, contract, Registry, Current, Checkpoint, default));
+        var error = await Assert.ThrowsAsync<ArenaHttpException>(() => client.ImportAsync(plan, plan.Digest, contract, Registry, Current, Checkpoint, default));
         Assert.Single(fake.Requests); Assert.Contains("400", error.Message); Assert.DoesNotContain(Key, error.Message);
     }
     [Fact]
