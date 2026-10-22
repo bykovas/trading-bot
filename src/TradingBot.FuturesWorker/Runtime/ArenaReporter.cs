@@ -272,13 +272,19 @@ internal sealed class ArenaNativeSource : IArenaFeedSource, IDisposable
         await using var connection = await _database.OpenConnectionAsync(ct);
         await using var tx = await connection.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, ct);
         await using (var readOnly = new NpgsqlCommand("SET TRANSACTION READ ONLY", connection, tx)) await readOnly.ExecuteNonQueryAsync(ct);
+        // Read accepted execution actions through the existing trade-action indexes. HOLD/analysis reasons are large
+        // and contain no executed order ownership; scanning every decision can exceed the reporting timeout.
+        // Protective order ownership is independently retained by CaptureProtectionAsync.
         await using var command = new NpgsqlCommand("""
             SELECT jsonb_build_object('pair',a.pair,'reason',a.reason,'exchange_order_id',a.exchange_order_id,
                 'exit_reason_code',a.exit_reason_code,'leverage',a.leverage,'requested_leverage',a.requested_leverage,
                 'fills',COALESCE((SELECT jsonb_agg(jsonb_build_object('order_id',f.order_id,'source',f.source))
                     FROM dry_run_action_fills f WHERE f.cycle_id=a.cycle_id AND f.decision_index=a.decision_index),'[]'::jsonb))::text
             FROM dry_run_actions a JOIN dry_run_cycles c ON c.cycle_id=a.cycle_id
-            WHERE c.bot_instance_id=$1 AND (a.exchange_order_id IS NOT NULL OR a.reason LIKE '%live Kraken Futures%accepted id=%') ORDER BY c.utc,a.decision_index LIMIT 100001
+            WHERE c.bot_instance_id=$1
+              AND a.action IN ('WOULD_BUY','WOULD_OPEN_LONG','WOULD_OPEN_SHORT','WOULD_SELL','WOULD_CLOSE')
+              AND (a.exchange_order_id IS NOT NULL OR a.reason LIKE '%live Kraken Futures%accepted id=%')
+            ORDER BY c.utc,a.decision_index LIMIT 100001
             """, connection, tx);
         command.Parameters.AddWithValue(_config.BotInstance.Id);
         var actions = await ReadJournalRowsAsync(command, value => JsonNode.Parse(value), "ownership", ct);
