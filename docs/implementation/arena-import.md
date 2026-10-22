@@ -4,9 +4,11 @@ Ordered delivery: platform#584/PR#588 is deployed; this is Part B. Part C is tra
 
 ## Read-only evidence capture
 
-The separate executable starts no worker and has no order method. It uses only GET to Kraken's fixed origin, refuses redirects, requires general=READ_ONLY and transfer=NO_ACCESS, and reads the complete execution history and account log (including opens before 2026-10-11). It never uses the live worker's credentials. Old account-log readers in the worker are not the import source: a best-effort response or a page limit cannot prove completeness.
+The separate executable starts no worker and has no order method. It uses only GET to Kraken's fixed origin and refuses redirects. The default `capture` requires general=READ_ONLY and transfer=NO_ACCESS. Owner decision (22 October): `capture-existing-key-readonly` may instead read using the existing working key, through the same GET-only allowlist. It omits the optional Futures Nonce header so it cannot advance the live bot's nonce; it never changes or revokes that key. See [Kraken Futures authentication](https://docs.kraken.com/exchange/guides/futures/rest).
 
-Supply a separate temporary read-only Kraken key through `TRADINGBOT_KRAKEN_FUTURES_API_KEY` and `TRADINGBOT_KRAKEN_FUTURES_API_SECRET` in a protected environment. Arena's own key is `DEBYKO_ARENA_KEY`; none is a CLI argument, URL, committed file or log entry. Revoke the temporary key after the owner-supervised import. Do not copy production trading credentials into the import environment.
+Credentials are read only from `TRADINGBOT_KRAKEN_FUTURES_API_KEY` / `TRADINGBOT_KRAKEN_FUTURES_API_SECRET` in the protected runtime environment. Arena's key is `DEBYKO_ARENA_KEY`; none is a CLI argument, URL, committed file or log entry.
+
+Only positions opened **and** closed by BYKO are selected. The journal provides proof of order ownership and annotations, not prices, quantities, fees or funding. Those facts come from Kraken fills/position events and the account log. Manual positions and cycles with any unproven/manual leg are excluded and reported; a manually closed bot position is not silently treated as a bot close. Matching symbols, times or P&L alone is not ownership proof.
 
 ```sh
 # Restore/build on the developer machine; the capture is a manual live operation, never an automated test.
@@ -14,7 +16,7 @@ dotnet build tools/TradingBot.ArenaImport -c Release
 dotnet run --no-build -c Release --project tools/TradingBot.ArenaImport -- capture "$HOME/.local/share/byko-arena-import/capture.json"
 ```
 
-The output directory must be outside a Git worktree and mode0700; each new evidence file is mode0600 and cannot overwrite an earlier one. A complete capture is an intermediate input, never an approved import. Current open-position receipt time is recorded separately from the historical cutoff; prepare/send must reconcile them and require fresh open evidence.
+The output directory must be outside a Git worktree and mode0700; each new evidence file is mode0600 and cannot overwrite an earlier one. A complete capture is an intermediate input, never an approved import. Position events preserve venue old/new state; the complete cycle must reconcile. Current open-position receipt time is recorded separately from the historical cutoff; prepare/send must reconcile them and require fresh open evidence.
 
 Pagination: executions use the opaque continuation token; account log uses inclusive `to=min_id-1` (not `before`, which is milliseconds). Empty/malformed/error arrays, repeated IDs/tokens, account changes, HTTP errors or safety bounds fail the whole capture. Nothing becomes an empty or partially complete history. Requests are paced at12s, transient429/5xx retries are bounded, and Retry-After wins. Byte/page safety bounds fail explicitly; they never shorten an import window.
 

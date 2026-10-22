@@ -8,9 +8,9 @@ using System.Text.Json.Nodes;
 namespace TradingBot.Arena;
 
 public sealed record HistoryCapture(string AccountUid, DateTimeOffset CapturedAt, IReadOnlyList<JsonObject> Executions,
-    IReadOnlyList<JsonObject> Ledger, JsonObject OpenPositions, DateTimeOffset OpenPositionsAt, bool Complete = true);
+    IReadOnlyList<JsonObject> Ledger, JsonObject OpenPositions, DateTimeOffset OpenPositionsAt, bool Complete = true, IReadOnlyList<JsonObject>? PositionUpdates = null);
 
-/// <summary>GET only. Separate import credentials; no trading broker, order method or best-effort history truncation.</summary>
+/// <summary>GET only. Explicit GET-only import credentials mode; no trading broker, order method or best-effort history truncation.</summary>
 public sealed class KrakenHistoryReader
 {
     private readonly HttpClient _http;
@@ -19,15 +19,17 @@ public sealed class KrakenHistoryReader
     private readonly TimeProvider _clock;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private long _nonce;
-    private static readonly HashSet<string> Paths = ["/api/auth/v1/api-keys/v3/check", "/api/history/v3/executions", "/api/history/v3/account-log", "/derivatives/api/v3/openpositions"];
+    private readonly bool _existingKeyReadOnly;
+    private static readonly HashSet<string> Paths = ["/api/auth/v1/api-keys/v3/check", "/api/history/v3/executions", "/api/history/v3/account-log", "/api/history/v3/positions", "/derivatives/api/v3/openpositions"];
     public KrakenHistoryReader(HttpClient http, string key, string secret, Uri? origin = null, TimeProvider? clock = null,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null, bool existingKeyReadOnly = false)
     {
+        _existingKeyReadOnly = existingKeyReadOnly;
         _http = http; _key = key; _secret = secret; _origin = origin ?? new Uri("https://futures.kraken.com");
         if (_origin != new Uri("https://futures.kraken.com") && !_origin.IsLoopback) throw new ArgumentException("Private credentials may go only to Kraken or a loopback fixture.");
         _clock = clock ?? TimeProvider.System;
         _delay = delay ?? ((duration, ct) => Task.Delay(duration, _clock, ct));
-        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(secret)) throw new ArgumentException("Temporary read-only Kraken credentials are required in the environment.");
+        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(secret)) throw new ArgumentException("Kraken credentials are required in the environment.");
     }
     private string Redact(string value) => value.Replace(_key, "[key]", StringComparison.Ordinal).Replace(_secret, "[secret]", StringComparison.Ordinal);
     private async Task<(JsonObject Body, string? Next)> GetAsync(string path, Dictionary<string, string> query, CancellationToken ct)
@@ -37,13 +39,16 @@ public sealed class KrakenHistoryReader
         for (int attempt = 0; ; attempt++)
         {
             long nonce = _nonce = Math.Max(_clock.GetUtcNow().ToUnixTimeMilliseconds(), _nonce + 1);
-            string n = nonce.ToString(CultureInfo.InvariantCulture);
+            string n = _existingKeyReadOnly ? "" : nonce.ToString(CultureInfo.InvariantCulture);
             string signingPath = path.StartsWith("/derivatives/", StringComparison.Ordinal) ? path["/derivatives".Length..] : path;
             // Same v3 signature as KrakenFuturesBroker: HMAC-SHA512(SHA256(encoded query + nonce + signing path)).
             byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes(data + n + signingPath));
             using var hmac = new HMACSHA512(Convert.FromBase64String(_secret));
             using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_origin, path + (data.Length == 0 ? "" : "?" + data)));
-            request.Headers.Add("APIKey", _key); request.Headers.Add("Nonce", n); request.Headers.Add("Authent", Convert.ToBase64String(hmac.ComputeHash(digest)));
+            request.Headers.Add("APIKey", _key);
+            // Kraken Derivatives REST makes Nonce optional. Omit it for a shared working key to avoid advancing the bot's nonce.
+            if (!_existingKeyReadOnly) request.Headers.Add("Nonce", n);
+            request.Headers.Add("Authent", Convert.ToBase64String(hmac.ComputeHash(digest)));
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
             if (!response.IsSuccessStatusCode)
             {
@@ -84,8 +89,9 @@ public sealed class KrakenHistoryReader
     public async Task<HistoryCapture> CaptureAsync(CancellationToken ct)
     {
         var (identity, _) = await GetAsync("/api/auth/v1/api-keys/v3/check", [], ct);
-        if (identity["permissions"]?["general"]?.GetValue<string>() != "READ_ONLY" || identity["permissions"]?["transfer"]?.GetValue<string>() != "NO_ACCESS")
-            throw new InvalidOperationException("Import requires a separate general=READ_ONLY, transfer=NO_ACCESS key. The trading key is refused.");
+        string? permission = identity["permissions"]?["general"]?.GetValue<string>();
+        if (_existingKeyReadOnly ? permission is not ("READ_ONLY" or "FULL_ACCESS") : permission != "READ_ONLY" || identity["permissions"]?["transfer"]?.GetValue<string>() != "NO_ACCESS")
+            throw new InvalidOperationException("Default capture requires general=READ_ONLY, transfer=NO_ACCESS. Existing-key GET-only mode must be selected explicitly and never grants order/transfer access.");
         string account = identity["accountUid"]?.GetValue<string>() ?? throw new InvalidDataException("Missing account identity.");
         DateTimeOffset cutoff = _clock.GetUtcNow();
         long bytes = 0;
@@ -117,6 +123,29 @@ public sealed class KrakenHistoryReader
             if (!tokens.Add(token) || elements.Count == 0) throw new InvalidDataException("Non-progressing execution pagination.");
             next = token;
         }
+        List<JsonObject> positions = []; ids.Clear(); tokens.Clear(); next = null;
+        for (int page = 0; ; page++)
+        {
+            if (page >= 1000) throw new InvalidDataException("Position history safety bound reached; capture is incomplete.");
+            await _delay(TimeSpan.FromSeconds(12), ct);
+            Dictionary<string, string> query = new() { ["count"] = "1000", ["sort"] = "asc", ["before"] = cutoff.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture) };
+            if (next is not null) query["continuation_token"] = next;
+            var (body, token) = await GetAsync("/api/history/v3/positions", query, ct);
+            CheckAccount(body, account);
+            var elements = body["elements"] as JsonArray ?? throw new InvalidDataException("Missing position history.");
+            foreach (var element in elements)
+            {
+                var row = element as JsonObject ?? throw new InvalidDataException("Malformed position history.");
+                // Position events share uid (account/scope), unlike executions. The full event is the deduplication identity.
+                if (row["timestamp"] is null || row["event"]?["PositionUpdate"] is not JsonObject) throw new InvalidDataException("Malformed position update.");
+                string id = ArenaContract.Digest(row);
+                if (!ids.Add(id)) throw new InvalidDataException("Repeated position event.");
+                positions.Add(Keep(row));
+            }
+            if (token is null) break;
+            if (!tokens.Add(token) || elements.Count == 0) throw new InvalidDataException("Non-progressing position pagination.");
+            next = token;
+        }
         // No artificial window start: positions closed in the import window may have opened earlier.
         // ID pagination is inclusive. 'before' is milliseconds, NOT an account-log ID.
         List<JsonObject> ledger = []; long? upperId = null; ids.Clear();
@@ -143,7 +172,7 @@ public sealed class KrakenHistoryReader
         await _delay(TimeSpan.FromSeconds(12), ct);
         var (open, _) = await GetAsync("/derivatives/api/v3/openpositions", [], ct);
         if (open["openPositions"] is not JsonArray) throw new InvalidDataException("Missing current open positions.");
-        return new(account, cutoff, executions, ledger, open, _clock.GetUtcNow());
+        return new(account, cutoff, executions, ledger, open, _clock.GetUtcNow(), PositionUpdates: positions);
     }
     private static void CheckAccount(JsonObject body, string expected)
     {

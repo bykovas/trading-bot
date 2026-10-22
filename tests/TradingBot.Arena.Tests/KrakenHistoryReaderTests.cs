@@ -22,9 +22,11 @@ public sealed class KrakenHistoryReaderTests
     private sealed class Fake(params HttpResponseMessage[] responses) : HttpMessageHandler
     {
         public readonly List<(HttpMethod Method, Uri Uri, string Key, string Signature)> Requests = [];
+        public readonly List<bool> HasNonce = [];
         private readonly Queue<HttpResponseMessage> _responses = new(responses);
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
+            HasNonce.Add(request.Headers.Contains("Nonce"));
             Requests.Add((request.Method, request.RequestUri!, request.Headers.GetValues("APIKey").Single(), request.Headers.GetValues("Authent").Single()));
             Assert.True(request.RequestUri!.IsLoopback);
             return Task.FromResult(_responses.Dequeue());
@@ -36,14 +38,35 @@ public sealed class KrakenHistoryReaderTests
     public async Task Reads_all_execution_tokens_and_inclusive_ledger_ID_pages_even_after_short_pages()
     {
         var fake = new Fake(Json(Identity()), Json(Events("{\"uid\":\"event-1\"}", "token-a")), Json(Events("{\"uid\":\"event-2\"}")),
-            Json(Ledger("{\"id\":3}")), Json(Ledger("{\"id\":1}")), Json(Open));
+            Json(Events("")), Json(Ledger("{\"id\":3}")), Json(Ledger("{\"id\":1}")), Json(Open));
         HistoryCapture capture = await Reader(fake).CaptureAsync(default);
         Assert.True(capture.Complete); Assert.Equal(2, capture.Executions.Count); Assert.Equal(2, capture.Ledger.Count);
         Assert.Equal(Account, capture.AccountUid);
         Assert.Contains("continuation_token=token-a", fake.Requests[2].Uri.Query);
-        Assert.Contains("to=2", fake.Requests[4].Uri.Query);
+        Assert.Contains("to=2", fake.Requests[5].Uri.Query);
         Assert.All(fake.Requests, r => { Assert.Equal(HttpMethod.Get, r.Method); Assert.Equal(Key, r.Key); Assert.NotEmpty(r.Signature); Assert.DoesNotContain(Key, r.Uri.ToString()); });
         Assert.DoesNotContain(Key, System.Text.Json.JsonSerializer.Serialize(capture));
+    }
+    [Fact]
+    public async Task Explicit_existing_key_mode_is_GET_only_and_does_not_advance_working_key_nonce()
+    {
+        var fake = new Fake(Json(Identity("FULL_ACCESS")), Json(Events("")), Json(Events("")), Json(Ledger("")), Json(Open));
+        var reader = new KrakenHistoryReader(new HttpClient(fake), Key, Secret, new Uri("http://127.0.0.1:49152"),
+            delay: (_, _) => Task.CompletedTask, existingKeyReadOnly: true);
+        var capture = await reader.CaptureAsync(default);
+        Assert.True(capture.Complete);
+        Assert.All(fake.Requests, r => Assert.Equal(HttpMethod.Get, r.Method));
+        Assert.All(fake.HasNonce, n => Assert.False(n));
+    }
+    [Fact]
+    public async Task Position_scope_UID_is_not_a_unique_event_ID_and_every_token_is_read()
+    {
+        const string a = "{\"uid\":\"same-scope\",\"timestamp\":1,\"event\":{\"PositionUpdate\":{\"executionUid\":\"fill-a\"}}}";
+        const string b = "{\"uid\":\"same-scope\",\"timestamp\":2,\"event\":{\"PositionUpdate\":{\"executionUid\":\"fill-b\"}}}";
+        var fake = new Fake(Json(Identity()), Json(Events("")), Json(Events(a, "position-token")), Json(Events(b)), Json(Ledger("")), Json(Open));
+        var capture = await Reader(fake).CaptureAsync(default);
+        Assert.Equal(2, capture.PositionUpdates!.Count);
+        Assert.Contains("continuation_token=position-token", fake.Requests[3].Uri.Query);
     }
     [Theory]
     [InlineData("FULL_ACCESS")]
@@ -76,7 +99,7 @@ public sealed class KrakenHistoryReaderTests
     public async Task Retry_after_is_honoured_without_real_time_waits()
     {
         var limited = Json("limited", HttpStatusCode.TooManyRequests); limited.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(30));
-        var fake = new Fake(Json(Identity()), limited, Json(Events("")), Json(Ledger("")), Json(Open));
+        var fake = new Fake(Json(Identity()), limited, Json(Events("")), Json(Events("")), Json(Ledger("")), Json(Open));
         List<TimeSpan> delays = [];
         var capture = await Reader(fake, delays).CaptureAsync(default);
         Assert.True(capture.Complete); Assert.Contains(TimeSpan.FromSeconds(30), delays);
