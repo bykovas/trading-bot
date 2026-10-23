@@ -541,17 +541,15 @@ on conflict (bot_instance_id, override_key) do update set
     numeric_value = excluded.numeric_value,
     updated_at = now();
 
--- BYKO is the live DEBYKO executor. Keep its cents-stage position exactly ten
--- times smaller than the PUKO model: USD 5 margin at 10x = USD 50 notional.
+-- Seed conservative defaults only for missing BYKO settings. Deploys must not
+-- overwrite operator changes (including margin=0 pauses) or their timestamps.
 insert into bot_config_overrides (bot_instance_id, override_key, numeric_value)
 values
     ('futures-live', 'position_margin_usd', 5),
     ('futures-live', 'leverage', 10),
     ('futures-live', 'max_open_positions', 1),
     ('futures-live', 'max_open_positions_per_group', 1)
-on conflict (bot_instance_id, override_key) do update set
-    numeric_value = excluded.numeric_value,
-    updated_at = now();
+on conflict (bot_instance_id, override_key) do nothing;
 
 -- Owner-provided manual starting capital for the PUKO paper portfolio. The fixed
 -- event id makes this idempotent across deploys; margin=0 above still keeps every

@@ -1,3 +1,8 @@
+## 2026-10-23-preserve-byko-deploy-overrides
+
+- Seed BYKO runtime limits only when the individual setting is absent. Repeated deploys preserve database margin, leverage, position limits, margin=0 pauses and updated_at instead of resetting them to the bootstrap defaults of USD 5 / 10x / one position.
+- Keep defaults for missing settings, PUKO seeding, trading decisions and worker version metadata unchanged. Add a deployment SQL regression check.
+
 ## 2026-10-22-arena-indexed-journal
 
 - Restrict the separate Arena reporter's journal read to the five executed trade action types, matching the existing indexed trade predicates and importer evidence scope. This avoids scanning large HOLD/analysis reasons under the reporting connection's unchanged 10-second timeout.
