@@ -10,7 +10,8 @@ internal sealed class BykoV2AlignedRunner(
     IClock? clock = null)
 {
     private readonly IClock _clock = clock ?? SystemClock.Instance;
-    private readonly Dictionary<(Guid Rule, string Pair, DateTimeOffset Bar), DateTimeOffset> _nextPoll = new();
+    private readonly Dictionary<(Guid Rule, string Version, string Pair, DateTimeOffset Bar), DateTimeOffset> _nextPoll = new();
+    private readonly Dictionary<(Guid Rule, string Version), DateTimeOffset> _scheduledThrough = new();
     private readonly Dictionary<(string Pair, DateTimeOffset Bar, DateTimeOffset Slice, bool Flush, bool Reference), DebykoFrameRead> _frames = new();
     private DateTimeOffset _authorizationRetryAt;
 
@@ -30,21 +31,36 @@ internal sealed class BykoV2AlignedRunner(
         foreach (var key in _frames.Keys.Where(key => now - key.Bar > TimeSpan.FromMinutes(30)).ToArray())
             _frames.Remove(key);
 
+        var rules = ConfiguredRules().ToArray();
+        foreach (var (rule, _, ruleId, version, duration) in rules)
+            _scheduledThrough.TryAdd((ruleId, version), BarEnd(now, rule).AddSeconds(-duration));
+
         var signals = new List<BykoV2LocalSignal>();
-        foreach (var rule in Enum.GetValues<BykoV2Rule>())
+        foreach (var (rule, ruleName, ruleId, expectedVersion, duration) in rules)
         {
-            var ruleName = PostgresBykoV2VerdictStore.RuleName(rule);
-            if (!config.BykoV2.DebykoRuleIds.TryGetValue(ruleName, out var ruleId) || ruleId == Guid.Empty)
-                continue;
-            if (!config.BykoV2.DebykoRuleVersions.TryGetValue(ruleName, out var expectedVersion)
-                || expectedVersion.Length != 64 || !expectedVersion.All(Uri.IsHexDigit))
-                continue;
-            var duration = rule is BykoV2Rule.BreakoutLong or BykoV2Rule.BreakoutShort ? 900 : 60;
+            now = _clock.UtcNow;
             var currentBar = BarEnd(now, rule);
-            var bars = new[] { currentBar }.Concat(_nextPoll
-                .Where(item => item.Key.Rule == ruleId && item.Key.Bar < currentBar && item.Value <= now
+            var scheduleKey = (ruleId, expectedVersion);
+            var firstBar = _scheduledThrough[scheduleKey].AddSeconds(duration);
+            // Register bars before HTTP reads, including those not yet eligible at E+15.
+            // Retrying only previously polled keys loses whole minutes during a slow pass.
+            var oldestBar = BarEnd(now.AddSeconds(-duration - 120), rule);
+            if (oldestBar < now.AddSeconds(-duration - 120))
+                oldestBar = oldestBar.AddSeconds(duration);
+            if (firstBar < oldestBar)
+            {
+                Console.WriteLine($"byko-v2-aligned: catch-up expired rule={ruleName} from={firstBar:O} until={oldestBar:O}");
+                firstBar = oldestBar;
+            }
+            for (var bar = firstBar; bar <= currentBar; bar = bar.AddSeconds(duration))
+                foreach (var pair in config.BykoV2.Universe)
+                    _nextPoll.TryAdd((ruleId, expectedVersion, pair, bar), bar.AddSeconds(15));
+            _scheduledThrough[scheduleKey] = currentBar;
+            var bars = _nextPoll
+                .Where(item => item.Key.Rule == ruleId && item.Key.Version == expectedVersion
+                    && item.Key.Bar <= currentBar && item.Value <= now
                     && now - item.Key.Bar <= TimeSpan.FromSeconds(duration + 120))
-                .Select(item => item.Key.Bar)).Distinct().OrderBy(value => value).ToArray();
+                .Select(item => item.Key.Bar).Distinct().OrderBy(value => value).ToArray();
             foreach (var bar in bars)
             {
             if (now < bar.AddSeconds(15)) continue;
@@ -53,7 +69,7 @@ internal sealed class BykoV2AlignedRunner(
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (config.RuntimeLimits.NewEntriesPaused) return Array.Empty<BykoV2LocalSignal>();
-                var key = (ruleId, pair, bar);
+                var key = (ruleId, expectedVersion, pair, bar);
                 if (_nextPoll.TryGetValue(key, out var next) && now < next) continue;
                 if (alignedStore.IsFinished(config.BotInstance.Id, ruleId, expectedVersion, pair, bar))
                 {
@@ -125,6 +141,19 @@ internal sealed class BykoV2AlignedRunner(
             }
         }
         return signals;
+    }
+
+    private IEnumerable<(BykoV2Rule Rule, string Name, Guid Id, string Version, int Duration)> ConfiguredRules()
+    {
+        foreach (var rule in Enum.GetValues<BykoV2Rule>())
+        {
+            var name = PostgresBykoV2VerdictStore.RuleName(rule);
+            if (config.BykoV2.DebykoRuleIds.TryGetValue(name, out var id) && id != Guid.Empty
+                && config.BykoV2.DebykoRuleVersions.TryGetValue(name, out var version)
+                && version.Length == 64 && version.All(Uri.IsHexDigit))
+                yield return (rule, name, id, version,
+                    rule is BykoV2Rule.BreakoutLong or BykoV2Rule.BreakoutShort ? 900 : 60);
+        }
     }
 
     public IReadOnlyList<BykoV2SignalNotice> PendingNotices() => alignedStore.PendingNotices(config.BotInstance.Id, _clock.UtcNow);

@@ -271,6 +271,85 @@ public sealed class BykoV2AlignedRunnerTests
         Assert.Single(h.Verdicts.Records);
     }
 
+    [Fact]
+    public async Task Bar_seen_before_E_plus_15_is_not_lost_when_next_pass_crosses_a_minute()
+    {
+        var h = new Harness();
+        h.Clock.UtcNow = End.AddSeconds(5);
+        Assert.Empty(await h.Runner.EvaluateAsync(default));
+        h.Clock.UtcNow = End.AddMinutes(1).AddSeconds(20);
+        await h.Runner.EvaluateAsync(default);
+        Assert.Equal(new[] { End, End.AddMinutes(1) }, h.Client.Results.Select(r => r.Item3));
+        Assert.Equal(2, h.Aligned.Records.Count);
+    }
+
+    [Fact]
+    public async Task Recovers_never_started_intervening_bars_once_in_chronological_order()
+    {
+        var h = new Harness();
+        await h.Runner.EvaluateAsync(default);
+        h.Clock.UtcNow = End.AddMinutes(2).AddSeconds(20);
+        await h.Runner.EvaluateAsync(default);
+        Assert.Equal(new[] { End, End.AddMinutes(1), End.AddMinutes(2) }, h.Client.Results.Select(r => r.Item3));
+        h.Clock.UtcNow = h.Clock.UtcNow.AddSeconds(1);
+        await h.Runner.EvaluateAsync(default);
+        Assert.Equal(3, h.Client.Results.Count);
+        Assert.Equal(3, h.Verdicts.Records.Count);
+    }
+
+    [Fact]
+    public async Task Long_pause_bounds_catch_up_and_audits_stale_bars_without_emitting_entries()
+    {
+        var h = new Harness();
+        h.Config.BykoV2.SignalMaxAgeSeconds = 10;
+        await h.Runner.EvaluateAsync(default);
+        h.Client.Results.Clear();
+        h.Clock.UtcNow = End.AddMinutes(10).AddSeconds(30);
+        Assert.Empty(await h.Runner.EvaluateAsync(default));
+        Assert.Equal(new[] { End.AddMinutes(8), End.AddMinutes(9), End.AddMinutes(10) },
+            h.Client.Results.Select(r => r.Item3));
+        Assert.Equal(4, h.Aligned.Records.Count);
+    }
+
+    [Fact]
+    public async Task Slow_earlier_rule_does_not_freeze_later_rules_clock()
+    {
+        var h = new Harness();
+        var flushId = Guid.NewGuid();
+        h.Config.BykoV2.DebykoRuleIds["BYKO_FLUSH_SHORT"] = flushId;
+        h.Config.BykoV2.DebykoRuleVersions["BYKO_FLUSH_SHORT"] = Version;
+        h.Client.Frame = (pair, _, _) =>
+        {
+            h.Clock.UtcNow = End.AddMinutes(1).AddSeconds(20);
+            return new(Market(pair), null, []);
+        };
+        await h.Runner.EvaluateAsync(default);
+        Assert.Contains(h.Client.Results, r => r.Item1 == flushId && r.Item3 == End.AddMinutes(1));
+        Assert.Contains(h.Client.Results, r => r.Item1 == flushId && r.Item3 == End);
+    }
+
+    [Fact]
+    public async Task New_version_does_not_inherit_old_versions_completed_poll_marker()
+    {
+        var h = new Harness();
+        await h.Runner.EvaluateAsync(default);
+        var newVersion = new string('b', 64);
+        h.Config.BykoV2.DebykoRuleVersions["BYKO_FLUSH_LONG"] = newVersion;
+        h.Client.Result = (id, instrument, bar) => Result(id, instrument, bar) with { Version = newVersion };
+        await h.Runner.EvaluateAsync(default);
+        Assert.Equal(2, h.Client.Results.Count);
+        Assert.Equal(newVersion, h.Aligned.Records[1].Version);
+    }
+
+    [Fact]
+    public async Task Cold_start_does_not_replay_earlier_bars()
+    {
+        var h = new Harness();
+        h.Clock.UtcNow = End.AddMinutes(10).AddSeconds(20);
+        await h.Runner.EvaluateAsync(default);
+        Assert.Equal(End.AddMinutes(10), Assert.Single(h.Client.Results).Item3);
+    }
+
     private static DebykoBarResult Result(Guid id, string instrument, DateTimeOffset bar) =>
         new(id, Version, instrument, bar, bar.AddSeconds(15), 0, true, null, true, "receipt",
             [new("/v2/agent/result", 200, null, "{}", new string('c', 64), "receipt", null, new Dictionary<string, string[]>())]);
