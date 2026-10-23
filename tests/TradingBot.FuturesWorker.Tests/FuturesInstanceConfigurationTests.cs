@@ -308,6 +308,25 @@ public sealed class FuturesInstanceConfigurationTests
     }
 
     [Fact]
+    public void Byko_deployment_only_seeds_missing_overrides_without_resetting_operator_settings()
+    {
+        var deploy = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "infra", "deploy.sh"));
+        var statements = System.Text.RegularExpressions.Regex.Matches(
+            deploy, @"insert into bot_config_overrides\b[^;]*;",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var bykoSeed = Assert.Single(statements.Cast<System.Text.RegularExpressions.Match>()
+            .Select(match => match.Value), sql => sql.Contains("'futures-live'"));
+
+        Assert.Contains("('futures-live', 'position_margin_usd', 5)", bykoSeed);
+        Assert.Contains("('futures-live', 'leverage', 10)", bykoSeed);
+        Assert.Contains("('futures-live', 'max_open_positions', 1)", bykoSeed);
+        Assert.Contains("('futures-live', 'max_open_positions_per_group', 1)", bykoSeed);
+        Assert.EndsWith("on conflict (bot_instance_id, override_key) do nothing;", bykoSeed);
+        Assert.DoesNotContain("do update", bykoSeed);
+        Assert.DoesNotContain("updated_at", bykoSeed);
+    }
+
+    [Fact]
     public void Non_legacy_entry_sources_force_legacy_entries_off_but_local_does_not()
     {
         var debyko = new FuturesBotConfiguration
