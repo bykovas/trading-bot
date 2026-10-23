@@ -1,3 +1,9 @@
+## 2026-10-23-aligned-bar-catchup
+
+- Register scheduled bars per pinned rule/version before HTTP reads and recover skipped intervals inside the existing timeframe-plus-120-second retry horizon. Refresh the clock between rules, log expired catch-up ranges, and do not replay earlier bars on cold start.
+- Preserve official evaluation slices, cooldowns, signal age limits, batch delivery, entry selection/authority, sizing, exits and automatic metadata. Add regressions for pre-E+15 scheduling, slow passes, bounded catch-up, version changes and cold starts.
+- Extract only scheduling from the unfinished aligned-entry draft. Early publication and deterministic entry arbitration are not included.
+
 ## 2026-10-23-preserve-byko-deploy-overrides
 
 - Seed BYKO runtime limits only when the individual setting is absent. Repeated deploys preserve database margin, leverage, position limits, margin=0 pauses and updated_at instead of resetting them to the bootstrap defaults of USD 5 / 10x / one position.
