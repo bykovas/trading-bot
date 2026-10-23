@@ -3,6 +3,13 @@
 - Seed BYKO runtime limits only when the individual setting is absent. Repeated deploys preserve database margin, leverage, position limits, margin=0 pauses and updated_at instead of resetting them to the bootstrap defaults of USD 5 / 10x / one position.
 - Keep defaults for missing settings, PUKO seeding, trading decisions and worker version metadata unchanged. Add a deployment SQL regression check.
 
+## 2026-10-22-puko-metadata-alerts
+
+- Owner disabled every Telegram message for BYKO and PUKO: turn off their repository notification defaults. Production also has an explicit disabled environment flag; trading, signals and error logging remain active.
+
+- Do not report individual Kraken contracts unavailable when PUKO's read-only metadata fetch failed. Emit the existing metadata warning and retain its retry, fee fallback, and per-pair checks against fresh metadata.
+- Add offline cold-start failure, expired-cache recovery and HTTP/transport failure regressions. Preserve all paper fills, sizing, strategy, live execution and automatic runtime metadata.
+
 ## 2026-10-22-arena-indexed-journal
 
 - Restrict the separate Arena reporter's journal read to the five executed trade action types, matching the existing indexed trade predicates and importer evidence scope. This avoids scanning large HOLD/analysis reasons under the reporting connection's unchanged 10-second timeout.

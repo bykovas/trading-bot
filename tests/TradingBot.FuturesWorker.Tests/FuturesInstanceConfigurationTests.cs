@@ -131,10 +131,9 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.False(primary["Reversal"]?["Enabled"]?.GetValue<bool>());
         Assert.Null(lukas["Reversal"]);
 
-        // Both announce since 2026-08-24, each under its own label - the label is what
-        // keeps two voices in one channel from reading as one bot contradicting itself.
+        // Owner disabled BYKO/PUKO Telegram on 2026-10-22; archived LUKO is not deployed.
         Assert.True(lukas["Telegram"]?["Enabled"]?.GetValue<bool>());
-        Assert.True(primary["Telegram"]?["Enabled"]?.GetValue<bool>());
+        Assert.False(primary["Telegram"]?["Enabled"]?.GetValue<bool>());
         Assert.Equal("LUKO", lukas["Telegram"]?["Label"]?.GetValue<string>());
         Assert.Equal("BYKO", primary["Telegram"]?["Label"]?.GetValue<string>());
         Assert.Equal(
@@ -156,6 +155,7 @@ public sealed class FuturesInstanceConfigurationTests
         // match, because a difference there is drift rather than a decision.
         var mayDiffer = new[]
         {
+            ("Telegram", "Enabled"),
             ("Futures", "OwnSignalEntriesEnabled"),
             ("Futures", "EntrySignalSource"),
             ("Futures", "TargetMarginUsd"),
@@ -288,6 +288,7 @@ public sealed class FuturesInstanceConfigurationTests
         Assert.Equal("futures-pukis-live", pukis["BotInstance"]?["Id"]?.GetValue<string>());
         Assert.Equal("Pukis live futures worker", pukis["BotInstance"]?["Name"]?.GetValue<string>());
         Assert.Equal("PUKO", pukis["Telegram"]?["Label"]?.GetValue<string>());
+        Assert.False(pukis["Telegram"]?["Enabled"]?.GetValue<bool>());
 
         Assert.False(pukis["Futures"]?["OwnSignalEntriesEnabled"]?.GetValue<bool>());
         Assert.Equal("BykoV2", pukis["Futures"]?["EntrySignalSource"]?.GetValue<string>());

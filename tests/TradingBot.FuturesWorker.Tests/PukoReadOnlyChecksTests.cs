@@ -113,7 +113,51 @@ public sealed class PukoReadOnlyChecksTests
         await checks.RefreshAsync(default);
         Assert.Contains(telegram.Messages, x => x.Contains("METADATA_UNAVAILABLE"));
         Assert.Contains(telegram.Messages, x => x.Contains("FEE_SCHEDULE_UNAVAILABLE"));
+        Assert.DoesNotContain(telegram.Messages, x => x.Contains("CONTRACT_UNAVAILABLE"));
         Assert.Contains("configured_fallback", checks.Fee().Source);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Missing_metadata_never_claims_contracts_are_absent_and_recovers(bool warmed)
+    {
+        var config = Configuration();
+        config.BykoV2.Universe = ["DOGE/USD"];
+        var clock = new TestClock();
+        var telegram = new Notices();
+        var unavailable = !warmed;
+        var checks = new PukoReadOnlyChecks(new HttpClient(new Handler(request =>
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            var path = request.RequestUri!.AbsolutePath;
+            Assert.True(path is "/derivatives/api/v3/instruments" or "/derivatives/api/v3/feeschedules");
+            if (path.EndsWith("instruments") && unavailable)
+                return new(HttpStatusCode.ServiceUnavailable);
+            return new(HttpStatusCode.OK) { Content = new StringContent(path.EndsWith("instruments") ? Registry : Fees) };
+        })), config, telegram, clock);
+        if (warmed)
+        {
+            await checks.RefreshAsync(default);
+            Assert.Empty(telegram.Messages);
+            clock.UtcNow = clock.UtcNow.AddHours(1);
+            unavailable = true;
+        }
+
+        await checks.RefreshAsync(default);
+        Assert.Single(telegram.Messages);
+        Assert.Contains("METADATA_UNAVAILABLE", telegram.Messages[0]);
+        Assert.DoesNotContain(telegram.Messages, x => x.Contains("CONTRACT_UNAVAILABLE"));
+        await checks.RefreshAsync(default);
+        Assert.Single(telegram.Messages);
+
+        unavailable = false;
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        await checks.RefreshAsync(default);
+        var result = await checks.CheckAsync(new() { Pair = "DOGE/USD", KrakenPair = "PF_DOGEUSD" },
+            FuturesDesiredExposure.Long, .1m, 50m, default);
+        Assert.Contains("local_preflight=OK", result);
+        Assert.Single(telegram.Messages);
     }
 
     [Fact]
