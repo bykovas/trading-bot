@@ -18,7 +18,7 @@ public sealed record ArenaImportPlan(JsonObject Profile, IReadOnlyList<JsonObjec
 }
 
 /// <summary>Only Arena endpoints; callers provide environment credentials and a fully approved, offline-validated plan.</summary>
-public sealed class ArenaSubmission : IArenaFeedTransport
+public sealed partial class ArenaSubmission : IArenaFeedTransport
 {
     private readonly HttpClient _http;
     private readonly string _key;
