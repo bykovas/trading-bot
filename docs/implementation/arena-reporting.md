@@ -2,7 +2,7 @@
 
 ## Delivery and activation
 
-Part A is deployed. Part B's owner-approved import is complete: 11 positions / 34 native fills, 11 verified signals, 15 tape-matched fills (4 fully tape trades), declared capital 6 USD effective 11 October. The public omenas curve is −59.48%, matching the independent Kraken-booking calculation. Five manual/mixed cycles were excluded. The single imported open snapshot correctly expires after 180 seconds until this reporter is activated.
+Part A is deployed. Part B's import recorded 11 positions / 34 native fills, 11 verified signals and 15 tape-matched fills (4 fully tape trades). It also declared 6 USD effective 11 October; that denominator was not the intended fixed trading capital and must not be reused. Historical correction is owner-managed, separate from this reporter change. Five manual/mixed cycles were excluded. The single imported open snapshot correctly expires after 180 seconds until this reporter is activated.
 
 PR #24 is merged and its main deployment succeeded. PR #25 has been rebased onto that main for a fresh full CI run. On 22 October Denis explicitly authorized Codex to merge both PRs, deploy the reporter, and verify automatic trades/position reporting in production. Activation follows a green current branch and a successful main deployment; it does not require another approval.
 
@@ -12,7 +12,17 @@ The production compose adds `arena-reporter` using the same versioned image but 
 
 Only BYKO's `futures-live` configuration with live trading and database persistence is accepted. The other instances are not enabled. The reporter reads existing Kraken credentials through the GET-only history adapter; it never calls a broker or an order/transfer endpoint, and omits the optional nonce so it cannot advance the trading process's nonce.
 
-Supply the account-owned key as `DEBYKO_ARENA_KEY` in the protected runtime file `/opt/trading-bot/futures/live/arena.env` (owned by the deployment service account, mode0600), for example with a secret manager/editor. Never put the value in Git, a URL, a command argument or a log. This optional env file is mounted only into the reporter; `deploy.sh` does not rewrite it. Missing key/configuration leaves the reporter idle and logs one disabled message. There is no public profile/capital write in automatic reporting; it reuses omenas.
+Supply the account-owned key as `DEBYKO_ARENA_KEY` in the protected runtime file `/opt/trading-bot/futures/live/arena.env` (owned by the deployment service account, mode0600), for example with a secret manager/editor. Never put the value in Git, a URL, a command argument or a log. This optional env file is mounted only into the reporter; `deploy.sh` does not rewrite it. Missing key/configuration leaves the reporter idle and logs one disabled message. It reuses the existing participant handle.
+
+### Optional fixed trading capital
+
+`ARENA_DECLARED_CAPITAL_USD` is a single positive invariant decimal, fixed by the owner, not account equity, available balance, margin per trade, notional, leverage or cash flows. The owner's current choice is **unset**: no capital value and no profile request are sent. PUKO and LUKO do not currently run this reporter; this change does not enable their reporting.
+
+When explicitly configured, startup reads `GET /v1/profile`. Only a different amount or non-USD declaration causes one `PUT /v1/profile`, preserving the returned handle and bio. The request omits `effective_from` so server receipt time applies. Identical declarations cause no PUT. Configuration changes take effect by restarting only the reporter; positions, trades and periodic heartbeats never update capital. A full user key and the new Arena profile-read API (platform issue #641) are required for this optional operation; a restricted `arena:write` key cannot edit/read a profile.
+
+Unset does not mean zero and does not clear a previous declaration. To enter no-capital/ROE mode, the owner must explicitly clear capital with `PUT /v1/profile` and `"declared_capital": null`, or perform the separately approved historical correction. No existing capital row is changed by this bot. Clearing now preserves earlier percentages, so it does not repair the old USD 6 denominator retroactively.
+
+Invalid configuration or a profile-read/write error stops the reporting process at startup, leaving trading independent and unaffected. A PUT is not blindly retried after an uncertain response: on restart, GET checks what Arena actually holds before any new PUT. No profile amount is inferred when the endpoint or its response is unavailable.
 
 The normal owner-approved main deploy starts the new service. To stop/restart reporting independently, use the existing runtime compose with `stop arena-reporter` / `up -d --no-deps arena-reporter`. Do not roll back this service to an image lacking the reporting executable. Stopping it does not stop the trading Worker. To erase Arena data intentionally, stop reporting and revoke its Arena key first; otherwise future explicitly authorized reports would create a new record.
 
