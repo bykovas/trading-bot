@@ -1,3 +1,9 @@
+## 2026-10-24-arena-fixed-declared-capital
+
+- The isolated Arena reporter accepts optional ARENA_DECLARED_CAPITAL_USD as a fixed owner-configured value. At process startup, read the private Arena profile and PUT only if that USD declaration differs; preserve handle/bio and never backdate it. No periodic capital writes or balance/margin/notional-derived declarations.
+- Unset means no profile request, including no automatic clear of historical capital. Explicit configuration changes take effect on reporter restart. Profile failures stop reporting startup, never the trading worker; ambiguous PUTs are not blindly retried.
+- PUKO/LUKO remain excluded from the reporter. Trading strategy, sizing, exits and automatic worker metadata are unchanged. Existing Arena capital history is not edited.
+
 ## 2026-10-23-aligned-bar-catchup
 
 - Register scheduled bars per pinned rule/version before HTTP reads and recover skipped intervals inside the existing timeframe-plus-120-second retry horizon. Refresh the clock between rules, log expired catch-up ranges, and do not replay earlier bars on cold start.

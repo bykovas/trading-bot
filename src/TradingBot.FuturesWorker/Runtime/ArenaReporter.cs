@@ -15,6 +15,8 @@ internal sealed class ArenaReporter : IDisposable
     private readonly HttpClient _krakenHttp = new(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
     private readonly ArenaNativeSource _source;
     private readonly ArenaFeed _feed;
+    private readonly ArenaSubmission _submission;
+    private readonly decimal? _declaredCapitalUsd;
     private readonly string _key;
     private string? _fingerprint;
     private readonly FileStream _owner;
@@ -22,6 +24,7 @@ internal sealed class ArenaReporter : IDisposable
     public ArenaReporter(FuturesBotConfiguration config, string key)
     {
         _key = key;
+        _declaredCapitalUsd = ArenaCapitalConfiguration.Parse(Environment.GetEnvironmentVariable(ArenaCapitalConfiguration.Variable));
         string directory = Path.Combine(config.DryRun.OutputDirectory, "arena");
         // The existing /app/data mount is durable; an explicit directory is useful for an isolated fixture/recovery.
         directory = Environment.GetEnvironmentVariable("DEBYKO_ARENA_STATE_DIRECTORY") ?? directory;
@@ -31,7 +34,8 @@ internal sealed class ArenaReporter : IDisposable
         if (!OperatingSystem.IsWindows()) lockOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
         _owner = new FileStream(Path.Combine(directory, "reporter.lock"), lockOptions);
         _source = new(config, _krakenHttp, directory);
-        _feed = new(_source, new ArenaSubmission(_arenaHttp, key), new ArenaFileStore(directory), Log);
+        _submission = new ArenaSubmission(_arenaHttp, key);
+        _feed = new(_source, _submission, new ArenaFileStore(directory), Log);
     }
     private void Log(string message) => Console.WriteLine(message.Replace(_key, "[key]", StringComparison.Ordinal));
     private void Observe(PortfolioPosition[] held)
@@ -55,10 +59,16 @@ internal sealed class ArenaReporter : IDisposable
         _fingerprint = fingerprint;
         _snapshots.Writer.TryWrite(true); _history.Writer.TryWrite(true);
     }
-    public Task RunAsync(CancellationToken ct) => Task.WhenAll(
-        LoopAsync("positions", _snapshots, TimeSpan.FromSeconds(60), _feed.SnapshotAsync, ct),
-        LoopAsync("history", _history, TimeSpan.FromSeconds(60), _feed.ReconcileAsync, ct),
-        DispatchLoopAsync(ct), ObserveLoopAsync(ct));
+    public async Task RunAsync(CancellationToken ct)
+    {
+        // Environment configuration changes take effect by restarting this reporting process, never from portfolio updates.
+        ArenaCapitalSync capital = await _submission.SynchronizeDeclaredCapitalAsync(_declaredCapitalUsd, ct);
+        Log($"Arena configured capital: {capital}. No balance-derived declaration.");
+        await Task.WhenAll(
+            LoopAsync("positions", _snapshots, TimeSpan.FromSeconds(60), _feed.SnapshotAsync, ct),
+            LoopAsync("history", _history, TimeSpan.FromSeconds(60), _feed.ReconcileAsync, ct),
+            DispatchLoopAsync(ct), ObserveLoopAsync(ct));
+    }
     private async Task LoopAsync(string name, Channel<bool> wake, TimeSpan period, Func<CancellationToken, Task> action, CancellationToken ct)
     {
         DateTimeOffset blockedUntil = default;
