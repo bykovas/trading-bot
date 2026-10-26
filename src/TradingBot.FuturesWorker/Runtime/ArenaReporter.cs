@@ -6,6 +6,12 @@ using TradingBot.Arena;
 
 namespace TradingBot.FuturesWorker;
 
+internal interface IArenaObservedSource : IArenaFeedSource, IDisposable
+{
+    Task<PortfolioPosition[]> HeldAsync(CancellationToken ct);
+    void Observe(PortfolioPosition[] held);
+}
+
 /// <summary>Optional reporting tasks have their own HTTP clients, DB pool and disk state. The trading worker never calls this process.</summary>
 internal sealed class ArenaReporter : IDisposable
 {
@@ -13,7 +19,7 @@ internal sealed class ArenaReporter : IDisposable
     private readonly Channel<bool> _history = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest });
     private readonly HttpClient _arenaHttp = new(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
     private readonly HttpClient _krakenHttp = new(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
-    private readonly ArenaNativeSource _source;
+    private readonly IArenaObservedSource _source;
     private readonly ArenaFeed _feed;
     private readonly ArenaSubmission _submission;
     private readonly decimal? _declaredCapitalUsd;
@@ -33,9 +39,20 @@ internal sealed class ArenaReporter : IDisposable
         var lockOptions = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None };
         if (!OperatingSystem.IsWindows()) lockOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
         _owner = new FileStream(Path.Combine(directory, "reporter.lock"), lockOptions);
-        _source = new(config, _krakenHttp, directory);
+        if (config.Futures.LiveTradingEnabled)
+            _source = new ArenaNativeSource(config, _krakenHttp, directory);
+        else
+        {
+            var since = ArenaPaperSource.ParseSince(Environment.GetEnvironmentVariable("ARENA_PAPER_SINCE_UTC"));
+            _source = new ArenaPaperSource(config, _krakenHttp, since);
+            // Live outbox identities/receipts remain untouched when the execution mode changes.
+            directory = Path.Combine(directory, "paper");
+            Directory.CreateDirectory(directory);
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
         _submission = new ArenaSubmission(_arenaHttp, key);
         _feed = new(_source, _submission, new ArenaFileStore(directory), Log);
+        Log($"Arena reporting account={(config.Futures.LiveTradingEnabled ? "live" : "demo")} source={(config.Futures.LiveTradingEnabled ? "Kraken executions" : "virtual portfolio; not real trades")}");
     }
     private void Log(string message) => Console.WriteLine(message.Replace(_key, "[key]", StringComparison.Ordinal));
     private void Observe(PortfolioPosition[] held)
@@ -125,7 +142,7 @@ internal sealed class ArenaReporter : IDisposable
     }
 }
 
-internal sealed class ArenaNativeSource : IArenaFeedSource, IDisposable
+internal sealed class ArenaNativeSource : IArenaObservedSource
 {
     private readonly FuturesBotConfiguration _config;
     private readonly HttpClient _http;
@@ -158,11 +175,15 @@ internal sealed class ArenaNativeSource : IArenaFeedSource, IDisposable
     public async Task<PortfolioPosition[]> HeldAsync(CancellationToken ct)
     {
         await using var connection = await _database.OpenConnectionAsync(ct);
+        return await ReadHeldAsync(connection, null, _config.BotInstance.Id, ct);
+    }
+    internal static async Task<PortfolioPosition[]> ReadHeldAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, string instance, CancellationToken ct)
+    {
         await using var query = new NpgsqlCommand("""
             SELECT pair,side,quantity,entry_price,opened_at_utc,leverage,origin,debyko_firing_id,trailing_stop_order_id
             FROM portfolio_position_state WHERE bot_instance_id=$1 ORDER BY position_index LIMIT 1001
-            """, connection);
-        query.Parameters.AddWithValue(_config.BotInstance.Id);
+            """, connection, transaction);
+        query.Parameters.AddWithValue(instance);
         var rows = new List<PortfolioPosition>();
         await using var reader = await query.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct)) rows.Add(new PortfolioPosition

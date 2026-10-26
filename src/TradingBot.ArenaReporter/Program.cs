@@ -6,9 +6,10 @@ var config = FuturesBotConfiguration.Load();
 using var stopping = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; stopping.Cancel(); };
 string? key = Environment.GetEnvironmentVariable("DEBYKO_ARENA_KEY");
-if (string.IsNullOrWhiteSpace(key) || config.BotInstance.Id != "futures-live" || !config.Futures.LiveTradingEnabled || !config.Database.Enabled)
+if (string.IsNullOrWhiteSpace(key) || config.BotInstance.Id != "futures-live"
+    || (!config.Futures.LiveTradingEnabled && !config.Futures.PaperTradingEnabled) || !config.Database.Enabled)
 {
-    Console.WriteLine("Arena reporter disabled: account-owned key and live BYKO configuration are required. Trading is not started in reporting mode.");
+    Console.WriteLine("Arena reporter disabled: account-owned key, BYKO live/paper configuration and database are required. Trading is not started in reporting mode.");
     try { await Task.Delay(Timeout.InfiniteTimeSpan, stopping.Token); } catch (OperationCanceledException) { /* Disabled reporter is being stopped. */ }
     return;
 }

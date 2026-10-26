@@ -10,7 +10,17 @@ The production compose adds `arena-reporter` using the same versioned image but 
 
 ### Protected configuration
 
-Only BYKO's `futures-live` configuration with live trading and database persistence is accepted. The other instances are not enabled. The reporter reads existing Kraken credentials through the GET-only history adapter; it never calls a broker or an order/transfer endpoint, and omits the optional nonce so it cannot advance the trading process's nonce.
+Only BYKO's `futures-live` configuration with live or explicitly enabled paper trading and database persistence is accepted. The other instances are not enabled. In live mode the reporter reads existing Kraken credentials through the GET-only history adapter; it never calls a broker or an order/transfer endpoint, and omits the optional nonce so it cannot advance the trading process's nonce.
+
+### Paper execution reporting
+
+With `LiveTradingEnabled=false` and `PaperTradingEnabled=true`, the reporter uses saved `MODELED_PORTFOLIO` fills, not Kraken executions. Set `ARENA_PAPER_SINCE_UTC` in the protected reporter `arena.env` to the explicit UTC instant the owner switched execution (ISO-8601 ending `Z`). Keep this boundary across restarts: it is not today's date, current balance or a backfill guess. An absent/invalid boundary stops the reporter, not the worker.
+
+Paper closed trades and open/flat snapshots use Arena's existing `account: "demo"`, label `BYKO paper`, and a note saying executions/fees are modeled and funding is not modeled. Arena separates demo and live results; the demo view is `/omenas?account=demo`. Historical real trades retain their original IDs/account. Paper IDs are deterministic hashes of bot instance and opening journal identity, under the `paper-` prefix; the durable outbox is in `arena-state/paper`, separate from native reporting state. No capital is sent when unset.
+
+The paper source reads holdings and executions in a read-only repeatable-read transaction, maps instruments through the public Kraken contract registry, and requires each full modeled close to match its complete opening, size, side, entry and historical leverage. It rejects mixed/exchange identities, missing costs, partial/multiple fills it cannot reconstruct and missing USD state. Snapshots must reconcile exactly to the saved portfolio. With open positions its timestamp must be within 180 seconds; a stopped worker creates a reporting gap, never a fabricated fresh flat. A proven flat journal/portfolio can heartbeat while unchanged: DEBYKO-only flat workers intentionally do not rewrite portfolio timestamps while waiting for signals. Limits fail explicitly rather than truncating history. Current virtual funding is zero because the simulator does not book funding, not because real funding is free.
+
+Paper mode never constructs the private Kraken history reader and does not continue native history backfill. Any final real close must be reconciled through the existing native reporting/import path, not fabricated from a virtual journal. Previously published live snapshots expire normally; switching mode does not send an unverified empty live snapshot. Re-enabling live mode is a separate owner decision; it restores the original native source/outbox.
 
 Supply the account-owned key as `DEBYKO_ARENA_KEY` in the protected runtime file `/opt/trading-bot/futures/live/arena.env` (owned by the deployment service account, mode0600), for example with a secret manager/editor. Never put the value in Git, a URL, a command argument or a log. This optional env file is mounted only into the reporter; `deploy.sh` does not rewrite it. Missing key/configuration leaves the reporter idle and logs one disabled message. It reuses the existing participant handle.
 
