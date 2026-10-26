@@ -1,3 +1,9 @@
+## 2026-10-26-byko-paper-arena
+
+- Keep BYKO Arena reporting active in paper mode using explicit modeled journal fills, `account=demo`, a paper label, deterministic paper-only identities and a separate durable outbox. Real Kraken history is not relabelled.
+- Require an explicit paper-mode start boundary and reconcile open modeled executions against a fresh USD portfolio in one read-only transaction. Missing evidence, stale state and mixed real/modeled fills stop reporting, never trading. Paper mode constructs no private Kraken history reader or order broker.
+- Preserve entry/exit strategy, sizing, real-trading disablement, PUKO/LUKO behavior and automatic cycle/build metadata. Capital remains unset; no balance-derived declaration. Add paper payload, isolation, freshness and loopback transport tests.
+
 ## 2026-10-26-byko-paper-mode
 
 - Owner switched BYKO to paper execution: explicitly allow paper trading in the primary configuration while live trading remains disabled. PROD's TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED is set to false so deploys do not re-enable live orders.
