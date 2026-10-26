@@ -1,3 +1,9 @@
+## 2026-10-26-byko-paper-mode
+
+- Owner switched BYKO to paper execution: explicitly allow paper trading in the primary configuration while live trading remains disabled. PROD's TRADINGBOT_FUTURES_LIVE_TRADING_ENABLED is set to false so deploys do not re-enable live orders.
+- Preserve DEBYKO entry authority, strategy, exits, database sizing overrides and historical portfolio records. The existing live-only Arena reporter guard excludes BYKO paper executions. PUKO and LUKO are unchanged.
+- Add a configuration regression test; retain automatic worker version and build metadata.
+
 ## 2026-10-24-arena-fixed-declared-capital
 
 - The isolated Arena reporter accepts optional ARENA_DECLARED_CAPITAL_USD as a fixed owner-configured value. At process startup, read the private Arena profile and PUT only if that USD declaration differs; preserve handle/bio and never backdate it. No periodic capital writes or balance/margin/notional-derived declarations.

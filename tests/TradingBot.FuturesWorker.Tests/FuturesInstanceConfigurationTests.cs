@@ -267,6 +267,7 @@ public sealed class FuturesInstanceConfigurationTests
         // remainder of the two profiles must still match key for key.
         normalizedLukas["Reversal"] = primary["Reversal"]?.DeepClone();
         normalizedLukas["BykoV2"] = primary["BykoV2"]?.DeepClone();
+        normalizedLukas["Futures"]!["PaperTradingEnabled"] = primary["Futures"]!["PaperTradingEnabled"]!.DeepClone();
         foreach (var (section, key) in mayDiffer)
         {
             if (primary[section]?[key] is not null)
@@ -276,6 +277,18 @@ public sealed class FuturesInstanceConfigurationTests
         }
 
         Assert.True(JsonNode.DeepEquals(primary, normalizedLukas));
+    }
+
+    [Fact]
+    public void Byko_profile_explicitly_allows_paper_execution_without_changing_entry_authority()
+    {
+        var primary = LoadObject(Path.Combine(FindRepositoryRoot(), "src", "TradingBot.FuturesWorker", "appsettings.json"));
+
+        Assert.False(primary["Futures"]!["LiveTradingEnabled"]!.GetValue<bool>());
+        Assert.True(primary["Futures"]!["PaperTradingEnabled"]!.GetValue<bool>());
+        Assert.Equal("Debyko", primary["Futures"]!["EntrySignalSource"]!.GetValue<string>());
+        Assert.False(primary["Futures"]!["OwnSignalEntriesEnabled"]!.GetValue<bool>());
+        Assert.True(primary["DryRun"]!["ApplyVirtualFills"]!.GetValue<bool>());
     }
 
     [Fact]
