@@ -1,3 +1,9 @@
+## 2026-11-02-breakout-version-pins
+
+- Restore BYKO/PUKO Breakout webhook eligibility with a guarded, explicit runtime pin update to the current DEBYKO rule versions. Preserve rule IDs, Flush pins, paper mode, sizing, signal expiry and all exit logic; never replay ignored historical events.
+- Report missing metadata, non-live mode, missing pins, ID mismatch and exact expected/received version separately instead of a generic metadata rejection. Continue to reject unapproved versions; no automatic trust of incoming webhook versions.
+- Add offline regressions for approved Breakout metadata and fail-closed version drift. Runtime configuration refresh applies pins without a worker restart; normal build/cycle metadata remains unchanged.
+
 ## 2026-10-26-byko-paper-arena
 
 - Keep BYKO Arena reporting active in paper mode using explicit modeled journal fills, `account=demo`, a paper label, deterministic paper-only identities and a separate durable outbox. Real Kraken history is not relabelled.
