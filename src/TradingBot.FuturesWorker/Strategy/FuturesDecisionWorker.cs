@@ -1112,11 +1112,10 @@ internal sealed class FuturesDecisionWorker(
             var firedAt = signal.FiredAtUtc ?? signal.ReceivedAtUtc;
             var evaluation = DebykoEvaluationMetadata.Read(signal.PayloadJson);
             if (config.BykoV2.DebykoAlignedDataEnabled
-                && (evaluation is null || evaluation.Mode != "live"
-                    || !config.BykoV2.DebykoRuleIds.TryGetValue(rule, out var expectedRule) || expectedRule != evaluation.RuleId
-                    || !config.BykoV2.DebykoRuleVersions.TryGetValue(rule, out var expectedVersion) || expectedVersion != evaluation.Version))
+                && DebykoEvaluationMetadata.RejectionReason(evaluation, config.BykoV2, rule) is { } rejection)
             {
-                await _debykoSignalInbox.MarkIgnoredAsync(signal.Id, "missing or mismatched live rule/slice metadata", cancellationToken);
+                Console.WriteLine($"debyko-signal: instance={config.BotInstance.Id} instrument={signalPair} {rejection}");
+                await _debykoSignalInbox.MarkIgnoredAsync(signal.Id, rejection, cancellationToken);
                 return;
             }
             var entryBar = evaluation?.BarEnd ?? firedAt;

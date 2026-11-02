@@ -6,6 +6,26 @@ namespace TradingBot.FuturesWorker.Tests;
 public sealed class FuturesStrategyProfileProviderTests
 {
     [Fact]
+    public async Task Refreshing_instance_version_pin_preserves_other_rules_and_paper_mode()
+    {
+        var config = NewConfiguration();
+        config.Futures.LiveTradingEnabled = false;
+        config.Futures.PaperTradingEnabled = true;
+        var values = """{"BykoV2":{"DebykoRuleVersions":{"BYKO_BREAKOUT_LONG":"old","BYKO_FLUSH_LONG":"unchanged"}}}""";
+        var store = new MutableStore { Assignment = Assignment(values, "{}") };
+        var provider = new FuturesStrategyProfileProvider(config, store);
+        await provider.RefreshAsync(CancellationToken.None);
+        Assert.Equal("old", config.BykoV2.DebykoRuleVersions["BYKO_BREAKOUT_LONG"]);
+        store.Assignment = Assignment(values,
+            """{"BykoV2":{"DebykoRuleVersions":{"BYKO_BREAKOUT_LONG":"reviewed"}}}""");
+        await provider.RefreshAsync(CancellationToken.None);
+        Assert.Equal("reviewed", config.BykoV2.DebykoRuleVersions["BYKO_BREAKOUT_LONG"]);
+        Assert.Equal("unchanged", config.BykoV2.DebykoRuleVersions["BYKO_FLUSH_LONG"]);
+        Assert.False(config.Futures.LiveTradingEnabled);
+        Assert.True(config.Futures.PaperTradingEnabled);
+    }
+
+    [Fact]
     public async Task Database_profile_and_instance_override_replace_strategy_values()
     {
         var config = NewConfiguration();

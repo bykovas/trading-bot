@@ -11,6 +11,30 @@ public sealed class DebykoEvaluationMetadataTests
     private static readonly string Version = new('A', 64);
 
     [Theory]
+    [InlineData("BYKO_BREAKOUT_LONG", "bd6a4033-ce4f-4acb-97b7-a384c5368f2e", "3eee341e9979ee76240a89d6e1a030bef39b328513d671454d4b9099badb6ad0")]
+    [InlineData("BYKO_BREAKOUT_SHORT", "2bb871a8-6c38-4c32-aa88-2fd5b7873527", "ef82714c71096f626749578ea5bf90962183c4f0969286e7088521eb9c9ec473")]
+    public void Reviewed_breakout_pin_accepts_live_slice_but_rejects_version_drift(string rule, string id, string version)
+    {
+        var payload = Payload();
+        payload["data"]!["watch"]!["id"] = id;
+        payload["data"]!["watch"]!["version"] = version;
+        var metadata = Assert.IsType<DebykoEvaluationMetadata>(DebykoEvaluationMetadata.Read(payload.ToJsonString()));
+        var config = new BykoV2Options();
+        config.DebykoRuleIds[rule] = Guid.Parse(id);
+        config.DebykoRuleVersions[rule] = version;
+        Assert.Null(DebykoEvaluationMetadata.RejectionReason(metadata, config, rule));
+        config.DebykoRuleVersions[rule] = Version;
+        var reason = DebykoEvaluationMetadata.RejectionReason(metadata, config, rule);
+        Assert.Contains($"expected={Version} actual={version}", reason);
+        config.DebykoRuleVersions.Clear();
+        Assert.Contains("version pin missing", DebykoEvaluationMetadata.RejectionReason(metadata, config, rule));
+        config.DebykoRuleIds[rule] = Guid.Empty;
+        Assert.Contains("rule ID mismatch", DebykoEvaluationMetadata.RejectionReason(metadata, config, rule));
+        Assert.Contains("missing or invalid", DebykoEvaluationMetadata.RejectionReason(null, config, rule));
+        Assert.Contains("mode mismatch", DebykoEvaluationMetadata.RejectionReason(metadata with { Mode = "settled" }, config, rule));
+    }
+
+    [Theory]
     [InlineData("live")]
     [InlineData("settled")]
     public void Reads_valid_metadata_and_preserves_mode(string mode)

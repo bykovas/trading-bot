@@ -5,6 +5,17 @@ namespace TradingBot.FuturesWorker;
 internal sealed record DebykoEvaluationMetadata(Guid RuleId, string Version, DateTimeOffset BarEnd,
     DateTimeOffset DataAsOf, int Attempt, string Mode)
 {
+    public static string? RejectionReason(DebykoEvaluationMetadata? metadata, BykoV2Options config, string rule)
+    {
+        if (metadata is null) return "missing or invalid DEBYKO evaluation metadata";
+        if (metadata.Mode != "live") return $"DEBYKO mode mismatch: expected=live actual={metadata.Mode}";
+        if (!config.DebykoRuleIds.TryGetValue(rule, out var id)) return $"DEBYKO rule ID pin missing: rule={rule}";
+        if (id != metadata.RuleId) return $"DEBYKO rule ID mismatch: rule={rule} expected={id} actual={metadata.RuleId}";
+        if (!config.DebykoRuleVersions.TryGetValue(rule, out var version)) return $"DEBYKO version pin missing: rule={rule}";
+        return version == metadata.Version ? null
+            : $"DEBYKO version mismatch: rule={rule} expected={version} actual={metadata.Version}";
+    }
+
     public static DebykoEvaluationMetadata? Read(string payload)
     {
         try
